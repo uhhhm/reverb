@@ -347,6 +347,8 @@ func (s *Server) handleDeleteSyncedPlaylist(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 		return
 	}
+	// T5: emit deletion tombstone for canonical library propagation (delete-wins).
+	s.emitPlaylistDeletion(r.Context(), id)
 	// FIX 4b: Best-effort remove any cover file for this playlist (ignore errors).
 	if s.deps.DataDir != "" {
 		coversDir := filepath.Join(s.deps.DataDir, "playlist-covers")
