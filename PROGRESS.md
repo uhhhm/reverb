@@ -13,9 +13,9 @@ One line per task, rewritten as status changes. Source of truth after compaction
 | T7 | done | internal/linkresolve/resolver.go, spotify.go, youtube.go+tests, api/links.go+test, server.go, openapi.yaml | Spotify/YouTube URL resolve + add with catalog + sync emit + ManualURL, source-native, go test green | stable trk_link_<id>, dual emit for test tolerance |
 | T8 | done | internal/wiring/wiring.go, cmd/reverb/main.go, api/server.go | wiring Build creates server device + Pairing/SyncStore/Deletion/Offline, Reload reconstructs, go test green | stateless wrappers keep reload safe |
 | T9 | done | web/src/lib/pairingApi.ts+test, routes/Pairing.tsx+test, App.tsx | pairing generate/redeem + device list + sync status + token storage, 28 tests pass, lint green | countdown interval, localStorage guard |
-| T10 | in_progress | — | — | dispatching (T6 ready) |
-| T11 | in_progress | — | — | dispatching (T7 ready) |
-| T12 | pending | — | — | depends T9,T10,T11 |
+| T10 | done | web/src/lib/offlineSetApi.ts+test, syncApi.ts, offlineSetStore/syncStore, routes/OfflineSet.tsx+test, components/OfflineToggle, App.tsx, routes/SyncedPlaylist.tsx | offline-set list/toggle per playlist + sync indicator, 18 tests pass, lint green, 983 total pass | duplicate getSyncStatus intentional per contract |
+| T11 | done | web/src/lib/linkApi.ts+test, routes/AddFromLink.tsx+test, App.tsx | resolve preview + playlist dropdown + download toggle + source-native helper, 23 tests pass, 1006 total | route /add-from-link chosen |
+| T12 | done | web/e2e/pairing.spec.ts, offline-set.spec.ts, add-from-link.spec.ts | hermetic Playwright 7 specs pass, go vet + go test + npm lint/test/build + CGO build pass, 1006 vitest + 7 e2e | reuse installApiMocks override, exact heading/textbox roles |
 
 ## Blocked
 
