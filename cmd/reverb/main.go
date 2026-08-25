@@ -32,6 +32,7 @@ import (
 	"github.com/maxjb-xyz/reverb/internal/search/deezer"
 	"github.com/maxjb-xyz/reverb/internal/search/spotify"
 	"github.com/maxjb-xyz/reverb/internal/store"
+	reverbsync "github.com/maxjb-xyz/reverb/internal/sync"
 	"github.com/maxjb-xyz/reverb/internal/wiring"
 )
 
@@ -67,6 +68,13 @@ func main() {
 	// spotDL is bundled with the image, so present it as a configured downloader
 	// out of the box (no manual setup) when none exists yet.
 	seedBundledDownloader(context.Background(), st.Q(), os.Getenv)
+
+	// T8: ensure server device row exists (is_server=1) before wiring. Idempotent.
+	if serverID, err := reverbsync.EnsureServerDevice(context.Background(), st.Q()); err != nil {
+		log.Printf("WARNING: ensure server device: %v", err)
+	} else {
+		log.Printf("server device %s ready", serverID)
+	}
 
 	// Registries (explicit registration at the composition root — no init() side-effects).
 	libraryReg := registry.NewRegistry("library")
@@ -206,6 +214,23 @@ func main() {
 				UserAgent: "Reverb/" + version + " (https://github.com/maxjb-xyz/reverb)",
 			},
 		},
+		// T8 multi-device: wiring.Build already ensured server device and built
+		// stateless wrappers around st.Q(); wire them directly into deps so
+		// handlers are live (instead of 503) in production. Explicit
+		// construction at the composition root, no init() side effects.
+		Pairing:      bundle.Pairing,
+		SyncStore:    bundle.SyncStore,
+		PairingStore: st.Q(),
+		PairingDB:    st.DB(),
+		OfflineSet:   st.Q(),
+		LinkStore:    st.Q(),
+	}
+	// T8 fallback: if wiring bundle somehow missed (e.g. older Build), ensure live.
+	if deps.Pairing == nil {
+		deps.Pairing = reverbsync.NewPairingService(st.Q())
+	}
+	if deps.SyncStore == nil {
+		deps.SyncStore = reverbsync.NewSyncStore(st.Q())
 	}
 	// Guard against the "non-nil interface wrapping a nil pointer" trap: only set
 	// the interface fields when the concrete service is actually present.

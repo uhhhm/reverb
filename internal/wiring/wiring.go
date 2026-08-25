@@ -20,6 +20,7 @@ import (
 	"github.com/maxjb-xyz/reverb/internal/library/embedded"
 	"github.com/maxjb-xyz/reverb/internal/library/subsonic"
 	"github.com/maxjb-xyz/reverb/internal/matching"
+	"github.com/maxjb-xyz/reverb/internal/offlineset"
 	"github.com/maxjb-xyz/reverb/internal/playlistsync"
 	"github.com/maxjb-xyz/reverb/internal/registry"
 	"github.com/maxjb-xyz/reverb/internal/resolver"
@@ -297,6 +298,14 @@ type ServiceBundle struct {
 	// so the long-lived resolver singleton can re-match against the CURRENT adapter
 	// after a hot-reload rebuilds the bundle. Nil when no library is configured.
 	Matcher resolver.Rematcher
+	// T8 multi-device: stateless sync/offline services reconstructed on every
+	// Build (and thus on every live Reload). ServerDeviceID is the ensured
+	// server device id (is_server=1) for logging.
+	Pairing        *reverbsync.PairingService  // never nil after Build
+	SyncStore      *reverbsync.SyncStore       // never nil after Build
+	Deletion       *reverbsync.DeletionService // never nil after Build
+	OfflineSet     *offlineset.Service         // never nil after Build
+	ServerDeviceID string
 }
 
 // VersionStore is the library_version reader/writer the Manager + matcher need.
@@ -557,7 +566,8 @@ func (b *Builder) nowMilli() int64 {
 // build downloaders into a Manager (only when downloaders AND a library are
 // present). It does NOT start the Manager — the caller controls its lifecycle.
 func (b *Builder) Build(ctx context.Context) (ServiceBundle, error) {
-	if _, err := reverbsync.EnsureServerDevice(ctx, b.queries); err != nil {
+	serverDeviceID, err := reverbsync.EnsureServerDevice(ctx, b.queries)
+	if err != nil {
 		log.Printf("WARNING: ensure server device: %v", err)
 	}
 	instances, err := b.queries.ListAdapterInstances(ctx)
@@ -712,6 +722,14 @@ func (b *Builder) Build(ctx context.Context) (ServiceBundle, error) {
 	if bundle.Sync != nil {
 		log.Printf("playlist sync service active")
 	}
+
+	// T8 multi-device: stateless sync/offline services. Reconstructed on every
+	// Build so live Reload picks up the current DB state without restart.
+	bundle.ServerDeviceID = serverDeviceID
+	bundle.Pairing = reverbsync.NewPairingService(b.queries)
+	bundle.SyncStore = reverbsync.NewSyncStore(b.queries)
+	bundle.Deletion = reverbsync.NewDeletionService(bundle.SyncStore, b.queries)
+	bundle.OfflineSet = offlineset.NewService(b.queries)
 
 	return bundle, nil
 }
