@@ -19,6 +19,7 @@ const Stats = lazy(() => import('./routes/Stats'))
 const ExternalPlaylist = lazy(() => import('./routes/ExternalPlaylist'))
 const Collection = lazy(() => import('./routes/Collection'))
 const Pairing = lazy(() => import('./routes/Pairing'))
+const OfflineSet = lazy(() => import('./routes/OfflineSet'))
 
 /** Redirect bare `/album/:id` or `/artist/:id` URLs to the source-qualified form
  *  `/album/library/:id` / `/artist/library/:id`. These old URLs may exist in
@@ -79,6 +80,7 @@ function Routed() {
         <Route path="/admin" element={<Admin />} />
         <Route path="/downloads" element={<Downloads />} />
         <Route path="/pairing" element={<Pairing />} />
+        <Route path="/offline-set" element={<OfflineSet />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

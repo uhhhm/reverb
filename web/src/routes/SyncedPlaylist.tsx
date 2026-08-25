@@ -22,6 +22,7 @@ import { usePlayer } from '../lib/playerStore'
 import { useToastStore } from '../lib/toastStore'
 import { useAlbumPalette } from '../lib/useAlbumPalette'
 import { rgbToCss } from '../lib/palette'
+import { useOfflineSet, setOfflineSet } from '../lib/offlineSetApi'
 
 // ── Local helpers ─────────────────────────────────────────────────────────────
 
@@ -117,6 +118,11 @@ export default function SyncedPlaylist() {
   // Drag-reorder state: optimistic local ordering of track indices
   const [trackOrder, setTrackOrder] = useState<number[] | null>(null)
   const dragSourceIdx = useRef<number | null>(null)
+
+  // Offline set — per-playlist keep offline
+  const { data: offlineSet } = useOfflineSet()
+  const isOfflineEnabled = offlineSet?.find((e) => e.playlistId === id)?.enabled ?? false
+  const [offlineUpdating, setOfflineUpdating] = useState(false)
 
   // Seed local state from detail once it loads / changes
   useEffect(() => {
@@ -221,6 +227,20 @@ export default function SyncedPlaylist() {
     } catch (err) {
       console.error('Failed to update sync settings:', err)
       useToastStore.getState().push("Couldn't save sync settings", 'error')
+    }
+  }
+
+  async function handleOfflineToggle(next: boolean) {
+    if (offlineUpdating) return
+    setOfflineUpdating(true)
+    try {
+      await setOfflineSet(id, next)
+      await qc.invalidateQueries({ queryKey: ['offline-set'] })
+    } catch (err) {
+      console.error('Failed to update offline set:', err)
+      useToastStore.getState().push("Couldn't update offline set", 'error')
+    } finally {
+      setOfflineUpdating(false)
     }
   }
 
@@ -527,6 +547,17 @@ export default function SyncedPlaylist() {
                   </button>
                 </PortalMenu>
               )}
+            </div>
+            <div className="mt-4 flex flex-col gap-1">
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-text-primary">Keep offline</span>
+                <Toggle
+                  checked={isOfflineEnabled}
+                  label="Keep offline"
+                  onChange={(v) => void handleOfflineToggle(v)}
+                />
+              </div>
+              <p className="text-xs text-text-muted">Removing from offline set does not delete the playlist.</p>
             </div>
           </div>
         </header>
