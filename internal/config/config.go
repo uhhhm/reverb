@@ -7,10 +7,9 @@ import (
 )
 
 type Config struct {
-	Port          int
-	DBPath        string
-	Dev           bool
-	AdminPassword string
+	Port   int
+	DBPath string
+	Dev    bool
 }
 
 // Load resolves config: flags win over env, env wins over defaults.
@@ -28,7 +27,6 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	if getenv("REVERB_DEV") == "1" {
 		c.Dev = true
 	}
-	c.AdminPassword = getenv("REVERB_ADMIN_PASSWORD")
 
 	fs := flag.NewFlagSet("reverb", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maxjb-xyz/reverb/internal/auth"
 	"github.com/maxjb-xyz/reverb/internal/catalog"
 	"github.com/maxjb-xyz/reverb/internal/play"
 	"github.com/maxjb-xyz/reverb/internal/registry"
@@ -67,11 +68,8 @@ func scrobbleTestServer(t *testing.T, sc scrobble.Scrobbler, cfg func() scrobble
 
 	authSvc, tok := seededAuthToken(t, st)
 
-	users, err := authSvc.ListUsers(context.Background())
-	if err != nil || len(users) == 0 {
-		t.Fatal("expected at least one user after seeding")
-	}
-	ownerID := users[0].ID
+	// The single local user owns every scrobble link.
+	ownerID := auth.OwnerID
 
 	var counter int
 	idgen := func() string {
@@ -225,42 +223,6 @@ func TestScrobbleLinks_ConfiguredReflectsCreds(t *testing.T) {
 	}
 }
 
-// TestScrobbleLinks_PerUserScoping asserts that user-1 never sees user-2's links.
-// This is the DB-level per-user scoping requirement.
-func TestScrobbleLinks_PerUserScoping(t *testing.T) {
-	fs := &fakeScrobbler{}
-	srv, ownerCookie, _, st := scrobbleTestServer(t, fs, cfgUnconfigured)
-
-	// Create a second user and seed a link for them.
-	_ = newAuthedUser(t, srv, st, "user2-scrobble", "user2-pass-12345")
-
-	// Find user2's ID via the users table directly.
-	row := st.DB().QueryRowContext(context.Background(),
-		"SELECT id FROM users WHERE username = ?", "user2-scrobble")
-	var user2ID string
-	if err := row.Scan(&user2ID); err != nil {
-		t.Fatalf("find user2 id: %v", err)
-	}
-	seedLink(t, st, user2ID)
-
-	// Owner (user1) must see zero links even though user2 has one.
-	rec := do(t, srv, ownerCookie, http.MethodGet, "/api/v1/scrobble/links", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /scrobble/links = %d; body: %s", rec.Code, rec.Body.String())
-	}
-	var resp struct {
-		Links []struct {
-			Provider string `json:"provider"`
-		} `json:"links"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(resp.Links) != 0 {
-		t.Fatalf("user1 must see 0 links, got %d — per-user scoping violated", len(resp.Links))
-	}
-}
-
 // TestScrobbleLinks_LinkVisibleForOwner verifies a link seeded for the owner appears.
 func TestScrobbleLinks_LinkVisibleForOwner(t *testing.T) {
 	fs := &fakeScrobbler{}
@@ -286,16 +248,6 @@ func TestScrobbleLinks_LinkVisibleForOwner(t *testing.T) {
 	}
 	if resp.Links[0].Provider != "lastfm" {
 		t.Fatalf("link provider = %q, want %q", resp.Links[0].Provider, "lastfm")
-	}
-}
-
-// TestScrobbleLinks_Unauth verifies 401 for unauthenticated requests.
-func TestScrobbleLinks_Unauth(t *testing.T) {
-	fs := &fakeScrobbler{}
-	srv, _, _, _ := scrobbleTestServer(t, fs, cfgUnconfigured)
-	rec := do(t, srv, &http.Cookie{Name: sessionCookie, Value: ""}, http.MethodGet, "/api/v1/scrobble/links", "")
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("GET /scrobble/links unauth = %d, want 401", rec.Code)
 	}
 }
 
@@ -393,16 +345,6 @@ func TestAuthURL_ConfiguredButTransientError_Returns5xx(t *testing.T) {
 	}
 }
 
-// TestAuthURL_Unauth verifies 401.
-func TestAuthURL_Unauth(t *testing.T) {
-	fs := &fakeScrobbler{}
-	srv, _, _, _ := scrobbleTestServer(t, fs, cfgUnconfigured)
-	rec := do(t, srv, &http.Cookie{Name: sessionCookie, Value: ""}, http.MethodPost, "/api/v1/scrobble/lastfm/auth-url", "")
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("auth-url unauth = %d, want 401", rec.Code)
-	}
-}
-
 // TestAuthURL_NilDep503 verifies 503 when Scrobble dep is nil.
 func TestAuthURL_NilDep503(t *testing.T) {
 	st, err := store.Open(t.TempDir() + "/scr-nil2.db")
@@ -471,16 +413,6 @@ func TestComplete_StoresLink(t *testing.T) {
 	}
 }
 
-// TestComplete_Unauth verifies 401.
-func TestComplete_Unauth(t *testing.T) {
-	fs := &fakeScrobbler{}
-	srv, _, _, _ := scrobbleTestServer(t, fs, cfgConfigured)
-	rec := do(t, srv, &http.Cookie{Name: sessionCookie, Value: ""}, http.MethodPost, "/api/v1/scrobble/lastfm/complete", `{"token":"t"}`)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("complete unauth = %d, want 401", rec.Code)
-	}
-}
-
 // ============================================================================
 // Tests: DELETE /scrobble/lastfm
 // ============================================================================
@@ -494,16 +426,6 @@ func TestUnlink_Returns204(t *testing.T) {
 	rec := do(t, srv, cookie, http.MethodDelete, "/api/v1/scrobble/lastfm", "")
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("DELETE /scrobble/lastfm = %d, want 204; body: %s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestUnlink_Unauth verifies 401.
-func TestUnlink_Unauth(t *testing.T) {
-	fs := &fakeScrobbler{}
-	srv, _, _, _ := scrobbleTestServer(t, fs, cfgUnconfigured)
-	rec := do(t, srv, &http.Cookie{Name: sessionCookie, Value: ""}, http.MethodDelete, "/api/v1/scrobble/lastfm", "")
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("DELETE /scrobble/lastfm unauth = %d, want 401", rec.Code)
 	}
 }
 
@@ -534,16 +456,6 @@ func TestNowPlaying_Returns204WhenLinked(t *testing.T) {
 	rec := do(t, srv, cookie, http.MethodPost, "/api/v1/scrobble/nowplaying", body)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("nowplaying linked+error = %d, want 204; body: %s", rec.Code, rec.Body.String())
-	}
-}
-
-// TestNowPlaying_Unauth verifies 401.
-func TestNowPlaying_Unauth(t *testing.T) {
-	fs := &fakeScrobbler{}
-	srv, _, _, _ := scrobbleTestServer(t, fs, cfgUnconfigured)
-	rec := do(t, srv, &http.Cookie{Name: sessionCookie, Value: ""}, http.MethodPost, "/api/v1/scrobble/nowplaying", `{"title":"t"}`)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("nowplaying unauth = %d, want 401", rec.Code)
 	}
 }
 

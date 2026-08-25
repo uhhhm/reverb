@@ -124,15 +124,6 @@ func TestLibrarySearchHandler(t *testing.T) {
 	}
 }
 
-func TestLibrarySearchRequiresAuth(t *testing.T) {
-	srv, _ := libTestServer(t, &fakeLibrary{})
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/library/search?q=x", nil))
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
-}
-
 func TestLibraryArtistAlbumPlaylistsHandlers(t *testing.T) {
 	srv, cookie := libTestServer(t, &fakeLibrary{})
 	for _, tc := range []struct {

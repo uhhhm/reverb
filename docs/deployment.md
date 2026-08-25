@@ -30,8 +30,6 @@ curl -o .env https://raw.githubusercontent.com/maxjb-xyz/reverb/main/.env.exampl
 
 - `REVERB_MUSIC_DIR=/srv/music` uses an existing music folder instead of `./music`.
 - `REVERB_VERSION=0.1.0` pins the image instead of following `latest`.
-- `REVERB_ADMIN_PASSWORD` skips the first-run password screen; remove it after
-  the first boot.
 - `REVERB_DOWNLOAD_WORKERS=3` runs up to three downloads at once (default: two;
   maximum: four). This speeds up batches, not individual transfers.
 
@@ -137,13 +135,10 @@ server {
 Before you expose Reverb beyond a trusted LAN:
 
 - **Put a TLS-terminating reverse proxy in front of it.** Reverb serves plain HTTP
-  and relies on a same-origin session cookie; never expose port 8090 directly.
+  and is a single-user instance with no login; never expose port 8090 directly.
 - **The proxy must set/overwrite `X-Forwarded-Proto`** so Reverb knows the original
   request was HTTPS. Caddy does this automatically; the nginx config above sets it
   explicitly (`proxy_set_header X-Forwarded-Proto $scheme;`).
-- **Unset `REVERB_ADMIN_PASSWORD` after first boot.** It is read only on first run
-  to seed the admin account and is ignored afterward — leaving it set just keeps a
-  plaintext password in your environment.
 - Keep the data volume sensitive — see [Secrets at rest](#secrets-at-rest).
 
 ## Backups

@@ -1,5 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { createPortal } from 'react-dom'
+import { useState, useEffect, useMemo } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useAlbumDetail } from '../lib/coverageApi'
@@ -7,16 +6,11 @@ import { coverUrl } from '../lib/libraryApi'
 import { TrackRow } from '../components/ui/TrackRow'
 import { DownloadAction } from '../components/download/DownloadAction'
 import { postBatchDownload } from '../lib/downloadApi'
-import { postRequest, useRequestStore } from '../lib/requestApi'
-import { useToastStore } from '../lib/toastStore'
-import { ApiError } from '../lib/api'
 import { formatDuration } from '../lib/types'
 import type { AlbumDetailTrack, ExternalResult, ExternalTrackRef, Track } from '../lib/types'
 import { usePlayer } from '../lib/playerStore'
-import { useAuthStore } from '../lib/authStore'
 import { Button, IconButton, Cover, Skeleton, EmptyState, Badge, Icon } from '../components/ui'
 import { useAlbumPalette } from '../lib/useAlbumPalette'
-import { useFocusTrap } from '../lib/useFocusTrap'
 import { rgbToCss } from '../lib/palette'
 import * as statsApi from '../lib/statsApi'
 import type { EntityStats, PlayCountTrack } from '../lib/statsApi'
@@ -73,14 +67,7 @@ export default function Album() {
   const currentTrack = usePlayer((s) => s.current)
   const isPlaying = usePlayer((s) => s.playing)
   const palette = useAlbumPalette(album?.coverArtId ? coverUrl(album.coverArtId, 300) : album?.coverUrl)
-  const canRequest = useAuthStore((s) => s.can('request'))
-  const canAutoApprove = useAuthStore((s) => s.can('auto_approve'))
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
-  const [requestDisclosureOpen, setRequestDisclosureOpen] = useState(false)
-  const requestModalRef = useRef<HTMLDivElement>(null)
-  const closeRequestModal = useCallback(() => setRequestDisclosureOpen(false), [])
-  // Focus trap + Esc + focus restore for the request modal (mirrors ImportPlaylistDialog).
-  useFocusTrap(requestDisclosureOpen, requestModalRef, closeRequestModal)
 
   // ── Listening-history stats ──────────────────────────────────────────────────
   // Hooks must run on every render (before the loading/error early returns), so
@@ -177,9 +164,6 @@ export default function Album() {
   // Cover source: prefer coverArtId proxy, fall back to direct coverUrl
   const coverSrc = album.coverArtId ? coverUrl(album.coverArtId, 300) : album.coverUrl
 
-  // Album artist: the album-level artist field (may differ from track-level artists)
-  const albumArtist = album.artist
-
   // Total duration: sum across all tracks (owned + missing)
   const totalDurationMs = album.tracks.reduce((acc, t) => acc + t.durationMs, 0)
 
@@ -262,11 +246,8 @@ export default function Album() {
                 }}
                 disabled={ownedTracks.length === 0}
               />
-              {/* Acquisition action — ONE capability-gated, mutually-exclusive
-                  button. auto_approve → "Download missing" (direct); else request
-                  → "Request album" (pending); else neither. A user with both caps
-                  sees only Download (the auto_approve branch wins). */}
-              {canAutoApprove && hasMissing && (
+              {/* Acquisition action — one-click download of the missing tracks. */}
+              {hasMissing && (
                 <Button
                   variant="secondary"
                   size="md"
@@ -280,87 +261,10 @@ export default function Album() {
                   {bulkSubmitting ? 'Starting downloads…' : `Download missing · ${missingRefs.length}`}
                 </Button>
               )}
-              {!canAutoApprove && canRequest && (
-                <Button
-                  variant="secondary"
-                  size="md"
-                  aria-label="Request album"
-                  onClick={() => setRequestDisclosureOpen(true)}
-                >
-                  Request album
-                </Button>
-              )}
             </div>
           </div>
         </header>
       </div>
-
-      {/* Request album disclosure modal */}
-      {requestDisclosureOpen &&
-        createPortal(
-          <>
-            <div
-              className="fixed inset-0 z-40"
-              aria-hidden="true"
-              onClick={() => setRequestDisclosureOpen(false)}
-            />
-            <div
-              ref={requestModalRef}
-              role="dialog"
-              aria-modal="true"
-              aria-label="Request album"
-              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-border-subtle bg-raised p-4 shadow-pop"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <p className="text-sm font-bold text-text-primary">Request the whole album?</p>
-              <p className="mt-1 text-xs text-text-secondary">
-                This fetches the full album via the album downloader
-                {album.name ? ` — "${album.name}"` : ''}.
-              </p>
-              <div className="mt-3 flex justify-end gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label="Cancel"
-                  onClick={() => setRequestDisclosureOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  aria-label="Confirm request album"
-                  onClick={() => {
-                    setRequestDisclosureOpen(false)
-                    postRequest({
-                      kind: 'album',
-                      source,
-                      externalId: id,
-                      title: album.name,
-                      artist: albumArtist,
-                      album: album.name,
-                      coverArtId: album.coverArtId,
-                      coverUrl: album.coverUrl,
-                      trackCount: album.totalCount,
-                    })
-                      .then((req) => useRequestStore.getState().upsert(req))
-                      .catch((err) => {
-                        console.error('[Album] postRequest failed:', err)
-                        if (err instanceof ApiError && err.status === 429 && typeof err.body?.error === 'string') {
-                          useToastStore.getState().push(err.body.error, 'error')
-                        } else {
-                          useToastStore.getState().push("Couldn't file your request", 'error')
-                        }
-                      })
-                  }}
-                >
-                  Confirm
-                </Button>
-              </div>
-            </div>
-          </>,
-          document.body,
-        )}
 
       {/* Track list */}
       <div className="space-y-0.5">

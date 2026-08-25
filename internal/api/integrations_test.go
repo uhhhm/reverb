@@ -1,14 +1,11 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/auth"
 	"github.com/maxjb-xyz/reverb/internal/store"
 )
 
@@ -31,22 +28,6 @@ func buildIntegrationServer(t *testing.T) (*Server, *http.Cookie, *store.Store) 
 	})
 	cookie := &http.Cookie{Name: sessionCookie, Value: tok}
 	return srv, cookie, st
-}
-
-// newRequesterCookie creates a role-requester user in st and returns their session cookie.
-func newRequesterCookie(t *testing.T, srv *Server, st *store.Store) *http.Cookie {
-	t.Helper()
-	ctx := context.Background()
-	authSvc := auth.NewService(st.Q(), time.Now)
-	uid, err := authSvc.CreateUser(ctx, "requester-user", "requester-pass-12345", "role-requester")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tok, err := authSvc.CreateSession(ctx, uid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &http.Cookie{Name: sessionCookie, Value: tok}
 }
 
 // ============================================================================
@@ -173,23 +154,6 @@ func TestPutLastfmIntegration_SentinelSecretPreservesStored(t *testing.T) {
 	}
 	if !resp.APISecretSet {
 		t.Fatal("apiSecretSet must still be true after PUT with sentinel secret")
-	}
-}
-
-// TestPutLastfmIntegration_NonManagerGets403 verifies that a user without
-// can_manage_library gets 403 on both GET and PUT.
-func TestPutLastfmIntegration_NonManagerGets403(t *testing.T) {
-	srv, _, st := buildIntegrationServer(t)
-	requesterCookie := newRequesterCookie(t, srv, st)
-
-	recGet := do(t, srv, requesterCookie, http.MethodGet, "/api/v1/admin/integrations/lastfm", "")
-	if recGet.Code != http.StatusForbidden {
-		t.Fatalf("GET /admin/integrations/lastfm for requester = %d, want 403; body: %s", recGet.Code, recGet.Body.String())
-	}
-
-	recPut := do(t, srv, requesterCookie, http.MethodPut, "/api/v1/admin/integrations/lastfm", `{"apiKey":"x","apiSecret":"y"}`)
-	if recPut.Code != http.StatusForbidden {
-		t.Fatalf("PUT /admin/integrations/lastfm for requester = %d, want 403; body: %s", recPut.Code, recPut.Body.String())
 	}
 }
 

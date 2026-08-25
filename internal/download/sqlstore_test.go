@@ -110,10 +110,7 @@ func mustSeedUser(t *testing.T, dbPath, userID string) {
 		t.Fatal(err)
 	}
 	defer raw.Close()
-	if _, err := raw.Exec(`INSERT OR IGNORE INTO roles (id, name, is_system, capabilities) VALUES ('role-test', 'Test', 0, '[]')`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := raw.Exec(`INSERT INTO users (id, username, password_hash, role_id, is_owner) VALUES (?, ?, 'x', 'role-test', 0)`, userID, "u-"+userID); err != nil {
+	if _, err := raw.Exec(`INSERT OR IGNORE INTO users (id, username) VALUES (?, ?)`, userID, "u-"+userID); err != nil {
 		t.Fatal(err)
 	}
 }

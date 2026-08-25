@@ -58,8 +58,7 @@ _The web player — queue, shuffle, repeat, seek, and keyboard shortcuts._
 - One-click spotDL downloads with live progress and auto play-when-ready, plus
   optional authenticated YouTube cookies and automatic cooldown/retry pacing for
   rate limits and bot challenges.
-- Pluggable adapters (library / search / downloader) configured in-app, with a
-  first-run setup wizard.
+- Pluggable adapters (library / search / downloader) configured in-app.
 - Single static binary, SPA embedded; ships as one Docker image (Python3 +
   ffmpeg + pinned spotDL included).
 - Responsive UI (desktop + mobile), installable as a PWA with OS media-key /
@@ -76,14 +75,14 @@ mkdir music
 docker compose up -d
 ```
 
-Open http://localhost:8090 and finish the first-run wizard. Reverb uses the
+Open http://localhost:8090 and configure your adapters. Reverb uses the
 `./music` folder for downloads, keeps its database in a managed Docker volume, and
 bundles both the music server and downloader — no extra containers or configuration
 are needed.
 
 To use an existing music folder, pin a version, or configure Spotify, download
 [.env.example](.env.example) as `.env` and uncomment the settings you need. Add
-the keyless **Deezer** search adapter in Settings after setup. Full deployment,
+the keyless **Deezer** search adapter in Settings. Full deployment,
 backup, and reverse-proxy guidance is in [docs/deployment.md](docs/deployment.md).
 
 ## Library backends
@@ -117,7 +116,6 @@ Reverb is configured by flags, environment variables, and the in-app Settings UI
 | `REVERB_DEV=1` | Enable dev mode |
 | `REVERB_DOWNLOAD_DIR` | Directory spotDL downloads into **and** the folder the bundled Navidrome serves. The Docker image defaults this to `/music` |
 | `REVERB_DOWNLOAD_WORKERS` | Concurrent spotDL jobs; defaults to `2`, accepts `1`–`4`. This improves batch throughput, not a single track's transfer rate. |
-| `REVERB_ADMIN_PASSWORD` | Seed the admin password on first run only (ignored once setup is complete). **Unset it after first boot.** |
 | `REVERB_SPOTIFY_CLIENT_ID` | Spotify app Client ID (alternative to setting it in the Settings UI) |
 | `REVERB_SPOTIFY_CLIENT_SECRET` | Spotify search adapter Client Secret (overrides stored config) |
 | `REVERB_LIBRARY_PASSWORD` | Subsonic/Navidrome library adapter password (overrides stored config) |
@@ -125,12 +123,9 @@ Reverb is configured by flags, environment variables, and the in-app Settings UI
 | `REVERB_NAVIDROME_BIN` | Path to the Navidrome binary for bundled library mode. Defaults to the bundled one; rarely needed |
 | `REVERB_NAVIDROME_LISTEN_ADDRESS` | Address for bundled Navidrome. Defaults to `127.0.0.1` inside the container; set to `0.0.0.0` only when deliberately sharing it through a private Docker network or localhost-only port mapping. |
 
-Secrets (`REVERB_*_SECRET`, `REVERB_*_PASSWORD`, `REVERB_ADMIN_PASSWORD`) should be
+Secrets (`REVERB_*_SECRET`, `REVERB_*_PASSWORD`) should be
 provided via environment / `.env` only — never committed. `.env` is gitignored;
-`.env.example` is the committed template. `REVERB_ADMIN_PASSWORD` is read **only on
-first run** to seed the admin account; once setup is complete it is ignored, so
-unset it after the first boot rather than leaving a plaintext password in your
-environment.
+`.env.example` is the committed template.
 
 ### Exposing Reverb to the internet
 

@@ -82,13 +82,3 @@ func TestLibraryStatus_FallbackNoLibrary(t *testing.T) {
 		t.Fatalf("got %+v, want external/unconfigured", dto)
 	}
 }
-
-func TestLibraryStatus_RequiresAuth(t *testing.T) {
-	srv, _ := libTestServer(t, &fakeLibrary{})
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/library/status", nil)
-	srv.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
-}

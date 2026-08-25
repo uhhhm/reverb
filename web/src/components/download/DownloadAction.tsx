@@ -3,11 +3,7 @@ import { createPortal } from 'react-dom'
 import { Badge, ProgressRing, Icon, Button } from '../ui'
 import { useDownloads } from '../../lib/downloadStore'
 import { postDownload, retryDownload, reqFromResult } from '../../lib/downloadApi'
-import { postRequest, useRequestStore } from '../../lib/requestApi'
-import { useToastStore } from '../../lib/toastStore'
 import { useAdapters } from '../../lib/adaptersApi'
-import { useAuthStore } from '../../lib/authStore'
-import { ApiError } from '../../lib/api'
 import type { ExternalResult } from '../../lib/types'
 
 interface Props {
@@ -37,16 +33,6 @@ export function DownloadAction({ result, onPlay }: Props) {
 
   const job = useDownloads((s) => s.byExternal(result.source, result.externalId))
   const downloaders = useDownloaders()
-
-  // Defense-in-depth: the backend enforces these caps regardless.
-  const canDownload = useAuthStore((s) => s.can('auto_approve'))
-  const canRequest = useAuthStore((s) => s.can('request'))
-
-  // For request-only users: find a matching pending/approved request so we can
-  // show "Requested" instead of "Request" once one exists.
-  const matchingRequest = useRequestStore((s) =>
-    canRequest && !canDownload ? s.byExternal(result.source, result.externalId) : undefined,
-  )
 
   // A completed job that matched a library track is treated as in-library.
   const inLibraryTrackId =
@@ -140,59 +126,6 @@ export function DownloadAction({ result, onPlay }: Props) {
         </Badge>
       </button>
     )
-  }
-
-  // ── Capability gate ───────────────────────────────────────────────────────
-  // Three branches: auto_approve → full download control; request → Request
-  // affordance; neither → nothing.
-  if (!canDownload) {
-    if (canRequest) {
-      // "Requested" if a pending/approved request exists, else "Request" button.
-      const isRequested =
-        matchingRequest?.status === 'pending' || matchingRequest?.status === 'approved'
-      return isRequested ? (
-        <button
-          type="button"
-          disabled
-          aria-label="Requested"
-          className="inline-flex items-center gap-1 rounded-full border border-border-subtle px-2.5 py-1 text-xs font-bold text-text-muted opacity-60 cursor-default"
-        >
-          Requested
-        </button>
-      ) : (
-        <button
-          type="button"
-          aria-label="Request"
-          onClick={(e) => {
-            e.stopPropagation()
-            postRequest({
-              source: result.source,
-              externalId: result.externalId,
-              title: result.title,
-              artist: result.artist,
-              album: result.album,
-              isrc: result.isrc,
-              durationMs: result.durationMs,
-              coverArtId: result.coverArtId,
-              coverUrl: result.coverUrl,
-            })
-              .then((req) => useRequestStore.getState().upsert(req))
-              .catch((err) => {
-                console.error('[DownloadAction] postRequest failed:', err)
-                if (err instanceof ApiError && err.status === 429 && typeof err.body?.error === 'string') {
-                  useToastStore.getState().push(err.body.error, 'error')
-                } else {
-                  useToastStore.getState().push("Couldn't file your request", 'error')
-                }
-              })
-          }}
-          className="inline-flex items-center gap-1 rounded-full border border-border-subtle px-2.5 py-1 text-xs font-bold text-text-primary transition-colors hover:bg-raised-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent active:opacity-80"
-        >
-          Request
-        </button>
-      )
-    }
-    return null
   }
 
   // ── 2a. Queued (incl. optimistic post-click) ─────────────────────────────

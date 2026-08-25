@@ -13,11 +13,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
+	"github.com/maxjb-xyz/reverb/internal/auth"
 	"github.com/maxjb-xyz/reverb/internal/core"
 	"github.com/maxjb-xyz/reverb/internal/playlistsync"
 	"github.com/maxjb-xyz/reverb/internal/registry"
 	"github.com/maxjb-xyz/reverb/internal/store"
+	"github.com/maxjb-xyz/reverb/internal/wiring"
 )
 
 // fakeSync is a controllable SyncService for handler tests.
@@ -156,6 +160,35 @@ func syncTestServerWithDataDir(t *testing.T, svc SyncService, dataDir string) (*
 	return srv, &http.Cookie{Name: sessionCookie, Value: tok}
 }
 
+// realSyncServer builds a Server backed by a real playlistsync.Service over the
+// store, so created playlists persist and owner-scoped listing works.
+func realSyncServer(t *testing.T) *Server {
+	t.Helper()
+	st, err := store.Open(t.TempDir() + "/realsync.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if err := st.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	authSvc := auth.NewService(st.Q(), time.Now)
+	if err := authSvc.EnsureSeed(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	syncStore := wiring.NewSyncStore(st.Q())
+	now := func() int64 { return time.Now().Unix() }
+	// src/match/dl/lib are nil: CreateManaged + List only touch the store.
+	svc := playlistsync.NewService(nil, nil, nil, syncStore, nil, now, uuid.NewString, nil)
+	return NewServer(Deps{
+		Auth:          authSvc,
+		Sync:          svc,
+		PlaylistOwner: st.Q(),
+		Search:        registry.NewRegistry("search"),
+		Downloader:    registry.NewRegistry("downloader"),
+	})
+}
+
 func TestSyncedImportReturnsDetail(t *testing.T) {
 	svc := &fakeSync{detail: core.SyncedPlaylistDetail{
 		SyncedPlaylist: core.SyncedPlaylist{ID: "p1", Source: "spotify", ExternalID: "ext1", Name: "Mix", TrackCount: 2},
@@ -232,11 +265,9 @@ func TestSyncedListReturns(t *testing.T) {
 	// Use a real sync server so that created playlists are persisted to the DB
 	// and owner-scoped listing works correctly.
 	srv := realSyncServer(t)
-	mustSetupOwner(t, srv, "owner", "pw123456")
-	otok := mustLogin(t, srv, "owner", "pw123456")
 
 	// Fresh DB: list must be empty.
-	rr := doGET(t, srv, "/api/v1/playlists", otok)
+	rr := doGET(t, srv, "/api/v1/playlists", "")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("initial list status = %d: %s", rr.Code, rr.Body.String())
 	}
@@ -249,16 +280,16 @@ func TestSyncedListReturns(t *testing.T) {
 	}
 
 	// Create two playlists and confirm they appear in the list.
-	rec1 := doPOST(t, srv, "/api/v1/playlists", otok, `{"name":"A"}`)
+	rec1 := doPOST(t, srv, "/api/v1/playlists", "", `{"name":"A"}`)
 	if rec1.Code != http.StatusCreated {
 		t.Fatalf("create A = %d: %s", rec1.Code, rec1.Body.String())
 	}
-	rec2 := doPOST(t, srv, "/api/v1/playlists", otok, `{"name":"B"}`)
+	rec2 := doPOST(t, srv, "/api/v1/playlists", "", `{"name":"B"}`)
 	if rec2.Code != http.StatusCreated {
 		t.Fatalf("create B = %d: %s", rec2.Code, rec2.Body.String())
 	}
 
-	rr2 := doGET(t, srv, "/api/v1/playlists", otok)
+	rr2 := doGET(t, srv, "/api/v1/playlists", "")
 	if rr2.Code != http.StatusOK {
 		t.Fatalf("list after creates status = %d: %s", rr2.Code, rr2.Body.String())
 	}
@@ -1020,41 +1051,8 @@ func TestRenameSyncedPlaylistNotFound(t *testing.T) {
 // auto_approve gate: download-triggering endpoints must require auto_approve
 // ---------------------------------------------------------------------------
 
-// syncTestServerWithRoles returns a syncTestServer plus a session token for a
-// second user assigned to the given role. The admin (owner) token is also
-// returned so that callers can verify admin-level access still works.
-func syncTestServerWithRoles(t *testing.T, svc SyncService, secondUserRole string) (srv *Server, adminCookie *http.Cookie, secondTok string) {
-	t.Helper()
-	srv, adminCookie = syncTestServer(t, svc)
-	// The admin creates a second user with the specified role.
-	doPOST(t, srv, "/api/v1/users", adminCookie.Value,
-		`{"username":"limited","password":"limitedpw1","roleId":"`+secondUserRole+`"}`)
-	secondTok = mustLogin(t, srv, "limited", "limitedpw1")
-	return srv, adminCookie, secondTok
-}
-
-// TestDownloadMissingRequiresAutoApprove: a user with can_create_playlists but
-// without auto_approve must receive 403 on POST /playlists/{id}/download-missing.
-// The auto_approve check must fire before ownership/404, so the capability gate
-// is visible even when no playlist exists in the DB.
-// The fake service must NOT be called — no downloads triggered.
-func TestDownloadMissingRequiresAutoApprove(t *testing.T) {
-	svc := &fakeSync{jobs: []core.DownloadJob{{ID: "j1"}}}
-	srv, _, requesterTok := syncTestServerWithRoles(t, svc, "role-requester")
-
-	rec := doPOST(t, srv, "/api/v1/playlists/pl1/download-missing", requesterTok, "")
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("requester download-missing = %d, want 403: %s", rec.Code, rec.Body.String())
-	}
-	// The service must not have been called — no downloads triggered.
-	if svc.lastID != "" {
-		t.Fatalf("DownloadMissing should not have been called, but lastID = %q", svc.lastID)
-	}
-}
-
-// TestDownloadMissingAllowedWithAutoApprove: the admin (who has auto_approve)
+// TestDownloadMissingAllowedWithAutoApprove: the owner (who has auto_approve)
 // must succeed on POST /playlists/{id}/download-missing (regression guard).
-// Using the owner/admin cookie because admin bypasses ownership and has auto_approve.
 func TestDownloadMissingAllowedWithAutoApprove(t *testing.T) {
 	svc := &fakeSync{jobs: []core.DownloadJob{{ID: "j1"}, {ID: "j2"}}}
 	srv, adminCookie := syncTestServer(t, svc)
@@ -1071,42 +1069,20 @@ func TestDownloadMissingAllowedWithAutoApprove(t *testing.T) {
 	}
 }
 
-// TestImportSyncedDownloadMissingStrippedWithoutAutoApprove: a user with
-// can_create_playlists but without auto_approve sends downloadMissing=true.
-// The import must succeed (200) but downloads must NOT be triggered
-// (the flag is silently stripped to false before calling the service).
-func TestImportSyncedDownloadMissingStrippedWithoutAutoApprove(t *testing.T) {
-	svc := &fakeSync{detail: core.SyncedPlaylistDetail{
-		SyncedPlaylist: core.SyncedPlaylist{ID: "pl-new", Name: "My Mix"},
-	}}
-	srv, _, requesterTok := syncTestServerWithRoles(t, svc, "role-requester")
-
-	body := `{"url":"https://open.spotify.com/playlist/ABC","downloadMissing":true}`
-	rec := doPOST(t, srv, "/api/v1/playlists/import-synced", requesterTok, body)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("import-synced status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
-	// The service must have been called with downloadMissing=false (stripped).
-	if svc.lastDL {
-		t.Fatalf("import-synced: downloadMissing should have been stripped to false for non-auto_approve user, but service was called with downloadMissing=true")
-	}
-}
-
-// TestImportSyncedDownloadMissingAllowedWithAutoApprove: a user with auto_approve
-// sends downloadMissing=true and the service must receive it unchanged (regression guard).
+// TestImportSyncedDownloadMissingAllowedWithAutoApprove: the owner has
+// auto_approve, so downloadMissing=true reaches the service unchanged.
 func TestImportSyncedDownloadMissingAllowedWithAutoApprove(t *testing.T) {
 	svc := &fakeSync{detail: core.SyncedPlaylistDetail{
 		SyncedPlaylist: core.SyncedPlaylist{ID: "pl-new", Name: "My Mix"},
 	}}
-	// role-user has auto_approve + can_create_playlists
-	srv, _, userTok := syncTestServerWithRoles(t, svc, "role-user")
+	srv, cookie := syncTestServer(t, svc)
 
 	body := `{"url":"https://open.spotify.com/playlist/DEF","downloadMissing":true}`
-	rec := doPOST(t, srv, "/api/v1/playlists/import-synced", userTok, body)
+	rec := doPOST(t, srv, "/api/v1/playlists/import-synced", cookie.Value, body)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("import-synced status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 	if !svc.lastDL {
-		t.Fatalf("import-synced: auto_approve user's downloadMissing=true should have been passed through, but service received false")
+		t.Fatalf("import-synced: owner's downloadMissing=true should have been passed through, but service received false")
 	}
 }

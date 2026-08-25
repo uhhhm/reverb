@@ -11,12 +11,6 @@ export class ApiError extends Error {
   }
 }
 
-/** Human, specific copy for a failed login attempt. */
-export function loginErrorMessage(e: unknown): string {
-  if (e instanceof ApiError && e.status === 401) return 'Incorrect username or password'
-  return 'Can\'t reach the server — try again'
-}
-
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(BASE + path, {
     method,

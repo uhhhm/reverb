@@ -22,14 +22,135 @@ func openMigrated(t *testing.T) *Store {
 	return st
 }
 
-func TestUsersRolesRoundTrip(t *testing.T) {
+func TestMigrateFromLegacyMultiUserSchema(t *testing.T) {
+	// Reproduces a database created by the old multi-user migration set
+	// (0013-0018): full users table, roles/invites/requests/notifications,
+	// sessions.user_id, and the FK columns. Upgrading must collapse it to the
+	// single-user shape without breaking the FK targets for existing data.
+	dbpath := t.TempDir() + "/legacy.db"
+	raw, err := sql.Open("sqlite", dbpath+"?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const legacy = `
+CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE sessions (id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL DEFAULT (unixepoch()), expires_at INTEGER NOT NULL, last_seen INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE download_jobs (id TEXT PRIMARY KEY, dedup_key TEXT NOT NULL, request_json TEXT NOT NULL DEFAULT '{}', downloader_name TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'queued', progress INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '', output_path TEXT NOT NULL DEFAULT '', library_track_id TEXT, priority INTEGER NOT NULL DEFAULT 0, requested_by TEXT, attempts INTEGER NOT NULL DEFAULT 0, cover_art_id TEXT, downloader_ref TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT (unixepoch()), started_at INTEGER, finished_at INTEGER);
+CREATE INDEX idx_download_jobs_dedup_active ON download_jobs (dedup_key, status);
+CREATE TABLE synced_playlists (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE roles (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, is_system INTEGER NOT NULL DEFAULT 0, capabilities TEXT NOT NULL DEFAULT '[]', created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL, role_id TEXT NOT NULL REFERENCES roles(id), is_owner INTEGER NOT NULL DEFAULT 0, disabled INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL DEFAULT (unixepoch()), updated_at INTEGER NOT NULL DEFAULT (unixepoch()), last_seen INTEGER);
+CREATE TABLE invites (id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE, role_id TEXT REFERENCES roles(id), created_by TEXT REFERENCES users(id), expires_at INTEGER, used_by TEXT REFERENCES users(id), used_at INTEGER, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE requests (id TEXT PRIMARY KEY, requested_by TEXT NOT NULL REFERENCES users(id), source TEXT NOT NULL, external_id TEXT NOT NULL, title TEXT NOT NULL, artist TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL DEFAULT (unixepoch()));
+CREATE TABLE notifications (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, type TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, read INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+ALTER TABLE sessions ADD COLUMN user_id TEXT REFERENCES users(id);
+ALTER TABLE download_jobs ADD COLUMN initiated_by TEXT REFERENCES users(id);
+ALTER TABLE synced_playlists ADD COLUMN owner_user_id TEXT REFERENCES users(id);
+INSERT INTO roles (id, name, is_system) VALUES ('role-admin', 'Admin', 1);
+INSERT INTO users (id, username, password_hash, role_id, is_owner) VALUES ('u1', 'admin', 'hash', 'role-admin', 1);
+INSERT INTO download_jobs (id, dedup_key, request_json, initiated_by) VALUES ('dj1', 'dk1', '{"title":"legacy"}', 'u1');
+`
+	if _, err := raw.Exec(legacy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec("CREATE TABLE goose_db_version (id INTEGER PRIMARY KEY AUTOINCREMENT, version_id INTEGER NOT NULL, is_applied INTEGER NOT NULL, tstamp TIMESTAMP DEFAULT (datetime('now')))"); err != nil {
+		t.Fatal(err)
+	}
+	// A real install that ran the old migration set has every version 1-18 recorded.
+	for v := 1; v <= 18; v++ {
+		if _, err := raw.Exec("INSERT INTO goose_db_version (version_id, is_applied) VALUES (?, 1)", v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Open(dbpath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+
+	q := st.Q()
+	ctx := context.Background()
+
+	// The local owner exists (FK target for attribution columns), and legacy
+	// rows survive the collapse.
+	u, err := q.GetUserByID(ctx, "local")
+	if err != nil {
+		t.Fatalf("local user missing after upgrade: %v", err)
+	}
+	if u.Username != "local" {
+		t.Fatalf("local username = %q", u.Username)
+	}
+
+	// The users table is slim: legacy columns are gone.
+	cols, err := tableColumns(ctx, st.DB(), "users")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, gone := range []string{"password_hash", "role_id", "is_owner", "disabled", "updated_at", "last_seen"} {
+		if cols[gone] {
+			t.Errorf("legacy column users.%s survived the upgrade", gone)
+		}
+	}
+	for _, gone := range []string{"sessions", "invites", "requests", "notifications", "roles"} {
+		if _, err := st.DB().QueryContext(ctx, "SELECT 1 FROM "+gone+" LIMIT 1"); err == nil {
+			t.Errorf("legacy table %s survived the upgrade", gone)
+		}
+	}
+
+	// FK enforcement on the attribution columns still works, now targeting local.
+	if err := q.InsertDownloadJob(ctx, db.InsertDownloadJobParams{
+		ID: "dj2", DedupKey: "dk2", RequestJson: `{"title":"x"}`, DownloaderName: "spotdl",
+		Status: "queued", InitiatedBy: sql.NullString{String: "missing", Valid: true},
+	}); err == nil {
+		t.Fatal("insert attributed to missing user should violate the FK")
+	}
+	if err := q.InsertDownloadJob(ctx, db.InsertDownloadJobParams{
+		ID: "dj2", DedupKey: "dk2", RequestJson: `{"title":"x"}`, DownloaderName: "spotdl",
+		Status: "queued", InitiatedBy: sql.NullString{String: "local", Valid: true},
+	}); err != nil {
+		t.Fatalf("insert attributed to local should succeed: %v", err)
+	}
+
+	// The legacy job's attribution row still resolves (its user row survived).
+	var initBy sql.NullString
+	if err := st.DB().QueryRowContext(ctx, "SELECT initiated_by FROM download_jobs WHERE id = 'dj1'").Scan(&initBy); err != nil {
+		t.Fatal(err)
+	}
+	if !initBy.Valid || initBy.String != "u1" {
+		t.Fatalf("legacy job attribution lost: %+v", initBy)
+	}
+}
+
+// tableColumns returns the column names of table.
+func tableColumns(ctx context.Context, db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.QueryContext(ctx, "SELECT name FROM pragma_table_info(?)", table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		cols[name] = true
+	}
+	return cols, rows.Err()
+}
+
+func TestUsersRoundTrip(t *testing.T) {
 	st := openMigrated(t) // existing helper in this file
 	ctx := context.Background()
 	q := st.Q()
-	if err := q.CreateRole(ctx, db.CreateRoleParams{ID: "role-user", Name: "User", IsSystem: 1, Capabilities: `["can_request"]`}); err != nil {
-		t.Fatal(err)
-	}
-	if err := q.CreateUser(ctx, db.CreateUserParams{ID: "u1", Username: "alice", PasswordHash: "h", RoleID: "role-user", IsOwner: 0}); err != nil {
+	if err := q.CreateUser(ctx, db.CreateUserParams{ID: "u1", Username: "alice"}); err != nil {
 		t.Fatal(err)
 	}
 	u, err := q.GetUserByUsername(ctx, "ALICE") // NOCASE
@@ -37,8 +158,8 @@ func TestUsersRolesRoundTrip(t *testing.T) {
 		t.Fatalf("case-insensitive lookup failed: %v %+v", err, u)
 	}
 	n, _ := q.CountUsers(ctx)
-	if n != 1 {
-		t.Fatalf("want 1 user, got %d", n)
+	if n != 2 {
+		t.Fatalf("want 2 users (seeded local + created), got %d", n)
 	}
 }
 
@@ -230,107 +351,6 @@ func TestSyncedPlaylistRoundTrip(t *testing.T) {
 	all, _ := q.ListSyncedPlaylists(ctx)
 	if len(all) != 1 || all[0].Name != "Renamed" {
 		t.Fatalf("want 1 row 'Renamed', got %+v", all)
-	}
-}
-
-func TestRequestRoundTrip(t *testing.T) {
-	st := openMigrated(t)
-	ctx := context.Background()
-	q := st.Q()
-
-	// Seed role + user (FK requirement)
-	if err := q.CreateRole(ctx, db.CreateRoleParams{ID: "role-user", Name: "User", IsSystem: 1, Capabilities: `["can_request"]`}); err != nil {
-		t.Fatal(err)
-	}
-	if err := q.CreateUser(ctx, db.CreateUserParams{ID: "u1", Username: "alice", PasswordHash: "h", RoleID: "role-user", IsOwner: 0}); err != nil {
-		t.Fatal(err)
-	}
-
-	// Insert a request (status = pending)
-	if err := q.CreateRequest(ctx, db.CreateRequestParams{
-		ID:          "req-1",
-		RequestedBy: "u1",
-		Source:      "spotify",
-		ExternalID:  "track-abc",
-		Title:       "Test Song",
-		Artist:      "Test Artist",
-		Status:      "pending",
-	}); err != nil {
-		t.Fatalf("CreateRequest: %v", err)
-	}
-
-	// GetOpenRequestByItem should find it (status IN pending/approved)
-	open, err := q.GetOpenRequestByItem(ctx, db.GetOpenRequestByItemParams{
-		RequestedBy: "u1",
-		Source:      "spotify",
-		ExternalID:  "track-abc",
-	})
-	if err != nil {
-		t.Fatalf("GetOpenRequestByItem: %v", err)
-	}
-	if open.ID != "req-1" || open.Title != "Test Song" {
-		t.Fatalf("unexpected open request: %+v", open)
-	}
-
-	// ListRequestsForOwner should return it
-	list, err := q.ListRequestsForOwner(ctx, "u1")
-	if err != nil {
-		t.Fatalf("ListRequestsForOwner: %v", err)
-	}
-	if len(list) != 1 || list[0].ID != "req-1" {
-		t.Fatalf("ListRequestsForOwner: want 1 row with req-1, got %+v", list)
-	}
-}
-
-// TestGetOpenRequestByItemNewest asserts that GetOpenRequestByItem returns the
-// NEWEST open request (ORDER BY created_at DESC) when multiple open rows exist
-// for the same (requested_by, source, external_id).
-func TestGetOpenRequestByItemNewest(t *testing.T) {
-	st := openMigrated(t)
-	ctx := context.Background()
-	q := st.Q()
-
-	// Seed role + user (FK requirement).
-	if err := q.CreateRole(ctx, db.CreateRoleParams{ID: "role-user2", Name: "User", IsSystem: 1, Capabilities: `["can_request"]`}); err != nil {
-		t.Fatal(err)
-	}
-	if err := q.CreateUser(ctx, db.CreateUserParams{ID: "u2", Username: "bob", PasswordHash: "h", RoleID: "role-user2", IsOwner: 0}); err != nil {
-		t.Fatal(err)
-	}
-
-	// Insert an OLDER pending request (lower created_at — SQLite accepts direct insert
-	// with explicit created_at so we can craft the timestamp).
-	if err := q.CreateRequest(ctx, db.CreateRequestParams{
-		ID: "req-old", RequestedBy: "u2", Source: "spotify", ExternalID: "dup-track",
-		Title: "Old Request", Artist: "Artist", Status: "pending",
-	}); err != nil {
-		t.Fatalf("CreateRequest old: %v", err)
-	}
-	// Force the old row's created_at to a small value via raw SQL so the ordering
-	// is deterministic regardless of wall-clock resolution.
-	if _, err := st.DB().ExecContext(ctx, `UPDATE requests SET created_at = 1 WHERE id = 'req-old'`); err != nil {
-		t.Fatalf("backdate old: %v", err)
-	}
-
-	// Insert a NEWER pending request (higher created_at).
-	if err := q.CreateRequest(ctx, db.CreateRequestParams{
-		ID: "req-new", RequestedBy: "u2", Source: "spotify", ExternalID: "dup-track",
-		Title: "New Request", Artist: "Artist", Status: "pending",
-	}); err != nil {
-		t.Fatalf("CreateRequest new: %v", err)
-	}
-	if _, err := st.DB().ExecContext(ctx, `UPDATE requests SET created_at = 9999 WHERE id = 'req-new'`); err != nil {
-		t.Fatalf("set new ts: %v", err)
-	}
-
-	got, err := q.GetOpenRequestByItem(ctx, db.GetOpenRequestByItemParams{
-		RequestedBy: "u2", Source: "spotify", ExternalID: "dup-track",
-	})
-	if err != nil {
-		t.Fatalf("GetOpenRequestByItem: %v", err)
-	}
-	if got.ID != "req-new" {
-		t.Fatalf("expected newest request (req-new), got %q (title=%q)", got.ID, got.Title)
 	}
 }
 

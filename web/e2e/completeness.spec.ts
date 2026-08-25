@@ -8,8 +8,8 @@ import { installApiMocks, installCompletenessMocks, installCompletenessWsMock } 
 //   → re-navigate proves the persistent album-level flip (2 of 2)
 //   → a library playlist is reachable and plays.
 test('completeness: artist coverage -> partial album -> download missing -> flips owned -> playlist plays', async ({ page }) => {
-  const authed = { value: false }
-  // Base mocks (me/setup/login/adapters/stream/cover + a default GET /downloads).
+  const authed = { value: true }
+  // Base mocks (me/adapters/stream/cover + a default GET /downloads).
   await installApiMocks(page, authed)
   // Completeness routes (artist/coverage/album/playlist + a stateful /downloads that
   // wins over the base one since it is registered later). Returns a control to flip
@@ -18,26 +18,11 @@ test('completeness: artist coverage -> partial album -> download missing -> flip
   // WS mock for the MISSING-TRACK completion. Does NOT send any frame until complete().
   const ws = await installCompletenessWsMock(page)
 
-  // 1) Load → not authed → Login screen.
+  // 1) Load the app (single-user, no login) and wait for the shell.
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible()
-
-  // 2) Log in (username + password). On success the app re-navigates to the shell;
-  //    the realtime socket opens and resyncs the download list once (GET /downloads).
-  //    Wait for that initial resync to settle BEFORE we enqueue so its (empty) result
-  //    can't land late and clobber the completed job (mock-only race; mirrors core-loop).
-  const initialResync = page
-    .waitForResponse((r) => r.url().includes('/api/v1/downloads') && r.request().method() === 'GET')
-    .catch(() => undefined)
-  await page.getByLabel('Username').fill('owner')
-  await page.getByLabel('Password').fill('correct horse')
-  const navigation = page.waitForNavigation({ waitUntil: 'domcontentloaded' })
-  await page.getByRole('button', { name: 'Log in' }).click()
-  await navigation
   await expect(page.getByTestId('app-shell-root')).toBeVisible()
-  await initialResync
 
-  // 3) Artist page. The album card renders AND the partial coverage chip ("1/2")
+  // 2) Artist page. The album card renders AND the partial coverage chip ("1/2")
   //    appears — proving the coverage SSE stream drove the CoverageChip.
   await page.goto('/artist/spotify/art-1')
   await expect(page.getByRole('heading', { name: 'Mock Artist' })).toBeVisible()

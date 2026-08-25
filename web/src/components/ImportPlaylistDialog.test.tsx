@@ -295,16 +295,9 @@ describe('ImportPlaylistDialog', () => {
     expect(screen.queryByRole('switch', { name: /download missing now/i })).not.toBeInTheDocument()
   })
 
-  // ── "Download missing now" capability gating (Fix 2) ─────────────────────
+  // ── "Download missing now" toggle ────────────────────────────────────────
 
-  it('request-only user (no auto_approve) does NOT see the "Download missing now" toggle in sync mode', () => {
-    setAuth(['request', 'create_playlists']) // can import, cannot auto_approve
-    render(wrap(<ImportPlaylistDialog open onClose={vi.fn()} />))
-    // Sync mode is the default — toggle must be absent for non-auto_approve user
-    expect(screen.queryByRole('switch', { name: /download missing now/i })).not.toBeInTheDocument()
-  })
-
-  it('auto_approve user sees the "Download missing now" toggle in sync mode', () => {
+  it('shows the "Download missing now" toggle in sync mode', () => {
     setAuth(['auto_approve', 'create_playlists'])
     render(wrap(<ImportPlaylistDialog open onClose={vi.fn()} />))
     expect(screen.getByRole('switch', { name: /download missing now/i })).toBeInTheDocument()

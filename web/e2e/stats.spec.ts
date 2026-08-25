@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { installApiMocks, installRequestWsMock } from './mocks'
+import { installApiMocks } from './mocks'
 import type { Route } from '@playwright/test'
 
 // Hermetic e2e for the /stats dashboard (SP3-3a; mock-driven, no real backend).
@@ -55,7 +55,6 @@ async function bootStats(page: Page, summaryFroms: number[]) {
   await page.route('**/api/v1/stats/clock**', json(clock))
   await page.route('**/api/v1/stats/recent**', json(recent))
 
-  await installRequestWsMock(page)
   await page.goto('/stats')
   await expect(page.getByTestId('app-shell-root')).toBeVisible()
 }

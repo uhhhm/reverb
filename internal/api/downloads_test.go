@@ -210,15 +210,6 @@ func TestRetryDownloadNoBodyIsPlainRetry(t *testing.T) {
 	}
 }
 
-func TestDownloadsRequireAuth(t *testing.T) {
-	srv, _ := downloadTestServer(t, newFakeManager())
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/downloads", nil))
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
-}
-
 func TestCreateDownloadNilManager503(t *testing.T) {
 	srv, cookie := downloadTestServer(t, nil)
 	rec := httptest.NewRecorder()

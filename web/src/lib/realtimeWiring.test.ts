@@ -1,17 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { renderHook, act } from '@testing-library/react'
+import { renderHook } from '@testing-library/react'
 import { createElement, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useRealtime } from './realtimeWiring'
 import { useDownloads } from './downloadStore'
 import { useLibraryRevision } from './libraryRevisionStore'
-import { useRequestStore } from './requestApi'
-import { useNotificationStore } from './notificationApi'
-import { useAuthStore } from './authStore'
 import { useToastStore } from './toastStore'
 import type { WebSocketLike } from './realtime'
-import type { Request } from './requestApi'
-import type { Notification } from './notificationApi'
 
 // Player spy: usePlayer((s) => s.playTrackList) must return our spy, and
 // usePlayer.getState() must expose a controllable `current` plus `enqueue`.
@@ -31,30 +26,6 @@ vi.mock('./downloadApi', () => ({
   getDownloads: vi.fn(() => Promise.resolve([])),
   getQueueState: vi.fn(() => Promise.resolve({ paused: false })),
 }))
-
-// requestApi: mock only the API fetch functions; real store is kept.
-// Typed via cast so mockResolvedValue receives the correct element type.
-const mockGetMyRequests = vi.fn() as ReturnType<typeof vi.fn> & { mockResolvedValue(v: Request[]): void; mockReset(): void }
-const mockGetAllRequests = vi.fn() as ReturnType<typeof vi.fn> & { mockResolvedValue(v: Request[]): void; mockReset(): void }
-vi.mock('./requestApi', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./requestApi')>()
-  return {
-    ...actual,
-    getMyRequests: () => (mockGetMyRequests as () => Promise<Request[]>)(),
-    getAllRequests: (status?: string) => (mockGetAllRequests as (s?: string) => Promise<Request[]>)(status),
-  }
-})
-
-// notificationApi: mock only the API fetch function; real store is kept.
-type GetNotificationsResult = { notifications: Notification[]; unread: number }
-const mockGetNotifications = vi.fn() as ReturnType<typeof vi.fn> & { mockResolvedValue(v: GetNotificationsResult): void; mockReset(): void }
-vi.mock('./notificationApi', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./notificationApi')>()
-  return {
-    ...actual,
-    getNotifications: () => (mockGetNotifications as () => Promise<GetNotificationsResult>)(),
-  }
-})
 
 // A controllable stub socket the test drives.
 const sockets: StubSocket[] = []
@@ -88,14 +59,8 @@ describe('useRealtime', () => {
     playTrackList.mockClear()
     enqueue.mockClear()
     playerState.current = null
-    mockGetMyRequests.mockReset()
-    mockGetAllRequests.mockReset()
-    mockGetNotifications.mockReset()
     useDownloads.setState({ jobs: {} })
     useLibraryRevision.setState({ revision: 0 })
-    useRequestStore.setState({ byId: {} })
-    useNotificationStore.setState({ byId: {}, unread: 0 })
-    useAuthStore.setState({ me: null, loading: false })
     useToastStore.setState({ toasts: [] })
     qc = new QueryClient()
     invalidateSpy = vi.spyOn(qc, 'invalidateQueries')
@@ -228,237 +193,5 @@ describe('useRealtime', () => {
 
     s.onmessage?.(frame('download.removed', { jobIds: ['x'] }))
     expect(useDownloads.getState().jobs['x']).toBeUndefined()
-  })
-
-  it('request.created upserts into the request store and emits no toast', () => {
-    renderHook(() => useRealtime((url) => new StubSocket(url)), { wrapper })
-    const s = sockets[0]
-
-    s.onmessage?.(frame('request.created', {
-      request: { id: 'r1', requestedBy: 'u1', source: 'spotify', externalId: 'e1', title: 'Bones', artist: 'Imagine Dragons', status: 'pending', createdAt: 1 },
-    }))
-
-    expect(useRequestStore.getState().byId['r1']).toBeDefined()
-    expect(useRequestStore.getState().byId['r1'].title).toBe('Bones')
-    expect(useToastStore.getState().toasts).toHaveLength(0)
-  })
-
-  it('request.updated with status fulfilled upserts store and shows a success toast mentioning the title', () => {
-    renderHook(() => useRealtime((url) => new StubSocket(url)), { wrapper })
-    const s = sockets[0]
-
-    s.onmessage?.(frame('request.updated', {
-      request: { id: 'r2', requestedBy: 'u1', source: 'spotify', externalId: 'e2', title: 'Bones', artist: 'Imagine Dragons', status: 'fulfilled', createdAt: 1 },
-    }))
-
-    expect(useRequestStore.getState().byId['r2']).toBeDefined()
-    const toasts = useToastStore.getState().toasts
-    expect(toasts).toHaveLength(1)
-    expect(toasts[0].kind).toBe('success')
-    expect(toasts[0].message).toContain('Bones')
-    expect(toasts[0].message).toContain('added')
-  })
-
-  it('request.updated with status denied shows an error toast', () => {
-    renderHook(() => useRealtime((url) => new StubSocket(url)), { wrapper })
-    const s = sockets[0]
-
-    s.onmessage?.(frame('request.updated', {
-      request: { id: 'r3', requestedBy: 'u1', source: 'spotify', externalId: 'e3', title: 'Bones', artist: 'Imagine Dragons', status: 'denied', createdAt: 1 },
-    }))
-
-    const toasts = useToastStore.getState().toasts
-    expect(toasts).toHaveLength(1)
-    expect(toasts[0].kind).toBe('error')
-    expect(toasts[0].message).toContain('denied')
-  })
-
-  it('request.updated with status failed shows an error toast', () => {
-    renderHook(() => useRealtime((url) => new StubSocket(url)), { wrapper })
-    const s = sockets[0]
-
-    s.onmessage?.(frame('request.updated', {
-      request: { id: 'r4', requestedBy: 'u1', source: 'spotify', externalId: 'e4', title: 'Bones', artist: 'Imagine Dragons', status: 'failed', createdAt: 1 },
-    }))
-
-    const toasts = useToastStore.getState().toasts
-    expect(toasts).toHaveLength(1)
-    expect(toasts[0].kind).toBe('error')
-    expect(toasts[0].message).toContain('failed')
-  })
-
-  it('request.updated with status pending or approved emits no toast', () => {
-    renderHook(() => useRealtime((url) => new StubSocket(url)), { wrapper })
-    const s = sockets[0]
-
-    s.onmessage?.(frame('request.updated', {
-      request: { id: 'r5', requestedBy: 'u1', source: 'spotify', externalId: 'e5', title: 'Bones', artist: 'Imagine Dragons', status: 'pending', createdAt: 1 },
-    }))
-    s.onmessage?.(frame('request.updated', {
-      request: { id: 'r6', requestedBy: 'u1', source: 'spotify', externalId: 'e6', title: 'Bones', artist: 'Imagine Dragons', status: 'approved', createdAt: 1 },
-    }))
-
-    expect(useToastStore.getState().toasts).toHaveLength(0)
-  })
-
-  // --- onOpen request-store hydration ---
-
-  it('onOpen: user with can("request") fetches getMyRequests and populates mine()', async () => {
-    const myReq: Request = {
-      id: 'req1', requestedBy: 'u42', source: 'spotify', externalId: 'e1',
-      title: 'Bones', artist: 'Imagine Dragons', status: 'pending', createdAt: 1,
-    }
-    mockGetMyRequests.mockResolvedValue([myReq])
-    mockGetAllRequests.mockResolvedValue([])
-    mockGetNotifications.mockResolvedValue({ notifications: [], unread: 0 })
-
-    // Set up a user who has the 'request' capability but NOT 'manage_requests'.
-    useAuthStore.setState({
-      me: { id: 'u42', username: 'alice', roleId: 'r1', roleName: 'User', isOwner: false, capabilities: ['request'], createdAt: 1 },
-      loading: false,
-    })
-
-    renderHook(() => useRealtime((url) => new StubSocket(url)), { wrapper })
-    // Trigger onOpen.
-    await act(async () => {
-      sockets[0].onopen?.()
-      await Promise.resolve()
-    })
-
-    expect(mockGetMyRequests).toHaveBeenCalledTimes(1)
-    expect(mockGetAllRequests).not.toHaveBeenCalled()
-    // The request should now be in the store.
-    expect(useRequestStore.getState().byId['req1']).toBeDefined()
-    expect(useRequestStore.getState().mine('u42')).toHaveLength(1)
-  })
-
-  it('onOpen: user with both caps fetches getMyRequests + getAllRequests("pending") and populates both', async () => {
-    const myReq: Request = {
-      id: 'req2', requestedBy: 'u99', source: 'spotify', externalId: 'e2',
-      title: 'Enemy', artist: 'Imagine Dragons', status: 'pending', createdAt: 2,
-    }
-    const queueReq: Request = {
-      id: 'req3', requestedBy: 'u11', source: 'spotify', externalId: 'e3',
-      title: 'Bones', artist: 'Imagine Dragons', status: 'pending', createdAt: 3,
-    }
-    mockGetMyRequests.mockResolvedValue([myReq])
-    mockGetAllRequests.mockResolvedValue([queueReq])
-    mockGetNotifications.mockResolvedValue({ notifications: [], unread: 0 })
-
-    useAuthStore.setState({
-      me: { id: 'u99', username: 'manager', roleId: 'r2', roleName: 'Manager', isOwner: false, capabilities: ['request', 'manage_requests'], createdAt: 1 },
-      loading: false,
-    })
-
-    renderHook(() => useRealtime((url) => new StubSocket(url)), { wrapper })
-    await act(async () => {
-      sockets[0].onopen?.()
-      await Promise.resolve()
-    })
-
-    expect(mockGetMyRequests).toHaveBeenCalledTimes(1)
-    expect(mockGetAllRequests).toHaveBeenCalledWith('pending')
-    // Both requests land in the store.
-    expect(useRequestStore.getState().byId['req2']).toBeDefined()
-    expect(useRequestStore.getState().byId['req3']).toBeDefined()
-    expect(useRequestStore.getState().pending()).toHaveLength(2)
-  })
-
-  it('onOpen: user with neither cap fires no request fetches', async () => {
-    mockGetMyRequests.mockResolvedValue([])
-    mockGetAllRequests.mockResolvedValue([])
-    mockGetNotifications.mockResolvedValue({ notifications: [], unread: 0 })
-
-    useAuthStore.setState({
-      me: { id: 'u7', username: 'noperms', roleId: 'r3', roleName: 'ReadOnly', isOwner: false, capabilities: [], createdAt: 1 },
-      loading: false,
-    })
-
-    renderHook(() => useRealtime((url) => new StubSocket(url)), { wrapper })
-    await act(async () => {
-      sockets[0].onopen?.()
-      await Promise.resolve()
-    })
-
-    expect(mockGetMyRequests).not.toHaveBeenCalled()
-    expect(mockGetAllRequests).not.toHaveBeenCalled()
-  })
-
-  // --- onOpen notification hydration ---
-
-  it('onOpen: getNotifications is always fetched and populates the notification store', async () => {
-    const notif: Notification = {
-      id: 'notif1',
-      userId: 'u42',
-      type: 'request.approved',
-      title: 'Approved',
-      body: 'Your request was approved',
-      read: false,
-      createdAt: 9000,
-    }
-    mockGetNotifications.mockResolvedValue({ notifications: [notif], unread: 1 })
-    mockGetMyRequests.mockResolvedValue([])
-    mockGetAllRequests.mockResolvedValue([])
-
-    // Even a user with no special caps gets notifications hydrated
-    useAuthStore.setState({
-      me: { id: 'u42', username: 'alice', roleId: 'r1', roleName: 'User', isOwner: false, capabilities: [], createdAt: 1 },
-      loading: false,
-    })
-
-    renderHook(() => useRealtime((url) => new StubSocket(url)), { wrapper })
-    await act(async () => {
-      sockets[0].onopen?.()
-      await Promise.resolve()
-    })
-
-    expect(mockGetNotifications).toHaveBeenCalledTimes(1)
-    expect(useNotificationStore.getState().byId['notif1']).toBeDefined()
-    expect(useNotificationStore.getState().unread).toBe(1)
-  })
-
-  // --- notification WS event ---
-
-  it('a notification WS frame calls add and makes the notification available in the store', async () => {
-    mockGetNotifications.mockResolvedValue({ notifications: [], unread: 0 })
-
-    renderHook(() => useRealtime((url) => new StubSocket(url)), { wrapper })
-    const s = sockets[0]
-
-    const notif: Notification = {
-      id: 'notif2',
-      userId: 'u1',
-      type: 'request.denied',
-      title: 'Denied',
-      body: 'Your request was denied',
-      read: false,
-      createdAt: 5000,
-    }
-    s.onmessage?.(frame('notification', { notification: notif }))
-
-    expect(useNotificationStore.getState().byId['notif2']).toBeDefined()
-    expect(useNotificationStore.getState().byId['notif2'].title).toBe('Denied')
-    expect(useNotificationStore.getState().unread).toBe(1)
-  })
-
-  it('a notification WS frame for a read notification does not bump unread', async () => {
-    mockGetNotifications.mockResolvedValue({ notifications: [], unread: 0 })
-
-    renderHook(() => useRealtime((url) => new StubSocket(url)), { wrapper })
-    const s = sockets[0]
-
-    const notif: Notification = {
-      id: 'notif3',
-      userId: 'u1',
-      type: 'request.approved',
-      title: 'Approved',
-      body: 'Your request was approved',
-      read: true,
-      createdAt: 5000,
-    }
-    s.onmessage?.(frame('notification', { notification: notif }))
-
-    expect(useNotificationStore.getState().byId['notif3']).toBeDefined()
-    expect(useNotificationStore.getState().unread).toBe(0)
   })
 })

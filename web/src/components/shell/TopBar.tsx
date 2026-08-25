@@ -5,9 +5,7 @@ import { SearchSuggest } from '../search/SearchSuggest'
 import { useUI } from '../../lib/uiStore'
 import { useDownloads } from '../../lib/downloadStore'
 import { useSearch } from '../../lib/searchStore'
-import { useAuthStore, isManagerCaps } from '../../lib/authStore'
-import { useRequestStore } from '../../lib/requestApi'
-import { NotificationBell } from '../NotificationBell'
+import { useAuthStore } from '../../lib/authStore'
 
 export function TopBar() {
   const navigate = useNavigate()
@@ -16,14 +14,7 @@ export function TopBar() {
   const query = useSearch((s) => s.query)
   const setQuery = useSearch((s) => s.setQuery)
 
-  // Defense-in-depth: hide the Admin entry for users without a management
-  // capability (the backend enforces this regardless). Account/Settings stay
-  // available to every authenticated user.
-  const isManager = useAuthStore((s) => isManagerCaps(s.me?.capabilities))
   const username = useAuthStore((s) => s.me?.username)
-  const canRequest = useAuthStore((s) => s.can('request'))
-  const canManageRequests = useAuthStore((s) => s.can('manage_requests'))
-  const pendingRequestCount = useRequestStore((s) => s.pending().length)
 
   // Typeahead dropdown — typing only updates the shared query; submitting
   // (Enter) navigates to the full /search results page.
@@ -68,11 +59,6 @@ export function TopBar() {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [menuOpen])
-
-  async function handleLogout() {
-    await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'include' })
-    window.location.reload()
-  }
 
   return (
     <header className="flex items-center justify-between px-4 h-16 bg-surface">
@@ -177,34 +163,6 @@ export function TopBar() {
           )}
         </div>
 
-        {/* Requests button with pending-count badge for managers (desktop only) */}
-        {canRequest && (
-          <div className="relative hidden md:block">
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label="Requests"
-              onClick={() => navigate('/requests')}
-            >
-              <span className="flex items-center gap-1.5">
-                <Icon name="music" className="w-4 h-4" />
-                <span>Requests</span>
-              </span>
-            </Button>
-            {canManageRequests && pendingRequestCount > 0 && (
-              <span
-                data-testid="requests-badge"
-                className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-accent text-on-accent text-xs font-extrabold grid place-items-center pointer-events-none"
-              >
-                {pendingRequestCount}
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Notification bell */}
-        <NotificationBell />
-
         {/* Avatar / account menu */}
         <div ref={menuRef} className="relative">
           <button
@@ -243,31 +201,17 @@ export function TopBar() {
               >
                 Settings
               </button>
-              {isManager && (
-                <button
-                  role="menuitem"
-                  type="button"
-                  onClick={() => { setMenuOpen(false); navigate('/admin') }}
-                  className={[
-                    'w-full text-left px-4 py-2 text-sm text-text-primary',
-                    'hover:bg-raised-hover transition-colors',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset',
-                  ].join(' ')}
-                >
-                  Admin
-                </button>
-              )}
               <button
                 role="menuitem"
                 type="button"
-                onClick={handleLogout}
+                onClick={() => { setMenuOpen(false); navigate('/admin') }}
                 className={[
                   'w-full text-left px-4 py-2 text-sm text-text-primary',
                   'hover:bg-raised-hover transition-colors',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset',
                 ].join(' ')}
               >
-                Logout
+                Admin
               </button>
             </div>
           )}

@@ -44,32 +44,8 @@ vi.mock('../lib/scrobbleApi', () => ({
   setLastfmConfig: (...args: unknown[]) => mockSetLastfmConfig(...args),
 }))
 
-// ── Mock usersApi (used by UsersSection / RolesSection / RegistrationSection) ─
-const mockUseUsers = vi.fn()
-const mockUseRoles = vi.fn()
-const mockUseCapabilities = vi.fn()
-const mockUseRegistration = vi.fn()
-const mockUseInvites = vi.fn()
-vi.mock('../lib/usersApi', () => ({
-  useUsers: () => mockUseUsers(),
-  useRoles: () => mockUseRoles(),
-  useCapabilities: () => mockUseCapabilities(),
-  useRegistration: () => mockUseRegistration(),
-  useInvites: () => mockUseInvites(),
-  createUser: vi.fn(),
-  updateUser: vi.fn(),
-  deleteUser: vi.fn(),
-  resetPassword: vi.fn(),
-  createRole: vi.fn(),
-  updateRole: vi.fn(),
-  deleteRole: vi.fn(),
-  setRegistration: vi.fn(),
-  createInvite: vi.fn(),
-  deleteInvite: vi.fn(),
-}))
-
-const settingsData = (libraryBackendMode: string, maxPendingRequestsPerUser = 0) => ({
-  data: { accentColor: '#F0354B', dynamicBackground: true, libraryBackendMode, maxPendingRequestsPerUser },
+const settingsData = (libraryBackendMode: string) => ({
+  data: { accentColor: '#F0354B', dynamicBackground: true, libraryBackendMode },
 })
 
 // ── Default mock return values ────────────────────────────────────────────────
@@ -109,14 +85,6 @@ function setupDefaultMocks() {
   mockUseAvailableAdapters.mockReturnValue({ data: [], isLoading: false })
   mockUseSettings.mockReturnValue(settingsData('built-in'))
   mockUseLibraryStatus.mockReturnValue({ data: { mode: 'built-in', state: 'ready' } })
-  mockUseUsers.mockReturnValue({ data: [], isLoading: false })
-  mockUseRoles.mockReturnValue({ data: [], isLoading: false })
-  mockUseCapabilities.mockReturnValue({ data: [], isLoading: false })
-  mockUseRegistration.mockReturnValue({
-    data: { signupEnabled: false, invitesEnabled: false, defaultRoleId: '' },
-    isLoading: false,
-  })
-  mockUseInvites.mockReturnValue({ data: [], isLoading: false })
   mockGetLastfmConfig.mockResolvedValue({ apiKey: '', apiSecretSet: false })
   mockSetLastfmConfig.mockResolvedValue(undefined)
 }
@@ -146,11 +114,10 @@ describe('Admin', () => {
     expect(screen.getByRole('heading', { name: /admin/i })).toBeInTheDocument()
   })
 
-  it('shows Providers and Users tabs', () => {
+  it('shows the Providers tab', () => {
     wrap(<Admin />)
     expect(screen.getByRole('button', { name: /providers/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^server$/i })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /users/i })).toBeInTheDocument()
   })
 
   // ── Library backend: single-active switch (lives in Providers, not user Settings) ─
@@ -321,14 +288,6 @@ describe('Admin', () => {
     expect(screen.queryByText(/restart reverb/i)).toBeNull()
   })
 
-  // ── Users tab — real UsersSection ────────────────────────────────────────────
-  it('Users tab renders the real UsersSection with Users heading and Create user button', () => {
-    wrap(<Admin />)
-    fireEvent.click(screen.getByRole('button', { name: /users/i }))
-    expect(screen.getByRole('heading', { name: /^users$/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /create user/i })).toBeInTheDocument()
-  })
-
   // ── Adapter instances render (search/downloader are multi-instance lists) ─────
   it('renders search and downloader instances in their sections', () => {
     mockUseAdapters.mockReturnValue({
@@ -354,34 +313,5 @@ describe('Admin', () => {
     expect(screen.getByLabelText(/path/i)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
     expect(screen.queryByLabelText(/path/i)).toBeNull()
-  })
-
-  // ── Request quota field ───────────────────────────────────────────────────────
-  it('Providers tab renders "Max pending requests per user" number input with "0 = unlimited" helper', () => {
-    wrap(<Admin />)
-    const input = screen.getByLabelText(/max pending requests per user/i)
-    expect(input).toBeInTheDocument()
-    expect(input).toHaveAttribute('type', 'number')
-    expect(screen.getByText(/0 = unlimited/i)).toBeInTheDocument()
-  })
-
-  it('quota input reflects the saved maxPendingRequestsPerUser value from settings', () => {
-    mockUseSettings.mockReturnValue(settingsData('built-in', 5))
-    wrap(<Admin />)
-    const input = screen.getByLabelText(/max pending requests per user/i) as HTMLInputElement
-    expect(input.value).toBe('5')
-  })
-
-  it('changing quota input and saving calls updateSettings.mutate with maxPendingRequestsPerUser', async () => {
-    wrap(<Admin />)
-    const input = screen.getByLabelText(/max pending requests per user/i)
-    fireEvent.change(input, { target: { value: '3' } })
-    fireEvent.blur(input)
-    await waitFor(() =>
-      expect(mockUpdateSettingsMutate).toHaveBeenCalledWith(
-        { maxPendingRequestsPerUser: 3 },
-        expect.anything(),
-      ),
-    )
   })
 })

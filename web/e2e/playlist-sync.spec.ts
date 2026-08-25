@@ -7,8 +7,8 @@ import { installApiMocks, installPlaylistSyncMocks, installPlaylistSyncWsMock } 
 //   has Download) → download the missing track → WS complete → row flips In Library
 //   (live) → "Sync now" → an added 3rd track appears.
 test('playlist sync: import -> have/missing -> download missing -> flips owned -> sync surfaces an added track', async ({ page }) => {
-  const authed = { value: false }
-  // Base mocks (me/setup/login/adapters/stream/cover + a default GET /downloads).
+  const authed = { value: true }
+  // Base mocks (me/adapters/stream/cover + a default GET /downloads).
   await installApiMocks(page, authed)
   // Playlist-sync routes (synced-playlists CRUD + a stateful /downloads + empty
   // library lists). Registered AFTER installApiMocks so its handlers win. Owns its
@@ -17,26 +17,11 @@ test('playlist sync: import -> have/missing -> download missing -> flips owned -
   // WS mock for the MISSING-TRACK completion. Sends no frame until complete().
   const ws = await installPlaylistSyncWsMock(page)
 
-  // 1) Load → not authed → Login screen.
+  // 1) Load the app (single-user, no login) and wait for the shell.
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible()
-
-  // 2) Log in (username + password). On success the app re-navigates to the shell;
-  //    the realtime socket opens and resyncs the download list once (GET /downloads).
-  //    Wait for that initial resync to settle BEFORE we enqueue so its (empty) result
-  //    can't land late and clobber the completed job (mock-only race; mirrors completeness).
-  const initialResync = page
-    .waitForResponse((r) => r.url().includes('/api/v1/downloads') && r.request().method() === 'GET')
-    .catch(() => undefined)
-  await page.getByLabel('Username').fill('owner')
-  await page.getByLabel('Password').fill('correct horse')
-  const navigation = page.waitForNavigation({ waitUntil: 'domcontentloaded' })
-  await page.getByRole('button', { name: 'Log in' }).click()
-  await navigation
   await expect(page.getByTestId('app-shell-root')).toBeVisible()
-  await initialResync
 
-  // 3) Library page → Playlists tab → "Import from Spotify" opens the dialog.
+  // 2) Library page → Playlists tab → "Import from Spotify" opens the dialog.
   await page.goto('/library')
   await expect(page.getByRole('heading', { name: 'Your Library' })).toBeVisible()
   // Scope to the page's filter group (a "Playlists" button also exists in the

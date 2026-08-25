@@ -5,7 +5,6 @@ import { Toggle } from './ui/Toggle'
 import { Segmented } from './ui/Segmented'
 import { importPlaylist } from '../lib/syncedPlaylistApi'
 import { importPlaylistOnce } from '../lib/libraryApi'
-import { useAuthStore } from '../lib/authStore'
 
 interface ImportPlaylistDialogProps {
   open: boolean
@@ -18,7 +17,6 @@ const FOCUSABLE = 'button, [href], input, [tabindex]:not([tabindex="-1"])'
 export function ImportPlaylistDialog({ open, onClose, initialURL = '' }: ImportPlaylistDialogProps) {
   const navigate = useNavigate()
   const panelRef = useRef<HTMLDivElement>(null)
-  const canAutoApprove = useAuthStore((s) => s.can('auto_approve'))
 
   const [mode, setMode] = useState<'sync' | 'one-time'>('sync')
   const [url, setUrl] = useState('')
@@ -94,7 +92,7 @@ export function ImportPlaylistDialog({ open, onClose, initialURL = '' }: ImportP
         onClose()
         navigate(`/playlist/${detail.id}`)
       } else {
-        const detail = await importPlaylist(trimmed, canAutoApprove && downloadMissing)
+        const detail = await importPlaylist(trimmed, downloadMissing)
         onClose()
         navigate(`/playlist/${detail.id}`)
       }
@@ -170,8 +168,8 @@ export function ImportPlaylistDialog({ open, onClose, initialURL = '' }: ImportP
               />
             </div>
 
-            {/* Download missing toggle — sync mode, auto_approve users only */}
-            {mode === 'sync' && canAutoApprove && (
+            {/* Download missing toggle — sync mode */}
+            {mode === 'sync' && (
               <div className="flex items-center gap-3">
                 <Toggle
                   checked={downloadMissing}

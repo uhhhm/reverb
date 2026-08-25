@@ -7,11 +7,9 @@ import (
 	"testing"
 )
 
-func TestMeIncludesCreatedAt(t *testing.T) {
+func TestMe(t *testing.T) {
 	srv := newTestServer(t)
-	mustSetupOwner(t, srv, "owner", "pw123456")
-	tok := mustLogin(t, srv, "owner", "pw123456")
-	rr := doGET(t, srv, "/api/v1/me", tok)
+	rr := doGET(t, srv, "/api/v1/me", "")
 	if rr.Code != 200 {
 		t.Fatalf("GET /me = %d (%s)", rr.Code, rr.Body)
 	}
@@ -19,14 +17,15 @@ func TestMeIncludesCreatedAt(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode /me body: %v", err)
 	}
-	v, ok := body["createdAt"]
-	if !ok {
-		t.Fatalf("/me response missing createdAt field: %s", rr.Body)
+	if body["isOwner"] != true {
+		t.Fatalf("/me isOwner = %v, want true", body["isOwner"])
 	}
-	// createdAt is a JSON number; json.Unmarshal decodes it as float64
-	ts, _ := v.(float64)
-	if ts <= 0 {
-		t.Fatalf("/me createdAt = %v, want non-zero unix timestamp", v)
+	if body["id"] == "" || body["username"] == "" {
+		t.Fatalf("/me missing identity: %s", rr.Body)
+	}
+	caps, ok := body["capabilities"].([]any)
+	if !ok || len(caps) == 0 {
+		t.Fatalf("/me capabilities = %v, want non-empty", body["capabilities"])
 	}
 }
 

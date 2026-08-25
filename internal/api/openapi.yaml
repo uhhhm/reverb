@@ -5,8 +5,8 @@ info:
   description: >
     Reverb is a self-hosted music app unifying a Subsonic/Navidrome library,
     Spotify search, and spotDL one-click download. All paths are served under
-    /api/v1. Session auth is a cookie issued by /setup/admin or /auth/login;
-    protected routes return 401 without it (unless auth is disabled via env).
+    /api/v1. Reverb is single-user with no login: every route is implicitly
+    authenticated as the single local user.
 servers:
   - url: /api/v1
 paths:
@@ -29,52 +29,10 @@ paths:
     get:
       summary: This OpenAPI document
       responses: { "200": { description: yaml } }
-  /setup/status:
-    get:
-      summary: Whether first-run setup is required
-      responses: { "200": { description: "{ setupRequired: bool }" } }
-  /setup/admin:
-    post:
-      summary: Set the admin password during first-run setup
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: object, properties: { password: { type: string } }, required: [password] }
-      responses: { "200": { description: session issued }, "400": { description: password required }, "409": { description: already set up } }
-  /auth/login:
-    post:
-      summary: Log in with the admin password
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { type: object, properties: { password: { type: string } }, required: [password] }
-      responses: { "200": { description: session issued }, "401": { description: invalid } }
-  /auth/logout:
-    post:
-      summary: Invalidate the current session
-      responses: { "200": { description: ok } }
   /me:
     get:
-      summary: Current session check
-      responses: { "200": { description: authenticated }, "401": { description: unauthorized } }
-  /account/profile:
-    patch:
-      summary: Change the current user's username
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties: { username: { type: string } }
-              required: [username]
-      responses: { "200": { description: updated }, "400": { description: invalid username }, "409": { description: username taken } }
-  /account/password:
-    post:
-      summary: Change the current user's password
-      responses: { "200": { description: updated }, "400": { description: invalid current or new password } }
+      summary: The single local user's identity and capabilities
+      responses: { "200": { description: ok } }
   /adapters/available:
     get:
       summary: Registered adapter types with config schemas and capabilities

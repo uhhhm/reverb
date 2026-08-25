@@ -96,16 +96,3 @@ func TestCollectionCountErrorFallsBackToResolvedCount(t *testing.T) {
 		t.Fatalf("artistCount = %d, want fallback to resolvedCount %d", body.ArtistCount, body.ResolvedCount)
 	}
 }
-
-func TestCollectionUnauthenticatedReturns401(t *testing.T) {
-	cov := &fakeCoverage{}
-	srv, _ := coverageTestServer(t, cov, nil)
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/collection", nil)
-	srv.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
-}

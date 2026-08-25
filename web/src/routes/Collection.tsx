@@ -8,7 +8,6 @@ import { useLibraryRevision } from '../lib/libraryRevisionStore'
 import { postDownload } from '../lib/downloadApi'
 import { useDownloads } from '../lib/downloadStore'
 import { coverUrl } from '../lib/libraryApi'
-import { useAuthStore } from '../lib/authStore'
 
 export default function Collection() {
   useDocumentTitle('Collection')
@@ -17,7 +16,6 @@ export default function Collection() {
   const queryClient = useQueryClient()
   const revision = useLibraryRevision((state) => state.revision)
   const jobs = useDownloads((s) => s.jobs)
-  const canAutoApprove = useAuthStore((s) => s.can('auto_approve'))
 
   useEffect(() => {
     void queryClient.invalidateQueries({ queryKey: ['collection'] })
@@ -123,18 +121,16 @@ export default function Collection() {
                     coverSrc={album.coverUrl}
                     onClick={() => navigate(`/album/${album.source}/${album.externalId}`)}
                     onDownload={
-                      canAutoApprove
-                        ? () =>
-                            void postDownload({
-                              source: album.source,
-                              externalId: album.externalId,
-                              artist: artist.name,
-                              title: album.name,
-                              album: album.name,
-                            })
-                              .then((next) => useDownloads.getState().upsert(next))
-                              .catch(() => {})
-                        : undefined
+                      () =>
+                        void postDownload({
+                          source: album.source,
+                          externalId: album.externalId,
+                          artist: artist.name,
+                          title: album.name,
+                          album: album.name,
+                        })
+                          .then((next) => useDownloads.getState().upsert(next))
+                          .catch(() => {})
                     }
                     downloadProgress={
                       job

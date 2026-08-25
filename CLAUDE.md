@@ -47,7 +47,24 @@ implementation commits; keep suites green.
 ## Architecture
 
 ### Adapter/seam pattern (the core design)
+## Project rules
 
+**Write the current truth, not its history.** Do not layer a correction on top of
+a claim you are correcting — delete the claim and state what is true now.
+
+Likewise for decisions: a section headed "the open decision" followed by
+"resolved" followed by "superseded" is archaeology. Record what is being done and
+why. Delete the rest.
+
+Do not pad documentation and docstrings with filler sections, redundant summaries, or boilerplate.
+
+**Responding:** Keep responses focused, brief, and concise. Keep disclaimers and caveats short, and spend most of the response on the main answer. 
+
+## Developing
+
+- When asked to commit, commit on main branch. Do not create seperate branches.
+- Do not user claude browser to preview/test - the user does this themselves.
+- Use ripgrep instead of grep - its much faster.
 Reverb has three pluggable seams, each with the same shape:
 
 - **`library`** (Subsonic/Navidrome) — `internal/library/library.go` defines the
@@ -131,3 +148,22 @@ unconvert. Deferred-`Close()` errcheck ignores are pre-configured for common
 `io.Closer` types. staticcheck runs "all" minus a few disabled stylistic
 checks (QF1001, QF1003, ST1000, ST1003 — the last because existing naming uses
 initialisms like `CoverUrl` pervasively, not `CoverURL`).
+
+## Project rules (important)
+
+**Write the current truth, not its history.** Do not layer a correction on top of
+a claim you are correcting — delete the claim and state what is true now.
+
+Likewise for decisions: a section headed "the open decision" followed by
+"resolved" followed by "superseded" is archaeology. Record what is being done and
+why. Delete the rest.
+
+Do not pad documentation and docstrings with filler sections, redundant summaries, or boilerplate. Keep it concise, short and straight to the point!!! (please)
+
+**Responding:** Keep responses focused, brief, and concise. Keep disclaimers and caveats short, and spend most of the response on the main answer. 
+
+## Developing
+
+- When asked to commit, commit on main branch. Do not create seperate branches.
+- Do not user claude browser to preview/test - the user does this themselves.
+- Use ripgrep instead of grep - its much faster.

@@ -28,8 +28,6 @@ interface AuthStore {
   refresh(): Promise<void>
   /** True iff the current user has the given capability. */
   can(cap: string): boolean
-  /** POST /auth/logout then clear me. */
-  logout(): Promise<void>
 }
 
 export const useAuthStore = create<AuthStore>((set, get) => ({
@@ -56,14 +54,6 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   },
 
   can: (cap: string) => get().me?.capabilities.includes(cap) ?? false,
-
-  logout: async () => {
-    try {
-      await api.post('/auth/logout')
-    } finally {
-      set({ me: null })
-    }
-  },
 }))
 
 /**

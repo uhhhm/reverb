@@ -5,9 +5,6 @@ import { useDownloads } from './downloadStore'
 import { useLibraryRevision } from './libraryRevisionStore'
 import { getDownloads, getQueueState } from './downloadApi'
 import { usePlayer } from './playerStore'
-import { getMyRequests, getAllRequests, useRequestStore, type RequestEventPayload } from './requestApi'
-import { getNotifications, useNotificationStore, type Notification } from './notificationApi'
-import { useAuthStore } from './authStore'
 import { useToastStore } from './toastStore'
 import { usePendingPlay } from './pendingPlayStore'
 import type { DownloadEvent, DownloadRemovedEvent, LibraryUpdatedEvent, QueueStateEvent, RealtimeEvent, Track } from './types'
@@ -110,27 +107,6 @@ export function useRealtime(makeSocket?: (url: string) => WebSocketLike): void {
           useDownloads.getState().remove((frame.payload as DownloadRemovedEvent).jobIds)
           break
         }
-        case 'request.created': {
-          useRequestStore.getState().applyRequestEvent(frame.payload as RequestEventPayload)
-          break
-        }
-        case 'notification': {
-          useNotificationStore.getState().add((frame.payload as { notification: Notification }).notification)
-          break
-        }
-        case 'request.updated': {
-          const payload = frame.payload as RequestEventPayload
-          useRequestStore.getState().applyRequestEvent(payload)
-          const { status, title } = payload.request
-          if (status === 'fulfilled') {
-            useToastStore.getState().push(`Your request for "${title}" was added`, 'success')
-          } else if (status === 'denied') {
-            useToastStore.getState().push(`Your request for "${title}" was denied`, 'error')
-          } else if (status === 'failed') {
-            useToastStore.getState().push(`Your request for "${title}" failed`, 'error')
-          }
-          break
-        }
         default:
           break
       }
@@ -142,24 +118,6 @@ export function useRealtime(makeSocket?: (url: string) => WebSocketLike): void {
       // Resync the paused flag (another client may have paused while we were away).
       void getQueueState()
         .then((q) => useDownloads.getState().setPaused(q.paused))
-        .catch(() => {})
-      // Hydrate the request store for the capabilities the user has, so the
-      // pending-count nav badge and track "Requested" affordance are correct on
-      // load — not only after visiting /requests.
-      const auth = useAuthStore.getState()
-      if (auth.can('request')) {
-        void getMyRequests()
-          .then((r) => useRequestStore.getState().setMine(r))
-          .catch(() => {})
-      }
-      if (auth.can('manage_requests')) {
-        void getAllRequests('pending')
-          .then((r) => useRequestStore.getState().setQueue(r))
-          .catch(() => {})
-      }
-      // Hydrate notifications for all authed users — no cap gate.
-      void getNotifications()
-        .then((r) => useNotificationStore.getState().setAll(r.notifications, r.unread))
         .catch(() => {})
     }
 

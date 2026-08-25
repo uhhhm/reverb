@@ -149,21 +149,13 @@ func stubLibTestServer(t *testing.T, lib library.LibraryAdapter) (*Server, *http
 	if err := authSvc.EnsureSeed(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	uid, err := authSvc.SetupOwner(context.Background(), "owner", "pw123456")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tok, err := authSvc.CreateSession(context.Background(), uid)
-	if err != nil {
-		t.Fatal(err)
-	}
 	srv := NewServer(Deps{
 		Auth:       authSvc,
 		Library:    lib,
 		Search:     registry.NewRegistry("search"),
 		Downloader: registry.NewRegistry("downloader"),
 	})
-	return srv, &http.Cookie{Name: sessionCookie, Value: tok}
+	return srv, &http.Cookie{Name: sessionCookie, Value: ""}
 }
 
 func TestHandlerStream_ErrLibraryItemNotFound_Returns404(t *testing.T) {
@@ -239,14 +231,6 @@ func stubLibTestServerWithResolver(t *testing.T, lib library.LibraryAdapter, res
 	if err := authSvc.EnsureSeed(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	uid, err := authSvc.SetupOwner(context.Background(), "owner", "pw123456")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tok, err := authSvc.CreateSession(context.Background(), uid)
-	if err != nil {
-		t.Fatal(err)
-	}
 	srv := NewServer(Deps{
 		Auth:       authSvc,
 		Library:    lib,
@@ -254,7 +238,7 @@ func stubLibTestServerWithResolver(t *testing.T, lib library.LibraryAdapter, res
 		Downloader: registry.NewRegistry("downloader"),
 		Resolver:   res,
 	})
-	return srv, &http.Cookie{Name: sessionCookie, Value: tok}
+	return srv, &http.Cookie{Name: sessionCookie, Value: ""}
 }
 
 // TestHandleCover_BackendIdPassesThrough verifies that a non-canonical id (no

@@ -107,10 +107,11 @@ describe('TopBar', () => {
     expect(badge.textContent).toBe('2')
   })
 
-  it('avatar button opens a menu with Logout', () => {
+  it('avatar button opens a menu with Settings and Admin', () => {
     renderBar()
     fireEvent.click(screen.getByRole('button', { name: /account|user|avatar|menu/i }))
-    expect(screen.getByRole('menuitem', { name: /logout/i })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /^settings$/i })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: /^admin$/i })).toBeInTheDocument()
   })
 
   it('uses the signed-in user’s initial for the avatar', () => {
@@ -127,13 +128,6 @@ describe('TopBar', () => {
     expect(screen.getByRole('menuitem', { name: /^settings$/i })).toBeInTheDocument()
     // No separate "Account" entry
     expect(screen.queryByRole('menuitem', { name: /^account$/i })).not.toBeInTheDocument()
-  })
-
-  it('Admin menu item is hidden when the user lacks all manager capabilities', () => {
-    setMe(['auto_approve', 'request', 'can_create_playlists'])
-    renderBar()
-    fireEvent.click(screen.getByRole('button', { name: /account|user|avatar|menu/i }))
-    expect(screen.queryByRole('menuitem', { name: /admin/i })).not.toBeInTheDocument()
   })
 
   it('Admin menu item is shown when the user is an admin', () => {
@@ -155,23 +149,5 @@ describe('TopBar', () => {
     renderBar()
     fireEvent.click(screen.getByRole('button', { name: /account|user|avatar|menu/i }))
     expect(screen.getByRole('menuitem', { name: /admin/i })).toBeInTheDocument()
-  })
-
-  it('logout POSTs to /api/v1/auth/logout', async () => {
-    // jsdom does not allow spying on window.location.reload; stub it via defineProperty
-    Object.defineProperty(window, 'location', {
-      value: { ...window.location, reload: vi.fn() },
-      writable: true,
-    })
-    renderBar()
-    fireEvent.click(screen.getByRole('button', { name: /account|user|avatar|menu/i }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /logout/i }))
-    // allow promise to flush
-    await vi.waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith(
-        '/api/v1/auth/logout',
-        expect.objectContaining({ method: 'POST' }),
-      )
-    })
   })
 })

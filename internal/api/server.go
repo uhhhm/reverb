@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -15,10 +14,8 @@ import (
 	"github.com/maxjb-xyz/reverb/internal/core"
 	"github.com/maxjb-xyz/reverb/internal/events"
 	"github.com/maxjb-xyz/reverb/internal/library"
-	"github.com/maxjb-xyz/reverb/internal/notification"
 	"github.com/maxjb-xyz/reverb/internal/play"
 	"github.com/maxjb-xyz/reverb/internal/registry"
-	"github.com/maxjb-xyz/reverb/internal/request"
 	"github.com/maxjb-xyz/reverb/internal/resolver"
 	"github.com/maxjb-xyz/reverb/internal/scrobble"
 	"github.com/maxjb-xyz/reverb/internal/search"
@@ -125,10 +122,6 @@ type Deps struct {
 	// LibraryStatus reports (mode, state) for the bundled-library status endpoint.
 	// nil in tests/legacy — handler falls back based on whether a library adapter is present.
 	LibraryStatus func() (mode string, state string)
-	// Requests is the request service. Nil in tests/legacy that don't use the request system.
-	Requests *request.Service
-	// Notifications is the notification service. Nil in tests/legacy that don't use notifications.
-	Notifications *notification.Service
 	// Resolver maps catalog IDs to current backend addressing. It is a long-lived
 	// singleton constructed once in the composition root with a provider that reads
 	// the LIVE matcher, so it survives adapter hot-reloads (the matcher is rebuilt
@@ -152,10 +145,6 @@ type Server struct {
 	deps   Deps
 	router chi.Router
 
-	// authLimiter throttles the login/signup/setup endpoints per client IP to
-	// slow online password guessing.
-	authLimiter *rateLimiter
-
 	// live holds the currently active services. Handlers read them through the
 	// getters under the RLock; reload swaps them under the write lock so adapter
 	// mutations take effect without a restart.
@@ -174,9 +163,6 @@ type Server struct {
 
 func NewServer(deps Deps) *Server {
 	s := &Server{deps: deps, router: chi.NewRouter()}
-	// Auth endpoints: at most 10 attempts per IP per minute. Generous enough that
-	// a human never notices, tight enough that bcrypt-slowed guessing stays slow.
-	s.authLimiter = newRateLimiter(10, time.Minute, nil)
 	s.live.library = deps.Library
 	s.live.search = deps.SearchAggregator
 	s.live.coverage = deps.Coverage
@@ -240,33 +226,20 @@ func (s *Server) routes() {
 	s.router.Use(s.securityHeaders)
 
 	s.router.Route("/api/v1", func(r chi.Router) {
-		// Reject cross-origin state-changing requests (defense-in-depth over the
-		// cookie's SameSite=Lax). Applies to every /api/v1 mutation, public or not.
+		// Reject cross-origin state-changing requests. Reverb has no login, so
+		// this Origin check is the only CSRF defense — it guards every mutation,
+		// public or not.
 		r.Use(s.csrfGuard)
 
 		// public
 		r.Get("/health", s.handleHealth)
-		r.Get("/setup/status", s.handleSetupStatus)
-		r.Post("/auth/logout", s.handleLogout)
-		r.Get("/auth/registration-status", s.handleRegistrationStatus)
 		r.Get("/openapi.yaml", s.handleOpenAPI)
 		r.Get("/version", s.handleVersion)
 
-		// public auth endpoints, rate-limited per IP to slow password guessing.
-		r.Group(func(ar chi.Router) {
-			ar.Use(s.rateLimitAuth)
-			ar.Post("/setup/admin", s.handleSetupAdmin)
-			ar.Post("/auth/login", s.handleLogin)
-			ar.Post("/auth/signup", s.handleSignup)
-		})
-
-		// protected
+		// Everything else is implicitly authenticated: Reverb is single-user
+		// (no login), so requireAuth injects the one local user on every request.
 		r.Group(func(pr chi.Router) {
 			pr.Use(s.requireAuth)
-			pr.Get("/account", s.handleAccount)
-			pr.Patch("/account/profile", s.handleChangeUsername)
-			pr.Post("/account/password", s.handleChangePassword)
-			pr.Post("/account/logout-all", s.handleLogoutAll)
 			pr.Get("/me", s.handleMe)
 			pr.Get("/config/pending-restart", s.handlePendingRestart)
 			pr.Get("/library/status", s.handleLibraryStatus)
@@ -285,23 +258,15 @@ func (s *Server) routes() {
 			pr.Get("/artist/{source}/{id}/profile", s.handleArtistProfile)
 			pr.Get("/artist/{source}/{id}/coverage", s.handleArtistCoverage)
 			pr.Get("/album/{source}/{id}", s.handleAlbumDetail)
-			// playlist READS stay on plain auth (ownership is enforced in-handler).
 			pr.Get("/playlists", s.handleListSyncedPlaylists)
 			pr.Get("/playlists/external/{source}/{id}", s.handleExternalPlaylistPreview)
 			pr.Get("/playlists/{id}", s.handleSyncedPlaylistDetail)
 			pr.Get("/playlists/{id}/cover", s.handleServePlaylistCover)
-			// download queue READS stay on plain auth; the mutating controls
-			// (pause/resume/clear/cancel/retry) are gated below — the queue is a
-			// single global resource, so any authenticated user must not be able to
-			// pause it or cancel/clear another user's jobs.
 			pr.Get("/downloads/queue", s.handleQueueState)
 			pr.Get("/downloads", s.handleListDownloads)
 			pr.Get("/ws", s.handleWS)
-			pr.Get("/notifications", s.handleListNotifications)
-			pr.Post("/notifications/read", s.handleMarkNotificationsRead)
 			pr.Post("/plays", s.handlePlay)
 			pr.Delete("/plays/{id}", s.handleDeletePlay)
-			// scrobbling
 			pr.Post("/scrobble/lastfm/auth-url", s.handleScrobbleAuthURL)
 			pr.Post("/scrobble/lastfm/complete", s.handleScrobbleComplete)
 			pr.Delete("/scrobble/lastfm", s.handleScrobbleUnlink)
@@ -333,8 +298,7 @@ func (s *Server) routes() {
 			})
 
 			// download tracks + manage the queue: enqueue create/batch, plus the
-			// global queue controls. All require auto-approve (the capability that
-			// grants one-click, un-gated downloading).
+			// global queue controls.
 			pr.Group(func(dr chi.Router) {
 				dr.Use(s.requireCapability(auth.CapAutoApprove))
 				dr.Post("/downloads/batch", s.handleBatchDownload)
@@ -362,49 +326,6 @@ func (s *Server) routes() {
 				cr.Delete("/playlists/{id}/tracks", s.handleRemoveSyncedTrack)
 				cr.Post("/playlists/{id}/cover", s.handleUploadPlaylistCover)
 				cr.Put("/playlists/{id}/tracks/order", s.handleReorderSyncedTracks)
-			})
-
-			// request music: create/list own/cancel/batch.
-			pr.Group(func(rr chi.Router) {
-				rr.Use(s.requireCapability(auth.CapRequest))
-				rr.Post("/requests", s.handleCreateRequest)
-				rr.Post("/requests/batch", s.handleBatchCreateRequests)
-				rr.Get("/requests/mine", s.handleListMyRequests)
-				rr.Post("/requests/{id}/cancel", s.handleCancelRequest)
-			})
-
-			// manage requests: list all + approve/deny.
-			pr.Group(func(mr chi.Router) {
-				mr.Use(s.requireCapability(auth.CapManageRequests))
-				mr.Get("/requests", s.handleListRequests)
-				mr.Post("/requests/{id}/approve", s.handleApproveRequest)
-				mr.Post("/requests/{id}/deny", s.handleDenyRequest)
-			})
-
-			// admin-only: user management
-			pr.Group(func(ar chi.Router) {
-				ar.Use(s.requireCapability(auth.CapManageUsers))
-				ar.Get("/users", s.handleListUsers)
-				ar.Post("/users", s.handleCreateUser)
-				ar.Patch("/users/{id}", s.handleUpdateUser)
-				ar.Delete("/users/{id}", s.handleDeleteUser)
-				ar.Post("/users/{id}/password", s.handleAdminResetPassword)
-			})
-
-			// admin-only: role management + capability registry
-			pr.Group(func(ar chi.Router) {
-				ar.Use(s.requireAdmin)
-				ar.Get("/roles", s.handleListRoles)
-				ar.Post("/roles", s.handleCreateRole)
-				ar.Patch("/roles/{id}", s.handleUpdateRole)
-				ar.Delete("/roles/{id}", s.handleDeleteRole)
-				ar.Get("/capabilities", s.handleCapabilities)
-				// registration policy + invites
-				ar.Get("/settings/registration", s.handleGetRegistration)
-				ar.Patch("/settings/registration", s.handlePatchRegistration)
-				ar.Get("/invites", s.handleListInvites)
-				ar.Post("/invites", s.handleCreateInvite)
-				ar.Delete("/invites/{id}", s.handleDeleteInvite)
 			})
 		})
 	})

@@ -23,18 +23,15 @@ import (
 	"github.com/maxjb-xyz/reverb/internal/library/embedded"
 	"github.com/maxjb-xyz/reverb/internal/library/lyrics"
 	"github.com/maxjb-xyz/reverb/internal/library/subsonic"
-	"github.com/maxjb-xyz/reverb/internal/notification"
 	"github.com/maxjb-xyz/reverb/internal/play"
 	"github.com/maxjb-xyz/reverb/internal/playlistsync"
 	"github.com/maxjb-xyz/reverb/internal/registry"
-	"github.com/maxjb-xyz/reverb/internal/request"
 	"github.com/maxjb-xyz/reverb/internal/resolver"
 	"github.com/maxjb-xyz/reverb/internal/scrobble"
 	"github.com/maxjb-xyz/reverb/internal/scrobble/lastfm"
 	"github.com/maxjb-xyz/reverb/internal/search/deezer"
 	"github.com/maxjb-xyz/reverb/internal/search/spotify"
 	"github.com/maxjb-xyz/reverb/internal/store"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
 	"github.com/maxjb-xyz/reverb/internal/wiring"
 )
 
@@ -61,20 +58,10 @@ func main() {
 	}
 
 	authSvc := auth.NewService(st.Q(), time.Now)
-	// Bootstrap an owner from REVERB_ADMIN_PASSWORD when no users exist yet: stash
-	// the hash in the legacy admin_password_hash setting so EnsureSeed below migrates
-	// it into the "admin" owner account (single, idempotent code path).
-	if cfg.AdminPassword != "" {
-		if req, _ := authSvc.IsSetupRequired(context.Background()); req {
-			if h, err := auth.HashPassword(cfg.AdminPassword); err == nil {
-				_ = st.Q().UpsertSetting(context.Background(), db.UpsertSettingParams{Key: "admin_password_hash", Value: h})
-			}
-		}
-	}
-	// Seed system roles + registration-policy defaults, and migrate a legacy
-	// single-admin install into an owner account. Idempotent; fail loudly on error.
+	// Ensure the single local user row exists (the FK target for
+	// download_jobs.initiated_by / synced_playlists.owner_user_id). Idempotent.
 	if err := authSvc.EnsureSeed(context.Background()); err != nil {
-		log.Fatalf("seed identity defaults: %v", err)
+		log.Fatalf("seed identity: %v", err)
 	}
 
 	// spotDL is bundled with the image, so present it as a configured downloader
@@ -100,20 +87,6 @@ func main() {
 
 	// EventBus backs both the WS endpoint and the Manager's typed events.
 	bus := events.New()
-
-	// Request system: service + tracker. The tracker subscribes to the stable bus
-	// (survives download-manager reloads). Start before any API traffic.
-	reqSvc := request.NewService(st.Q(), bus, time.Now)
-	tracker := request.NewTracker(reqSvc, bus)
-	tracker.Start(ctx)
-	defer tracker.Stop()
-
-	// Notification system: service + notifier. The notifier listens on the same bus
-	// for request lifecycle events and fans out in-app notifications.
-	notifSvc := notification.NewService(st.Q(), time.Now)
-	notifier := notification.NewNotifier(bus, notifSvc, &authManagerLister{svc: authSvc})
-	notifier.Start(ctx)
-	defer notifier.Stop()
 
 	dirty := &atomicDirty{}
 
@@ -223,8 +196,6 @@ func main() {
 		Dev:           cfg.Dev,
 		Version:       version,
 		DataDir:       filepath.Dir(cfg.DBPath),
-		Requests:      reqSvc,
-		Notifications: notifSvc,
 		Resolver:      resolverSvc,
 		Play:          playSvc,
 		Stats:         statsSvc,
@@ -289,37 +260,4 @@ func main() {
 	}); err != nil {
 		log.Fatal(err)
 	}
-}
-
-// authManagerLister adapts auth.Service to notification.AuthLister.
-// It enumerates users whose role carries the manage_requests capability.
-type authManagerLister struct {
-	svc *auth.Service
-}
-
-func (a *authManagerLister) ListManagerIDs(ctx context.Context) ([]string, error) {
-	roles, err := a.svc.ListRoles(ctx)
-	if err != nil {
-		return nil, err
-	}
-	managerRoles := make(map[string]bool)
-	for _, r := range roles {
-		for _, cap := range r.Capabilities {
-			if cap == auth.CapManageRequests {
-				managerRoles[r.ID] = true
-				break
-			}
-		}
-	}
-	users, err := a.svc.ListUsers(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var ids []string
-	for _, u := range users {
-		if !u.Disabled && managerRoles[u.RoleID] {
-			ids = append(ids, u.ID)
-		}
-	}
-	return ids, nil
 }

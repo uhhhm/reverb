@@ -31,15 +31,8 @@ func playsTestServer(t *testing.T) (*Server, *http.Cookie, string, *store.Store)
 
 	authSvc, tok := seededAuthToken(t, st)
 
-	// Fetch the owner's user ID from the seeded store.
-	users, err := authSvc.ListUsers(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(users) == 0 {
-		t.Fatal("expected at least one user (owner)")
-	}
-	ownerID := users[0].ID
+	// The single local user owns every play.
+	ownerID := auth.OwnerID
 
 	// Build a real play.Service backed by the same DB.
 	var counter int
@@ -162,23 +155,6 @@ func TestHandlePlay_IgnoresBodyUserID(t *testing.T) {
 	}
 }
 
-// newAuthedUser creates a second, distinct user in the shared store and returns
-// a session cookie for them. Used to exercise cross-user privacy boundaries.
-func newAuthedUser(t *testing.T, srv *Server, st *store.Store, username, password string) *http.Cookie {
-	t.Helper()
-	ctx := context.Background()
-	authSvc := auth.NewService(st.Q(), time.Now)
-	uid, err := authSvc.CreateUser(ctx, username, password, "role-requester")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tok, err := authSvc.CreateSession(ctx, uid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &http.Cookie{Name: sessionCookie, Value: tok}
-}
-
 // recordAndGetPlayID records a play for the owner via POST /plays, then reads
 // its id back via ListRecentPlays. Returns the play id.
 func recordAndGetPlayID(t *testing.T, srv *Server, cookie *http.Cookie, st *store.Store, ownerID string) string {
@@ -240,39 +216,6 @@ func TestHandleDeletePlay_OwnerDeletes(t *testing.T) {
 	}
 }
 
-// TestHandleDeletePlay_CrossUserNoOp is the load-bearing privacy assertion at the
-// HTTP layer: a DIFFERENT authed user calling DELETE /plays/{ownerPlayId} gets
-// 204 (idempotent, no existence leak) BUT the owner's play STILL EXISTS — the
-// cross-user delete was a no-op.
-func TestHandleDeletePlay_CrossUserNoOp(t *testing.T) {
-	srv, ownerCookie, ownerID, st := playsTestServer(t)
-	playID := recordAndGetPlayID(t, srv, ownerCookie, st, ownerID)
-
-	// Create a second, different authenticated user and log them in.
-	attackerCookie := newAuthedUser(t, srv, st, "attacker", "attacker-pass-12345")
-
-	rec := do(t, srv, attackerCookie, http.MethodDelete, "/api/v1/plays/"+playID, "")
-	// Idempotent / no existence leak: the attacker gets 204, not 403/404.
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("DELETE /plays/%s as attacker = %d, want 204; body: %s", playID, rec.Code, rec.Body.String())
-	}
-
-	// The owner's play MUST still exist — the cross-user delete was a no-op.
-	if n := countPlays(t, st, ownerID); n != 1 {
-		t.Fatalf("cross-user delete leaked: expected owner to still have 1 play, got %d", n)
-	}
-}
-
-// TestHandleDeletePlay_UnauthenticatedReturns401 verifies that the route is
-// guarded by requireAuth and returns 401 for unauthenticated requests.
-func TestHandleDeletePlay_UnauthenticatedReturns401(t *testing.T) {
-	srv, _, _, _ := playsTestServer(t)
-	rec := do(t, srv, &http.Cookie{Name: sessionCookie, Value: ""}, http.MethodDelete, "/api/v1/plays/some-id", "")
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("DELETE /plays/{id} unauthenticated = %d, want 401", rec.Code)
-	}
-}
-
 // TestHandleDeletePlay_NilServiceReturns503 verifies that when s.deps.Play is nil
 // the handler returns 503 Service Unavailable.
 func TestHandleDeletePlay_NilServiceReturns503(t *testing.T) {
@@ -295,18 +238,6 @@ func TestHandleDeletePlay_NilServiceReturns503(t *testing.T) {
 	rec := do(t, srv, cookie, http.MethodDelete, "/api/v1/plays/some-id", "")
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("DELETE /plays/{id} with nil Play = %d, want 503", rec.Code)
-	}
-}
-
-// TestHandlePlay_UnauthenticatedReturns401 verifies that the route is guarded by
-// requireAuth and returns 401 for unauthenticated requests.
-func TestHandlePlay_UnauthenticatedReturns401(t *testing.T) {
-	srv, _, _, _ := playsTestServer(t)
-
-	body := `{"Title":"Hurt","Artist":"Johnny Cash","DurationMs":218000,"MsPlayed":218000}`
-	rec := do(t, srv, &http.Cookie{Name: sessionCookie, Value: ""}, http.MethodPost, "/api/v1/plays", body)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("POST /plays unauthenticated = %d, want 401", rec.Code)
 	}
 }
 

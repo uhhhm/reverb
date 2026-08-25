@@ -20,7 +20,10 @@ import (
 //go:embed migrations/*.sql
 var migrationFS embed.FS
 
-var migrateMu sync.Mutex
+var (
+	migrateMu      sync.Mutex
+	registerGoOnce sync.Once
+)
 
 type Store struct {
 	sql  *sql.DB
@@ -48,6 +51,15 @@ func (s *Store) Migrate() error {
 	if err := goose.SetDialect("sqlite"); err != nil {
 		return err
 	}
+	// 0024 is a Go migration: it branches on the live schema (slim vs legacy
+	// multi-user), which pure SQL cannot express. It lives in package store and
+	// is registered here with its version-bearing source name; the embedded
+	// migration FS holds only .sql files, so goose picks it up from the
+	// registry. Registered once — goose panics on a duplicate version, and
+	// tests call Migrate() repeatedly.
+	registerGoOnce.Do(func() {
+		goose.AddNamedMigrationContext("0024_single_user.go", upSingleUser, nil)
+	})
 	s.backupBeforePendingMigrations()
 	return goose.Up(s.sql, "migrations")
 }

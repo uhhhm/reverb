@@ -3,11 +3,8 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { DownloadAction } from './DownloadAction'
 import { useDownloads } from '../../lib/downloadStore'
 import { useAuthStore } from '../../lib/authStore'
-import { useRequestStore } from '../../lib/requestApi'
 import { useToastStore } from '../../lib/toastStore'
-import { ApiError } from '../../lib/api'
 import type { ExternalResult, DownloadJob } from '../../lib/types'
-import type { Request } from '../../lib/requestApi'
 
 function setCaps(capabilities: string[]) {
   useAuthStore.setState({
@@ -56,28 +53,6 @@ const retryDownloadMock = vi.fn(
       finishedAt: 0,
     } as DownloadJob),
 )
-
-const postRequestMock = vi.fn(
-  (_item?: unknown): Promise<Request> =>
-    Promise.resolve({
-      id: 'req-1',
-      requestedBy: 'u',
-      source: 'spotify',
-      externalId: 'sp1',
-      title: 'Song',
-      artist: 'Artist',
-      status: 'pending',
-      createdAt: 1700000000,
-    } as Request),
-)
-
-vi.mock('../../lib/requestApi', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('../../lib/requestApi')>()
-  return {
-    ...mod,
-    postRequest: (...args: Parameters<typeof postRequestMock>) => postRequestMock(...args),
-  }
-})
 
 vi.mock('../../lib/downloadApi', () => ({
   postDownload: (req: unknown) => postDownloadMock(req),
@@ -145,7 +120,6 @@ describe('DownloadAction', () => {
 
   beforeEach(() => {
     useDownloads.setState({ jobs: {} })
-    useRequestStore.setState({ byId: {} })
     useToastStore.setState({ toasts: [] })
     vi.clearAllMocks()
     // default: user can download, 1 enabled downloader
@@ -155,29 +129,7 @@ describe('DownloadAction', () => {
     }))
   })
 
-  // ── capability gating ────────────────────────────────────────────────────────
-  it('without auto_approve → does NOT render the Download button for a not-in-library result', () => {
-    setCaps([]) // user lacks auto_approve
-    render(<DownloadAction result={makeResult()} onPlay={onPlay} />)
-
-    expect(screen.queryByRole('button', { name: /download/i })).not.toBeInTheDocument()
-    expect(screen.queryByText(/no downloader/i)).not.toBeInTheDocument()
-  })
-
-  it('without auto_approve → still renders the in-library Play affordance', () => {
-    setCaps([]) // user lacks auto_approve
-    const result = makeResult({
-      match: { status: 'in_library', libraryTrackId: 'lib-t3', method: 'isrc', confidence: 1 },
-    })
-    render(<DownloadAction result={result} onPlay={onPlay} />)
-
-    expect(screen.getByText('In Library')).toBeInTheDocument()
-    const btn = screen.getByRole('button', { name: /play/i })
-    fireEvent.click(btn)
-    expect(onPlay).toHaveBeenCalledWith('lib-t3')
-  })
-
-  it('with auto_approve → renders the Download button for a not-in-library result', () => {
+  it('renders the Download button for a not-in-library result', () => {
     setCaps(['auto_approve'])
     render(<DownloadAction result={makeResult()} onPlay={onPlay} />)
     expect(screen.getByRole('button', { name: /download song/i })).toBeInTheDocument()
@@ -501,87 +453,6 @@ describe('DownloadAction', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  // ── Task 8: Request affordance ────────────────────────────────────────────
-
-  it('request cap only: not-in-library → renders "Request" button, not the download control', () => {
-    setCaps(['request']) // no auto_approve
-    render(<DownloadAction result={makeResult()} onPlay={onPlay} />)
-
-    expect(screen.getByRole('button', { name: /^request$/i })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /download/i })).not.toBeInTheDocument()
-  })
-
-  it('request cap only: clicking Request calls postRequest and transitions to "Requested"', async () => {
-    setCaps(['request'])
-    render(<DownloadAction result={makeResult()} onPlay={onPlay} />)
-
-    const btn = screen.getByRole('button', { name: /^request$/i })
-    fireEvent.click(btn)
-
-    await waitFor(() => expect(postRequestMock).toHaveBeenCalledTimes(1))
-    expect(postRequestMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        source: 'spotify',
-        externalId: 'sp1',
-        title: 'Song',
-        artist: 'Artist',
-        album: 'Album',
-      }),
-    )
-    // After the request resolves the store has the request → "Requested" shows
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /requested/i })).toBeInTheDocument(),
-    )
-    expect(screen.queryByRole('button', { name: /^request$/i })).not.toBeInTheDocument()
-  })
-
-  it('request cap only + pending request in store → shows "Requested" (no Request button)', () => {
-    setCaps(['request'])
-    const req: Request = {
-      id: 'req-1',
-      requestedBy: 'u',
-      source: 'spotify',
-      externalId: 'sp1',
-      title: 'Song',
-      artist: 'Artist',
-      status: 'pending',
-      createdAt: 1700000000,
-    }
-    useRequestStore.getState().upsert(req)
-    render(<DownloadAction result={makeResult()} onPlay={onPlay} />)
-
-    expect(screen.getByRole('button', { name: /requested/i })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^request$/i })).not.toBeInTheDocument()
-  })
-
-  it('auto_approve cap → renders Download button (unchanged)', () => {
-    setCaps(['auto_approve'])
-    render(<DownloadAction result={makeResult()} onPlay={onPlay} />)
-
-    expect(screen.getByRole('button', { name: /download song/i })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^request$/i })).not.toBeInTheDocument()
-  })
-
-  it('neither cap → no add control, but in-library Play still renders', () => {
-    setCaps([])
-    const result = makeResult({
-      match: { status: 'in_library', libraryTrackId: 'lib-t3', method: 'isrc', confidence: 1 },
-    })
-    render(<DownloadAction result={result} onPlay={onPlay} />)
-
-    expect(screen.getByText('In Library')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^request$/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /download/i })).not.toBeInTheDocument()
-  })
-
-  it('neither cap, not-in-library → no add control at all (null)', () => {
-    setCaps([])
-    render(<DownloadAction result={makeResult()} onPlay={onPlay} />)
-
-    expect(screen.queryByRole('button', { name: /^request$/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /download/i })).not.toBeInTheDocument()
-  })
-
   // ── 20. lidarr as first-priority → Download enqueues directly (NO album disclosure)
   it('lidarr as highest-priority downloader → Download click enqueues directly without showing album disclosure', async () => {
     useAdaptersMock = vi.fn(() => ({
@@ -601,49 +472,4 @@ describe('DownloadAction', () => {
     expect(postDownloadMock).toHaveBeenCalledWith(expect.objectContaining({ downloader: 'lidarr' }))
   })
 
-  // ── Fix D: error toast on postRequest failure ─────────────────────────────
-  it('request cap only: rejected postRequest pushes an error toast', async () => {
-    setCaps(['request'])
-    postRequestMock.mockRejectedValueOnce(new Error('network error'))
-    render(<DownloadAction result={makeResult()} onPlay={onPlay} />)
-
-    fireEvent.click(screen.getByRole('button', { name: /^request$/i }))
-
-    await waitFor(() => expect(postRequestMock).toHaveBeenCalledTimes(1))
-    await waitFor(() => {
-      const { toasts } = useToastStore.getState()
-      expect(toasts.some((t) => t.kind === 'error' && t.message === "Couldn't file your request")).toBe(true)
-    })
-  })
-
-  // ── Task 2: 429 quota error handling ─────────────────────────────────────
-
-  it('request cap only: 429 ApiError shows the server error message (NOT the generic toast)', async () => {
-    setCaps(['request'])
-    const err = new ApiError('POST', '/requests', 429, { error: 'Quota exceeded', limit: 3 })
-    postRequestMock.mockRejectedValueOnce(err)
-    render(<DownloadAction result={makeResult()} onPlay={onPlay} />)
-
-    fireEvent.click(screen.getByRole('button', { name: /^request$/i }))
-
-    await waitFor(() => {
-      const { toasts } = useToastStore.getState()
-      expect(toasts.some((t) => t.kind === 'error' && t.message === 'Quota exceeded')).toBe(true)
-      expect(toasts.some((t) => t.message === "Couldn't file your request")).toBe(false)
-    })
-  })
-
-  it('request cap only: non-429 error shows the generic toast (not the server body)', async () => {
-    setCaps(['request'])
-    const err = new ApiError('POST', '/requests', 500, { error: 'Internal Server Error' })
-    postRequestMock.mockRejectedValueOnce(err)
-    render(<DownloadAction result={makeResult()} onPlay={onPlay} />)
-
-    fireEvent.click(screen.getByRole('button', { name: /^request$/i }))
-
-    await waitFor(() => {
-      const { toasts } = useToastStore.getState()
-      expect(toasts.some((t) => t.kind === 'error' && t.message === "Couldn't file your request")).toBe(true)
-    })
-  })
 })

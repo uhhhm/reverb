@@ -7,7 +7,6 @@ require (
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/google/uuid v1.6.0
 	github.com/pressly/goose/v3 v3.22.1
-	golang.org/x/crypto v0.31.0
 	golang.org/x/sync v0.8.0
 	modernc.org/sqlite v1.34.1
 )

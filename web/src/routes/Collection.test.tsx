@@ -230,7 +230,7 @@ describe('Collection page', () => {
     expect(skeletons.length).toBeGreaterThan(0)
   })
 
-  it('shows a download button on ghost cards when the user can auto_approve', async () => {
+  it('shows a download button on ghost cards', async () => {
     setAuth(['auto_approve'])
     const { useCollection } = await import('../lib/collectionApi')
     const artist = makeArtist({
@@ -249,26 +249,5 @@ describe('Collection page', () => {
     render(wrap(<Collection />))
 
     expect(screen.getByLabelText('Download Missing Album 1')).toBeInTheDocument()
-  })
-
-  it('hides the download button on ghost cards when the user cannot auto_approve', async () => {
-    setAuth([])
-    const { useCollection } = await import('../lib/collectionApi')
-    const artist = makeArtist({
-      name: 'Radiohead',
-      missingAlbums: [
-        makeDiscographyAlbum({ externalId: 'missing-1', name: 'Missing Album 1' }),
-      ],
-    })
-
-    vi.mocked(useCollection).mockReturnValue({
-      data: { artists: [artist], resolvedCount: 1, artistCount: 1 },
-      isLoading: false,
-      error: null,
-    } as unknown as UseQueryResult<CollectionSummary, Error>)
-
-    render(wrap(<Collection />))
-
-    expect(screen.queryByLabelText(/^Download /)).toBeNull()
   })
 })

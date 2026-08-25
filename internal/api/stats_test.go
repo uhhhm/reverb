@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maxjb-xyz/reverb/internal/auth"
 	"github.com/maxjb-xyz/reverb/internal/catalog"
 	"github.com/maxjb-xyz/reverb/internal/play"
 	"github.com/maxjb-xyz/reverb/internal/registry"
@@ -30,14 +31,8 @@ func statsTestServer(t *testing.T) (*Server, *http.Cookie, string, *play.Service
 
 	authSvc, tok := seededAuthToken(t, st)
 
-	users, err := authSvc.ListUsers(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(users) == 0 {
-		t.Fatal("expected at least one user (owner)")
-	}
-	ownerID := users[0].ID
+	// The single local user owns every play.
+	ownerID := auth.OwnerID
 
 	var counter int
 	idgen := func() string {
@@ -132,69 +127,6 @@ func TestStatsSummaryWindowExcludes(t *testing.T) {
 		t.Errorf("Plays = %d, want 1 (only the late play in window)", resp.Plays)
 	}
 }
-
-// TestStatsSummaryPerUserIsolation verifies user-2's plays never appear in user-1's summary.
-func TestStatsSummaryPerUserIsolation(t *testing.T) {
-	st, err := store.Open(t.TempDir() + "/stats-iso.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
-	if err := st.Migrate(); err != nil {
-		t.Fatal(err)
-	}
-
-	authSvc, ownerTok := seededAuthToken(t, st)
-	users, err := authSvc.ListUsers(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	ownerID := users[0].ID
-
-	// Create a second user and get a session for them.
-	otherID, err := authSvc.CreateUser(context.Background(), "other", "pw123456", "role-requester")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var counter int
-	idgen := func() string { counter++; return fmt.Sprintf("%08d-0000-0000-0000-000000000000", counter) }
-	q := st.Q()
-	catalogSvc := catalog.NewService(q, time.Now, idgen)
-	playSvc := play.NewService(q, catalogSvc, time.Now, idgen)
-	statsSvc := play.NewStats(q)
-
-	srv := NewServer(Deps{
-		Auth:       authSvc,
-		Search:     registry.NewRegistry("search"),
-		Downloader: registry.NewRegistry("downloader"),
-		Play:       playSvc,
-		Stats:      statsSvc,
-	})
-
-	// Seed 1 play for owner, 3 for otherID.
-	seedPlay(t, playSvc, ownerID, "Owner Track", "Artist O", "Album O", 1_000_000, 200_000)
-	for i := 0; i < 3; i++ {
-		seedPlay(t, playSvc, otherID, "Other Track", "Artist X", "Album X", int64(2_000_000+i), 100_000)
-	}
-
-	ownerCookie := &http.Cookie{Name: sessionCookie, Value: ownerTok}
-	rec := doGET(t, srv, "/api/v1/stats/summary", ownerCookie.Value)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /stats/summary = %d: %s", rec.Code, rec.Body.String())
-	}
-	var resp struct {
-		Plays int `json:"Plays"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if resp.Plays != 1 {
-		t.Errorf("Plays = %d, want 1 (only owner's play, not other's 3)", resp.Plays)
-	}
-}
-
-// --- Top Tracks ---
 
 // TestStatsTopTracks verifies GET /stats/top/tracks returns top tracks ordered by play count.
 func TestStatsTopTracks(t *testing.T) {
@@ -621,15 +553,6 @@ func TestStatsPlayCountsSessionScoped(t *testing.T) {
 	}
 }
 
-// TestStatsPlayCountsRequiresAuth verifies the endpoint rejects unauthenticated requests.
-func TestStatsPlayCountsRequiresAuth(t *testing.T) {
-	srv, _, _, _ := statsTestServer(t)
-	rec := doPOST(t, srv, "/api/v1/stats/play-counts", "", `{"tracks":[]}`)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("POST /stats/play-counts unauthenticated = %d, want 401", rec.Code)
-	}
-}
-
 // TestStatsPlayCountsBadBody verifies a malformed body is rejected with 400.
 func TestStatsPlayCountsBadBody(t *testing.T) {
 	srv, cookie, _, _ := statsTestServer(t)
@@ -639,29 +562,7 @@ func TestStatsPlayCountsBadBody(t *testing.T) {
 	}
 }
 
-// --- Auth / nil-dep guards ---
-
-// TestStatsRequiresAuth verifies all stats endpoints reject unauthenticated requests.
-func TestStatsRequiresAuth(t *testing.T) {
-	srv, _, _, _ := statsTestServer(t)
-
-	paths := []string{
-		"/api/v1/stats/summary",
-		"/api/v1/stats/top/tracks",
-		"/api/v1/stats/top/artists",
-		"/api/v1/stats/top/albums",
-		"/api/v1/stats/timeline",
-		"/api/v1/stats/clock",
-		"/api/v1/stats/recent",
-		"/api/v1/stats/entity?kind=artist&id=X",
-	}
-	for _, p := range paths {
-		rec := doGET(t, srv, p, "")
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("GET %s unauthenticated = %d, want 401", p, rec.Code)
-		}
-	}
-}
+// --- nil-dep guards ---
 
 // TestStatsNilServiceReturns503 verifies that 503 is returned when Stats is nil.
 func TestStatsNilServiceReturns503(t *testing.T) {

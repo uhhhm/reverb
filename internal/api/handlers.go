@@ -2,30 +2,11 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/maxjb-xyz/reverb/internal/auth"
 	"github.com/maxjb-xyz/reverb/internal/registry"
 )
-
-// writePasswordPolicyError writes a 400 describing the password-policy violation
-// and reports whether err was in fact a policy error. Callers use the bool to
-// decide whether to fall through to their generic error mapping.
-func writePasswordPolicyError(w http.ResponseWriter, err error) bool {
-	switch {
-	case errors.Is(err, auth.ErrPasswordTooShort):
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": fmt.Sprintf("password must be at least %d characters", auth.MinPasswordLength),
-		})
-		return true
-	case errors.Is(err, auth.ErrPasswordTooLong):
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password is too long"})
-		return true
-	}
-	return false
-}
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -48,69 +29,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-type credsBody struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
 func decode(r *http.Request, v any) error {
 	return json.NewDecoder(r.Body).Decode(v)
-}
-
-func (s *Server) handleSetupStatus(w http.ResponseWriter, r *http.Request) {
-	req, _ := s.deps.Auth.IsSetupRequired(r.Context())
-	writeJSON(w, http.StatusOK, map[string]bool{"setupRequired": req})
-}
-
-func (s *Server) handleSetupAdmin(w http.ResponseWriter, r *http.Request) {
-	if req, _ := s.deps.Auth.IsSetupRequired(r.Context()); !req {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "setup already complete"})
-		return
-	}
-	var b credsBody
-	if err := decode(r, &b); err != nil || b.Username == "" || b.Password == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "username and password required"})
-		return
-	}
-	uid, err := s.deps.Auth.SetupOwner(r.Context(), b.Username, b.Password)
-	if err != nil {
-		if writePasswordPolicyError(w, err) {
-			return
-		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create owner"})
-		return
-	}
-	s.issueSession(w, r, uid)
-}
-
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	var b credsBody
-	if err := decode(r, &b); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
-		return
-	}
-	uid, err := s.deps.Auth.Login(r.Context(), b.Username, b.Password)
-	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
-		return
-	}
-	s.issueSession(w, r, uid)
-}
-
-func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, userID string) {
-	tok, err := s.deps.Auth.CreateSession(r.Context(), userID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "session error"})
-		return
-	}
-	s.setSessionCookie(w, r, tok)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "id": userID})
-}
-
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	_ = s.deps.Auth.Logout(r.Context(), s.tokenFromRequest(r))
-	s.setSessionCookie(w, r, "")
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {

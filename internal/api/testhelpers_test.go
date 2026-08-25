@@ -3,8 +3,6 @@ package api
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -75,9 +73,9 @@ func adapterTestServer(t *testing.T, opts adapterServerOpts) (*Server, *http.Coo
 	return srv, &http.Cookie{Name: sessionCookie, Value: tok}
 }
 
-// seededAuthToken seeds the system roles, creates the owner account, and returns
-// the auth service plus a valid session token. It is the canonical way for api
-// tests to obtain an authenticated session now that auth is user-based.
+// seededAuthToken seeds the single local user and returns the auth service plus a
+// (now meaningless) session token. Reverb is single-user with no login, so the
+// token value is ignored by requireAuth; kept for test-compat with doGET/do.
 func seededAuthToken(t *testing.T, st *store.Store) (*auth.Service, string) {
 	t.Helper()
 	authSvc := auth.NewService(st.Q(), time.Now)
@@ -85,19 +83,10 @@ func seededAuthToken(t *testing.T, st *store.Store) (*auth.Service, string) {
 	if err := authSvc.EnsureSeed(ctx); err != nil {
 		t.Fatal(err)
 	}
-	uid, err := authSvc.SetupOwner(ctx, "owner", "pw123456")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tok, err := authSvc.CreateSession(ctx, uid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return authSvc, tok
+	return authSvc, ""
 }
 
 // newTestServer builds a minimal Server backed by a fresh migrated+seeded store.
-// Setup is NOT performed (no owner yet) so first-run flows can be exercised.
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	st, err := store.Open(t.TempDir() + "/api.db")
@@ -119,50 +108,23 @@ func newTestServer(t *testing.T) *Server {
 	})
 }
 
-// mustSetupOwner completes first-run setup via POST /setup/admin with {username,password}
-// and returns the owner's user ID extracted from the response body.
-func mustSetupOwner(t *testing.T, srv *Server, username, password string) string {
-	t.Helper()
-	rec := httptest.NewRecorder()
-	body := fmt.Sprintf(`{"username":%q,"password":%q}`, username, password)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/setup/admin", bytes.NewBufferString(body))
-	srv.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("setup/admin = %d %s", rec.Code, rec.Body.String())
-	}
-	var resp struct {
-		ID string `json:"id"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil || resp.ID == "" {
-		t.Fatalf("setup/admin response missing id: %v / body=%s", err, rec.Body.String())
-	}
-	return resp.ID
-}
-
-// mustLogin POSTs /auth/login with {username,password} and returns the session cookie token.
-func mustLogin(t *testing.T, srv *Server, username, password string) string {
-	t.Helper()
-	rec := httptest.NewRecorder()
-	body := fmt.Sprintf(`{"username":%q,"password":%q}`, username, password)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(body))
-	srv.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("auth/login = %d %s", rec.Code, rec.Body.String())
-	}
-	for _, c := range rec.Result().Cookies() {
-		if c.Name == sessionCookie {
-			return c.Value
-		}
-	}
-	t.Fatal("no session cookie set by login")
-	return ""
-}
-
 // doGET issues a GET with the given session token (empty token → no auth cookie).
 func doGET(t *testing.T, srv *Server, path, token string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, path, nil)
+	if token != "" {
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	}
+	srv.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
+// doPOST issues a POST with an optional session token string (empty = no cookie).
+func doPOST(t *testing.T, srv *Server, path, token, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
 	if token != "" {
 		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
 	}

@@ -110,15 +110,6 @@ func TestEverywhereSSEAcceptsPlaylistType(t *testing.T) {
 	}
 }
 
-func TestEverywhereRequiresAuth(t *testing.T) {
-	srv, _ := searchTestServer(t, fakeAgg{})
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/search/everywhere?q=x", nil))
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401", rec.Code)
-	}
-}
-
 func TestEverywhereNilAggregatorReturns503(t *testing.T) {
 	srv, cookie := searchTestServer(t, nil)
 	rec := httptest.NewRecorder()

@@ -51,10 +51,11 @@ func isStateChanging(method string) bool {
 }
 
 // csrfGuard rejects state-changing requests whose Origin (or, absent that,
-// Referer) names a host other than the one the request targeted. It is
-// defense-in-depth on top of the session cookie's SameSite=Lax attribute: a
+// Referer) names a host other than the one the request targeted. Reverb is
+// single-user with no login, so there is no session cookie to gate on — this
+// Origin check is the only protection against drive-by cross-site requests. A
 // browser always attaches Origin to a cross-site POST/PUT/DELETE, so a forged
-// request is caught here even if a future browser relaxes SameSite semantics.
+// request is caught here.
 //
 // Requests that carry neither header (curl, native apps, server-to-server) are
 // allowed through: those clients cannot be driven by a malicious web page, which

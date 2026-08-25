@@ -1,14 +1,10 @@
 import { useState, useMemo, useCallback, useEffect } from 'react'
-import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useArtistDetail } from '../lib/coverageApi'
 import { useCoverageStream } from '../lib/coverageStore'
 import { postBatchDownload } from '../lib/downloadApi'
 import { useDownloads } from '../lib/downloadStore'
 import { coverUrl } from '../lib/libraryApi'
-import { postBatchRequest } from '../lib/requestApi'
-import { useAuthStore } from '../lib/authStore'
-import { useToastStore } from '../lib/toastStore'
 import { Cover, Skeleton, EmptyState, MediaCard } from '../components/ui'
 import { Chip } from '../components/ui/Chip'
 import { Button } from '../components/ui/Button'
@@ -30,11 +26,10 @@ interface AlbumCardProps {
   album: DiscographyAlbum
   cov: AlbumCoverage | undefined
   resolved: boolean
-  canAutoApprove: boolean
   onNavigate: () => void
 }
 
-function AlbumCard({ album, cov, resolved, canAutoApprove, onNavigate }: AlbumCardProps) {
+function AlbumCard({ album, cov, resolved, onNavigate }: AlbumCardProps) {
   const [optimistic, setOptimistic] = useState(false)
 
   // Build the set of externalIds for this album's missing tracks so we can
@@ -91,7 +86,7 @@ function AlbumCard({ album, cov, resolved, canAutoApprove, onNavigate }: AlbumCa
           : undefined
       }
       ghost={!album.libraryAlbumId}
-      onDownload={canAutoApprove && hasMissing && !downloadState.active ? handleDownload : undefined}
+      onDownload={hasMissing && !downloadState.active ? handleDownload : undefined}
       downloadProgress={downloadState.active ? downloadState : undefined}
       onClick={onNavigate}
     />
@@ -105,10 +100,7 @@ export default function Artist() {
   const coverage = useCoverageStream(source, id, detail?.resolved === true)
   const navigate = useNavigate()
   const [filter, setFilter] = useState<KindFilter>('all')
-  const canRequest = useAuthStore((s) => s.can('request'))
-  const canAutoApprove = useAuthStore((s) => s.can('auto_approve'))
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
-  const [requestAllOpen, setRequestAllOpen] = useState(false)
 
   // Per-entity listening stats — fetched once detail.name is known
   // DEFERRED: album-page strip needs backend entity kind="album"; per-track "played N×"
@@ -129,29 +121,6 @@ export default function Artist() {
     () => Object.values(coverage).flatMap((c) => c.missingTracks),
     [coverage],
   )
-
-  // Build the list of not-fully-owned albums for "Request all".
-  // An album is not fully owned when: no coverage entry, or ownedCount < totalCount.
-  const notOwnedRequestItems = useMemo(() => {
-    if (!detail) return []
-    return detail.albums
-      .filter((album) => {
-        const cov = coverage[album.externalId]
-        if (!cov) return true // no coverage → treat as not owned
-        const total = cov.totalCount > 0 ? cov.totalCount : album.totalTracks
-        return cov.ownedCount < total
-      })
-      .map((album) => ({
-        kind: 'album' as const,
-        source: album.source,
-        externalId: album.externalId,
-        title: album.name,
-        album: album.name,
-        artist: detail.name,
-        coverUrl: album.coverUrl,
-        trackCount: album.totalTracks,
-      }))
-  }, [detail, coverage])
 
   const palette = useAlbumPalette(detail?.coverArtId ? coverUrl(detail.coverArtId, 300) : detail?.coverUrl)
 
@@ -288,46 +257,29 @@ export default function Artist() {
               </p>
             )}
 
-            {/* Acquisition action row — ONE capability-gated, mutually-exclusive
-                button. auto_approve → "Download all missing" (direct); else request
-                → "Request all" (pending); else neither. A user with both caps sees
-                only Download (the auto_approve branch wins). The download path is
-                guarded by a confirm so a stray click can't enqueue a large batch
-                (spec §10). */}
-            {(canAutoApprove && detail.resolved && allMissingTracks.length > 0) ||
-            (!canAutoApprove && canRequest && notOwnedRequestItems.length > 0) ? (
+            {/* Acquisition action row — "Download all missing" (guarded by a
+                confirm so a stray click can't enqueue a large batch). */}
+            {detail.resolved && allMissingTracks.length > 0 && (
               <div className="mt-4 flex items-center gap-3">
-                {canAutoApprove && detail.resolved && allMissingTracks.length > 0 && (
-                  <Button
-                    variant="secondary"
-                    size="md"
-                    disabled={bulkSubmitting}
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          `Download ${allMissingTracks.length} missing tracks?`,
-                        )
-                      ) {
-                        setBulkSubmitting(true)
-                        void postBatchDownload(allMissingTracks).finally(() => setBulkSubmitting(false))
-                      }
-                    }}
-                  >
-                    {bulkSubmitting ? 'Starting downloads…' : `Download all missing · ${allMissingTracks.length}`}
-                  </Button>
-                )}
-                {!canAutoApprove && canRequest && notOwnedRequestItems.length > 0 && (
-                  <Button
-                    variant="secondary"
-                    size="md"
-                    aria-label="Request all"
-                    onClick={() => setRequestAllOpen(true)}
-                  >
-                    Request all · {notOwnedRequestItems.length}
-                  </Button>
-                )}
+                <Button
+                  variant="secondary"
+                  size="md"
+                  disabled={bulkSubmitting}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Download ${allMissingTracks.length} missing tracks?`,
+                      )
+                    ) {
+                      setBulkSubmitting(true)
+                      void postBatchDownload(allMissingTracks).finally(() => setBulkSubmitting(false))
+                    }
+                  }}
+                >
+                  {bulkSubmitting ? 'Starting downloads…' : `Download all missing · ${allMissingTracks.length}`}
+                </Button>
               </div>
-            ) : null}
+            )}
           </div>
         </header>
       </div>
@@ -377,7 +329,6 @@ export default function Artist() {
                 album={al}
                 cov={coverage[al.externalId]}
                 resolved={detail.resolved}
-                canAutoApprove={canAutoApprove}
                 onNavigate={() =>
                 navigate(
                   al.libraryAlbumId
@@ -392,66 +343,6 @@ export default function Artist() {
           <EmptyState icon="browse" title="No albums" />
         )}
       </section>
-
-      {/* Request all disclosure modal */}
-      {requestAllOpen &&
-        createPortal(
-          <>
-            <div
-              className="fixed inset-0 z-40"
-              aria-hidden="true"
-              onClick={() => setRequestAllOpen(false)}
-            />
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-label="Request all albums"
-              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-border-subtle bg-raised p-4 shadow-pop"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <p className="text-sm font-bold text-text-primary">
-                Request all {notOwnedRequestItems.length} album{notOwnedRequestItems.length === 1 ? '' : 's'} by {detail.name} not in your library?
-              </p>
-              <p className="mt-1 text-xs text-text-secondary">
-                Each album will be queued for download once approved.
-              </p>
-              <div className="mt-3 flex justify-end gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label="Cancel"
-                  onClick={() => setRequestAllOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  aria-label="Confirm request all"
-                  onClick={() => {
-                    setRequestAllOpen(false)
-                    postBatchRequest(notOwnedRequestItems)
-                      .then((result) => {
-                        const skippedNote = result.skipped > 0 ? ` (${result.skipped} already requested)` : ''
-                        const cappedNote = result.quotaCapped > 0 ? ` — ${result.quotaCapped} not requested (limit reached)` : ''
-                        const msg = canAutoApprove
-                          ? `Requested ${result.created} album${result.created === 1 ? '' : 's'}${skippedNote}${cappedNote}`
-                          : `Requested ${result.created} album${result.created === 1 ? '' : 's'} — pending approval${skippedNote}${cappedNote}`
-                        useToastStore.getState().push(msg, 'success')
-                      })
-                      .catch((err) => {
-                        console.error('[Artist] postBatchRequest failed:', err)
-                        useToastStore.getState().push("Couldn't file your requests", 'error')
-                      })
-                  }}
-                >
-                  Confirm
-                </Button>
-              </div>
-            </div>
-          </>,
-          document.body,
-        )}
     </div>
   )
 }

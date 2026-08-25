@@ -10,7 +10,6 @@ import (
 )
 
 // newTestService opens a migrated temp sqlite store and returns a *Service.
-// Mirrors the pattern in internal/notification/service_test.go.
 func newTestService(t *testing.T) *Service {
 	t.Helper()
 	st, err := store.Open(t.TempDir() + "/catalog.db")

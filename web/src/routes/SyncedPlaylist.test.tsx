@@ -424,18 +424,9 @@ describe('SyncedPlaylist page', () => {
     useAuthStore.setState({ me: null, loading: false })
   })
 
-  // ── "Download all missing" gating (auto_approve capability) ─────────────────
-  // No bulk-request path exists for synced playlists. A user without auto_approve
-  // simply sees no bulk-download button; per-item DownloadAction on missing rows
-  // is unaffected.
-  it('a user WITHOUT auto_approve does NOT see the "Download all missing" button', async () => {
-    setCaps(['request']) // request-only: no bulk-download path here
-    await renderLoaded()
-    expect(screen.queryByRole('button', { name: /download all missing/i })).not.toBeInTheDocument()
-    useAuthStore.setState({ me: null, loading: false })
-  })
+  // ── "Download all missing" button ──────────────────────────────────────────
 
-  it('an auto_approve user DOES see the "Download all missing" button', async () => {
+  it('shows the "Download all missing" button when there are missing tracks', async () => {
     setCaps(['auto_approve'])
     await renderLoaded()
     expect(screen.getByRole('button', { name: /download all missing/i })).toBeInTheDocument()

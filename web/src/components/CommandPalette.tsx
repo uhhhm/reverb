@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { baseCommands, matchCommands } from '../lib/commands'
-import { isManagerCaps, useAuthStore } from '../lib/authStore'
 import { usePlayer } from '../lib/playerStore'
 import { useSearch } from '../lib/searchStore'
 import { useUI } from '../lib/uiStore'
@@ -27,10 +26,7 @@ export function CommandPalette() {
   const togglePanel = useUI((s) => s.togglePanel)
   const openCinema = useUI((s) => s.openCinema)
 
-  // Reactive manager check.
-  const isManager = useAuthStore((s) => isManagerCaps(s.me?.capabilities))
-
-  const commands = matchCommands(query, baseCommands(isManager))
+  const commands = matchCommands(query, baseCommands())
 
   useEffect(() => {
     if (open) requestAnimationFrame(() => input.current?.focus())

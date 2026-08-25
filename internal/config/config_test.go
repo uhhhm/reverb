@@ -23,12 +23,12 @@ func TestLoadFlagsOverrideDefaults(t *testing.T) {
 }
 
 func TestEnvFillsPortWhenNoFlag(t *testing.T) {
-	env := map[string]string{"REVERB_PORT": "7000", "REVERB_ADMIN_PASSWORD": "secret"}
+	env := map[string]string{"REVERB_PORT": "7000"}
 	c, err := Load(nil, func(k string) string { return env[k] })
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Port != 7000 || c.AdminPassword != "secret" {
+	if c.Port != 7000 {
 		t.Fatalf("env not applied: %+v", c)
 	}
 }
