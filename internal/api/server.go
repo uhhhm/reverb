@@ -139,6 +139,9 @@ type Deps struct {
 	// Lyrics resolves track lyrics (local tags → LRCLIB, DB-cached). Nil in
 	// tests/legacy wiring — the lyrics endpoint serves 204.
 	Lyrics LyricsProvider
+	// OfflineSet backs the per-device offline set (local-only, never syncs).
+	// *db.Queries satisfies it. Nil in tests/legacy that don't exercise offline set.
+	OfflineSet OfflineSetStore
 }
 
 type Server struct {
@@ -281,6 +284,13 @@ func (s *Server) routes() {
 			pr.Get("/stats/recent", s.handleStatsRecent)
 			pr.Get("/stats/entity", s.handleStatsEntity)
 			pr.Post("/stats/play-counts", s.handlePlayCounts)
+
+			// offline-set (T6) — per-playlist offline set, local-only, never emits sync_change.
+			pr.Group(func(or chi.Router) {
+				or.Get("/offline-set", s.handleListOfflineSet)
+				or.Put("/offline-set/{playlistId}", s.handleSetOfflineSet)
+				or.Delete("/offline-set/{playlistId}", s.handleDeleteOfflineSet)
+			})
 
 			// manage library & integrations: adapter CRUD + server settings.
 			pr.Group(func(mr chi.Router) {

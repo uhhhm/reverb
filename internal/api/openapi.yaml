@@ -335,6 +335,27 @@ paths:
         "200": { description: ok }
         "422": { description: update failed }
         "503": { description: playlist sync unavailable }
+  /offline-set:
+    get:
+      summary: List offline set for server device (local-only, per-playlist)
+      responses: { "200": { description: ok } }
+  /offline-set/{playlistId}:
+    put:
+      summary: Set offline enabled for a playlist (local-only, never syncs)
+      parameters: [{ name: playlistId, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { enabled: { type: boolean } }
+              required: [enabled]
+      responses: { "200": { description: ok }, "404": { description: not found } }
+    delete:
+      summary: Remove playlist from offline set (local-only)
+      parameters: [{ name: playlistId, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: ok }, "404": { description: not found } }
   /downloads/batch:
     post:
       summary: Enqueue multiple downloads in one request
