@@ -20,6 +20,7 @@ import (
 	"github.com/maxjb-xyz/reverb/internal/scrobble"
 	"github.com/maxjb-xyz/reverb/internal/search"
 	"github.com/maxjb-xyz/reverb/internal/store/db"
+	reverbsync "github.com/maxjb-xyz/reverb/internal/sync"
 )
 
 // Streamer is the subset of *search.Aggregator the SSE handler needs.
@@ -142,6 +143,18 @@ type Deps struct {
 	// OfflineSet backs the per-device offline set (local-only, never syncs).
 	// *db.Queries satisfies it. Nil in tests/legacy that don't exercise offline set.
 	OfflineSet OfflineSetStore
+	// Pairing and SyncStore back multi-device rendezvous. *sync.PairingService and
+	// *sync.SyncStore satisfy them (wired to the same DB). Nil in tests/legacy.
+	Pairing      *reverbsync.PairingService
+	SyncStore    *reverbsync.SyncStore
+	PairingStore PairingStore
+	// PairingDB is the raw DB handle for FK cleanup on device delete (pairing_code
+	// and sync_change reference device). When set, handlePairingDeviceDelete
+	// clears those rows before DeleteDevice so the delete does not hit
+	// FOREIGN KEY constraint failures. *store.Store.DB() or *sql.DB satisfies it.
+	PairingDB interface {
+		ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+	}
 }
 
 type Server struct {
@@ -239,6 +252,16 @@ func (s *Server) routes() {
 		r.Get("/openapi.yaml", s.handleOpenAPI)
 		r.Get("/version", s.handleVersion)
 
+		// pairing redeem is public (no auth) — laptop not yet paired.
+		r.Post("/pairing/redeem", s.handlePairingRedeem)
+
+		// sync rendezvous — auth is either Bearer sync token OR local cookie fallback.
+		// Handled inside the handler via authenticateSync (tries Bearer first, then
+		// server device). Placed outside requireAuth so Bearer-only devices don't
+		// need a local session; local fallback still resolves to the server device.
+		r.Post("/sync", s.handleSync)
+		r.Get("/sync/status", s.handleSyncStatus)
+
 		// Everything else is implicitly authenticated: Reverb is single-user
 		// (no login), so requireAuth injects the one local user on every request.
 		r.Group(func(pr chi.Router) {
@@ -290,6 +313,14 @@ func (s *Server) routes() {
 				or.Get("/offline-set", s.handleListOfflineSet)
 				or.Put("/offline-set/{playlistId}", s.handleSetOfflineSet)
 				or.Delete("/offline-set/{playlistId}", s.handleDeleteOfflineSet)
+			})
+
+			// pairing (T4) — code + devices are manage-library gated; redeem is public above.
+			pr.Group(func(pr2 chi.Router) {
+				pr2.Use(s.requireCapability(auth.CapManageLibrary))
+				pr2.Post("/pairing/code", s.handlePairingCode)
+				pr2.Get("/pairing/devices", s.handlePairingDevices)
+				pr2.Delete("/pairing/devices/{id}", s.handlePairingDeviceDelete)
 			})
 
 			// manage library & integrations: adapter CRUD + server settings.

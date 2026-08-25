@@ -67,6 +67,11 @@ func (s *Server) csrfGuard(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// Bearer sync tokens are not cookie-authenticated, so CSRF does not apply.
+		if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		src := r.Header.Get("Origin")
 		if src == "" {
 			src = r.Header.Get("Referer")

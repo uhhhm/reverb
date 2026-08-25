@@ -390,3 +390,132 @@ paths:
       responses:
         "101": { description: Switching Protocols (WebSocket upgrade) }
         "401": { description: unauthorized }
+  /pairing/code:
+    post:
+      summary: Generate a single-use pairing code (manage-library capability required)
+      responses:
+        "200":
+          description: pairing code
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: "AB12-CD34" }
+                  expiresAt: { type: integer, format: int64 }
+                required: [code, expiresAt]
+        "503": { description: pairing unavailable }
+  /pairing/redeem:
+    post:
+      summary: Redeem a pairing code for a new device (no auth)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code: { type: string }
+                deviceName: { type: string }
+              required: [code, deviceName]
+      responses:
+        "200":
+          description: device credentials
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deviceId: { type: string }
+                  token: { type: string }
+                  serverDeviceId: { type: string }
+                required: [deviceId, token, serverDeviceId]
+        "400": { description: invalid code or missing fields }
+        "409": { description: code already used }
+        "410": { description: code expired }
+        "503": { description: pairing unavailable }
+  /pairing/devices:
+    get:
+      summary: List paired devices (manage-library capability required)
+      responses:
+        "200":
+          description: array of devices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    name: { type: string }
+                    isServer: { type: boolean }
+                    createdAt: { type: integer, format: int64 }
+                    lastSeen: { type: integer, format: int64 }
+                  required: [id, name, isServer, createdAt, lastSeen]
+        "503": { description: pairing unavailable }
+  /pairing/devices/{id}:
+    delete:
+      summary: Delete a paired device (cannot delete server device)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: ok }
+        "400": { description: cannot delete server device }
+        "404": { description: device not found }
+        "503": { description: pairing unavailable }
+  /sync:
+    post:
+      summary: Sync changes (Bearer sync token or local auth)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sinceRevision: { type: integer, format: int64 }
+                changes:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      entityType: { type: string }
+                      entityId: { type: string }
+                      field: { type: string }
+                      value: {}
+                      updatedAt: { type: integer, format: int64 }
+                      deviceId: { type: string }
+                      revision: { type: integer, format: int64 }
+                    required: [entityType, entityId, field, updatedAt]
+              required: [sinceRevision, changes]
+      responses:
+        "200":
+          description: sync response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  changes: { type: array, items: { type: object } }
+                  newRevision: { type: integer, format: int64 }
+                  accepted: { type: integer }
+                  rejected: { type: array, items: { type: object } }
+                required: [changes, newRevision, accepted]
+        "401": { description: invalid sync token }
+        "503": { description: sync unavailable }
+  /sync/status:
+    get:
+      summary: Sync status (revision + device count) — requires auth either Bearer or local
+      responses:
+        "200":
+          description: status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revision: { type: integer, format: int64 }
+                  deviceCount: { type: integer }
+                required: [revision, deviceCount]
+        "401": { description: invalid sync token }
+        "503": { description: sync unavailable }
