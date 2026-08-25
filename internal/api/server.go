@@ -155,6 +155,7 @@ type Deps struct {
 	PairingDB interface {
 		ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
 	}
+	LinkStore LinkStore
 }
 
 type Server struct {
@@ -313,6 +314,12 @@ func (s *Server) routes() {
 				or.Get("/offline-set", s.handleListOfflineSet)
 				or.Put("/offline-set/{playlistId}", s.handleSetOfflineSet)
 				or.Delete("/offline-set/{playlistId}", s.handleDeleteOfflineSet)
+			})
+
+			// add-from-link (T7) — resolve external URLs and optionally download.
+			pr.Group(func(lr chi.Router) {
+				lr.Post("/links/resolve", s.handleLinkResolve)
+				lr.Post("/links/add", s.handleLinkAdd)
 			})
 
 			// pairing (T4) — code + devices are manage-library gated; redeem is public above.
