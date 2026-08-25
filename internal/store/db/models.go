@@ -75,6 +75,15 @@ type CatalogEntity struct {
 	CreatedAt  int64  `json:"created_at"`
 }
 
+type Device struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	TokenHash string `json:"token_hash"`
+	IsServer  int64  `json:"is_server"`
+	CreatedAt int64  `json:"created_at"`
+	LastSeen  int64  `json:"last_seen"`
+}
+
 type DiscographyCache struct {
 	Source           string `json:"source"`
 	ExternalArtistID string `json:"external_artist_id"`
@@ -128,6 +137,21 @@ type MatchCache struct {
 	CoverArtID     string         `json:"cover_art_id"`
 }
 
+type OfflineSet struct {
+	DeviceID   string `json:"device_id"`
+	PlaylistID string `json:"playlist_id"`
+	Enabled    int64  `json:"enabled"`
+	UpdatedAt  int64  `json:"updated_at"`
+}
+
+type PairingCode struct {
+	Code           string         `json:"code"`
+	ExpiresAt      int64          `json:"expires_at"`
+	UsedAt         sql.NullInt64  `json:"used_at"`
+	UsedByDeviceID sql.NullString `json:"used_by_device_id"`
+	CreatedAt      int64          `json:"created_at"`
+}
+
 type Play struct {
 	ID        string `json:"id"`
 	UserID    string `json:"user_id"`
@@ -174,6 +198,23 @@ type Session struct {
 type Setting struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
+}
+
+type SyncChange struct {
+	Revision   int64  `json:"revision"`
+	DeviceID   string `json:"device_id"`
+	EntityType string `json:"entity_type"`
+	EntityID   string `json:"entity_id"`
+	Field      string `json:"field"`
+	ValueJson  string `json:"value_json"`
+	UpdatedAt  int64  `json:"updated_at"`
+	CreatedAt  int64  `json:"created_at"`
+}
+
+type SyncCursor struct {
+	DeviceID  string `json:"device_id"`
+	Revision  int64  `json:"revision"`
+	UpdatedAt int64  `json:"updated_at"`
 }
 
 type SyncedPlaylist struct {
