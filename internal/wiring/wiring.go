@@ -25,6 +25,7 @@ import (
 	"github.com/maxjb-xyz/reverb/internal/resolver"
 	"github.com/maxjb-xyz/reverb/internal/search"
 	"github.com/maxjb-xyz/reverb/internal/store/db"
+	reverbsync "github.com/maxjb-xyz/reverb/internal/sync"
 )
 
 const (
@@ -556,6 +557,9 @@ func (b *Builder) nowMilli() int64 {
 // build downloaders into a Manager (only when downloaders AND a library are
 // present). It does NOT start the Manager — the caller controls its lifecycle.
 func (b *Builder) Build(ctx context.Context) (ServiceBundle, error) {
+	if _, err := reverbsync.EnsureServerDevice(ctx, b.queries); err != nil {
+		log.Printf("WARNING: ensure server device: %v", err)
+	}
 	instances, err := b.queries.ListAdapterInstances(ctx)
 	if err != nil {
 		return ServiceBundle{}, err
