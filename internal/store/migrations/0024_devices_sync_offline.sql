@@ -38,9 +38,11 @@ CREATE TABLE offline_set (
   updated_at  INTEGER NOT NULL,
   PRIMARY KEY (device_id, playlist_id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_device_single_server ON device(is_server) WHERE is_server = 1;
 -- Settings key sync_revision is NOT a table; it lives in settings, but AUTOINCREMENT revision is canonical. Also ensure settings key server_device_id can be stored.
 
 -- +goose Down
+DROP INDEX IF EXISTS idx_device_single_server;
 DROP TABLE IF EXISTS offline_set;
 DROP TABLE IF EXISTS sync_cursor;
 DROP INDEX IF EXISTS idx_sync_change_entity;

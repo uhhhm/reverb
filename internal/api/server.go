@@ -256,17 +256,17 @@ func (s *Server) routes() {
 		// pairing redeem is public (no auth) — laptop not yet paired.
 		r.Post("/pairing/redeem", s.handlePairingRedeem)
 
-		// sync rendezvous — auth is either Bearer sync token OR local cookie fallback.
-		// Handled inside the handler via authenticateSync (tries Bearer first, then
-		// server device). Placed outside requireAuth so Bearer-only devices don't
-		// need a local session; local fallback still resolves to the server device.
-		r.Post("/sync", s.handleSync)
-		r.Get("/sync/status", s.handleSyncStatus)
-
 		// Everything else is implicitly authenticated: Reverb is single-user
 		// (no login), so requireAuth injects the one local user on every request.
 		r.Group(func(pr chi.Router) {
 			pr.Use(s.requireAuth)
+			// sync rendezvous — Bearer sync token OR local fallback.
+			// Behind requireAuth so only locally-authenticated requests can use
+			// the server-device fallback; Bearer devices bypass CSRF, local
+			// fallback is gated on currentUser in authenticateSync (not a raw
+			// Cookie existence check, which was bypassable and broke fresh installs).
+			pr.Post("/sync", s.handleSync)
+			pr.Get("/sync/status", s.handleSyncStatus)
 			pr.Get("/me", s.handleMe)
 			pr.Get("/config/pending-restart", s.handlePendingRestart)
 			pr.Get("/library/status", s.handleLibraryStatus)

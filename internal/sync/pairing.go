@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	gosync "sync"
 	"time"
 	"unicode"
 
@@ -21,6 +22,11 @@ var (
 	ErrCodeUsed     = errors.New("pairing code already used")
 	ErrInvalidToken = errors.New("invalid sync token")
 )
+
+// fallbackMu serializes the non-atomic Redeem fallback (queriers without
+// TryMarkPairingCodeUsed, e.g. test mocks) to prevent TOCTOU double-redeem.
+// Production queriers (*db.Queries) always hit the atomic TryMark paths above.
+var fallbackMu gosync.Mutex
 
 // PairingService implements pairing code generation and redeem flow.
 type PairingService struct {
@@ -63,6 +69,7 @@ func formatCode(stripped string) string {
 // GenerateCode creates a new single-use pairing code with 10 minute TTL.
 // Code is formatted XXXX-XXXX for display but stored stripped (no dash).
 func (s *PairingService) GenerateCode(ctx context.Context) (string, int64, error) {
+	_ = s.q.DeleteExpiredPairingCodes(ctx)
 	expiresAt := time.Now().Add(10 * time.Minute).Unix()
 	// Retry on PK collision (extremely unlikely but correct).
 	for attempt := 0; attempt < 5; attempt++ {
@@ -87,6 +94,9 @@ func (s *PairingService) GenerateCode(ctx context.Context) (string, int64, error
 
 // Redeem validates rawCode, checks expiry and single-use, creates a new device row
 // with a fresh sync token, marks the code used, and returns deviceID + plain token.
+// It is atomic: when the backing store is *db.Queries on *sql.DB it runs in a
+// single transaction (create device + conditional claim), preventing TOCTOU
+// double-redeem and FK violations (used_by_device_id references device).
 func (s *PairingService) Redeem(ctx context.Context, rawCode, deviceName string) (string, string, error) {
 	normalized := normalizeCode(rawCode)
 	if len(normalized) != 8 {
@@ -97,6 +107,120 @@ func (s *PairingService) Redeem(ctx context.Context, rawCode, deviceName string)
 			return "", "", ErrCodeInvalid
 		}
 	}
+	plain, hash, err := generateToken()
+	if err != nil {
+		return "", "", err
+	}
+	deviceID := "dev_" + uuid.NewString()
+	// Transactional path when we have a *db.Queries on *sql.DB.
+	if dbq, ok := s.q.(*db.Queries); ok {
+		if sqlDB, ok := dbq.UnderlyingDB().(*sql.DB); ok {
+			tx, err := sqlDB.BeginTx(ctx, nil)
+			if err == nil {
+				txQ := dbq.WithTx(tx)
+				// Create device first so FK on pairing_code is satisfied.
+				if err := txQ.CreateDevice(ctx, db.CreateDeviceParams{
+					ID:        deviceID,
+					Name:      deviceName,
+					TokenHash: hash,
+					IsServer:  0,
+				}); err != nil {
+					_ = tx.Rollback()
+					return "", "", err
+				}
+				rows, err := txQ.TryMarkPairingCodeUsed(ctx, db.MarkPairingCodeUsedParams{
+					Code: normalized,
+					UsedByDeviceID: sql.NullString{
+						String: deviceID,
+						Valid:  true,
+					},
+				})
+				if err != nil {
+					_ = tx.Rollback()
+					return "", "", err
+				}
+				if rows == 0 {
+					_ = tx.Rollback()
+					pc, gerr := s.q.GetPairingCode(ctx, normalized)
+					if gerr != nil {
+						if errors.Is(gerr, sql.ErrNoRows) {
+							return "", "", ErrCodeInvalid
+						}
+						return "", "", gerr
+					}
+					if pc.UsedAt.Valid {
+						return "", "", ErrCodeUsed
+					}
+					if time.Now().Unix() > pc.ExpiresAt {
+						return "", "", ErrCodeExpired
+					}
+					return "", "", ErrCodeInvalid
+				}
+				if err := tx.Commit(); err != nil {
+					return "", "", err
+				}
+				return deviceID, plain, nil
+			}
+		}
+	}
+	// Fallback for queriers without TryMark (e.g., mocks) or when tx not available: try conditional claim first if available.
+	if tryQ, ok := s.q.(interface {
+		TryMarkPairingCodeUsed(context.Context, db.MarkPairingCodeUsedParams) (int64, error)
+	}); ok {
+		// Need device to exist for FK, so create a temporary device then claim, but we can't tx.
+		// Instead do non-transactional but in order: create then claim, and if claim fails delete device.
+		if err := s.q.CreateDevice(ctx, db.CreateDeviceParams{
+			ID:        deviceID,
+			Name:      deviceName,
+			TokenHash: hash,
+			IsServer:  0,
+		}); err != nil {
+			return "", "", err
+		}
+		rows, err := tryQ.TryMarkPairingCodeUsed(ctx, db.MarkPairingCodeUsedParams{
+			Code: normalized,
+			UsedByDeviceID: sql.NullString{
+				String: deviceID,
+				Valid:  true,
+			},
+		})
+		if err != nil {
+			// best-effort cleanup
+			if del, ok := any(s.q).(interface {
+				DeleteDevice(context.Context, string) error
+			}); ok {
+				_ = del.DeleteDevice(ctx, deviceID)
+			}
+			return "", "", err
+		}
+		if rows == 0 {
+			if del, ok := any(s.q).(interface {
+				DeleteDevice(context.Context, string) error
+			}); ok {
+				_ = del.DeleteDevice(ctx, deviceID)
+			}
+			pc, gerr := s.q.GetPairingCode(ctx, normalized)
+			if gerr != nil {
+				if errors.Is(gerr, sql.ErrNoRows) {
+					return "", "", ErrCodeInvalid
+				}
+				return "", "", gerr
+			}
+			if pc.UsedAt.Valid {
+				return "", "", ErrCodeUsed
+			}
+			if time.Now().Unix() > pc.ExpiresAt {
+				return "", "", ErrCodeExpired
+			}
+			return "", "", ErrCodeInvalid
+		}
+		return deviceID, plain, nil
+	}
+	// Fallback for queriers without TryMark (e.g., mocks): old non-atomic path.
+	// This path is test-only in production (*db.Queries always has TryMark) — serialize
+	// with fallbackMu to prevent TOCTOU double-redeem, and clean up orphan device on error.
+	fallbackMu.Lock()
+	defer fallbackMu.Unlock()
 	pc, err := s.q.GetPairingCode(ctx, normalized)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -110,11 +234,6 @@ func (s *PairingService) Redeem(ctx context.Context, rawCode, deviceName string)
 	if time.Now().Unix() > pc.ExpiresAt {
 		return "", "", ErrCodeExpired
 	}
-	plain, hash, err := generateToken()
-	if err != nil {
-		return "", "", err
-	}
-	deviceID := "dev_" + uuid.NewString()
 	if err := s.q.CreateDevice(ctx, db.CreateDeviceParams{
 		ID:        deviceID,
 		Name:      deviceName,
@@ -130,6 +249,11 @@ func (s *PairingService) Redeem(ctx context.Context, rawCode, deviceName string)
 			Valid:  true,
 		},
 	}); err != nil {
+		if del, ok := any(s.q).(interface {
+			DeleteDevice(context.Context, string) error
+		}); ok {
+			_ = del.DeleteDevice(ctx, deviceID)
+		}
 		return "", "", err
 	}
 	return deviceID, plain, nil

@@ -37,4 +37,6 @@ type MergePolicy interface {
 //   - exact tie -> deviceId lex order (smaller wins)
 //
 // Delete-wins is handled in SyncStore.Reconcile before delegating to PickWinner.
-type LWWPolicy struct{}
+type LWWPolicy struct {
+	IsServer func(string) bool
+}

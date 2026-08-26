@@ -12,10 +12,23 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = {}
+  if (body) headers['Content-Type'] = 'application/json'
+  const isSyncPath = path === '/sync' || path.startsWith('/sync/')
+  if (isSyncPath) {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const token = window.localStorage.getItem('reverb:syncToken')
+        if (token) headers['Authorization'] = `Bearer ${token}`
+      }
+    } catch {
+      /* ignore storage errors */
+    }
+  }
   const res = await fetch(BASE + path, {
     method,
     credentials: 'include',
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers: Object.keys(headers).length ? headers : undefined,
     body: body ? JSON.stringify(body) : undefined,
   })
   if (!res.ok) {

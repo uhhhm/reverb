@@ -60,6 +60,7 @@ func ensureDeviceSyncTables(ctx context.Context, tx *sql.Tx) error {
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   last_seen  INTEGER NOT NULL DEFAULT (unixepoch())
 )`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_device_single_server ON device(is_server) WHERE is_server = 1`,
 		`CREATE TABLE IF NOT EXISTS pairing_code (
   code       TEXT PRIMARY KEY,
   expires_at INTEGER NOT NULL,

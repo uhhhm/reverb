@@ -29,3 +29,5 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		db: tx,
 	}
 }
+
+func (q *Queries) UnderlyingDB() DBTX { return q.db }

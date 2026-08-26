@@ -48,9 +48,6 @@ func (s *Server) linkServerDeviceID(ctx context.Context) (string, error) {
 					return d.ID, nil
 				}
 			}
-			if len(devices) > 0 {
-				return devices[0].ID, nil
-			}
 		}
 	}
 	// Fallback to OfflineSet
@@ -161,18 +158,29 @@ func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Catalog entity handling: deterministic stable ID.
-	catalogID := "trk_link_" + res.ExternalID
+	// Catalog entity handling: deterministic stable ID includes source and kind to avoid
+	// collisions (e.g. Spotify sp123 vs YouTube sp123 would otherwise share the
+	// same catalog_entity row and sync_change entityId, and track vs playlist).
+	kind := res.Kind
+	if kind == "" {
+		kind = "track"
+	}
+	var catalogPrefix string
+	switch kind {
+	case "playlist":
+		catalogPrefix = "pl_link_"
+	case "album":
+		catalogPrefix = "alb_link_"
+	default:
+		catalogPrefix = "trk_link_"
+	}
+	catalogID := catalogPrefix + res.Source + "_" + res.ExternalID
 	createdNew := false
 	if ls := s.linkStore(); ls != nil {
 		// Check existing.
 		_, gerr := ls.GetCatalogEntity(r.Context(), catalogID)
 		if errors.Is(gerr, sql.ErrNoRows) {
 			now := time.Now().Unix()
-			kind := res.Kind
-			if kind == "" {
-				kind = "track"
-			}
 			ierr := ls.InsertCatalogEntity(r.Context(), db.InsertCatalogEntityParams{
 				ID:         catalogID,
 				Kind:       kind,
@@ -209,12 +217,12 @@ func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Emit sync change for new track so canonical library reflects it.
+		// Emit sync change for new entity so canonical library reflects it.
 		if createdNew && s.deps.SyncStore != nil {
 			deviceID, derr := s.linkServerDeviceID(r.Context())
 			if derr == nil && deviceID != "" {
 				ch := reverbsync.SyncChange{
-					EntityType: "track",
+					EntityType: kind,
 					EntityID:   catalogID,
 					Field:      "title",
 					Value:      res.Title,
@@ -224,7 +232,7 @@ func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
 				_, _ = s.deps.SyncStore.AppendChange(r.Context(), deviceID, ch)
 				// Also emit artist for completeness (no harm, not required for test)
 				ch2 := reverbsync.SyncChange{
-					EntityType: "track",
+					EntityType: kind,
 					EntityID:   catalogID,
 					Field:      "artist",
 					Value:      res.Artist,
@@ -251,6 +259,10 @@ func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not validate playlist"})
 				return
 			}
+		}
+		if !s.playlistAccessAllowed(r, playlistID) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "playlist not found"})
+			return
 		}
 		// Emit playlist membership sync_change if we have sync store.
 		if s.deps.SyncStore != nil {

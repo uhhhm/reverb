@@ -143,15 +143,116 @@ func (s *Server) handlePairingDeviceDelete(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot delete server device"})
 		return
 	}
-	_ = s.deps.PairingStore.DeleteSyncCursor(r.Context(), id)
+	// Atomic FK cleanup + delete: wrap in a transaction when we have a *sql.DB.
+	if sqlDB, ok := s.deps.PairingDB.(*sql.DB); ok {
+		tx, err := sqlDB.BeginTx(r.Context(), nil)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		defer func() { _ = tx.Rollback() }()
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM sync_cursor WHERE device_id = ?`, id); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM pairing_code WHERE used_by_device_id = ?`, id); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM sync_change WHERE device_id = ?`, id); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM offline_set WHERE device_id = ?`, id); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM device WHERE id = ?`, id); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return
+	}
+	// Fallback when PairingDB is not *sql.DB (e.g., *sql.Tx, mock, or nil).
+	// Resolve an Exec handle: prefer PairingDB, else try PairingStore's underlying DB.
+	var execHandle interface {
+		ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+	}
+	if s.deps.PairingDB != nil {
+		execHandle = s.deps.PairingDB
+	} else if dbq, ok := s.deps.PairingStore.(*db.Queries); ok && dbq.UnderlyingDB() != nil {
+		if eh, ok := dbq.UnderlyingDB().(interface {
+			ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+		}); ok {
+			execHandle = eh
+		}
+	}
+	// Try generic transaction if handle supports BeginTx.
+	if execHandle != nil {
+		if beginner, ok := execHandle.(interface {
+			BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
+		}); ok {
+			if tx, err := beginner.BeginTx(r.Context(), nil); err == nil {
+				defer func() { _ = tx.Rollback() }()
+				if _, err := tx.ExecContext(r.Context(), `DELETE FROM sync_cursor WHERE device_id = ?`, id); err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
+				if _, err := tx.ExecContext(r.Context(), `DELETE FROM pairing_code WHERE used_by_device_id = ?`, id); err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
+				if _, err := tx.ExecContext(r.Context(), `DELETE FROM sync_change WHERE device_id = ?`, id); err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
+				if _, err := tx.ExecContext(r.Context(), `DELETE FROM offline_set WHERE device_id = ?`, id); err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
+				if _, err := tx.ExecContext(r.Context(), `DELETE FROM device WHERE id = ?`, id); err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
+				if err := tx.Commit(); err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
+				writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+				return
+			}
+		}
+	}
+	// Non-transactional best-effort fallback.
+	if err := s.deps.PairingStore.DeleteSyncCursor(r.Context(), id); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
 	// FK cleanup: pairing_code and sync_change reference device. Clear them before
 	// deleting the device so the delete does not hit FOREIGN KEY constraint.
-	if s.deps.PairingDB != nil {
-		_, _ = s.deps.PairingDB.ExecContext(r.Context(), `DELETE FROM pairing_code WHERE used_by_device_id = ?`, id)
-		_, _ = s.deps.PairingDB.ExecContext(r.Context(), `DELETE FROM sync_change WHERE device_id = ?`, id)
-		_, _ = s.deps.PairingDB.ExecContext(r.Context(), `DELETE FROM sync_cursor WHERE device_id = ?`, id)
+	if execHandle != nil {
+		if _, err := execHandle.ExecContext(r.Context(), `DELETE FROM pairing_code WHERE used_by_device_id = ?`, id); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if _, err := execHandle.ExecContext(r.Context(), `DELETE FROM sync_change WHERE device_id = ?`, id); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if _, err := execHandle.ExecContext(r.Context(), `DELETE FROM sync_cursor WHERE device_id = ?`, id); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 		// offline_set also references device, but deviceId+playlistId is composite; clean if present.
-		_, _ = s.deps.PairingDB.ExecContext(r.Context(), `DELETE FROM offline_set WHERE device_id = ?`, id)
+		if _, err := execHandle.ExecContext(r.Context(), `DELETE FROM offline_set WHERE device_id = ?`, id); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 	if err := s.deps.PairingStore.DeleteDevice(r.Context(), id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

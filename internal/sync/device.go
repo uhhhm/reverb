@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 
@@ -39,6 +40,7 @@ type Querier interface {
 	CreatePairingCode(ctx context.Context, arg db.CreatePairingCodeParams) error
 	GetPairingCode(ctx context.Context, code string) (db.PairingCode, error)
 	MarkPairingCodeUsed(ctx context.Context, arg db.MarkPairingCodeUsedParams) error
+	DeleteExpiredPairingCodes(ctx context.Context) error
 	GetSetting(ctx context.Context, key string) (string, error)
 	UpsertSetting(ctx context.Context, arg db.UpsertSettingParams) error
 	TouchDeviceLastSeen(ctx context.Context, id string) error
@@ -65,7 +67,59 @@ func tokenHash(plain string) string {
 // EnsureServerDevice ensures one device row with is_server=1 exists.
 // If none exists it creates dev_<uuid> name="server" with a random token hash.
 // It stores server_device_id in settings for convenience and is idempotent.
+// It is safe under concurrent callers: a partial unique index guarantees at most
+// one is_server=1 row, and a transaction serializes the check-then-create.
 func EnsureServerDevice(ctx context.Context, q Querier) (string, error) {
+	// Ensure the single-server invariant at the DB level when we have a *sql.DB.
+	if dbq, ok := q.(*db.Queries); ok {
+		if sqlDB, ok := dbq.UnderlyingDB().(*sql.DB); ok {
+			_, _ = sqlDB.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_device_single_server ON device(is_server) WHERE is_server = 1`)
+			tx, err := sqlDB.BeginTx(ctx, nil)
+			if err == nil {
+				txQ := dbq.WithTx(tx)
+				devices, err := txQ.ListDevices(ctx)
+				if err == nil {
+					for _, d := range devices {
+						if d.IsServer == 1 {
+							_ = txQ.UpsertSetting(ctx, db.UpsertSettingParams{Key: serverDeviceIDKey, Value: d.ID})
+							_ = tx.Commit()
+							return d.ID, nil
+						}
+					}
+				}
+				plain, hash, gerr := generateToken()
+				if gerr == nil {
+					_ = plain
+					id := "dev_" + uuid.NewString()
+					if cerr := txQ.CreateDevice(ctx, db.CreateDeviceParams{
+						ID:        id,
+						Name:      "server",
+						TokenHash: hash,
+						IsServer:  1,
+					}); cerr == nil {
+						_ = txQ.UpsertSetting(ctx, db.UpsertSettingParams{Key: serverDeviceIDKey, Value: id})
+						if err := tx.Commit(); err == nil {
+							return id, nil
+						}
+					} else {
+						_ = tx.Rollback()
+						// Likely unique constraint violation from concurrent winner; fall through to re-check.
+						devices2, lerr := q.ListDevices(ctx)
+						if lerr == nil {
+							for _, d := range devices2 {
+								if d.IsServer == 1 {
+									_ = q.UpsertSetting(ctx, db.UpsertSettingParams{Key: serverDeviceIDKey, Value: d.ID})
+									return d.ID, nil
+								}
+							}
+						}
+						return "", cerr
+					}
+				}
+				_ = tx.Rollback()
+			}
+		}
+	}
 	devices, err := q.ListDevices(ctx)
 	if err != nil {
 		return "", err

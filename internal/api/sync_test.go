@@ -79,6 +79,8 @@ func doSync(t *testing.T, srv *Server, token string, since int64, changes []sync
 	httpReq.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+token)
+	} else {
+		httpReq.AddCookie(&http.Cookie{Name: "reverb_session", Value: "test"})
 	}
 	srv.Handler().ServeHTTP(rec, httpReq)
 	var resp syncpkg.SyncResponse
@@ -94,6 +96,8 @@ func doSyncStatus(t *testing.T, srv *Server, token string) *httptest.ResponseRec
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/sync/status", nil)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	} else {
+		req.AddCookie(&http.Cookie{Name: "reverb_session", Value: "test"})
 	}
 	srv.Handler().ServeHTTP(rec, req)
 	return rec

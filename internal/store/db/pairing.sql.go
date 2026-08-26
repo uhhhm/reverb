@@ -96,3 +96,15 @@ func (q *Queries) MarkPairingCodeUsed(ctx context.Context, arg MarkPairingCodeUs
 	_, err := q.db.ExecContext(ctx, markPairingCodeUsed, arg.UsedByDeviceID, arg.Code)
 	return err
 }
+
+const tryMarkPairingCodeUsed = `-- name: TryMarkPairingCodeUsed :execrows
+UPDATE pairing_code SET used_at = unixepoch(), used_by_device_id = ? WHERE code = ? AND used_at IS NULL AND expires_at > unixepoch()
+`
+
+func (q *Queries) TryMarkPairingCodeUsed(ctx context.Context, arg MarkPairingCodeUsedParams) (int64, error) {
+	res, err := q.db.ExecContext(ctx, tryMarkPairingCodeUsed, arg.UsedByDeviceID, arg.Code)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

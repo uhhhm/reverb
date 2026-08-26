@@ -281,29 +281,66 @@ func (s *SyncStore) isServer(ctx context.Context, deviceID string) bool {
 	return dev.IsServer == 1
 }
 
+func (s *SyncStore) effectivePolicy(ctx context.Context) MergePolicy {
+	base := s.policy
+	if base == nil {
+		base = LWWPolicy{}
+	}
+	switch p := base.(type) {
+	case LWWPolicy:
+		if p.IsServer == nil {
+			p.IsServer = func(id string) bool { return s.isServer(ctx, id) }
+		}
+		return p
+	case *LWWPolicy:
+		if p != nil {
+			cp := *p
+			if cp.IsServer == nil {
+				cp.IsServer = func(id string) bool { return s.isServer(ctx, id) }
+			}
+			return cp
+		}
+	}
+	return base
+}
+
 // Reconcile applies inbound changes per-field LWW with delete-wins and deterministic tie-breakers,
 // then returns outbound changes (revision > sinceRev) and new revision.
 // Delete-wins: a __deleted tombstone always wins over a concurrent field edit, irrespective of UpdatedAt.
 // When both sides are __deleted, LWW decides. Otherwise LWW via MergePolicy.
 // Tie on UpdatedAt -> server wins, then deviceId lex order.
+// It is atomic when backed by *sql.DB: the inbound loop and cursor advance run in a single transaction.
 func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange) (outbound []SyncChange, newRev int64, rejected []SyncChange, err error) {
-	policy := s.policy
-	if policy == nil {
-		policy = LWWPolicy{}
-	}
-
-	prevLookup := deviceIsServerLookup
-	deviceIsServerLookup = func(id string) bool {
-		return s.isServer(ctx, id)
-	}
-	defer func() { deviceIsServerLookup = prevLookup }()
-
-	for _, inc := range inbound {
-		originDevice := inc.DeviceID
-		if originDevice == "" {
-			originDevice = deviceID
+	policy := s.effectivePolicy(ctx)
+	// Attempt transactional path when we have a *sql.DB.
+	if dbq, ok := any(s.q).(*db.Queries); ok {
+		if sqlDB, ok := dbq.UnderlyingDB().(*sql.DB); ok {
+			tx, err := sqlDB.BeginTx(ctx, nil)
+			if err == nil {
+				txQ := dbq.WithTx(tx)
+				// Use s.policy (not the already-wrapped policy) so effectivePolicy
+				// recomputes IsServer to capture txQ, not the outer s.q snapshot.
+				txStore := &SyncStore{q: txQ, policy: s.policy}
+				// Recompute policy for txStore so IsServer uses tx view.
+				txPolicy := txStore.effectivePolicy(ctx)
+				outbound, newRev, rejected, err = txStore.reconcileInternal(ctx, deviceID, sinceRev, inbound, txPolicy)
+				if err != nil {
+					_ = tx.Rollback()
+					return nil, 0, nil, err
+				}
+				if err := tx.Commit(); err != nil {
+					return nil, 0, nil, err
+				}
+				return outbound, newRev, rejected, nil
+			}
 		}
-		inc.DeviceID = originDevice
+	}
+	return s.reconcileInternal(ctx, deviceID, sinceRev, inbound, policy)
+}
+
+func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange, policy MergePolicy) (outbound []SyncChange, newRev int64, rejected []SyncChange, err error) {
+	for _, inc := range inbound {
+		inc.DeviceID = deviceID
 
 		if inc.Field != "__deleted" {
 			tomb, terr := s.GetLatestForField(ctx, inc.EntityType, inc.EntityID, "__deleted")
@@ -321,7 +358,7 @@ func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int
 			return nil, 0, nil, err
 		}
 		if existing == nil {
-			if _, aerr := s.AppendChange(ctx, originDevice, inc); aerr != nil {
+			if _, aerr := s.AppendChange(ctx, deviceID, inc); aerr != nil {
 				return nil, 0, nil, aerr
 			}
 			continue
@@ -335,27 +372,13 @@ func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int
 			continue
 		}
 		if !isExistingDeleted && isIncomingDeleted {
-			if _, aerr := s.AppendChange(ctx, originDevice, inc); aerr != nil {
+			if _, aerr := s.AppendChange(ctx, deviceID, inc); aerr != nil {
 				return nil, 0, nil, aerr
 			}
 			continue
 		}
-		if existing.UpdatedAt == inc.UpdatedAt {
-			exSrv := s.isServer(ctx, existing.DeviceID)
-			incSrv := s.isServer(ctx, inc.DeviceID)
-			if exSrv != incSrv {
-				if exSrv {
-					rejected = append(rejected, inc)
-					continue
-				}
-				if _, aerr := s.AppendChange(ctx, originDevice, inc); aerr != nil {
-					return nil, 0, nil, aerr
-				}
-				continue
-			}
-		}
 		if policy.PickWinner(*existing, inc) {
-			if _, aerr := s.AppendChange(ctx, originDevice, inc); aerr != nil {
+			if _, aerr := s.AppendChange(ctx, deviceID, inc); aerr != nil {
 				return nil, 0, nil, aerr
 			}
 		} else {

@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -42,14 +43,15 @@ func linkTestServer(t *testing.T, mgr DownloadManager) (*Server, *store.Store, *
 		// In tests where mgr is fake, this is the same.
 	}
 	srv := NewServer(Deps{
-		Auth:         authSvc,
-		Downloads:    mgr,
-		Search:       registry.NewRegistry("search"),
-		Downloader:   registry.NewRegistry("downloader"),
-		SyncStore:    syncStore,
-		LinkStore:    st.Q(),
-		OfflineSet:   st.Q(),
-		PairingStore: st.Q(),
+		Auth:          authSvc,
+		Downloads:     mgr,
+		Search:        registry.NewRegistry("search"),
+		Downloader:    registry.NewRegistry("downloader"),
+		SyncStore:     syncStore,
+		LinkStore:     st.Q(),
+		OfflineSet:    st.Q(),
+		PairingStore:  st.Q(),
+		PlaylistOwner: st.Q(),
 	})
 	cookie := &http.Cookie{Name: sessionCookie, Value: tok}
 	_ = authSvc
@@ -259,8 +261,10 @@ func TestLinkResolve(t *testing.T) {
 			t.Fatal(err)
 		}
 		_ = pl
-		// Also stamp owner? Not needed for link store GetSyncedPlaylist check, but if we used PlaylistOwner checks they'd fail.
-		// LinkStore uses GetSyncedPlaylist directly, not ownership.
+		_ = st4.Q().SetSyncedPlaylistOwner(context.Background(), db.SetSyncedPlaylistOwnerParams{
+			OwnerUserID: sql.NullString{String: "local", Valid: true},
+			ID:          "plTest1",
+		})
 		rec := doLink(t, srv4, cookie4, http.MethodPost, "/api/v1/links/add", `{"url":"https://open.spotify.com/track/spPL1","playlistId":"plTest1"}`)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("add with playlist %d: %s", rec.Code, rec.Body.String())
