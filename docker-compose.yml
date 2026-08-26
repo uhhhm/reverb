@@ -6,7 +6,7 @@
 
 services:
   reverb:
-    image: ghcr.io/maxjb-xyz/reverb:${REVERB_VERSION:-latest}
+    image: ghcr.io/uhhhm/reverb:${REVERB_VERSION:-latest}
     ports:
       - "8090:8090"
     environment:

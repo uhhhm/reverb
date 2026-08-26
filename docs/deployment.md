@@ -1,17 +1,19 @@
 # Deploying Reverb
 
+> Fork of [maxjb-xyz/reverb](https://github.com/maxjb-xyz/reverb) — this guide is for [uhhhm/reverb](https://github.com/uhhhm/reverb) (`ghcr.io/uhhhm/reverb`).
+
 Reverb ships as a single Docker image: a static Go binary with the web UI
 embedded, plus Python 3, ffmpeg, and a pinned spotDL. This guide covers a
 production-ish single-host deployment.
 
 ## Quick start
 
-Compose pulls the published image (`ghcr.io/maxjb-xyz/reverb`) — no source
+Compose pulls the published image (`ghcr.io/uhhhm/reverb`) — no source
 checkout or build required:
 
 ```bash
 mkdir reverb && cd reverb
-curl -O https://raw.githubusercontent.com/maxjb-xyz/reverb/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/uhhhm/reverb/main/docker-compose.yml
 mkdir music
 docker compose up -d
 ```
@@ -25,7 +27,7 @@ Want to use an existing library, pin a release, or supply credentials? Download
 the optional settings file and uncomment only the values you need:
 
 ```bash
-curl -o .env https://raw.githubusercontent.com/maxjb-xyz/reverb/main/.env.example
+curl -o .env https://raw.githubusercontent.com/uhhhm/reverb/main/.env.example
 ```
 
 - `REVERB_MUSIC_DIR=/srv/music` uses an existing music folder instead of `./music`.

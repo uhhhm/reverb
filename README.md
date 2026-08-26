@@ -14,6 +14,8 @@
   <img src="https://img.shields.io/badge/license-AGPL_v3-A00000" />
 </p>
 
+> **Fork notice:** This is a fork of [maxjb-xyz/reverb](https://github.com/maxjb-xyz/reverb) maintained at [uhhhm/reverb](https://github.com/uhhhm/reverb). Upstream links, images and deployment instructions below have been updated for this fork.
+
 **Reverb** is a self-hosted music app that unifies your existing music library, the
 broader catalog you can search online, and one-click downloading — in a single
 fast web UI. It is a Go single-binary modular monolith with an embedded
@@ -70,7 +72,7 @@ No clone or build needed — Compose pulls the published image:
 
 ```bash
 mkdir reverb && cd reverb
-curl -O https://raw.githubusercontent.com/maxjb-xyz/reverb/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/uhhhm/reverb/main/docker-compose.yml
 mkdir music
 docker compose up -d
 ```
@@ -164,9 +166,23 @@ EventBus that backs both the WebSocket and the download manager. The full design
 rationale follows those explicit adapter boundaries and the package-level tests.
 The HTTP API is documented in OpenAPI, served live at `/api/v1/openapi.yaml`.
 
-## Development & contributing
+## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md)
+```bash
+# Backend tests — never ./... (web/node_modules contains vendored Go)
+go test ./cmd/... ./internal/...
+make test   # backend + frontend unit tests
+
+# Frontend (from web/)
+cd web && npm install
+npm run test   # vitest
+npm run lint   # eslint
+
+# Build
+make build   # -> ./reverb (requires Go 1.23+, Node 22+)
+```
+
+See `CLAUDE.md` for architecture notes and conventions. `gofmt -w` and Conventional Commits are required.
 
 ## License
 
