@@ -10,9 +10,10 @@ interface CheckboxProps {
   onChange: (checked: boolean) => void
   label: string
   id?: string
+  disabled?: boolean
 }
 
-export function Checkbox({ checked, onChange, label, id }: CheckboxProps) {
+export function Checkbox({ checked, onChange, label, id, disabled = false }: CheckboxProps) {
   return (
     <span className="relative inline-flex h-4 w-4 flex-none items-center justify-center">
       <input
@@ -20,13 +21,15 @@ export function Checkbox({ checked, onChange, label, id }: CheckboxProps) {
         type="checkbox"
         aria-label={label}
         checked={checked}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
-        className="peer absolute inset-0 z-10 m-0 h-full w-full cursor-pointer opacity-0"
+        className="peer absolute inset-0 z-10 m-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
       />
       <span
         aria-hidden="true"
         className={[
           'pointer-events-none grid h-4 w-4 place-items-center rounded-[3px] border transition-colors',
+          disabled ? 'opacity-50' : '',
           'peer-focus-visible:ring-2 peer-focus-visible:ring-accent peer-focus-visible:ring-offset-1 peer-focus-visible:ring-offset-surface',
           checked ? 'border-accent bg-accent' : 'border-border-subtle bg-input',
         ].join(' ')}

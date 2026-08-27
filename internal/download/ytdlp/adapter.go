@@ -294,6 +294,17 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 		"--no-warnings",
 		"--extract-audio",
 	}
+	// Trim to a time range when asked. Rejected up front so a typo surfaces as a
+	// clear message instead of a late, cryptic yt-dlp failure.
+	section, serr := sectionArg(req)
+	if serr != nil {
+		return "", download.ClassifiedError{Class: download.ClassNoMatch, Err: fmt.Errorf("ytdlp: %w", serr)}
+	}
+	if section != "" {
+		// --force-keyframes-at-cuts re-encodes around the cut points so the audio
+		// actually starts where the user asked rather than at the previous keyframe.
+		args = append(args, "--download-sections", section, "--force-keyframes-at-cuts")
+	}
 	args = append(args, a.resolveAudioArgs(ctx, req, query)...)
 	args = append(args,
 		"--embed-metadata",

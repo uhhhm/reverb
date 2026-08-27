@@ -52,6 +52,12 @@ type DownloadRequest struct {
 	// Quality is the requested audio quality tier (a ceiling — see AudioQuality).
 	// Empty means "use the download_quality setting".
 	Quality AudioQuality `json:"quality,omitempty"`
+	// SectionStart and SectionEnd trim the source to a time range, as accepted by
+	// yt-dlp's --download-sections (e.g. "1:30", "00:01:30", "90"). Either may be
+	// empty: an empty start means "from the beginning", an empty end "to the end".
+	// Ignored by downloaders that cannot trim.
+	SectionStart string `json:"sectionStart,omitempty"`
+	SectionEnd   string `json:"sectionEnd,omitempty"`
 	// ForceOverwrite tells the downloader to replace an existing file rather than
 	// skip it. Set by the quality-upgrade path, where an identical filename
 	// already sits in the output dir and skipping is exactly the wrong behaviour.
@@ -143,4 +149,13 @@ type DownloadRemovedEvent struct {
 // or resumed, so every client reflects the gate state live.
 type QueueStateEvent struct {
 	Paused bool `json:"paused"`
+}
+
+// Chapter is one internal chapter of a source video, as reported by the
+// downloader. Used to offer per-chapter splitting: each chapter becomes its own
+// download request trimmed to StartSec..EndSec.
+type Chapter struct {
+	Title    string  `json:"title"`
+	StartSec float64 `json:"startSec"`
+	EndSec   float64 `json:"endSec"`
 }

@@ -1620,3 +1620,18 @@ func (m *Manager) SeedRequest(jobID string, req core.DownloadRequest) {
 	m.reqs[jobID] = req
 	m.mu.Unlock()
 }
+
+// ListChapters enumerates a source URL's internal chapters using the first
+// configured downloader that implements ChapterLister. It returns
+// ErrNoChapterLister when no such downloader is configured, so a caller can
+// tell "nothing can inspect this" apart from "this video has no chapters".
+func (m *Manager) ListChapters(ctx context.Context, url string) ([]core.Chapter, error) {
+	for _, e := range m.downloaders {
+		cl, ok := e.Downloader.(ChapterLister)
+		if !ok {
+			continue
+		}
+		return cl.ListChapters(ctx, url)
+	}
+	return nil, ErrNoChapterLister
+}

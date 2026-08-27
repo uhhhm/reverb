@@ -5,6 +5,7 @@ package download
 
 import (
 	"context"
+	"errors"
 
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/registry"
@@ -71,6 +72,17 @@ type AsyncDownloader interface {
 
 	// CancelAsync best-effort abandons the external job.
 	CancelAsync(ctx context.Context, ref string) error
+}
+
+// ErrNoChapterLister means no configured downloader can enumerate chapters.
+var ErrNoChapterLister = errors.New("no downloader can list chapters")
+
+// ChapterLister is an OPTIONAL capability. An adapter implementing it can
+// enumerate a source URL's internal chapters WITHOUT downloading it, so the
+// caller can offer per-chapter splitting. The Manager detects it via a type
+// assertion and exposes it through Manager.ListChapters.
+type ChapterLister interface {
+	ListChapters(ctx context.Context, url string) ([]core.Chapter, error)
 }
 
 // AsyncStatus is the polled state of an async download.

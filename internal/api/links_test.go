@@ -342,3 +342,158 @@ func TestLinkResolve(t *testing.T) {
 // ensure imported symbols not unused
 var _ core.DownloadJob
 var _ = time.Now
+
+// seedPlaylist creates an owned synced playlist the add-from-link handler will accept.
+func seedPlaylist(t *testing.T, st *store.Store, id string) {
+	t.Helper()
+	if _, err := st.Q().UpsertSyncedPlaylist(context.Background(), db.UpsertSyncedPlaylistParams{
+		ID:         id,
+		Source:     "spotify",
+		ExternalID: "ext-" + id,
+		Name:       "Test Playlist",
+		CoverUrl:   "",
+		TracksJson: "[]",
+		Mode:       "once",
+		CreatedAt:  time.Now().Unix(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Q().SetSyncedPlaylistOwner(context.Background(), db.SetSyncedPlaylistOwnerParams{
+		OwnerUserID: sql.NullString{String: "local", Valid: true},
+		ID:          id,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLinkAddForwardsTimeRange(t *testing.T) {
+	srv, _, cookie, fake := linkTestServer(t, nil)
+	rec := doLink(t, srv, cookie, http.MethodPost, "/api/v1/links/add",
+		`{"url":"https://www.youtube.com/watch?v=trim1","startTime":"1:30","endTime":"4:00"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(fake.allReqs) != 1 {
+		t.Fatalf("enqueued %d requests, want 1", len(fake.allReqs))
+	}
+	if fake.allReqs[0].SectionStart != "1:30" || fake.allReqs[0].SectionEnd != "4:00" {
+		t.Fatalf("range not forwarded: %+v", fake.allReqs[0])
+	}
+}
+
+// Chapter splitting fans out into one download request per chapter, each
+// trimmed to that chapter, so every chapter travels the normal one-track path.
+func TestLinkAddSplitChaptersFansOut(t *testing.T) {
+	mgr := newFakeManager()
+	mgr.chapters = []core.Chapter{
+		{Title: "Intro", StartSec: 0, EndSec: 30},
+		{Title: "Verse", StartSec: 30, EndSec: 90},
+		{Title: "Outro", StartSec: 90, EndSec: 150},
+	}
+	srv, _, cookie, fake := linkTestServer(t, mgr)
+
+	rec := doLink(t, srv, cookie, http.MethodPost, "/api/v1/links/add",
+		`{"url":"https://www.youtube.com/watch?v=chap1","splitChapters":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(fake.allReqs) != 3 {
+		t.Fatalf("enqueued %d requests, want 3", len(fake.allReqs))
+	}
+	titles := []string{fake.allReqs[0].Title, fake.allReqs[1].Title, fake.allReqs[2].Title}
+	for i, want := range []string{"Intro", "Verse", "Outro"} {
+		if titles[i] != want {
+			t.Fatalf("title[%d] = %q, want %q", i, titles[i], want)
+		}
+	}
+	if fake.allReqs[1].SectionStart != "30" || fake.allReqs[1].SectionEnd != "90" {
+		t.Fatalf("chapter bounds: %+v", fake.allReqs[1])
+	}
+	// All chapters share one album so the split lands as a coherent release.
+	if fake.allReqs[0].Album == "" || fake.allReqs[0].Album != fake.allReqs[2].Album {
+		t.Fatalf("chapters must share an album: %q vs %q", fake.allReqs[0].Album, fake.allReqs[2].Album)
+	}
+}
+
+// Every chapter must carry the playlist target, so a split adds them all.
+func TestLinkAddSplitChaptersAllJoinPlaylist(t *testing.T) {
+	mgr := newFakeManager()
+	mgr.chapters = []core.Chapter{
+		{Title: "One", StartSec: 0, EndSec: 10},
+		{Title: "Two", StartSec: 10, EndSec: 20},
+	}
+	srv, st, cookie, fake := linkTestServer(t, mgr)
+	seedPlaylist(t, st, "pl-chap")
+
+	rec := doLink(t, srv, cookie, http.MethodPost, "/api/v1/links/add",
+		`{"url":"https://www.youtube.com/watch?v=chap2","splitChapters":true,"playlistId":"pl-chap"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(fake.allReqs) != 2 {
+		t.Fatalf("enqueued %d requests, want 2", len(fake.allReqs))
+	}
+	for i, req := range fake.allReqs {
+		if req.AddToPlaylistID != "pl-chap" {
+			t.Fatalf("chapter %d missing playlist target: %+v", i, req)
+		}
+	}
+}
+
+func TestLinkAddRejectsRangeAndChaptersTogether(t *testing.T) {
+	mgr := newFakeManager()
+	mgr.chapters = []core.Chapter{{Title: "One", StartSec: 0, EndSec: 10}}
+	srv, _, cookie, fake := linkTestServer(t, mgr)
+
+	rec := doLink(t, srv, cookie, http.MethodPost, "/api/v1/links/add",
+		`{"url":"https://www.youtube.com/watch?v=chap3","splitChapters":true,"startTime":"0:10"}`)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422: %s", rec.Code, rec.Body.String())
+	}
+	if len(fake.allReqs) != 0 {
+		t.Fatalf("nothing should be enqueued, got %d", len(fake.allReqs))
+	}
+}
+
+func TestLinkAddSplitChaptersWithNoChapters(t *testing.T) {
+	mgr := newFakeManager() // chapters left nil
+	srv, _, cookie, fake := linkTestServer(t, mgr)
+
+	rec := doLink(t, srv, cookie, http.MethodPost, "/api/v1/links/add",
+		`{"url":"https://www.youtube.com/watch?v=chap4","splitChapters":true}`)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422: %s", rec.Code, rec.Body.String())
+	}
+	if len(fake.allReqs) != 0 {
+		t.Fatalf("nothing should be enqueued, got %d", len(fake.allReqs))
+	}
+}
+
+// Trimming a Spotify link is meaningless — spotDL has no notion of a section.
+func TestLinkAddRejectsRangeOnNonYouTube(t *testing.T) {
+	srv, _, cookie, _ := linkTestServer(t, nil)
+	rec := doLink(t, srv, cookie, http.MethodPost, "/api/v1/links/add",
+		`{"url":"https://open.spotify.com/track/sp1","startTime":"0:10"}`)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestLinkChaptersEndpoint(t *testing.T) {
+	mgr := newFakeManager()
+	mgr.chapters = []core.Chapter{{Title: "Intro", StartSec: 0, EndSec: 30}}
+	srv, _, cookie, _ := linkTestServer(t, mgr)
+
+	rec := doLink(t, srv, cookie, http.MethodPost, "/api/v1/links/chapters",
+		`{"url":"https://www.youtube.com/watch?v=chap5"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var got []core.Chapter
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Title != "Intro" {
+		t.Fatalf("chapters: %+v", got)
+	}
+}

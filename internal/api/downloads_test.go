@@ -20,6 +20,9 @@ var errActiveClear = errors.New("cannot clear active job")
 type fakeManager struct {
 	jobs          map[string]core.DownloadJob
 	lastReq       core.DownloadRequest
+	allReqs       []core.DownloadRequest // every Enqueue, in order — chapter fan-out asserts on this
+	chapters      []core.Chapter         // returned by ListChapters
+	chaptersErr   error
 	enqueueCalls  int // incremented on every Enqueue call
 	canceled      []string
 	retried       []string
@@ -34,10 +37,17 @@ func newFakeManager() *fakeManager { return &fakeManager{jobs: map[string]core.D
 func (m *fakeManager) Enqueue(_ context.Context, req core.DownloadRequest) (core.DownloadJob, error) {
 	m.enqueueCalls++
 	m.lastReq = req
+	m.allReqs = append(m.allReqs, req)
 	j := core.DownloadJob{ID: "job-" + req.ExternalID, DedupKey: "dk", Status: core.DownloadQueued, Source: req.Source, ExternalID: req.ExternalID, PlayWhenReady: req.PlayWhenReady}
 	m.jobs[j.ID] = j
 	return j, nil
 }
+
+// ListChapters makes fakeManager satisfy the optional chapterLister capability.
+func (m *fakeManager) ListChapters(context.Context, string) ([]core.Chapter, error) {
+	return m.chapters, m.chaptersErr
+}
+
 func (m *fakeManager) List(context.Context) ([]core.DownloadJob, error) {
 	out := []core.DownloadJob{}
 	for _, j := range m.jobs {

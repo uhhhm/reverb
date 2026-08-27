@@ -107,6 +107,29 @@ paths:
       summary: List albums
       parameters: [{ name: type, in: query, required: false, schema: { type: string } }]
       responses: { "200": { description: ok } }
+  /library/songs:
+    get:
+      summary: List every song in the library
+      parameters:
+        - { name: size, in: query, required: false, schema: { type: integer }, description: Maximum songs to return; omit for everything }
+        - { name: offset, in: query, required: false, schema: { type: integer } }
+      responses: { "200": { description: ok } }
+  /library/track/{id}/name:
+    put:
+      summary: Rename a library track (Reverb-side display override; file tags are never rewritten)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, description: Blank keeps the library's own title }
+                artist: { type: string, description: Blank keeps the library's own artist }
+      responses:
+        "200": { description: the stored override }
+        "503": { description: renaming unavailable }
   /library/track/{id}/peaks:
     get:
       summary: Waveform peaks for a local track (computed on demand; embedded library only)
@@ -426,6 +449,17 @@ paths:
         "200": { description: ResolveResult }
         "400": { description: url is required }
         "422": { description: unsupported URL }
+  /links/chapters:
+    post:
+      summary: List a source video's internal chapters (yt-dlp; no download)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { url: { type: string } }, required: [url] }
+      responses:
+        "200": { description: chapters (empty when the video has none) }
+        "503": { description: no downloader can read chapters }
   /links/add:
     post:
       summary: Add a resolved track to the library and optionally enqueue a source-native download
@@ -443,12 +477,24 @@ paths:
                   type: string
                   enum: [low, medium, high, best]
                   description: Overrides the configured default quality for this download.
+                startTime:
+                  type: string
+                  description: "YouTube only. Trim start as seconds, M:SS or H:MM:SS. Blank means from the beginning."
+                endTime:
+                  type: string
+                  description: "YouTube only. Trim end, same formats. Blank means to the end."
+                splitChapters:
+                  type: boolean
+                  description: >
+                    YouTube only. Enqueue one download per internal chapter instead of one for the
+                    whole video, each trimmed to its chapter and sharing the video title as album.
+                    Mutually exclusive with startTime/endTime.
               required: [url]
       responses:
-        "200": { description: "{ resolve, job?, playlistId?, catalogId }" }
+        "200": { description: "{ resolve, job?, jobs?, playlistId?, catalogId } — jobs is present only for a chapter split" }
         "400": { description: url is required }
         "404": { description: playlist not found }
-        "422": { description: unsupported URL }
+        "422": { description: unsupported URL, bad time range, or chapter split not possible }
         "503": { description: no downloader configured }
   /downloads/batch:
     post:

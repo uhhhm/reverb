@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -124,6 +126,14 @@ type linkAddBody struct {
 	Download   *bool   `json:"download"`
 	// Quality overrides the configured download_quality for this one download.
 	Quality string `json:"quality,omitempty"`
+	// StartTime and EndTime trim a YouTube source to a time range ("1:30",
+	// "00:01:30" or plain seconds). Both optional and independent.
+	StartTime string `json:"startTime,omitempty"`
+	EndTime   string `json:"endTime,omitempty"`
+	// SplitChapters downloads one track per internal chapter instead of one
+	// track for the whole video. Mutually exclusive with StartTime/EndTime:
+	// chapter boundaries stop meaning anything once the source is trimmed.
+	SplitChapters bool `json:"splitChapters,omitempty"`
 }
 
 func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
@@ -294,13 +304,14 @@ func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var job *core.DownloadJob
+	var jobs []core.DownloadJob
 	if shouldDownload {
 		dm := s.downloads()
 		if dm == nil {
 			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no downloader configured"})
 			return
 		}
-		req := core.DownloadRequest{
+		base := core.DownloadRequest{
 			Source:     res.Source,
 			ExternalID: res.ExternalID,
 			Artist:     res.Artist,
@@ -309,23 +320,34 @@ func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
 			Quality:    core.ParseAudioQuality(body.Quality, ""),
 		}
 		if res.Source == "youtube" {
-			req.ManualURL = strings.TrimSpace(res.URL)
+			base.ManualURL = strings.TrimSpace(res.URL)
 			// yt-dlp handles a pasted link natively; spotDL remains the fallback
 			// when no ytdlp downloader is configured.
-			req.PreferDownloader = "ytdlp"
+			base.PreferDownloader = "ytdlp"
 		}
 		if playlistID != "" {
-			req.AddToPlaylistID = playlistID
+			base.AddToPlaylistID = playlistID
 		}
 		if cu, ok := currentUser(r); ok {
-			req.InitiatedBy = cu.ID
+			base.InitiatedBy = cu.ID
 		}
-		j, err := dm.Enqueue(r.Context(), req)
-		if err != nil {
-			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+
+		reqs, derr := s.linkDownloadRequests(r.Context(), base, res, body)
+		if derr != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": derr.Error()})
 			return
 		}
-		job = &j
+		for _, req := range reqs {
+			j, err := dm.Enqueue(r.Context(), req)
+			if err != nil {
+				writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+				return
+			}
+			jobs = append(jobs, j)
+		}
+		if len(jobs) > 0 {
+			job = &jobs[0]
+		}
 	}
 
 	resp := make(map[string]any)
@@ -337,5 +359,99 @@ func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
 	if job != nil {
 		resp["job"] = job
 	}
+	if len(jobs) > 1 {
+		resp["jobs"] = jobs
+	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// chapterLister is the manager capability the chapter endpoints need. The
+// Manager satisfies it; test doubles need not.
+type chapterLister interface {
+	ListChapters(ctx context.Context, url string) ([]core.Chapter, error)
+}
+
+// linkDownloadRequests expands one add-from-link request into the download
+// requests it implies: normally exactly one, but a chapter split becomes one
+// request per chapter, each trimmed to that chapter's bounds. Splitting this
+// way (rather than letting yt-dlp write many files from a single job) keeps
+// every chapter on the ordinary one-job-per-track path, so library matching,
+// playlist adds, progress and retry all work per chapter without special cases.
+func (s *Server) linkDownloadRequests(
+	ctx context.Context, base core.DownloadRequest, res *linkresolve.ResolveResult, body linkAddBody,
+) ([]core.DownloadRequest, error) {
+	start, end := strings.TrimSpace(body.StartTime), strings.TrimSpace(body.EndTime)
+	trimmed := start != "" || end != ""
+
+	if body.SplitChapters && trimmed {
+		return nil, errors.New("choose either a time range or chapter splitting, not both")
+	}
+	if (body.SplitChapters || trimmed) && res.Source != "youtube" {
+		return nil, errors.New("time ranges and chapter splitting only apply to YouTube links")
+	}
+
+	if !body.SplitChapters {
+		base.SectionStart, base.SectionEnd = start, end
+		return []core.DownloadRequest{base}, nil
+	}
+
+	cl, ok := s.downloads().(chapterLister)
+	if !ok {
+		return nil, errors.New("the configured downloader cannot read chapters")
+	}
+	chapters, err := cl.ListChapters(ctx, res.URL)
+	if err != nil {
+		return nil, fmt.Errorf("could not read chapters: %w", err)
+	}
+	if len(chapters) == 0 {
+		return nil, errors.New("this video has no chapters to split on")
+	}
+
+	out := make([]core.DownloadRequest, 0, len(chapters))
+	for _, ch := range chapters {
+		req := base
+		// The chapter is the track; the video as a whole becomes the album, so
+		// the split lands in the library as one coherent release.
+		req.Title = ch.Title
+		req.Album = res.Title
+		req.SectionStart = strconv.FormatFloat(ch.StartSec, 'f', -1, 64)
+		if ch.EndSec > ch.StartSec {
+			req.SectionEnd = strconv.FormatFloat(ch.EndSec, 'f', -1, 64)
+		}
+		out = append(out, req)
+	}
+	return out, nil
+}
+
+// handleLinkChapters previews a link's chapters so the UI can show what a split
+// would produce before the user commits to it.
+func (s *Server) handleLinkChapters(w http.ResponseWriter, r *http.Request) {
+	var body linkResolveBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	if strings.TrimSpace(body.URL) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url is required"})
+		return
+	}
+	dm := s.downloads()
+	if dm == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no downloader configured"})
+		return
+	}
+	cl, ok := dm.(chapterLister)
+	if !ok {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "the configured downloader cannot read chapters"})
+		return
+	}
+	chapters, err := cl.ListChapters(r.Context(), body.URL)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+	if chapters == nil {
+		chapters = []core.Chapter{}
+	}
+	writeJSON(w, http.StatusOK, chapters)
 }
