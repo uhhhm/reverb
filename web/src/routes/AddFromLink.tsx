@@ -6,6 +6,7 @@ import { useSyncedPlaylists } from '../lib/syncedPlaylistApi'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
 import { useToastStore } from '../lib/toastStore'
 import { Button } from '../components/ui/Button'
+import { Checkbox } from '../components/ui/Checkbox'
 
 export default function AddFromLink() {
   useDocumentTitle('Add from link')
@@ -181,7 +182,7 @@ export default function AddFromLink() {
               aria-label="Add to playlist"
               value={selectedPlaylist}
               onChange={(e) => setSelectedPlaylist(e.target.value)}
-              className="w-full rounded-md border border-border-subtle bg-surface px-3 py-2 text-sm text-text-primary outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+              className="w-full appearance-none rounded-md border border-border-subtle bg-input px-3 py-2 text-sm text-text-primary outline-none focus:border-accent focus:ring-1 focus:ring-accent"
             >
               <option value="">Add to library only</option>
               {playlists?.map((pl) => (
@@ -194,13 +195,7 @@ export default function AddFromLink() {
           </div>
 
           <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              aria-label="Download now"
-              checked={downloadNow}
-              onChange={(e) => setDownloadNow(e.target.checked)}
-              className="h-4 w-4 rounded border-border-subtle accent-accent"
-            />
+            <Checkbox label="Download now" checked={downloadNow} onChange={setDownloadNow} />
             <span className="text-sm font-semibold text-text-primary">Download now</span>
           </label>
           <p className="text-xs text-text-secondary">

@@ -3,6 +3,10 @@
 @tailwind utilities;
 
 :root {
+  /* Dark-only app: makes native controls (select popups, scrollbars, date
+     pickers) render dark instead of inheriting the OS light theme. */
+  color-scheme: dark;
+
   /* accent — configurable; default red #F0354B as space-separated RGB channels */
   --color-accent: 240 53 75;
 
