@@ -115,6 +115,7 @@ type Deps struct {
 	ConfigDirty   ConfigDirty
 	Reload        ServiceReloader
 	Dev           bool
+	Desktop       bool
 	Version       string
 	// DataDir is the directory where Reverb persists app data (same dir as the
 	// SQLite DB). Used by the playlist-cover upload handler. When empty, cover

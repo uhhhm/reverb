@@ -25,6 +25,15 @@ const contentSecurityPolicy = "default-src 'self'; " +
 	"connect-src 'self' ws: wss:; " +
 	"frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 
+const desktopContentSecurityPolicy = "default-src 'self'; " +
+	"img-src 'self' data: https:; " +
+	"media-src 'self' blob:; " +
+	"style-src 'self' 'unsafe-inline'; " +
+	"script-src 'self'; " +
+	"font-src 'self' data:; " +
+	"connect-src 'self' ws: wss: wails: http://localhost:* ws://localhost:*; " +
+	"frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+
 // securityHeaders sets defensive response headers on every response (SPA + API).
 // These are safe defaults for a same-origin single-page app served over a trusted
 // reverse proxy; see contentSecurityPolicy for the CSP rationale.
@@ -34,7 +43,11 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
-		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		csp := contentSecurityPolicy
+		if s.deps.Desktop {
+			csp = desktopContentSecurityPolicy
+		}
+		h.Set("Content-Security-Policy", csp)
 		next.ServeHTTP(w, r)
 	})
 }

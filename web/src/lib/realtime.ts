@@ -1,5 +1,12 @@
 import type { RealtimeEvent } from './types'
 
+declare global {
+  interface Window {
+    __REVERB_PORT__?: number
+    __WAILS__?: boolean
+  }
+}
+
 // WebSocketLike is the minimal slice we use so tests inject a stub (no real
 // network/socket). The browser `WebSocket` satisfies it.
 export interface WebSocketLike {
@@ -46,6 +53,9 @@ export class RealtimeConnection {
   }
 
   private url(): string {
+    if (typeof window !== 'undefined' && window.__REVERB_PORT__) {
+      return `ws://127.0.0.1:${window.__REVERB_PORT__}/api/v1/ws`
+    }
     // Same-origin ws(s):// URL derived from the page location.
     if (typeof location !== 'undefined') {
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'

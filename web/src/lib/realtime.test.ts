@@ -62,4 +62,32 @@ describe('RealtimeConnection', () => {
     conn.close()
     vi.useRealTimers()
   })
+
+  it('uses injected port when window.__REVERB_PORT__ is set (desktop)', () => {
+    const prev = (window as unknown as { __REVERB_PORT__?: number }).__REVERB_PORT__
+    ;(window as unknown as { __REVERB_PORT__?: number }).__REVERB_PORT__ = 8765
+    try {
+      const { sockets, StubSocket } = makeStub()
+      const conn = new RealtimeConnection({ onEvent: () => {} }, (url) => new StubSocket(url))
+      expect(sockets[0].url).toBe('ws://127.0.0.1:8765/api/v1/ws')
+      conn.close()
+    } finally {
+      if (prev === undefined) delete (window as unknown as { __REVERB_PORT__?: number }).__REVERB_PORT__
+      else (window as unknown as { __REVERB_PORT__?: number }).__REVERB_PORT__ = prev
+    }
+  })
+
+  it('falls back to location.host when no injected port', () => {
+    const prev = (window as unknown as { __REVERB_PORT__?: number }).__REVERB_PORT__
+    if (prev !== undefined) delete (window as unknown as { __REVERB_PORT__?: number }).__REVERB_PORT__
+    try {
+      const { sockets, StubSocket } = makeStub()
+      const conn = new RealtimeConnection({ onEvent: () => {} }, (url) => new StubSocket(url))
+      expect(sockets[0].url).toContain('/api/v1/ws')
+      expect(sockets[0].url).not.toContain('127.0.0.1')
+      conn.close()
+    } finally {
+      if (prev !== undefined) (window as unknown as { __REVERB_PORT__?: number }).__REVERB_PORT__ = prev
+    }
+  })
 })
