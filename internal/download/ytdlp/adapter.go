@@ -214,6 +214,14 @@ func sanitizeSegment(s string) string {
 	return strings.TrimSpace(r.Replace(s))
 }
 
+// metadataLiteral prepares a known tag value for the FROM side of --parse-metadata.
+// yt-dlp splits "FROM:TO" at the first UNESCAPED colon, so a colon inside the value
+// (e.g. "Lullaby of the New Moon (I) : Somnias a Luna") would otherwise truncate the
+// tag and shift the rest into the field name.
+func metadataLiteral(s string) string {
+	return strings.ReplaceAll(sanitizeSegment(s), ":", "\\:")
+}
+
 // outputTemplate builds the -o value. When artist and title are known they are
 // used literally, so the file lands with a sane name instead of a YouTube title
 // like "Artist - Song (Official Video) [HD]".
@@ -268,9 +276,8 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 	}
 
 	args := []string{
-		"--no-playlist",     // a watch URL carrying &list= must not pull the whole playlist
-		"--no-progress-bar", // plain lines instead of a redrawn bar
-		"--newline",         // one progress update per line, so onLine sees each
+		"--no-playlist", // a watch URL carrying &list= must not pull the whole playlist
+		"--newline",     // progress as discrete lines, not a redrawn bar, so onLine sees each
 		"--no-warnings",
 		"--extract-audio",
 		"--audio-format", a.audioFormat,
@@ -283,13 +290,13 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 	}
 	// Force the tags we already know onto the file. yt-dlp expands the FROM side
 	// as an output template, and a literal with no placeholders expands to itself.
-	if s := sanitizeSegment(req.Artist); s != "" {
+	if s := metadataLiteral(req.Artist); s != "" {
 		args = append(args, "--parse-metadata", s+":%(meta_artist)s")
 	}
-	if s := sanitizeSegment(req.Title); s != "" {
+	if s := metadataLiteral(req.Title); s != "" {
 		args = append(args, "--parse-metadata", s+":%(meta_title)s")
 	}
-	if s := sanitizeSegment(req.Album); s != "" {
+	if s := metadataLiteral(req.Album); s != "" {
 		args = append(args, "--parse-metadata", s+":%(meta_album)s")
 	}
 	args = append(args, "--output", a.outputTemplate(req), "--", query)

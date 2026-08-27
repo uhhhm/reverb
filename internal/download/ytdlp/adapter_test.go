@@ -365,3 +365,44 @@ func TestTestConnectionRunsVersion(t *testing.T) {
 		t.Fatal("TestConnection must surface a runner error")
 	}
 }
+
+// Every flag the adapter passes must actually exist in yt-dlp: a typo'd flag makes
+// yt-dlp exit on usage before downloading anything ("no such option").
+func TestStartUsesOnlyRealProgressFlags(t *testing.T) {
+	r := &fakeRunner{}
+	a := newAdapter(t, r, nil)
+	if _, err := a.Start(context.Background(), core.DownloadRequest{
+		Artist: "A", Title: "T", ManualURL: "https://www.youtube.com/watch?v=abc",
+	}, func(int) {}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(r.argString(), "--no-progress-bar") {
+		t.Errorf("--no-progress-bar is not a yt-dlp option: %s", r.argString())
+	}
+	if !strings.Contains(r.argString(), "--newline") {
+		t.Errorf("want --newline for line-wise progress: %s", r.argString())
+	}
+}
+
+// yt-dlp splits --parse-metadata at the first unescaped colon, so a colon in the
+// title must be escaped or the tag is silently truncated.
+func TestStartEscapesColonsInParseMetadata(t *testing.T) {
+	r := &fakeRunner{}
+	a := newAdapter(t, r, nil)
+	if _, err := a.Start(context.Background(), core.DownloadRequest{
+		Artist: "HOYO-MiX", Title: "Lullaby of the New Moon (I) : Somnias a Luna",
+		ManualURL: "https://www.youtube.com/watch?v=abc",
+	}, func(int) {}); err != nil {
+		t.Fatal(err)
+	}
+	want := `Lullaby of the New Moon (I) \: Somnias a Luna:%(meta_title)s`
+	found := false
+	for _, arg := range r.gotArgs {
+		if arg == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("want escaped title arg %q, got args: %v", want, r.gotArgs)
+	}
+}
