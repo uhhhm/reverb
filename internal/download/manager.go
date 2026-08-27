@@ -806,6 +806,7 @@ func (m *Manager) Enqueue(ctx context.Context, req core.DownloadRequest) (core.D
 		ISRC:            req.ISRC,
 		PlayWhenReady:   req.PlayWhenReady,
 		AddToPlaylistID: req.AddToPlaylistID,
+		Quality:         req.Quality,
 		CreatedAt:       m.clock.Now().Unix(),
 	}
 	if err := m.store.Insert(ctx, job, req); err != nil {

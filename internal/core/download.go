@@ -97,6 +97,9 @@ type DownloadJob struct {
 	// AddToPlaylistID mirrors DownloadRequest.AddToPlaylistID so the post-download
 	// playlist-add hook in runScan can read it from the rehydrated job.
 	AddToPlaylistID string `json:"addToPlaylistId,omitempty"`
+	// Quality is the tier this job was fetched at, so the UI can show what a
+	// downloaded track is and offer an upgrade. Empty for jobs predating tiers.
+	Quality AudioQuality `json:"quality,omitempty"`
 	// DownloaderRef is downloader-internal handle for async downloaders (e.g. the
 	// Lidarr album id). Empty for synchronous downloaders like spotDL.
 	DownloaderRef string `json:"downloaderRef,omitempty"`

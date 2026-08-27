@@ -375,6 +375,42 @@ paths:
       summary: Remove playlist from offline set (local-only)
       parameters: [{ name: playlistId, in: path, required: true, schema: { type: string } }]
       responses: { "200": { description: ok }, "404": { description: not found } }
+  /downloads/upgrade:
+    post:
+      summary: Re-download a track at a higher quality tier, replacing the existing file
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source: { type: string }
+                externalId: { type: string }
+                artist: { type: string }
+                title: { type: string }
+                album: { type: string }
+                quality: { type: string, enum: [low, medium, high, best] }
+                currentQuality:
+                  type: string
+                  enum: [low, medium, high, best]
+                  description: When given, a request that would not raise the tier is rejected.
+              required: [artist, title, quality]
+      responses:
+        "200": { description: DownloadJob }
+        "400": { description: missing artist/title or unknown tier }
+        "422": { description: not an upgrade, or nothing can fetch it }
+  /downloads/upgradable:
+    get:
+      summary: Completed downloads sitting below the target quality tier
+      parameters:
+        - name: quality
+          in: query
+          required: false
+          schema: { type: string, enum: [low, medium, high, best] }
+          description: Defaults to the configured download_quality setting.
+      responses:
+        "200": { description: array of upgradable tracks }
   /links/resolve:
     post:
       summary: Resolve a Spotify or YouTube URL to track/album/playlist metadata

@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { Select } from '../ui'
 import { useSettings, useUpdateSettings } from '../../lib/settingsApi'
 import { AUDIO_QUALITIES, DEFAULT_AUDIO_QUALITY, type AudioQuality } from '../../lib/audioQuality'
@@ -28,6 +29,23 @@ export function DownloadsSection() {
             options={AUDIO_QUALITIES.map((q) => ({ value: q.value, label: q.label }))}
             onChange={(v) => updateSettings.mutate({ downloadQuality: v as AudioQuality })}
           />
+        </div>
+      </div>
+
+      <div className="flex items-start gap-5 py-5">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-bold text-text-primary">Upgrade existing downloads</div>
+          <div className="mt-0.5 text-xs text-text-secondary">
+            Re-download tracks that were fetched below your current tier, replacing the existing files.
+          </div>
+        </div>
+        <div className="flex-none">
+          <Link
+            to="/upgrade-quality"
+            className="inline-flex items-center rounded-md border border-border-subtle bg-input px-3 py-2 text-sm font-semibold text-text-primary hover:bg-raised-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            Review upgrades
+          </Link>
         </div>
       </div>
     </div>

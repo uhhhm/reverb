@@ -90,6 +90,7 @@ func toCoreFlatRow(r rowFields) (core.DownloadJob, error) {
 	j.DurationMs = req.DurationMs
 	j.PlayWhenReady = req.PlayWhenReady
 	j.AddToPlaylistID = req.AddToPlaylistID
+	j.Quality = req.Quality
 	return j, nil
 }
 

@@ -284,6 +284,7 @@ func (s *Server) routes() {
 			pr.Get("/library/artist/{id}", s.handleLibraryArtist)
 			pr.Get("/library/album/{id}", s.handleLibraryAlbum)
 			pr.Get("/library/albums", s.handleLibraryAlbums)
+			pr.Get("/downloads/upgradable", s.handleListUpgradable)
 			pr.Get("/library/track/{id}/peaks", s.handleTrackPeaks)
 			pr.Get("/library/track/{id}/lyrics", s.handleTrackLyrics)
 			pr.Get("/collection", s.handleCollection)
@@ -366,6 +367,7 @@ func (s *Server) routes() {
 				dr.Post("/downloads/{id}/clear", s.handleClearDownload)
 				dr.Post("/downloads/{id}/cancel", s.handleCancelDownload)
 				dr.Post("/downloads/{id}/retry", s.handleRetryDownload)
+				dr.Post("/downloads/upgrade", s.handleUpgradeDownload)
 			})
 
 			// create playlists: every playlist WRITE (create/import/mutate).

@@ -4,6 +4,7 @@ import type { Track } from '../../lib/types'
 import { formatDuration } from '../../lib/types'
 import { trackCoverUrl } from '../../lib/libraryApi'
 import { AddToPlaylistMenu } from '../AddToPlaylistMenu'
+import { UpgradeQualityButton } from '../UpgradeQualityButton'
 import { Cover } from './Cover'
 import { Equalizer } from './Equalizer'
 import { Icon } from './Icon'
@@ -143,8 +144,9 @@ export function TrackRow({ track, index, active = false, playing, onPlay, right,
         {right}
       </span>
 
-      {/* Add-to-playlist button — only for owned tracks (truthy track.id) */}
+      {/* Row actions — only for owned tracks (truthy track.id) */}
       <span className="flex items-center justify-center">
+        <UpgradeQualityButton track={track} />
         {track.id ? (
           <button
             type="button"
