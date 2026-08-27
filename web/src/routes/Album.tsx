@@ -15,6 +15,7 @@ import { rgbToCss } from '../lib/palette'
 import * as statsApi from '../lib/statsApi'
 import type { EntityStats, PlayCountTrack } from '../lib/statsApi'
 import { presetRange, msToHuman } from '../lib/range'
+import { RenameTrackDialog } from '../components/RenameTrackDialog'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
 
 // ── Local helpers ─────────────────────────────────────────────────────────────
@@ -68,6 +69,7 @@ export default function Album() {
   const isPlaying = usePlayer((s) => s.playing)
   const palette = useAlbumPalette(album?.coverArtId ? coverUrl(album.coverArtId, 300) : album?.coverUrl)
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
+  const [renaming, setRenaming] = useState<Track | null>(null)
 
   // ── Listening-history stats ──────────────────────────────────────────────────
   // Hooks must run on every render (before the loading/error early returns), so
@@ -281,6 +283,7 @@ export default function Album() {
                 active={isActive}
                 playing={isActive ? isPlaying : undefined}
                 onPlay={() => playTrackList(ownedTracks, ownedIdx)}
+                onRename={setRenaming}
                 coverSrc={t.libraryTrack.coverArtId ? undefined : t.coverUrl}
                 artistTo={t.artistExternalId ? `/artist/spotify/${t.artistExternalId}` : undefined}
                 albumTo={t.albumExternalId ? `/album/spotify/${t.albumExternalId}` : undefined}
@@ -323,6 +326,8 @@ export default function Album() {
           <EmptyState icon="browse" title="No tracks in this album" />
         )}
       </div>
+
+      <RenameTrackDialog track={renaming} onClose={() => setRenaming(null)} />
     </div>
   )
 }

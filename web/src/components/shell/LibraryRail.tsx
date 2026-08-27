@@ -51,14 +51,27 @@ export function LibraryRail() {
       {/* Header — "Your Library" opens the full library page */}
       <div className="px-4 pt-4 pb-2">
         <div className="flex items-center">
+          {/* Styled as an explicit button (surface, border, chevron) rather than
+              bare text — as plain text it did not read as the way into the full
+              library page. */}
           <button
             type="button"
             onClick={() => navigate('/library')}
             aria-label="Open your library"
-            className="flex items-center gap-2.5 font-bold text-base text-text-secondary hover:text-text-primary transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            title="Open your library"
+            className={[
+              'group/lib flex items-center gap-2.5 rounded-md px-2 py-1.5 -ml-2',
+              'border border-transparent bg-raised/60 hover:bg-raised-hover hover:border-border-subtle',
+              'font-bold text-base text-text-secondary hover:text-text-primary',
+              'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+            ].join(' ')}
           >
             <Icon name="browse" className="w-4 h-4" />
             Your Library
+            <Icon
+              name="fwd"
+              className="w-3.5 h-3.5 text-text-muted transition-transform group-hover/lib:translate-x-0.5"
+            />
           </button>
           <div className="ml-auto flex gap-1.5 text-text-secondary">
             <IconButton

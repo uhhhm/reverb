@@ -1,14 +1,18 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAlbums, useArtists, useLibraryStatus } from '../lib/libraryApi'
+import { useAlbums, useArtists, useLibraryStatus, useSongs } from '../lib/libraryApi'
 import { useSyncedPlaylists } from '../lib/syncedPlaylistApi'
-import { Chip, MediaCard, Skeleton, EmptyState, Button } from '../components/ui'
+import { Chip, MediaCard, Skeleton, EmptyState, Button, TrackRow } from '../components/ui'
 import { ImportPlaylistDialog } from '../components/ImportPlaylistDialog'
+import { RenameTrackDialog } from '../components/RenameTrackDialog'
+import { usePlayer } from '../lib/playerStore'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
+import type { Track } from '../lib/types'
 
-type Filter = 'albums' | 'artists' | 'playlists'
+type Filter = 'songs' | 'albums' | 'artists' | 'playlists'
 
 const FILTERS: { key: Filter; label: string }[] = [
+  { key: 'songs', label: 'Songs' },
   { key: 'albums', label: 'Albums' },
   { key: 'artists', label: 'Artists' },
   { key: 'playlists', label: 'Playlists' },
@@ -34,6 +38,22 @@ function SkeletonGrid({ rounded = 'md' }: { rounded?: 'md' | 'full' }) {
   )
 }
 
+function SkeletonRows() {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: SKELETON_COUNT }).map((_, i) => (
+        <div key={i} className="flex items-center gap-3 px-2.5 py-2">
+          <Skeleton className="h-10 w-10 flex-none" rounded="md" data-testid="skeleton-row-cover" />
+          <div className="flex-1 space-y-2">
+            <Skeleton className="h-3 w-1/3" />
+            <Skeleton className="h-2 w-1/4" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /** Distinct error state for a failed library query — separate from the "empty
  *  library" message so an outage never reads as "you have no music". */
 function LibraryError({ onRetry }: { onRetry: () => void }) {
@@ -53,10 +73,15 @@ function LibraryError({ onRetry }: { onRetry: () => void }) {
 
 export default function Library() {
   useDocumentTitle('Library')
-  const [filter, setFilter] = useState<Filter>('albums')
+  const [filter, setFilter] = useState<Filter>('songs')
   const [importOpen, setImportOpen] = useState(false)
+  const [renaming, setRenaming] = useState<Track | null>(null)
   const navigate = useNavigate()
+  const playTrackList = usePlayer((s) => s.playTrackList)
+  const currentTrack = usePlayer((s) => s.current)
+  const isPlaying = usePlayer((s) => s.playing)
 
+  const songs = useSongs()
   const albums = useAlbums('newest')
   const artists = useArtists()
   const syncedPlaylists = useSyncedPlaylists()
@@ -113,6 +138,37 @@ export default function Library() {
           </Chip>
         ))}
       </div>
+
+      {/* Songs list */}
+      {filter === 'songs' && (
+        <>
+          {songs.isLoading ? (
+            <SkeletonRows />
+          ) : songs.isError ? (
+            <LibraryError onRetry={() => void songs.refetch()} />
+          ) : (songs.data ?? []).length === 0 ? (
+            <EmptyState
+              icon="music"
+              title="Nothing here yet"
+              hint="Download some music to start building your library."
+            />
+          ) : (
+            <div>
+              {(songs.data ?? []).map((t, i) => (
+                <TrackRow
+                  key={t.id}
+                  track={t}
+                  index={i}
+                  active={currentTrack?.id === t.id}
+                  playing={currentTrack?.id === t.id ? isPlaying : undefined}
+                  onPlay={() => playTrackList(songs.data ?? [], i)}
+                  onRename={setRenaming}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      )}
 
       {/* Albums grid */}
       {filter === 'albums' && (
@@ -204,6 +260,7 @@ export default function Library() {
       )}
 
       <ImportPlaylistDialog open={importOpen} onClose={() => setImportOpen(false)} />
+      <RenameTrackDialog track={renaming} onClose={() => setRenaming(null)} />
     </div>
   )
 }

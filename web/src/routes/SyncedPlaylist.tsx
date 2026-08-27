@@ -19,6 +19,7 @@ import { Button, IconButton, Cover, Skeleton, EmptyState, Badge, Toggle, Select,
 import { PortalMenu } from '../components/PortalMenu'
 import type { ExternalResult, ExternalTrackRef, AlbumDetailTrack, Track } from '../lib/types'
 import { usePlayer } from '../lib/playerStore'
+import { RenameTrackDialog } from '../components/RenameTrackDialog'
 import { useToastStore } from '../lib/toastStore'
 import { useAlbumPalette } from '../lib/useAlbumPalette'
 import { rgbToCss } from '../lib/palette'
@@ -92,6 +93,7 @@ export default function SyncedPlaylist() {
   const currentTrack = usePlayer((s) => s.current)
   const isPlaying = usePlayer((s) => s.playing)
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
+  const [renaming, setRenaming] = useState<Track | null>(null)
 
   // "…" menu state
   const [menuOpen, setMenuOpen] = useState(false)
@@ -603,6 +605,7 @@ export default function SyncedPlaylist() {
                     active={isActive}
                     playing={isActive ? isPlaying : undefined}
                     onPlay={() => playTrackList(ownedTracks, ownedIdx)}
+                    onRename={setRenaming}
                     coverSrc={t.libraryTrack?.coverArtId ? undefined : t.coverUrl}
                     artistTo={t.artistExternalId ? `/artist/spotify/${t.artistExternalId}` : undefined}
                     albumTo={t.albumExternalId ? `/album/spotify/${t.albumExternalId}` : undefined}
@@ -706,6 +709,8 @@ export default function SyncedPlaylist() {
           <EmptyState icon="browse" title="No tracks in this playlist" />
         )}
       </div>
+
+      <RenameTrackDialog track={renaming} onClose={() => setRenaming(null)} />
     </div>
   )
 }

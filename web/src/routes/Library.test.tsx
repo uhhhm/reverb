@@ -4,7 +4,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { UseQueryResult } from '@tanstack/react-query'
 import Library from './Library'
-import type { Album, Artist } from '../lib/types'
+import type { Album, Artist, Track } from '../lib/types'
 
 // ------------------------------------------------------------------
 // Helpers
@@ -53,6 +53,25 @@ function makeSyncedPlaylist(overrides: Partial<SyncedPlaylist> = {}): SyncedPlay
   }
 }
 
+function makeTrack(overrides: Partial<Track> = {}): Track {
+  return {
+    id: 't1',
+    title: 'Test Song',
+    albumId: 'al1',
+    album: 'Test Album',
+    artistId: 'ar1',
+    artist: 'Test Artist',
+    coverArtId: 'ca1',
+    trackNumber: 1,
+    discNumber: 1,
+    durationMs: 200000,
+    bitRate: 320,
+    suffix: 'mp3',
+    contentType: 'audio/mpeg',
+    ...overrides,
+  } as Track
+}
+
 function makeAlbum(overrides: Partial<Album> = {}): Album {
   return {
     id: 'al1',
@@ -87,6 +106,7 @@ vi.mock('../lib/libraryApi', async (importOriginal) => {
   return {
     ...actual,
     useAlbums: vi.fn(),
+    useSongs: vi.fn(),
     useArtists: vi.fn(),
     useLibraryStatus: vi.fn(),
     coverUrl: vi.fn((id: string) => `/api/v1/cover/${id}`),
@@ -106,8 +126,9 @@ import type { SyncedPlaylist } from '../lib/types'
 
 describe('Library page', () => {
   beforeEach(async () => {
-    const { useAlbums, useArtists, useLibraryStatus } = await import('../lib/libraryApi')
+    const { useAlbums, useArtists, useLibraryStatus, useSongs } = await import('../lib/libraryApi')
     vi.mocked(useAlbums).mockReturnValue({ data: [], isLoading: false, error: null } as unknown as UseQueryResult<Album[], Error>)
+    vi.mocked(useSongs).mockReturnValue({ data: [], isLoading: false, error: null } as unknown as UseQueryResult<Track[], Error>)
     vi.mocked(useArtists).mockReturnValue({ data: [], isLoading: false, error: null } as unknown as UseQueryResult<Artist[], Error>)
     vi.mocked(useLibraryStatus).mockReturnValue({ data: { mode: 'built-in', state: 'ready' }, isLoading: false, error: null } as unknown as ReturnType<typeof useLibraryStatus>)
     vi.mocked(useSyncedPlaylists).mockReturnValue({ data: [], isLoading: false, error: null } as unknown as ReturnType<typeof useSyncedPlaylists>)
@@ -122,14 +143,15 @@ describe('Library page', () => {
     expect(screen.getByRole('heading', { name: /your library/i })).toBeInTheDocument()
   })
 
-  it('renders Albums, Artists, Playlists filter chips', () => {
+  it('renders Songs, Albums, Artists, Playlists filter chips', () => {
     render(wrap(<Library />))
+    expect(screen.getByRole('button', { name: /^songs$/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^albums$/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^artists$/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^playlists$/i })).toBeInTheDocument()
   })
 
-  it('defaults to Albums tab showing album cards', async () => {
+  it('shows album cards on the Albums tab', async () => {
     const { useAlbums } = await import('../lib/libraryApi')
     vi.mocked(useAlbums).mockReturnValue({
       data: [makeAlbum({ id: 'al1', name: 'OK Computer', artist: 'Radiohead' })],
@@ -138,6 +160,7 @@ describe('Library page', () => {
     } as unknown as UseQueryResult<Album[], Error>)
 
     render(wrap(<Library />))
+    fireEvent.click(screen.getByRole('button', { name: /^albums$/i }))
     expect(screen.getByRole('button', { name: /ok computer/i })).toBeInTheDocument()
   })
 
@@ -168,6 +191,7 @@ describe('Library page', () => {
 
   it('shows EmptyState when album list is empty', () => {
     render(wrap(<Library />))
+    fireEvent.click(screen.getByRole('button', { name: /^albums$/i }))
     expect(screen.getByText(/nothing here yet/i)).toBeInTheDocument()
   })
 
@@ -195,6 +219,7 @@ describe('Library page', () => {
     } as unknown as UseQueryResult<Album[], Error>)
 
     render(wrap(<Library />))
+    fireEvent.click(screen.getByRole('button', { name: /^albums$/i }))
     expect(screen.getByText(/couldn't load your library/i)).toBeInTheDocument()
     // Must NOT show the misleading "empty library" message during an outage
     expect(screen.queryByText(/nothing here yet/i)).not.toBeInTheDocument()
@@ -243,6 +268,7 @@ describe('Library page', () => {
     } as unknown as UseQueryResult<Album[], Error>)
 
     render(wrap(<Library />))
+    fireEvent.click(screen.getByRole('button', { name: /^albums$/i }))
     const skeletons = document.querySelectorAll('.animate-pulse')
     expect(skeletons.length).toBeGreaterThan(0)
   })
@@ -285,6 +311,7 @@ describe('Library page', () => {
     } as unknown as UseQueryResult<Album[], Error>)
 
     render(wrapWithRoutes(<Library />))
+    fireEvent.click(screen.getByRole('button', { name: /^albums$/i }))
 
     const card = screen.getByRole('button', { name: /kid a/i })
     expect(card).toBeInTheDocument()
@@ -354,6 +381,56 @@ describe('Library page', () => {
 
     expect(screen.getByRole('button', { name: /synced one/i })).toBeInTheDocument()
   })
+
+  it('defaults to the Songs tab and lists every song', async () => {
+    const { useSongs } = await import('../lib/libraryApi')
+    vi.mocked(useSongs).mockReturnValue({
+      data: [
+        makeTrack({ id: 't1', title: 'Everything In Its Right Place', artist: 'Radiohead' }),
+        makeTrack({ id: 't2', title: 'Idioteque', artist: 'Radiohead' }),
+      ],
+      isLoading: false,
+      error: null,
+    } as unknown as UseQueryResult<Track[], Error>)
+
+    render(wrap(<Library />))
+    expect(screen.getByText('Everything In Its Right Place')).toBeInTheDocument()
+    expect(screen.getByText('Idioteque')).toBeInTheDocument()
+  })
+
+  it('shows EmptyState when the library has no songs', () => {
+    render(wrap(<Library />))
+    expect(screen.getByText(/nothing here yet/i)).toBeInTheDocument()
+  })
+
+  it('shows a distinct error state when songs fail to load', async () => {
+    const { useSongs } = await import('../lib/libraryApi')
+    vi.mocked(useSongs).mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: new Error('boom'),
+      refetch: vi.fn(),
+    } as unknown as UseQueryResult<Track[], Error>)
+
+    render(wrap(<Library />))
+    expect(screen.getByText(/couldn't load your library/i)).toBeInTheDocument()
+  })
+
+  it('opens the rename dialog from a song row', async () => {
+    const { useSongs } = await import('../lib/libraryApi')
+    vi.mocked(useSongs).mockReturnValue({
+      data: [makeTrack({ id: 't1', title: 'Idioteque', artist: 'Radiohead' })],
+      isLoading: false,
+      error: null,
+    } as unknown as UseQueryResult<Track[], Error>)
+
+    render(wrap(<Library />))
+    fireEvent.click(screen.getByRole('button', { name: /rename idioteque/i }))
+    expect(screen.getByRole('dialog', { name: /rename track/i })).toBeInTheDocument()
+    expect(screen.getByLabelText(/title/i)).toHaveValue('Idioteque')
+    expect(screen.getByLabelText(/artist/i)).toHaveValue('Radiohead')
+  })
 })
 
 // ------------------------------------------------------------------
@@ -400,4 +477,5 @@ describe('Library starting indicator', () => {
     expect(screen.queryByText(/library starting/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/library unavailable/i)).not.toBeInTheDocument()
   })
+
 })
