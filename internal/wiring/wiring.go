@@ -177,12 +177,16 @@ func BuildSearchSources(reg *registry.Registry, instances []db.AdapterInstance, 
 func BuildDownloaders(reg *registry.Registry, instances []db.AdapterInstance, getenv func(string) string) []download.DownloaderEntry {
 	out := []download.DownloaderEntry{}
 	hasDownloaderInstance := false
+	hasYtdlpInstance := false
 	for i := range instances {
 		inst := instances[i]
 		if inst.Type != "downloader" {
 			continue
 		}
 		hasDownloaderInstance = true
+		if inst.Name == "ytdlp" {
+			hasYtdlpInstance = true
+		}
 		if inst.Enabled != 1 {
 			continue
 		}
@@ -254,6 +258,20 @@ func BuildDownloaders(reg *registry.Registry, instances []db.AdapterInstance, ge
 			}
 		}
 	}
+
+	// yt-dlp is bundled alongside spotDL and is what a pasted link needs: spotDL
+	// resolves Spotify metadata first and fails outright on a bare YouTube URL.
+	// It is therefore injected whenever the user has no ytdlp instance of their
+	// own, even when another downloader IS configured — unlike the spotDL default
+	// above, which only fills a completely empty chain. It sorts behind everything
+	// else, so it only ever runs when asked for by name or as a last resort.
+	if !hasYtdlpInstance {
+		if dir := getenv("REVERB_DOWNLOAD_DIR"); dir != "" {
+			if entry := buildDefaultYtdlp(reg, dir, getenv); entry != nil {
+				out = append(out, *entry)
+			}
+		}
+	}
 	return out
 }
 
@@ -289,6 +307,38 @@ func buildDefaultSpotdl(reg *registry.Registry, dir string, getenv func(string) 
 	order := make(map[core.DownloadGranularity]int, len(dl.SupportedGranularities()))
 	for _, g := range dl.SupportedGranularities() {
 		order[g] = 0
+	}
+	return &download.DownloaderEntry{Downloader: dl, Order: order}
+}
+
+// ytdlpDefaultOrder sorts the injected yt-dlp fallback behind any user-configured
+// downloader (instance priorities are small integers).
+const ytdlpDefaultOrder = 1000
+
+// buildDefaultYtdlp constructs the bundled yt-dlp downloader entry (output_dir=dir).
+// Returns nil (with a log line) if it can't be created/initialised — never fatal.
+func buildDefaultYtdlp(reg *registry.Registry, dir string, getenv func(string) string) *download.DownloaderEntry {
+	plugin, err := reg.Create("ytdlp")
+	if err != nil {
+		log.Printf("bundled ytdlp downloader unavailable: %v", err)
+		return nil
+	}
+	dl, ok := plugin.(download.Downloader)
+	if !ok {
+		return nil
+	}
+	cfg := map[string]any{"output_dir": dir}
+	if p := getenv("REVERB_YTDLP_PATH"); p != "" {
+		cfg["binary_path"] = p
+	}
+	if err := dl.Init(cfg); err != nil {
+		log.Printf("bundled ytdlp downloader unavailable: %v", err)
+		return nil
+	}
+	log.Printf("using bundled ytdlp downloader (output_dir=%s)", dir)
+	order := make(map[core.DownloadGranularity]int, len(dl.SupportedGranularities()))
+	for _, g := range dl.SupportedGranularities() {
+		order[g] = ytdlpDefaultOrder
 	}
 	return &download.DownloaderEntry{Downloader: dl, Order: order}
 }

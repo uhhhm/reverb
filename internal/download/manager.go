@@ -666,7 +666,18 @@ func (m *Manager) pick(ctx context.Context, req core.DownloadRequest) (Downloade
 	if g == "" {
 		g = core.GranularityTrack
 	}
-	for _, e := range m.sortedEntries(g) {
+	entries := m.sortedEntries(g)
+	if name := req.PreferDownloader; name != "" {
+		for _, e := range entries {
+			if e.Downloader.Name() != name {
+				continue
+			}
+			if ok, err := e.Downloader.CanDownload(ctx, req); err == nil && ok {
+				return e.Downloader, nil
+			}
+		}
+	}
+	for _, e := range entries {
 		ok, err := e.Downloader.CanDownload(ctx, req)
 		if err != nil {
 			continue

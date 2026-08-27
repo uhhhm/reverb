@@ -3467,3 +3467,40 @@ func TestNoAutoRetryForNonRetryableClass(t *testing.T) {
 		t.Fatalf("job = %+v, want DownloadFailed with Attempts=0 (never auto-retried)", got)
 	}
 }
+
+// TestPickPreferDownloaderWins: PreferDownloader jumps a named downloader ahead of
+// the configured order when it accepts the request.
+func TestPickPreferDownloaderWins(t *testing.T) {
+	first := &fakeDL{name: "spotdl", canDownload: true}
+	second := &fakeDL{name: "ytdlp", canDownload: true}
+	m, _ := testManager(t, []Downloader{first, second}, newMemStore(), nil, nil, nil)
+
+	job, err := m.Enqueue(context.Background(), core.DownloadRequest{
+		Source: "youtube", ExternalID: "yt1", Artist: "A", Title: "T",
+		PreferDownloader: "ytdlp",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.DownloaderName != "ytdlp" {
+		t.Fatalf("preferred downloader should win, got %q", job.DownloaderName)
+	}
+}
+
+// TestPickPreferDownloaderFallsBack: an unconfigured preference is ignored and the
+// normal chain still runs.
+func TestPickPreferDownloaderFallsBack(t *testing.T) {
+	first := &fakeDL{name: "spotdl", canDownload: true}
+	m, _ := testManager(t, []Downloader{first}, newMemStore(), nil, nil, nil)
+
+	job, err := m.Enqueue(context.Background(), core.DownloadRequest{
+		Source: "youtube", ExternalID: "yt2", Artist: "A", Title: "T",
+		PreferDownloader: "ytdlp",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.DownloaderName != "spotdl" {
+		t.Fatalf("should fall back to configured chain, got %q", job.DownloaderName)
+	}
+}

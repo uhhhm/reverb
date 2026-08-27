@@ -49,6 +49,11 @@ type DownloadRequest struct {
 	// request. Empty defaults to GranularityTrack. Set by callers that want an
 	// album-granularity downloader (e.g. Lidarr) for a full-album import.
 	Granularity DownloadGranularity `json:"granularity,omitempty"`
+	// PreferDownloader names a downloader that should be tried first, ahead of the
+	// configured order, when it is present and its CanDownload accepts the request.
+	// Set server-side (hence json:"-") — e.g. a pasted YouTube link prefers "ytdlp"
+	// over spotDL's Spotify-metadata-first flow. Falls back to the normal chain.
+	PreferDownloader string `json:"-"`
 	// InitiatedBy is the id of the user who initiated this download. It is set
 	// server-side from the request context (never from the client body, hence
 	// json:"-") and persisted on the job as download_jobs.initiated_by.

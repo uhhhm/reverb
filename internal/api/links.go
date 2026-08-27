@@ -307,6 +307,9 @@ func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
 		}
 		if res.Source == "youtube" {
 			req.ManualURL = strings.TrimSpace(res.URL)
+			// yt-dlp handles a pasted link natively; spotDL remains the fallback
+			// when no ytdlp downloader is configured.
+			req.PreferDownloader = "ytdlp"
 		}
 		if playlistID != "" {
 			req.AddToPlaylistID = playlistID

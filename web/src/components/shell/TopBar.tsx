@@ -125,6 +125,21 @@ export function TopBar() {
 
       {/* Right — downloads + avatar */}
       <div className="flex items-center gap-3 flex-none">
+        {/* Add-from-link (paste a Spotify/YouTube URL); desktop only */}
+        <div className="hidden md:block">
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Add from link"
+            onClick={() => navigate('/add-from-link')}
+          >
+            <span className="flex items-center gap-1.5">
+              <Icon name="plus" className="w-4 h-4" />
+              <span>Add link</span>
+            </span>
+          </Button>
+        </div>
+
         {/* Stats link (desktop only) */}
         <div className="hidden md:block">
           <Button
@@ -189,6 +204,18 @@ export function TopBar() {
                 'py-1 z-50',
               ].join(' ')}
             >
+              <button
+                role="menuitem"
+                type="button"
+                onClick={() => { setMenuOpen(false); navigate('/add-from-link') }}
+                className={[
+                  'w-full text-left px-4 py-2 text-sm text-text-primary md:hidden',
+                  'hover:bg-raised-hover transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset',
+                ].join(' ')}
+              >
+                Add from link
+              </button>
               <button
                 role="menuitem"
                 type="button"

@@ -22,9 +22,10 @@ type ResolveResult struct {
 var ErrUnsupportedURL = errors.New("unsupported URL")
 
 // ResolveURL tries Spotify then YouTube. If neither matches it returns ErrUnsupportedURL.
-// It does not perform network calls; returned titles are synthetic.
+// YouTube track/video links are enriched with real title/artist/thumbnail via
+// YouTube's oEmbed endpoint; if that call fails the synthetic fallback is used so
+// resolving never hard-fails. Spotify titles are synthetic.
 func ResolveURL(ctx context.Context, rawURL string) (*ResolveResult, error) {
-	_ = ctx
 	raw := strings.TrimSpace(rawURL)
 	if raw == "" {
 		return nil, ErrUnsupportedURL
@@ -49,16 +50,20 @@ func ResolveURL(ctx context.Context, rawURL string) (*ResolveResult, error) {
 		}, nil
 	}
 	if kind, id, ok := ParseYouTubeURL(raw); ok {
-		title := "YouTube " + kind + " " + id
-		return &ResolveResult{
+		res := &ResolveResult{
 			Kind:       kind,
 			Source:     "youtube",
 			ExternalID: id,
-			Title:      title,
+			Title:      "YouTube " + kind + " " + id,
 			Artist:     "Unknown",
-			Album:      "",
 			URL:        raw,
-		}, nil
+		}
+		if meta, ok := fetchYouTubeMeta(ctx, raw); ok {
+			res.Title = meta.Title
+			res.Artist = meta.Artist
+			res.CoverUrl = meta.Thumbnail
+		}
+		return res, nil
 	}
 	return nil, ErrUnsupportedURL
 }
