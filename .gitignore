@@ -19,5 +19,6 @@ docs/superpowers/
 .claude/
 
 # Wails desktop build tools/cache (per-arch ffmpeg, navidrome, etc.)
-desktop/tools/
+desktop/tools/bin/
+desktop/tools/python/
 dist/
