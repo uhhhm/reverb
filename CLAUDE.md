@@ -1,13 +1,13 @@
-# CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What this is
 
-Reverb is a self-hosted music app: a Go single-binary modular monolith with an
+This is a fork of Reverb, a self-hosted music app. It is an Go single-binary modular monolith with an
 embedded React/TypeScript SPA. It unifies an existing music library (Subsonic/
 Navidrome), online search (Deezer/Spotify), and one-click downloading (spotDL)
 in one web UI. License is AGPL-3.0-only.
+
+IMPORTANT: This is a fork, so published instructions and README are may be out of date. Keep this in mind when working and giving user advice. Furthermore, although it is single-user, you should still be security-conscious.
 
 ## Commands
 
