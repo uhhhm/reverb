@@ -179,8 +179,12 @@ npm run test   # vitest
 npm run lint   # eslint
 
 # Build
-make build   # -> ./reverb (requires Go 1.23+, Node 22+)
+make build        # -> ./reverb (requires Go 1.23+, Node 22+)
+make desktop      # -> ./dist/reverb-desktop (Wails desktop app)
+make desktop-dev  # wails dev -projectdir ./desktop (hot reload via Vite :5173)
 ```
+
+Desktop (Wails) runs the same Go monolith on `127.0.0.1:0`, DB at `~/Library/Application Support/Reverb/reverb.db` (macOS) / `~/.config/reverb/reverb.db` (Linux, XDG) and downloads in `~/Music/Reverb`. Bundled `ffmpeg`/`spotDL`/`Navidrome`/`deno` are fetched into `desktop/tools/` via `make desktop-deps`. See [docs/deployment.md#desktop-wails](docs/deployment.md#desktop-wails) and `desktop/README.md`.
 
 See `CLAUDE.md` for architecture notes and conventions. `gofmt -w` and Conventional Commits are required.
 

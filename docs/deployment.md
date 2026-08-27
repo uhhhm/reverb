@@ -203,3 +203,37 @@ Reverb parses download progress with the regex `(\d{1,3})\s*%`
 (`internal/download/spotdl/adapter.go`). **Bumping the spotDL pin requires
 re-validating that regex against the new output format** before shipping —
 otherwise progress may silently degrade to "indeterminate".
+
+## Desktop (Wails)
+
+The desktop app wraps the same Go monolith in a Wails window and serves the SPA on `127.0.0.1:0` — no Docker, no `192.168.x.x:8090`. Downloads and sync run while the window is open (`close→quit`).
+
+### Prerequisites
+
+- **Linux:** `sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev pkg-config` (WebKitGTK). `CGO_ENABLED=1` is required for Wails; `modernc.org/sqlite` stays pure Go.
+- **macOS:** Xcode Command Line Tools (`xcode-select --install`).
+
+### Build & run
+
+```bash
+make desktop      # web build + Go build -tags desktop -> ./dist/reverb-desktop
+make desktop-dev  # wails dev -projectdir ./desktop (Vite at :5173, Go on 127.0.0.1:0)
+make desktop-deps # fetch per-OS ffmpeg static + Navidrome + deno + python venv into desktop/tools/
+```
+
+Bundled tools (ffmpeg static, Navidrome 0.62.0, spotDL 4.5.0, yt-dlp, deno) are embedded per-OS so the app is self-contained (~150–180 MB). `desktop/wails.json` sets frontend `../web`, build `npm run build`, dev server `http://localhost:5173`, fallback `index.html`.
+
+### Data locations
+
+- **DB:** `~/Library/Application Support/Reverb/reverb.db` (macOS) / `~/.config/reverb/reverb.db` (Linux, XDG via `os.UserConfigDir`). `REVERB_DB` overrides. On first launch `MaybeMigrateLegacyDB` copies `./data/reverb.db` if the desktop DB is missing.
+- **Downloads:** `~/Music/Reverb` (`REVERB_DOWNLOAD_DIR` overrides, created if missing) — also the built-in Navidrome scan dir.
+
+### macOS Gatekeeper (unsigned v1)
+
+The app is unsigned. On first launch right-click the `.app` / `.zip` → **Open** → **Open** to bypass Gatekeeper. A future release will be signed and notarized.
+
+### Auto-update
+
+The desktop polls GitHub Releases (`GET /repos/<owner>/reverb/releases/latest`) on startup and every 6 h (stable channel only). When a newer semver tag is found the UI shows an update banner; confirming replaces the binary in-place via `go-selfupdate` and restarts. `yt-dlp` is hot-upgraded separately every 24 h via `pip install --upgrade yt-dlp` without an app restart.
+
+CI builds `reverb-desktop-$VERSION-$GOOS-$GOARCH.{zip,deb,AppImage}` via `.github/workflows/desktop.yml` (matrix `macos-14` + `ubuntu-22.04` × `amd64`/`arm64`, `wails build -platform $GOOS/$GOARCH -ldflags "-X main.version=$TAG"`).

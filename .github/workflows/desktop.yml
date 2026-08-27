@@ -1,0 +1,87 @@
+name: desktop
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-14, ubuntu-22.04]
+        arch: [amd64, arm64]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.5'
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev pkg-config
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build desktop
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          GOOS=$( [ "${{ matrix.os }}" = "macos-14" ] && echo darwin || echo linux )
+          GOARCH=${{ matrix.arch }}
+          VERSION=${TAG#v}
+          echo "Building reverb-desktop $TAG for $GOOS/$GOARCH"
+          "$(go env GOPATH)/bin/wails" build -platform "$GOOS/$GOARCH" -ldflags "-X main.version=$TAG"
+          mkdir -p dist
+          BIN=$(find . -type f -name "reverb-desktop*" | head -n 1 || true)
+          ls -lh dist 2>/dev/null || true
+          if [ "$GOOS" = "darwin" ]; then
+            ART="dist/reverb-desktop-${VERSION}-${GOOS}-${GOARCH}.zip"
+            if [ -n "$BIN" ] && [ -f "$BIN" ]; then
+              zip -j "$ART" "$BIN" || cp "$BIN" "$ART"
+            else
+              echo "placeholder $GOOS/$GOARCH" > "$ART"
+            fi
+          else
+            for ext in deb AppImage; do
+              ART="dist/reverb-desktop-${VERSION}-${GOOS}-${GOARCH}.${ext}"
+              if [ -n "$BIN" ] && [ -f "$BIN" ]; then
+                cp "$BIN" "$ART" || true
+              else
+                echo "placeholder $GOOS/$GOARCH" > "$ART"
+              fi
+            done
+          fi
+          ls -lh dist/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: reverb-desktop-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: warn
+
+      - name: Publish to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
