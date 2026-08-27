@@ -25,9 +25,13 @@ const contentSecurityPolicy = "default-src 'self'; " +
 	"connect-src 'self' ws: wss:; " +
 	"frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 
+// The desktop policy additionally allows the loopback listener as a media
+// source: the SPA is served from the wails: scheme, whose custom URI handler
+// WebKitGTK's GStreamer media pipeline cannot read, so audio is loaded from
+// http://127.0.0.1:<port> instead — see web/src/lib/mediaBase.ts.
 const desktopContentSecurityPolicy = "default-src 'self'; " +
 	"img-src 'self' data: https:; " +
-	"media-src 'self' blob:; " +
+	"media-src 'self' blob: http://127.0.0.1:* http://localhost:*; " +
 	"style-src 'self' 'unsafe-inline'; " +
 	"script-src 'self'; " +
 	"font-src 'self' data:; " +

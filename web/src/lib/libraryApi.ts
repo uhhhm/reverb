@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from './api'
-import type { Album, Artist, SearchResults, SyncedPlaylistDetail } from './types'
+import { mediaBase } from './mediaBase'
+import type { Album, Artist, SearchResults, SyncedPlaylistDetail, Track } from './types'
 
 export interface LibraryStatus {
   mode: string
@@ -19,8 +20,10 @@ export function useLibraryStatus() {
   })
 }
 
+// Audio is loaded by the webview's media pipeline rather than by fetch, so it
+// needs an absolute origin on desktop — see mediaBase.
 export function streamUrl(id: string): string {
-  return `/api/v1/stream/${encodeURIComponent(id)}`
+  return `${mediaBase()}/api/v1/stream/${encodeURIComponent(id)}`
 }
 
 // Task 9 Part A — DEFERRED to SP3:
@@ -81,6 +84,31 @@ export function useAlbums(type = 'newest', size?: number) {
     queryKey: ['library', 'albums', type, size ?? 0],
     queryFn: () => api.get<Album[]>(`/library/albums?${params.toString()}`),
   })
+}
+
+/** Every song in the library. size <= 0 (omitted) means "everything". */
+export function useSongs(size?: number) {
+  const params = new URLSearchParams()
+  if (size) params.set('size', String(size))
+  const qs = params.toString()
+  return useQuery({
+    queryKey: ['library', 'songs', size ?? 0],
+    queryFn: () => api.get<Track[]>(`/library/songs${qs ? `?${qs}` : ''}`),
+  })
+}
+
+export interface TrackName {
+  title: string
+  artist: string
+}
+
+/**
+ * Rename a library track. Reverb stores this as a display override and never
+ * rewrites file tags, so the name stays as-is in Navidrome. Blank fields mean
+ * "use the library's own name" — sending both blank clears the rename.
+ */
+export function renameTrack(id: string, name: TrackName): Promise<TrackName> {
+  return api.put<TrackName>(`/library/track/${encodeURIComponent(id)}/name`, name)
 }
 
 export function createPlaylist(name: string): Promise<SyncedPlaylistDetail> {
