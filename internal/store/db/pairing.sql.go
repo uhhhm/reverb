@@ -101,10 +101,15 @@ const tryMarkPairingCodeUsed = `-- name: TryMarkPairingCodeUsed :execrows
 UPDATE pairing_code SET used_at = unixepoch(), used_by_device_id = ? WHERE code = ? AND used_at IS NULL AND expires_at > unixepoch()
 `
 
-func (q *Queries) TryMarkPairingCodeUsed(ctx context.Context, arg MarkPairingCodeUsedParams) (int64, error) {
-	res, err := q.db.ExecContext(ctx, tryMarkPairingCodeUsed, arg.UsedByDeviceID, arg.Code)
+type TryMarkPairingCodeUsedParams struct {
+	UsedByDeviceID sql.NullString `json:"used_by_device_id"`
+	Code           string         `json:"code"`
+}
+
+func (q *Queries) TryMarkPairingCodeUsed(ctx context.Context, arg TryMarkPairingCodeUsedParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, tryMarkPairingCodeUsed, arg.UsedByDeviceID, arg.Code)
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	return result.RowsAffected()
 }

@@ -1,9 +1,15 @@
-.PHONY: gen test build web dev clean desktop desktop-dev desktop-deps
+.PHONY: gen gen-check test build web dev clean desktop desktop-dev desktop-deps
 
 VERSION ?= dev
 
 gen:
 	@if command -v sqlc >/dev/null 2>&1; then sqlc generate; else go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.27.0 generate; fi
+
+# Fails if regenerating changes anything: queries are stale, or hand-edits
+# landed inside sqlc-generated files instead of separate ones (see
+# internal/store/db/underlying.go).
+gen-check: gen
+	@git diff --exit-code -- internal/store/db
 
 test:
 	go test ./cmd/... ./internal/...

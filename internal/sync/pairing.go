@@ -128,7 +128,7 @@ func (s *PairingService) Redeem(ctx context.Context, rawCode, deviceName string)
 					_ = tx.Rollback()
 					return "", "", err
 				}
-				rows, err := txQ.TryMarkPairingCodeUsed(ctx, db.MarkPairingCodeUsedParams{
+				rows, err := txQ.TryMarkPairingCodeUsed(ctx, db.TryMarkPairingCodeUsedParams{
 					Code: normalized,
 					UsedByDeviceID: sql.NullString{
 						String: deviceID,
@@ -165,7 +165,7 @@ func (s *PairingService) Redeem(ctx context.Context, rawCode, deviceName string)
 	}
 	// Fallback for queriers without TryMark (e.g., mocks) or when tx not available: try conditional claim first if available.
 	if tryQ, ok := s.q.(interface {
-		TryMarkPairingCodeUsed(context.Context, db.MarkPairingCodeUsedParams) (int64, error)
+		TryMarkPairingCodeUsed(context.Context, db.TryMarkPairingCodeUsedParams) (int64, error)
 	}); ok {
 		// Need device to exist for FK, so create a temporary device then claim, but we can't tx.
 		// Instead do non-transactional but in order: create then claim, and if claim fails delete device.
@@ -177,7 +177,7 @@ func (s *PairingService) Redeem(ctx context.Context, rawCode, deviceName string)
 		}); err != nil {
 			return "", "", err
 		}
-		rows, err := tryQ.TryMarkPairingCodeUsed(ctx, db.MarkPairingCodeUsedParams{
+		rows, err := tryQ.TryMarkPairingCodeUsed(ctx, db.TryMarkPairingCodeUsedParams{
 			Code: normalized,
 			UsedByDeviceID: sql.NullString{
 				String: deviceID,
