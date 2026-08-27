@@ -2,6 +2,6 @@
 
 package main
 
-// minimal stub — Wails AssetServer will serve web/dist via wails.json config; this file exists to satisfy build tag and optionally embed fallback if needed
-
-func main() {}
+// frontend bridge for Wails AssetServer — serves web/dist via wails.json.
+// main() lives in main.go; this file provides the build-tag isolation for the desktop tag.
+var desktopFrontend = true
