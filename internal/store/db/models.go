@@ -233,6 +233,13 @@ type SyncedPlaylist struct {
 	OwnerUserID     sql.NullString `json:"owner_user_id"`
 }
 
+type TrackOverride struct {
+	TrackID   string `json:"track_id"`
+	Title     string `json:"title"`
+	Artist    string `json:"artist"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
 type User struct {
 	ID        string `json:"id"`
 	Username  string `json:"username"`

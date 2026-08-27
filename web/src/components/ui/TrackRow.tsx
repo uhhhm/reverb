@@ -34,9 +34,11 @@ interface TrackRowProps {
   albumTo?: string
   /** Small muted caption appended to the artist line (e.g. "Played 5×"). Layout-stable. */
   caption?: ReactNode
+  /** Show a rename affordance for owned tracks. Omit to hide it. */
+  onRename?: (track: Track) => void
 }
 
-export function TrackRow({ track, index, active = false, playing, onPlay, right, coverSrc, rightWidth = 'auto', artistNode, albumNode, artistTo, albumTo, caption }: TrackRowProps) {
+export function TrackRow({ track, index, active = false, playing, onPlay, right, coverSrc, rightWidth = 'auto', artistNode, albumNode, artistTo, albumTo, caption, onRename }: TrackRowProps) {
   // coverSrc overrides (external Spotify images); otherwise use album cover directly
   // (album art reliably resolves; per-song embedded art is usually absent).
   const src = coverSrc ?? trackCoverUrl(track, 80)
@@ -62,7 +64,7 @@ export function TrackRow({ track, index, active = false, playing, onPlay, right,
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         active ? 'text-accent' : 'text-text-primary',
       ].join(' ')}
-      style={{ gridTemplateColumns: `26px 40px 1fr 1fr ${rightWidth} 36px 44px` }}
+      style={{ gridTemplateColumns: `26px 40px 1fr 1fr ${rightWidth} ${onRename ? '64px' : '36px'} 44px` }}
     >
       {/* Lead: index or Equalizer when active */}
       <span className="grid place-items-center text-sm font-bold text-text-muted">
@@ -162,6 +164,23 @@ export function TrackRow({ track, index, active = false, playing, onPlay, right,
             ].join(' ')}
           >
             <Icon name="plus" className="w-3.5 h-3.5" />
+          </button>
+        ) : null}
+        {track.id && onRename ? (
+          <button
+            type="button"
+            aria-label={`Rename ${track.title}`}
+            onClick={(e) => { e.stopPropagation(); onRename(track) }}
+            onDoubleClick={(e) => e.stopPropagation()}
+            className={[
+              'inline-grid place-items-center w-7 h-7 rounded-md',
+              'text-text-muted hover:text-text-primary',
+              'opacity-0 group-hover:opacity-100',
+              'transition-opacity duration-150',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:opacity-100',
+            ].join(' ')}
+          >
+            <Icon name="pencil" className="w-3.5 h-3.5" />
           </button>
         ) : null}
       </span>

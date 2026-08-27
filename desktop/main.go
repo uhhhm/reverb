@@ -26,6 +26,7 @@ import (
 	"github.com/uhhhm/reverb/internal/library/embedded"
 	"github.com/uhhhm/reverb/internal/library/lyrics"
 	"github.com/uhhhm/reverb/internal/library/subsonic"
+	"github.com/uhhhm/reverb/internal/override"
 	"github.com/uhhhm/reverb/internal/play"
 	"github.com/uhhhm/reverb/internal/playlistsync"
 	"github.com/uhhhm/reverb/internal/registry"
@@ -184,6 +185,7 @@ func boot(args []string) (*App, error) {
 		UpdateRepo:    cfg.UpdateRepo,
 		DataDir:       filepath.Dir(cfg.DBPath),
 		Resolver:      resolverSvc,
+		Overrides:     override.New(st.Q()),
 		Play:          playSvc,
 		Stats:         statsSvc,
 		Scrobble:      scrobbleSvc,

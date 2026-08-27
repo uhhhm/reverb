@@ -250,6 +250,7 @@ func (s *Server) handleSyncedPlaylistDetail(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
+	s.deps.Overrides.ApplyDetailTracks(r.Context(), det.Tracks)
 	writeJSON(w, http.StatusOK, det)
 }
 

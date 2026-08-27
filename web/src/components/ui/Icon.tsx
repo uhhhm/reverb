@@ -32,6 +32,7 @@ export type IconName =
   | 'down'
   | 'chevron-down'
   | 'music'
+  | 'pencil'
   | 'camera'
   | 'grip'
   | 'chart'
@@ -282,6 +283,15 @@ const icons: Record<IconName, IconDef> = {
     ),
   },
   // camera: lens + body — used for cover-art upload overlay
+  // pencil: rename/edit affordance on track rows
+  pencil: {
+    content: (
+      <>
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
+      </>
+    ),
+  },
   camera: {
     content: (
       <>

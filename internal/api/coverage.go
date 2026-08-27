@@ -102,6 +102,7 @@ func (s *Server) handleAlbumDetail(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
+	s.deps.Overrides.ApplyDetailTracks(r.Context(), det.Tracks)
 	writeJSON(w, http.StatusOK, det)
 }
 
