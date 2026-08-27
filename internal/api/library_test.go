@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/override"
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/store"
 )
@@ -79,6 +80,12 @@ func (fakeLibrary) GetArtistsBrowse(ctx context.Context) ([]core.Artist, error) 
 func (fakeLibrary) GetAlbumsBrowse(ctx context.Context, listType string, size int) ([]core.Album, error) {
 	return []core.Album{{ID: "al1", Name: "Album"}}, nil
 }
+func (fakeLibrary) GetSongsBrowse(ctx context.Context, size, offset int) ([]core.Track, error) {
+	return []core.Track{
+		{ID: "t1", Title: "Song One", Artist: "Artist One"},
+		{ID: "t2", Title: "Song Two", Artist: "Artist Two"},
+	}, nil
+}
 
 func libTestServer(t *testing.T, lib *fakeLibrary) (*Server, *http.Cookie) {
 	t.Helper()
@@ -134,6 +141,7 @@ func TestLibraryArtistAlbumPlaylistsHandlers(t *testing.T) {
 		{"/api/v1/library/album/al1", "Album"},
 		{"/api/v1/library/artists", "Artist"},
 		{"/api/v1/library/albums?type=newest", "Album"},
+		{"/api/v1/library/songs", "Song One"},
 	} {
 		rec := doAuthed(t, srv, http.MethodGet, tc.path, cookie)
 		if rec.Code != http.StatusOK {
@@ -270,4 +278,92 @@ func TestImportSyncedPlaylistRouteResponds(t *testing.T) {
 			t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
 		}
 	})
+}
+
+// libTestServerWithOverrides is libTestServer plus a live override service, so
+// rename round-trips can be asserted end to end.
+func libTestServerWithOverrides(t *testing.T, lib *fakeLibrary) (*Server, *http.Cookie) {
+	t.Helper()
+	st, err := store.Open(t.TempDir() + "/api.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if err := st.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	authSvc, tok := seededAuthToken(t, st)
+	srv := NewServer(Deps{
+		Auth:       authSvc,
+		Library:    lib,
+		Search:     registry.NewRegistry("search"),
+		Downloader: registry.NewRegistry("downloader"),
+		Overrides:  override.New(st.Q()),
+	})
+	return srv, &http.Cookie{Name: sessionCookie, Value: tok}
+}
+
+func TestLibrarySongsHandler(t *testing.T) {
+	srv, cookie := libTestServer(t, &fakeLibrary{})
+	rec := doAuthed(t, srv, http.MethodGet, "/api/v1/library/songs", cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var songs []core.Track
+	if err := json.Unmarshal(rec.Body.Bytes(), &songs); err != nil {
+		t.Fatal(err)
+	}
+	if len(songs) != 2 || songs[0].Title != "Song One" {
+		t.Fatalf("songs: %+v", songs)
+	}
+}
+
+func TestRenameTrackAppliesToSongList(t *testing.T) {
+	srv, cookie := libTestServerWithOverrides(t, &fakeLibrary{})
+
+	rec := doAuthedBody(t, srv, http.MethodPut, "/api/v1/library/track/t1/name",
+		`{"title":"Better Title","artist":"Better Artist"}`, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rename status = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doAuthed(t, srv, http.MethodGet, "/api/v1/library/songs", cookie)
+	var songs []core.Track
+	if err := json.Unmarshal(rec.Body.Bytes(), &songs); err != nil {
+		t.Fatal(err)
+	}
+	if songs[0].Title != "Better Title" || songs[0].Artist != "Better Artist" {
+		t.Fatalf("override not applied: %+v", songs[0])
+	}
+	// Untouched tracks keep the library's own names.
+	if songs[1].Title != "Song Two" {
+		t.Fatalf("unrelated track changed: %+v", songs[1])
+	}
+}
+
+func TestRenameTrackBlankClearsOverride(t *testing.T) {
+	srv, cookie := libTestServerWithOverrides(t, &fakeLibrary{})
+
+	doAuthedBody(t, srv, http.MethodPut, "/api/v1/library/track/t1/name", `{"title":"Renamed","artist":""}`, cookie)
+	rec := doAuthedBody(t, srv, http.MethodPut, "/api/v1/library/track/t1/name", `{"title":"","artist":""}`, cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("clear status = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doAuthed(t, srv, http.MethodGet, "/api/v1/library/songs", cookie)
+	var songs []core.Track
+	if err := json.Unmarshal(rec.Body.Bytes(), &songs); err != nil {
+		t.Fatal(err)
+	}
+	if songs[0].Title != "Song One" {
+		t.Fatalf("override not cleared: %+v", songs[0])
+	}
+}
+
+func TestRenameTrackUnavailableWithoutOverrides(t *testing.T) {
+	srv, cookie := libTestServer(t, &fakeLibrary{})
+	rec := doAuthedBody(t, srv, http.MethodPut, "/api/v1/library/track/t1/name", `{"title":"x"}`, cookie)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503: %s", rec.Code, rec.Body.String())
+	}
 }

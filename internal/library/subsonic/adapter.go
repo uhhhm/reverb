@@ -393,6 +393,51 @@ func (a *Adapter) GetAlbumsBrowse(ctx context.Context, listType string, size int
 	return out, nil
 }
 
+// GetSongsBrowse returns the whole song list, paging Subsonic search3 with an
+// empty query (Navidrome treats that as "match everything"). Subsonic has no
+// dedicated all-songs endpoint, and search3 caps each page server-side, so this
+// walks offsets until a short page comes back. size <= 0 means "everything";
+// a positive size stops once that many songs have been collected.
+func (a *Adapter) GetSongsBrowse(ctx context.Context, size, offset int) ([]core.Track, error) {
+	const page = 500
+	const maxSongs = 20000 // safety stop so a misbehaving server cannot loop forever
+
+	out := []core.Track{}
+	for {
+		want := page
+		if size > 0 && size-len(out) < want {
+			want = size - len(out)
+		}
+		if want <= 0 {
+			break
+		}
+		params := url.Values{}
+		params.Set("query", "")
+		params.Set("songCount", strconv.Itoa(want))
+		params.Set("songOffset", strconv.Itoa(offset+len(out)))
+		// Albums and artists are not wanted here; asking for zero keeps the
+		// response small.
+		params.Set("albumCount", "0")
+		params.Set("artistCount", "0")
+
+		var resp subsonicResponse
+		if err := a.client.GetJSON(ctx, "search3", params, &resp); err != nil {
+			return nil, err
+		}
+		if resp.SearchResult3 == nil || len(resp.SearchResult3.Song) == 0 {
+			break
+		}
+		for _, sng := range resp.SearchResult3.Song {
+			out = append(out, mapTrack(sng))
+		}
+		// A short page means the server has no more songs.
+		if len(resp.SearchResult3.Song) < want || len(out) >= maxSongs {
+			break
+		}
+	}
+	return out, nil
+}
+
 // LocalTrackPath resolves a track ID to an absolute filesystem path, for the
 // waveform-peaks endpoint. It only works when the adapter has been configured
 // via WithLocalMusicDir (i.e. the Subsonic server shares Reverb's filesystem —

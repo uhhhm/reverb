@@ -2,11 +2,15 @@ package subsonic
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"testing"
 
 	"github.com/uhhhm/reverb/internal/core"
@@ -424,5 +428,84 @@ func TestGetAlbumsBrowse(t *testing.T) {
 	}
 	if len(albs) != 2 {
 		t.Fatalf("albums: %+v", albs)
+	}
+}
+
+func TestGetSongsBrowse(t *testing.T) {
+	a := newTestAdapter(t)
+	songs, err := a.GetSongsBrowse(context.Background(), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(songs) == 0 {
+		t.Fatalf("songs: %+v", songs)
+	}
+}
+
+// GetSongsBrowse walks offsets until a short page comes back, because Subsonic
+// caps each search3 response server-side.
+func TestGetSongsBrowsePagesUntilShortPage(t *testing.T) {
+	const total = 1200
+	var offsets []int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count, _ := strconv.Atoi(r.URL.Query().Get("songCount"))
+		offset, _ := strconv.Atoi(r.URL.Query().Get("songOffset"))
+		offsets = append(offsets, offset)
+
+		n := count
+		if remaining := total - offset; remaining < n {
+			n = remaining
+		}
+		if n < 0 {
+			n = 0
+		}
+		songs := make([]map[string]any, 0, n)
+		for i := 0; i < n; i++ {
+			songs = append(songs, map[string]any{
+				"id":    fmt.Sprintf("t%d", offset+i),
+				"title": fmt.Sprintf("Song %d", offset+i),
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"subsonic-response": map[string]any{
+				"status":        "ok",
+				"version":       "1.16.1",
+				"searchResult3": map[string]any{"song": songs},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	a := New().WithHTTPClient(srv.Client())
+	if err := a.Init(map[string]any{"url": srv.URL, "username": "alice", "password": "secret"}); err != nil {
+		t.Fatal(err)
+	}
+
+	songs, err := a.GetSongsBrowse(context.Background(), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(songs) != total {
+		t.Fatalf("got %d songs, want %d", len(songs), total)
+	}
+	if want := []int{0, 500, 1000}; !reflect.DeepEqual(offsets, want) {
+		t.Fatalf("offsets = %v, want %v", offsets, want)
+	}
+	if songs[0].ID != "t0" || songs[total-1].ID != "t1199" {
+		t.Fatalf("boundaries: %q .. %q", songs[0].ID, songs[total-1].ID)
+	}
+}
+
+// A positive size caps the walk instead of reading the whole library.
+func TestGetSongsBrowseRespectsSize(t *testing.T) {
+	a := newTestAdapter(t)
+	songs, err := a.GetSongsBrowse(context.Background(), 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(songs) > 1 {
+		t.Fatalf("got %d songs, want at most 1", len(songs))
 	}
 }

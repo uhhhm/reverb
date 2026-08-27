@@ -14,6 +14,7 @@ import (
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/events"
 	"github.com/uhhhm/reverb/internal/library"
+	"github.com/uhhhm/reverb/internal/override"
 	"github.com/uhhhm/reverb/internal/play"
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/resolver"
@@ -137,6 +138,9 @@ type Deps struct {
 	// the LIVE matcher, so it survives adapter hot-reloads (the matcher is rebuilt
 	// on each reload). Nil in tests/legacy that don't use the addressing boundary.
 	Resolver Resolver
+	// Overrides applies user-supplied track renames on read and records them on
+	// write. Nil disables renaming (handlers return 503).
+	Overrides *override.Service
 	// Play records user play events and mints catalog IDs. Nil in tests/legacy
 	// that don't exercise the listening-history boundary.
 	Play *play.Service
@@ -284,6 +288,8 @@ func (s *Server) routes() {
 			pr.Get("/library/artist/{id}", s.handleLibraryArtist)
 			pr.Get("/library/album/{id}", s.handleLibraryAlbum)
 			pr.Get("/library/albums", s.handleLibraryAlbums)
+			pr.Get("/library/songs", s.handleLibrarySongs)
+			pr.Put("/library/track/{id}/name", s.handleRenameTrack)
 			pr.Get("/downloads/upgradable", s.handleListUpgradable)
 			pr.Get("/library/track/{id}/peaks", s.handleTrackPeaks)
 			pr.Get("/library/track/{id}/lyrics", s.handleTrackLyrics)
@@ -329,6 +335,7 @@ func (s *Server) routes() {
 			// add-from-link (T7) — resolve external URLs and optionally download.
 			pr.Group(func(lr chi.Router) {
 				lr.Post("/links/resolve", s.handleLinkResolve)
+				lr.Post("/links/chapters", s.handleLinkChapters)
 				lr.Post("/links/add", s.handleLinkAdd)
 			})
 
