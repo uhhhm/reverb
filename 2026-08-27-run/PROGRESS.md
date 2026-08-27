@@ -10,7 +10,7 @@ One line per task, rewritten as status changes. Source of truth after compaction
 | T4 | done | desktop/main.go, app.go, app_test.go + frontend.go fix (remove duplicate main) | XDG+Port0 wiring, App lifecycle 6 tests pass, both vet/build pass 19M | frontend.go main removed, main.go unconditional to avoid duplicate |
 | T5 | done | desktop/singleinstance.go+test, bundle.go+test, tools/fetch-*.sh+setup-venv.sh, .gitignore fix | single-instance O_EXCL lock, bundle ResolveBundledTools, 9 tests pass, scripts +x, gitignore narrowed to bin/python | fixed T3 .gitignore over-ignore (scripts now tracked) |
 | T6 | done | desktop/updater/updater.go+ytdlp.go+test, web UpdateBanner.tsx+test, updateApi.ts | LatestRelease/PickAsset/CheckAndEmit 8 tests, UpdateBanner 5 tests, pollers 6h/24h, 1013 web tests | selfupdate Apply deferred (no CGO dep), wiring into App deferred to keep T4 off-limits |
-| T7 | pending | — | — | — |
+| T7 | done | .github/workflows/desktop.yml, README.md, docs/deployment.md, CONTEXT.md | CI matrix macos-14/ubuntu-22.04, docs Desktop section, XDG/Gatekeeper/auto-update, lint+yaml ok | reviewer PASS |
 
 ## Blocked
 
