@@ -78,8 +78,6 @@ func ensureDeviceSyncTables(ctx context.Context, tx *sql.Tx) error {
   updated_at  INTEGER NOT NULL,
   created_at  INTEGER NOT NULL DEFAULT (unixepoch())
 )`,
-		`CREATE INDEX IF NOT EXISTS idx_sync_change_revision ON sync_change(revision)`,
-		`CREATE INDEX IF NOT EXISTS idx_sync_change_entity ON sync_change(entity_type, entity_id)`,
 		`CREATE TABLE IF NOT EXISTS sync_cursor (
   device_id TEXT PRIMARY KEY REFERENCES device(id),
   revision  INTEGER NOT NULL DEFAULT 0,
@@ -97,6 +95,32 @@ func ensureDeviceSyncTables(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, s); err != nil {
 			return fmt.Errorf("ensure device/sync tables: %w", err)
 		}
+	}
+	// Deduplicate server devices before creating unique index (TOCTOU fix).
+	// All statements must keep the same survivor (earliest) so dependent rows
+	// and the device row itself stay consistent. Previously the first four
+	// kept latest (DESC) while the final kept earliest (ASC), orphaning data.
+	_, _ = tx.ExecContext(ctx, `DELETE FROM sync_change WHERE device_id IN (SELECT id FROM device WHERE is_server = 1 ORDER BY created_at ASC LIMIT -1 OFFSET 1)`)
+	_, _ = tx.ExecContext(ctx, `DELETE FROM sync_cursor WHERE device_id IN (SELECT id FROM device WHERE is_server = 1 ORDER BY created_at ASC LIMIT -1 OFFSET 1)`)
+	_, _ = tx.ExecContext(ctx, `DELETE FROM offline_set WHERE device_id IN (SELECT id FROM device WHERE is_server = 1 ORDER BY created_at ASC LIMIT -1 OFFSET 1)`)
+	_, _ = tx.ExecContext(ctx, `UPDATE pairing_code SET used_by_device_id = NULL WHERE used_by_device_id IN (SELECT id FROM device WHERE is_server = 1 ORDER BY created_at ASC LIMIT -1 OFFSET 1)`)
+	_, _ = tx.ExecContext(ctx, `DELETE FROM device WHERE is_server = 1 AND id NOT IN (SELECT id FROM device WHERE is_server = 1 ORDER BY created_at ASC LIMIT 1)`)
+	// Create desired indexes
+	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_sync_change_entity_field ON sync_change(entity_type, entity_id, field)`); err != nil {
+		return fmt.Errorf("create idx_sync_change_entity_field: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_sync_change_device_id ON sync_change(device_id)`); err != nil {
+		return fmt.Errorf("create idx_sync_change_device_id: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_device_single_server ON device(is_server) WHERE is_server = 1`); err != nil {
+		return fmt.Errorf("create idx_device_single_server: %w", err)
+	}
+	// Drop legacy redundant indexes if they exist (from 0024)
+	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS idx_sync_change_revision`); err != nil {
+		return fmt.Errorf("drop idx_sync_change_revision: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS idx_sync_change_entity`); err != nil {
+		return fmt.Errorf("drop idx_sync_change_entity: %w", err)
 	}
 	return nil
 }

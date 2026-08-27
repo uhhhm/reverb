@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/uhhhm/reverb/internal/store/db"
 )
@@ -18,6 +19,7 @@ import (
 type SyncStore struct {
 	q      Querier
 	policy MergePolicy
+	mu     sync.Mutex
 }
 
 // NewSyncStore creates a store with default LWWPolicy.
@@ -126,14 +128,12 @@ func (s *SyncStore) getMaxSyncRevision(ctx context.Context) (int64, error) {
 		case nil:
 			return 0, nil
 		case string:
-			// shouldn't happen
 			return 0, nil
 		default:
 			return 0, fmt.Errorf("unexpected GetMaxSyncRevision type %T", v)
 		}
 	}
 	if dbq, ok := any(s.q).(*db.Queries); ok {
-		// db.Queries currently returns interface{}
 		v, err := dbq.GetMaxSyncRevision(ctx)
 		if err != nil {
 			return 0, err
@@ -146,7 +146,6 @@ func (s *SyncStore) getMaxSyncRevision(ctx context.Context) (int64, error) {
 		case nil:
 			return 0, nil
 		default:
-			// try via reflection? fallback
 			return 0, fmt.Errorf("unexpected GetMaxSyncRevision type %T", v)
 		}
 	}
@@ -191,6 +190,23 @@ func (s *SyncStore) upsertSyncCursor(ctx context.Context, arg db.UpsertSyncCurso
 
 // AppendChange appends a single change for deviceID. Value is marshaled to value_json.
 func (s *SyncStore) AppendChange(ctx context.Context, deviceID string, ch SyncChange) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	valueJSON, err := marshalValue(ch)
+	if err != nil {
+		return 0, err
+	}
+	return s.appendSyncChange(ctx, db.AppendSyncChangeParams{
+		DeviceID:   deviceID,
+		EntityType: ch.EntityType,
+		EntityID:   ch.EntityID,
+		Field:      ch.Field,
+		ValueJson:  valueJSON,
+		UpdatedAt:  ch.UpdatedAt,
+	})
+}
+
+func (s *SyncStore) appendChangeLocked(ctx context.Context, deviceID string, ch SyncChange) (int64, error) {
 	valueJSON, err := marshalValue(ch)
 	if err != nil {
 		return 0, err
@@ -311,6 +327,9 @@ func (s *SyncStore) effectivePolicy(ctx context.Context) MergePolicy {
 // Tie on UpdatedAt -> server wins, then deviceId lex order.
 // It is atomic when backed by *sql.DB: the inbound loop and cursor advance run in a single transaction.
 func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange) (outbound []SyncChange, newRev int64, rejected []SyncChange, err error) {
+	if len(inbound) > 5000 {
+		return nil, 0, nil, fmt.Errorf("too many changes: %d > 5000", len(inbound))
+	}
 	policy := s.effectivePolicy(ctx)
 	// Attempt transactional path when we have a *sql.DB.
 	if dbq, ok := any(s.q).(*db.Queries); ok {
@@ -318,10 +337,7 @@ func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int
 			tx, err := sqlDB.BeginTx(ctx, nil)
 			if err == nil {
 				txQ := dbq.WithTx(tx)
-				// Use s.policy (not the already-wrapped policy) so effectivePolicy
-				// recomputes IsServer to capture txQ, not the outer s.q snapshot.
 				txStore := &SyncStore{q: txQ, policy: s.policy}
-				// Recompute policy for txStore so IsServer uses tx view.
 				txPolicy := txStore.effectivePolicy(ctx)
 				outbound, newRev, rejected, err = txStore.reconcileInternal(ctx, deviceID, sinceRev, inbound, txPolicy)
 				if err != nil {
@@ -335,6 +351,8 @@ func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int
 			}
 		}
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.reconcileInternal(ctx, deviceID, sinceRev, inbound, policy)
 }
 
@@ -358,7 +376,7 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 			return nil, 0, nil, err
 		}
 		if existing == nil {
-			if _, aerr := s.AppendChange(ctx, deviceID, inc); aerr != nil {
+			if _, aerr := s.appendChangeLocked(ctx, deviceID, inc); aerr != nil {
 				return nil, 0, nil, aerr
 			}
 			continue
@@ -372,13 +390,13 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 			continue
 		}
 		if !isExistingDeleted && isIncomingDeleted {
-			if _, aerr := s.AppendChange(ctx, deviceID, inc); aerr != nil {
+			if _, aerr := s.appendChangeLocked(ctx, deviceID, inc); aerr != nil {
 				return nil, 0, nil, aerr
 			}
 			continue
 		}
 		if policy.PickWinner(*existing, inc) {
-			if _, aerr := s.AppendChange(ctx, deviceID, inc); aerr != nil {
+			if _, aerr := s.appendChangeLocked(ctx, deviceID, inc); aerr != nil {
 				return nil, 0, nil, aerr
 			}
 		} else {
