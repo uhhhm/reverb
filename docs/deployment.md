@@ -234,6 +234,6 @@ The app is unsigned. On first launch right-click the `.app` / `.zip` → **Open*
 
 ### Auto-update
 
-The desktop polls GitHub Releases (`GET /repos/<owner>/reverb/releases/latest`) on startup and every 6 h (stable channel only). When a newer semver tag is found the UI shows an update banner; confirming replaces the binary in-place via `go-selfupdate` and restarts. `yt-dlp` is hot-upgraded separately every 24 h via `pip install --upgrade yt-dlp` without an app restart.
+The desktop polls GitHub Releases (`GET /repos/<owner>/<name>/releases/latest`) on startup and every 6 h (stable channel only). The repository defaults to `uhhhm/reverb` and is set with `REVERB_UPDATE_REPO` / `--update-repo`; `off` disables the check (both the desktop poller and the web UI banner — `/api/v1/version` then reports an empty `updateRepo`). When a newer semver tag is found the UI shows an update banner; confirming replaces the binary in-place via `go-selfupdate` and restarts. `yt-dlp` is hot-upgraded separately every 24 h via `pip install --upgrade yt-dlp` without an app restart.
 
 CI builds `reverb-desktop-$VERSION-$GOOS-$GOARCH.{zip,deb,AppImage}` via `.github/workflows/desktop.yml` (matrix `macos-14` + `ubuntu-22.04` × `amd64`/`arm64`, `wails build -platform $GOOS/$GOARCH -ldflags "-X main.version=$TAG"`).

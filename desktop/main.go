@@ -21,6 +21,7 @@ import (
 	"github.com/maxjb-xyz/reverb/internal/download"
 	"github.com/maxjb-xyz/reverb/internal/download/lidarr"
 	"github.com/maxjb-xyz/reverb/internal/download/spotdl"
+	"github.com/maxjb-xyz/reverb/internal/download/ytdlp"
 	"github.com/maxjb-xyz/reverb/internal/events"
 	"github.com/maxjb-xyz/reverb/internal/library/embedded"
 	"github.com/maxjb-xyz/reverb/internal/library/lyrics"
@@ -42,6 +43,26 @@ import (
 var version = "dev"
 
 func main() {
+	app, err := boot(os.Args[1:])
+	if err != nil {
+		log.Fatal(err)
+	}
+	app.StartServices()
+
+	// runApp is build-tag dispatched: the native Wails window under -tags
+	// desktop (frontend.go), plain HTTP otherwise (run_fallback.go).
+	if err := runApp(app); err != nil {
+		log.Fatal(err)
+	}
+}
+
+// boot builds the desktop composition root: filesystem contract, bundled-tool
+// environment, config, store, registries, wiring, API deps and the 127.0.0.1
+// listener. It stops short of starting the window, so the smoke test can boot
+// the very same wiring the app runs rather than a hand-assembled lookalike.
+// args are the CLI flags (os.Args[1:] in main; nil under test, where os.Args
+// carries the test binary's own flags).
+func boot(args []string) (*App, error) {
 	// Desktop filesystem contract: XDG DB, Music dir, legacy migration.
 	desktopDB := desktop.ResolveDesktopDB()
 	downloadDir := desktop.ResolveDesktopDownloadDir()
@@ -58,13 +79,17 @@ func main() {
 	_ = os.MkdirAll(dataDir, 0755)
 	_ = os.MkdirAll(downloadDir, 0755)
 
-	cfg, err := config.Load(os.Args[1:], os.Getenv)
+	// Point the services at the bundled navidrome/spotdl/yt-dlp/ffmpeg before
+	// config.Load and wiring read the environment.
+	ApplyBundledToolEnv()
+
+	cfg, err := config.Load(args, os.Getenv)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 	// Override Port=0 (random) unless --port arg or REVERB_PORT is set.
 	hasPortArg := false
-	for _, arg := range os.Args[1:] {
+	for _, arg := range args {
 		if arg == "--port" || strings.HasPrefix(arg, "--port=") || arg == "-port" || strings.HasPrefix(arg, "-port=") {
 			hasPortArg = true
 			break
@@ -77,16 +102,17 @@ func main() {
 	// Open store and run migrations.
 	st, err := store.Open(cfg.DBPath)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
-	defer st.Close()
 	if err := st.Migrate(); err != nil {
-		log.Fatal(err)
+		st.Close()
+		return nil, err
 	}
 
 	authSvc := auth.NewService(st.Q(), time.Now)
 	if err := authSvc.EnsureSeed(context.Background()); err != nil {
-		log.Fatalf("seed identity: %v", err)
+		st.Close()
+		return nil, fmt.Errorf("seed identity: %w", err)
 	}
 	seedBundledDownloader(context.Background(), st.Q(), os.Getenv)
 	if serverID, err := reverbsync.EnsureServerDevice(context.Background(), st.Q()); err != nil {
@@ -104,6 +130,7 @@ func main() {
 	downloaderReg := registry.NewRegistry("downloader")
 	downloaderReg.Register("spotdl", func() registry.Plugin { return spotdl.New() })
 	downloaderReg.Register("lidarr", func() registry.Plugin { return lidarr.New() })
+	downloaderReg.Register("ytdlp", func() registry.Plugin { return ytdlp.New() })
 	registry.RegisterCapability("async", func(p registry.Plugin) bool {
 		_, ok := p.(download.AsyncDownloader)
 		return ok
@@ -128,23 +155,11 @@ func main() {
 
 	bundle, err := builder.Build(context.Background())
 	if err != nil {
-		log.Fatal(err)
-	}
-	if bundle.Supervisor != nil {
-		bundle.Supervisor.Start()
+		st.Close()
+		return nil, err
 	}
 	if bundle.Manager != nil {
 		bundle.Manager.SetCanonicalMinter(catalogSvc)
-		bundle.Manager.Start()
-		defer bundle.Manager.Stop()
-	}
-	if bundle.Sync != nil {
-		go playlistsync.NewScheduler(bundle.Sync, 15*time.Minute).Run(context.Background())
-		go func() {
-			if err := bundle.Sync.MigrateLibraryPlaylists(context.Background()); err != nil {
-				log.Printf("WARNING: library playlist migration: %v", err)
-			}
-		}()
 	}
 	playSvc := play.NewService(st.Q(), catalogSvc, time.Now, uuid.NewString)
 	statsSvc := play.NewStats(st.Q())
@@ -155,7 +170,6 @@ func main() {
 		return scrobble.Creds{APIKey: key, APISecret: secret}
 	}
 	scrobbleSvc := scrobble.NewService(st.Q(), lastfm.New(), scrobbleCfg, time.Now, uuid.NewString)
-	go scrobbleSvc.RunWorker(context.Background(), 30*time.Second)
 
 	deps := api.Deps{
 		Auth:          authSvc,
@@ -167,6 +181,7 @@ func main() {
 		PlaylistOwner: st.Q(),
 		Events:        bus,
 		Version:       version,
+		UpdateRepo:    cfg.UpdateRepo,
 		DataDir:       filepath.Dir(cfg.DBPath),
 		Resolver:      resolverSvc,
 		Play:          playSvc,
@@ -175,7 +190,7 @@ func main() {
 		Lyrics: &lyrics.Service{
 			Store: st.Q(),
 			Client: &lyrics.LRCLibClient{
-				UserAgent: "Reverb/" + version + " (https://github.com/maxjb-xyz/reverb)",
+				UserAgent: "Reverb/" + version + " (https://github.com/uhhhm/reverb)",
 			},
 		},
 		Pairing:      bundle.Pairing,
@@ -222,10 +237,16 @@ func main() {
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.Fatal(err)
+		st.Close()
+		return nil, err
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 	log.Printf("desktop reverb listening on 127.0.0.1:%d (dev=%v)", port, cfg.Dev)
+
+	// The window's page is served by the Wails AssetServer, which cannot carry a
+	// WebSocket upgrade. Publish the real listener port so the SPA dials it
+	// directly for realtime updates.
+	deps.LocalAPIPort = port
 
 	srv := &http.Server{
 		Handler:           api.NewServer(deps).Handler(),
@@ -240,20 +261,35 @@ func main() {
 	app.bundle = bundle
 	app.deps = deps
 	app.port = port
+	app.store = st
+	app.scrobble = scrobbleSvc
 	app.ctx, app.cancel = context.WithCancel(context.Background())
 
-	// TODO: future Wails Run — when github.com/wailsapp/wails/v2 is added to go.mod,
-	// replace the fallback plain HTTP serve below with:
-	//   wails.Run(&options.App{
-	//     Title: "Reverb", Width: 1200, Height: 800,
-	//     AssetServer: &assetserver.Options{Assets: assets},
-	//     OnStartup: app.OnStartup, OnShutdown: app.OnShutdown, OnBeforeClose: app.OnBeforeClose,
-	//     Bind: []interface{}{app},
-	//   })
-	// For now, fallback to plain HTTP serve so `go run ./desktop` works without wails.
-	log.Printf("desktop fallback HTTP serving on http://127.0.0.1:%d", port)
-	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-		log.Fatal(err)
+	return app, nil
+}
+
+// StartServices starts the long-running background work boot() only wired up:
+// the bundled Navidrome, the download manager, playlist sync and the scrobble
+// worker. It is separate from boot() so constructing the composition root has
+// no side effects — notably, booting it in a test must not spawn a second
+// Navidrome on the fixed 4533 port.
+func (a *App) StartServices() {
+	if a.bundle.Supervisor != nil {
+		a.bundle.Supervisor.Start()
+	}
+	if a.bundle.Manager != nil {
+		a.bundle.Manager.Start()
+	}
+	if a.bundle.Sync != nil {
+		go playlistsync.NewScheduler(a.bundle.Sync, 15*time.Minute).Run(context.Background())
+		go func() {
+			if err := a.bundle.Sync.MigrateLibraryPlaylists(context.Background()); err != nil {
+				log.Printf("WARNING: library playlist migration: %v", err)
+			}
+		}()
+	}
+	if a.scrobble != nil {
+		go a.scrobble.RunWorker(context.Background(), 30*time.Second)
 	}
 }
 

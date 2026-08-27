@@ -19,6 +19,7 @@ import (
 	"github.com/maxjb-xyz/reverb/internal/download"
 	"github.com/maxjb-xyz/reverb/internal/download/lidarr"
 	"github.com/maxjb-xyz/reverb/internal/download/spotdl"
+	"github.com/maxjb-xyz/reverb/internal/download/ytdlp"
 	"github.com/maxjb-xyz/reverb/internal/events"
 	"github.com/maxjb-xyz/reverb/internal/library/embedded"
 	"github.com/maxjb-xyz/reverb/internal/library/lyrics"
@@ -85,6 +86,7 @@ func main() {
 	downloaderReg := registry.NewRegistry("downloader")
 	downloaderReg.Register("spotdl", func() registry.Plugin { return spotdl.New() })
 	downloaderReg.Register("lidarr", func() registry.Plugin { return lidarr.New() })
+	downloaderReg.Register("ytdlp", func() registry.Plugin { return ytdlp.New() })
 	// Surface the async capability to the admin UI (/adapters/available).
 	registry.RegisterCapability("async", func(p registry.Plugin) bool {
 		_, ok := p.(download.AsyncDownloader)
@@ -203,6 +205,7 @@ func main() {
 		Reload:        reloader,
 		Dev:           cfg.Dev,
 		Version:       version,
+		UpdateRepo:    cfg.UpdateRepo,
 		DataDir:       filepath.Dir(cfg.DBPath),
 		Resolver:      resolverSvc,
 		Play:          playSvc,
@@ -211,7 +214,7 @@ func main() {
 		Lyrics: &lyrics.Service{
 			Store: st.Q(),
 			Client: &lyrics.LRCLibClient{
-				UserAgent: "Reverb/" + version + " (https://github.com/maxjb-xyz/reverb)",
+				UserAgent: "Reverb/" + version + " (https://github.com/uhhhm/reverb)",
 			},
 		},
 		// T8 multi-device: wiring.Build already ensured server device and built

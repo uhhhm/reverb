@@ -22,14 +22,22 @@ dev:
 	@echo "  1) cd web && npm run dev"
 	@echo "  2) go run ./cmd/reverb --dev"
 
+# WAILS_TAGS: "production" compiles the real Wails app (without it internal/app
+# is a no-op stub). Linux needs webkit2_41 where only webkit2gtk-4.1 is packaged
+# (Fedora/Nobara); drop it on distros shipping 4.0.
+WAILS_TAGS ?= desktop,production,webkit2_41
+
 desktop: web
-	go build -tags desktop -ldflags "-X main.version=$(VERSION)" -o dist/reverb-desktop ./desktop
+	go build -tags $(WAILS_TAGS) -ldflags "-X main.version=$(VERSION)" -o dist/reverb-desktop ./desktop
 
 desktop-dev:
 	wails dev -projectdir ./desktop
 
-desktop-deps: # fetch ffmpeg static + navidrome per TARGETARCH (tools/fetch-*.sh)
-	@echo "desktop-deps: fetch ffmpeg static + navidrome per TARGETARCH (tools/fetch-*.sh) - not yet implemented"
+desktop-deps: # fetch ffmpeg, navidrome, deno and the spotDL venv into desktop/tools/
+	desktop/tools/fetch-ffmpeg.sh
+	desktop/tools/fetch-navidrome.sh
+	desktop/tools/fetch-deno.sh
+	desktop/tools/setup-python-venv.sh
 
 clean:
 	rm -rf reverb web/dist internal/api/dist

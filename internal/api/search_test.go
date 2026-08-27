@@ -135,3 +135,48 @@ func TestEverywhereEmptyQueryReturns400(t *testing.T) {
 		t.Fatalf("content-type = %q, should not be an SSE stream", ct)
 	}
 }
+
+// nonFlushingRecorder is an httptest.ResponseRecorder with the Flush method
+// hidden, mirroring the Wails desktop webview's ResponseWriter. Embedding the
+// http.ResponseWriter interface (rather than the concrete recorder) is what
+// drops Flush from the method set.
+type nonFlushingRecorder struct {
+	http.ResponseWriter
+	rec *httptest.ResponseRecorder
+}
+
+func newNonFlushingRecorder() *nonFlushingRecorder {
+	rec := httptest.NewRecorder()
+	return &nonFlushingRecorder{ResponseWriter: rec, rec: rec}
+}
+
+// TestEverywhereSSEWorksWithoutFlusher guards the desktop-app regression: the
+// Wails webview ResponseWriter is not an http.Flusher, and requiring one made
+// every Everywhere search inside the desktop window fail with 500 while the
+// same request over the plain HTTP listener succeeded.
+func TestEverywhereSSEWorksWithoutFlusher(t *testing.T) {
+	envs := []search.Envelope{
+		{Source: "deezer", Status: search.StatusOK, Results: []core.ExternalResult{
+			{Source: "deezer", ExternalID: "d1", Title: "Song", Type: core.EntityTrack},
+		}},
+	}
+	srv, cookie := searchTestServer(t, fakeAgg{envs: envs})
+
+	w := newNonFlushingRecorder()
+	if _, isFlusher := http.ResponseWriter(w).(http.Flusher); isFlusher {
+		t.Fatal("test writer must NOT implement http.Flusher")
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/search/everywhere?q=song&type=track", nil)
+	req.AddCookie(cookie)
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", w.rec.Code, w.rec.Body.String())
+	}
+	if ct := w.rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+		t.Fatalf("content-type = %q, want text/event-stream", ct)
+	}
+	if !strings.Contains(w.rec.Body.String(), `"source":"deezer"`) {
+		t.Fatalf("envelope missing from body: %q", w.rec.Body.String())
+	}
+}

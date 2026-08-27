@@ -12,7 +12,7 @@ import (
 
 func TestLatestReleaseSuccess(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/repos/maxjb-xyz/reverb/releases/latest" {
+		if r.URL.Path != "/repos/uhhhm/reverb/releases/latest" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
 		if r.Method != http.MethodGet {
@@ -34,7 +34,7 @@ func TestLatestReleaseSuccess(t *testing.T) {
 	githubAPIBase = srv.URL
 	defer func() { githubAPIBase = origBase }()
 
-	rel, err := LatestRelease(context.Background(), "maxjb-xyz/reverb")
+	rel, err := LatestRelease(context.Background(), "uhhhm/reverb")
 	if err != nil {
 		t.Fatalf("LatestRelease error: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestLatestReleaseHTTPError(t *testing.T) {
 	githubAPIBase = srv.URL
 	defer func() { githubAPIBase = origBase }()
 
-	_, err := LatestRelease(context.Background(), "maxjb-xyz/reverb")
+	_, err := LatestRelease(context.Background(), "uhhhm/reverb")
 	if err == nil {
 		t.Fatal("expected error for 404")
 	}
@@ -197,25 +197,25 @@ func TestCheckAndEmit(t *testing.T) {
 	defer func() { githubAPIBase = origBase }()
 
 	// Older current -> available
-	ok, tag := CheckAndEmit(context.Background(), "v1.0.0")
+	ok, tag := CheckAndEmit(context.Background(), DefaultRepo, "v1.0.0")
 	if !ok || tag != "v2.0.0" {
 		t.Fatalf("CheckAndEmit old -> ok=%v tag=%q want true v2.0.0", ok, tag)
 	}
 
 	// Same version -> not available
-	ok, tag = CheckAndEmit(context.Background(), "v2.0.0")
+	ok, tag = CheckAndEmit(context.Background(), DefaultRepo, "v2.0.0")
 	if ok || tag != "" {
 		t.Fatalf("CheckAndEmit same -> ok=%v tag=%q want false", ok, tag)
 	}
 
 	// Newer current -> not available
-	ok, tag = CheckAndEmit(context.Background(), "v3.0.0")
+	ok, tag = CheckAndEmit(context.Background(), DefaultRepo, "v3.0.0")
 	if ok {
 		t.Fatalf("CheckAndEmit newer current -> ok=%v want false", ok)
 	}
 
 	// dev -> not available
-	ok, tag = CheckAndEmit(context.Background(), "dev")
+	ok, tag = CheckAndEmit(context.Background(), DefaultRepo, "dev")
 	if ok {
 		t.Fatalf("CheckAndEmit dev -> ok=%v want false", ok)
 	}

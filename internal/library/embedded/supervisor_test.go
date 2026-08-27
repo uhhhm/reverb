@@ -111,3 +111,21 @@ func TestSupervisor_CrashLoop_GoesDegraded(t *testing.T) {
 		t.Errorf("shutdown after degraded: %v", err)
 	}
 }
+
+// TestShutdownBeforeStartReturnsImmediately guards against a quit that happens
+// before startup stalling for the caller's whole timeout: done is only closed by
+// Start/supervise, so an unstarted supervisor used to block until ctx expired.
+func TestShutdownBeforeStartReturnsImmediately(t *testing.T) {
+	s := New(Options{Mode: ModeBuiltIn})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	if err := s.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown before Start: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 250*time.Millisecond {
+		t.Errorf("Shutdown before Start took %v, want it to return immediately", elapsed)
+	}
+}

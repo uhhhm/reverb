@@ -37,6 +37,7 @@ type Supervisor struct {
 	sawReady bool
 	cancel   context.CancelFunc
 	done     chan struct{}
+	started  bool
 }
 
 func New(o Options) *Supervisor {
@@ -63,6 +64,9 @@ func (s *Supervisor) setHealth(h Health) { s.mu.Lock(); s.health = h; s.mu.Unloc
 
 // Start launches the supervise loop. No-op (beyond external health) when not built-in.
 func (s *Supervisor) Start() {
+	s.mu.Lock()
+	s.started = true
+	s.mu.Unlock()
 	if s.opts.Mode != ModeBuiltIn {
 		close(s.done)
 		return
@@ -141,6 +145,15 @@ func (s *Supervisor) waitReady(ctx context.Context) {
 // Shutdown cancels the supervise loop (which SIGTERMs the child via ExecRunner's
 // cmd.Cancel) and waits for it to exit, or until ctx is done.
 func (s *Supervisor) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	started := s.started
+	s.mu.Unlock()
+	if !started {
+		// Never started, so there is nothing to wind down — and s.done is only
+		// closed by Start/supervise, so waiting on it here would block until ctx
+		// expires (15s of dead time on a quit that happens before startup).
+		return nil
+	}
 	if s.cancel != nil {
 		s.cancel()
 	}

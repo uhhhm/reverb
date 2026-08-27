@@ -14,6 +14,7 @@ dev/music/*
 reverb-plan.md
 docs/HANDOFF-*.md
 docs/superpowers/
+docs/task-reports/
 
 .agents/
 .claude/

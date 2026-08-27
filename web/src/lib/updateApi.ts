@@ -6,7 +6,9 @@ export interface UpdateRelease {
   assets: { name: string; url: string }[]
 }
 
-const DEFAULT_REPO = 'maxjb-xyz/reverb'
+// Fallback only. The repository is server-configured (REVERB_UPDATE_REPO /
+// --update-repo) and reported by /version as updateRepo.
+const DEFAULT_REPO = 'uhhhm/reverb'
 
 // isNewer reports whether latest is newer than current. Mirrors
 // desktop/updater semver logic: strips leading "v", numeric compare.
@@ -38,9 +40,19 @@ export function isNewer(current: string, latest: string): boolean {
   return lat > cur
 }
 
+export interface VersionInfo {
+  version: string
+  // GitHub owner/name to poll for releases; '' when updates are disabled.
+  updateRepo: string
+}
+
+export async function fetchVersionInfo(): Promise<VersionInfo> {
+  const data = await api.get<{ version: string; updateRepo?: string }>('/version')
+  return { version: data.version, updateRepo: data.updateRepo ?? DEFAULT_REPO }
+}
+
 export async function fetchVersion(): Promise<string> {
-  const data = await api.get<{ version: string }>('/version')
-  return data.version
+  return (await fetchVersionInfo()).version
 }
 
 export async function fetchLatestRelease(repo: string = DEFAULT_REPO): Promise<UpdateRelease> {

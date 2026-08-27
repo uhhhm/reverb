@@ -32,3 +32,30 @@ func TestEnvFillsPortWhenNoFlag(t *testing.T) {
 		t.Fatalf("env not applied: %+v", c)
 	}
 }
+
+func TestUpdateRepo(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		env  map[string]string
+		want string
+	}{
+		{name: "default", want: DefaultUpdateRepo},
+		{name: "env", env: map[string]string{"REVERB_UPDATE_REPO": "me/fork"}, want: "me/fork"},
+		{name: "flag beats env", args: []string{"--update-repo", "me/fork"},
+			env: map[string]string{"REVERB_UPDATE_REPO": "other/fork"}, want: "me/fork"},
+		{name: "off disables", env: map[string]string{"REVERB_UPDATE_REPO": "off"}, want: ""},
+		{name: "off via flag", args: []string{"--update-repo", "off"}, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, err := Load(tt.args, func(k string) string { return tt.env[k] })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.UpdateRepo != tt.want {
+				t.Fatalf("UpdateRepo = %q, want %q", c.UpdateRepo, tt.want)
+			}
+		})
+	}
+}

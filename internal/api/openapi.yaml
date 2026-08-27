@@ -16,15 +16,15 @@ paths:
       responses: { "200": { description: ok } }
   /version:
     get:
-      summary: Build version
+      summary: Build version and update-check repository
       responses:
         "200":
-          description: version string
+          description: version string, and the GitHub owner/name polled for updates ("" when disabled)
           content:
             application/json:
               schema:
                 type: object
-                properties: { version: { type: string } }
+                properties: { version: { type: string }, updateRepo: { type: string } }
   /openapi.yaml:
     get:
       summary: This OpenAPI document

@@ -11,6 +11,10 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Served by the Go server: publishes window.__REVERB_PORT__ when the page
+         is not same-origin with the API (the Wails desktop window). Must load
+         before the app bundle. -->
+    <script src="/runtime-config.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

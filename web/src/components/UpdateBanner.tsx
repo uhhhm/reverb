@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchLatestRelease, fetchVersion, isNewer } from '../lib/updateApi'
+import { fetchLatestRelease, fetchVersionInfo, isNewer } from '../lib/updateApi'
 
 export interface UpdateBannerProps {
   tag: string
@@ -52,9 +52,10 @@ export function UpdateBanner({ tag: propTag, onDismiss, onUpdate }: UpdateBanner
     let cancelled = false
     async function poll() {
       try {
-        const current = await fetchVersion()
-        const rel = await fetchLatestRelease()
-        if (!cancelled && isNewer(current, rel.tag)) {
+        const { version, updateRepo } = await fetchVersionInfo()
+        if (!updateRepo) return
+        const rel = await fetchLatestRelease(updateRepo)
+        if (!cancelled && isNewer(version, rel.tag)) {
           setInternalTag(rel.tag)
         }
       } catch {

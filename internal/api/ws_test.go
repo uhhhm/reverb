@@ -116,3 +116,68 @@ func TestWSHandshake(t *testing.T) {
 	}
 	defer c.Close(websocket.StatusNormalClosure, "")
 }
+
+// wsDesktopServer is wsTestServer with Desktop set, i.e. the composition the
+// desktop binary uses.
+func wsDesktopServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	st, err := store.Open(t.TempDir() + "/wsdesktop.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if err := st.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	authSvc, _ := seededAuthToken(t, st)
+	srv := NewServer(Deps{
+		Auth:       authSvc,
+		Events:     events.New(),
+		Search:     registry.NewRegistry("search"),
+		Downloader: registry.NewRegistry("downloader"),
+		Desktop:    true,
+	})
+	hs := httptest.NewServer(srv.Handler())
+	t.Cleanup(hs.Close)
+	return hs
+}
+
+// TestWSAcceptsWailsWindowOrigin covers the desktop realtime path: the window's
+// page is served by the Wails AssetServer, which cannot carry a WebSocket
+// upgrade, so the SPA dials the 127.0.0.1 listener directly. That upgrade is
+// cross-origin, and the default same-origin check rejected it.
+func TestWSAcceptsWailsWindowOrigin(t *testing.T) {
+	hs := wsDesktopServer(t)
+	wsURL := "ws" + hs.URL[len("http"):] + "/api/v1/ws"
+
+	for _, origin := range []string{"wails://wails", "http://wails.localhost"} {
+		t.Run(origin, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			c, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+				HTTPHeader: http.Header{"Origin": {origin}},
+			})
+			if err != nil {
+				t.Fatalf("dial from %s: %v", origin, err)
+			}
+			c.Close(websocket.StatusNormalClosure, "")
+		})
+	}
+}
+
+// TestWSRejectsForeignOriginOnDesktop guards the allowance from being widened
+// into "any origin": only the Wails window origins are exempt.
+func TestWSRejectsForeignOriginOnDesktop(t *testing.T) {
+	hs := wsDesktopServer(t)
+	wsURL := "ws" + hs.URL[len("http"):] + "/api/v1/ws"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	c, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Origin": {"http://evil.example"}},
+	})
+	if err == nil {
+		c.Close(websocket.StatusNormalClosure, "")
+		t.Fatal("upgrade from a foreign origin must be rejected")
+	}
+}

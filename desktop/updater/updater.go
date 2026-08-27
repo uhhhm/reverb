@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/maxjb-xyz/reverb/internal/config"
 )
 
 // Release holds the tag, body and assets for a GitHub release.
@@ -23,8 +25,10 @@ type Asset struct {
 	URL  string
 }
 
-// DefaultRepo is the GitHub repository used for update checks (stable channel).
-const DefaultRepo = "maxjb-xyz/reverb"
+// DefaultRepo is the GitHub repository used for update checks (stable channel)
+// when the caller passes no repo. Configurable via REVERB_UPDATE_REPO /
+// --update-repo; see internal/config.
+const DefaultRepo = config.DefaultUpdateRepo
 
 // githubAPIBase is the base URL for GitHub API; overridden in tests via
 // httptest server URL.
@@ -194,10 +198,14 @@ func IsNewer(current, latest string) bool {
 	return lat > cur
 }
 
-// CheckAndEmit checks GitHub for a newer release than currentVersion.
+// CheckAndEmit checks repo for a release newer than currentVersion.
 // If a newer tag is found it returns (true, tag). Channel is stable only.
-func CheckAndEmit(ctx context.Context, currentVersion string) (bool, string) {
-	rel, err := LatestRelease(ctx, DefaultRepo)
+// An empty repo means update checks are disabled.
+func CheckAndEmit(ctx context.Context, repo, currentVersion string) (bool, string) {
+	if repo == "" {
+		return false, ""
+	}
+	rel, err := LatestRelease(ctx, repo)
 	if err != nil {
 		log.Printf("updater: check failed: %v", err)
 		return false, ""
@@ -216,14 +224,18 @@ func CheckAndEmit(ctx context.Context, currentVersion string) (bool, string) {
 // StartPollers launches background goroutines that periodically check for app
 // updates (every 6h) and yt-dlp upgrades (every 24h). It returns immediately.
 // Context cancellation stops both pollers.
-func StartPollers(ctx context.Context, currentVersion string) {
-	go pollUpdates(ctx, currentVersion)
+// An empty repo disables the release poller; yt-dlp upgrades still run.
+func StartPollers(ctx context.Context, repo, currentVersion string) {
+	go pollUpdates(ctx, repo, currentVersion)
 	go pollYtDlp(ctx)
 }
 
-func pollUpdates(ctx context.Context, currentVersion string) {
+func pollUpdates(ctx context.Context, repo, currentVersion string) {
+	if repo == "" {
+		return
+	}
 	// Immediate check on start.
-	_, _ = CheckAndEmit(ctx, currentVersion)
+	_, _ = CheckAndEmit(ctx, repo, currentVersion)
 
 	ticker := time.NewTicker(6 * time.Hour)
 	defer ticker.Stop()
@@ -232,7 +244,7 @@ func pollUpdates(ctx context.Context, currentVersion string) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			_, _ = CheckAndEmit(ctx, currentVersion)
+			_, _ = CheckAndEmit(ctx, repo, currentVersion)
 		}
 	}
 }

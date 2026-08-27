@@ -108,6 +108,7 @@ Reverb is configured by flags, environment variables, and the in-app Settings UI
 | `--port` | `8090` | HTTP listen port |
 | `--db` | `./data/reverb.db` | SQLite database path |
 | `--dev` | `false` | Dev mode (proxies the Vite dev server) |
+| `--update-repo` | `uhhhm/reverb` | GitHub `owner/name` checked for new releases; `off` disables update checks |
 
 ### Environment variables
 
@@ -116,6 +117,7 @@ Reverb is configured by flags, environment variables, and the in-app Settings UI
 | `REVERB_PORT` | HTTP listen port (same as `--port`); defaults to `8090` |
 | `REVERB_DB` | SQLite path (same as `--db`); the Docker image defaults this to `/data/reverb.db` |
 | `REVERB_DEV=1` | Enable dev mode |
+| `REVERB_UPDATE_REPO` | GitHub `owner/name` checked for new releases (same as `--update-repo`); `off` disables update checks |
 | `REVERB_DOWNLOAD_DIR` | Directory spotDL downloads into **and** the folder the bundled Navidrome serves. The Docker image defaults this to `/music` |
 | `REVERB_DOWNLOAD_WORKERS` | Concurrent spotDL jobs; defaults to `2`, accepts `1`–`4`. This improves batch throughput, not a single track's transfer rate. |
 | `REVERB_SPOTIFY_CLIENT_ID` | Spotify app Client ID (alternative to setting it in the Settings UI) |
@@ -124,6 +126,8 @@ Reverb is configured by flags, environment variables, and the in-app Settings UI
 | `REVERB_SPOTDL_PATH` | Path to the spotDL binary. Defaults to the bundled one; rarely needed |
 | `REVERB_NAVIDROME_BIN` | Path to the Navidrome binary for bundled library mode. Defaults to the bundled one; rarely needed |
 | `REVERB_NAVIDROME_LISTEN_ADDRESS` | Address for bundled Navidrome. Defaults to `127.0.0.1` inside the container; set to `0.0.0.0` only when deliberately sharing it through a private Docker network or localhost-only port mapping. |
+| `REVERB_NAVIDROME_PORT` | Port for bundled Navidrome; defaults to `4533`. Set it to run a second instance without colliding with one already running |
+| `REVERB_YTDLP_PATH` | Path to the yt-dlp binary for the yt-dlp downloader. Defaults to `yt-dlp` on PATH |
 
 Secrets (`REVERB_*_SECRET`, `REVERB_*_PASSWORD`) should be
 provided via environment / `.env` only — never committed. `.env` is gitignored;

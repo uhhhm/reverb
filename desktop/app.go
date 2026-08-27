@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/maxjb-xyz/reverb/internal/api"
+	"github.com/maxjb-xyz/reverb/internal/scrobble"
+	"github.com/maxjb-xyz/reverb/internal/store"
 	"github.com/maxjb-xyz/reverb/internal/wiring"
 )
 
@@ -21,6 +23,10 @@ type App struct {
 	bundle wiring.ServiceBundle
 	deps   api.Deps
 	port   int
+	// store is closed on shutdown. boot() opens it and hands ownership here.
+	store *store.Store
+	// scrobble is started by StartServices.
+	scrobble *scrobble.Service
 }
 
 // NewApp creates a new desktop App.
@@ -84,6 +90,9 @@ func (a *App) OnShutdown(ctx context.Context) {
 	}
 	if a.bundle.Manager != nil {
 		a.bundle.Manager.Stop()
+	}
+	if a.store != nil {
+		_ = a.store.Close()
 	}
 }
 

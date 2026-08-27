@@ -23,10 +23,31 @@ func DefaultNaviOptions(reverbDataDir, musicDir, adminPassword string) NaviOptio
 		MusicDir:      musicDir,
 		DataDir:       filepath.Join(reverbDataDir, "navidrome"),
 		Address:       "127.0.0.1",
-		Port:          4533,
+		Port:          DefaultPort,
 		AdminPassword: adminPassword,
 		ScanSchedule:  "@every 1h",
 	}
+}
+
+// DefaultPort is the port the bundled Navidrome listens on unless
+// REVERB_NAVIDROME_PORT overrides it.
+const DefaultPort = 4533
+
+// Port returns the port for the bundled Navidrome. It is overridable mainly so
+// a second instance (a smoke test, a side-by-side run) can avoid colliding with
+// an already-running one on the default.
+func Port(getenv func(string) string) int {
+	if v := getenv("REVERB_NAVIDROME_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil && p > 0 {
+			return p
+		}
+	}
+	return DefaultPort
+}
+
+// BaseURL is the loopback URL the bundled Navidrome answers on.
+func BaseURL(getenv func(string) string) string {
+	return "http://127.0.0.1:" + strconv.Itoa(Port(getenv))
 }
 
 // ListenAddress returns the address the bundled Navidrome listens on. Keep it

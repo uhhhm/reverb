@@ -38,10 +38,19 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "events unavailable"})
 		return
 	}
-	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+	opts := &websocket.AcceptOptions{
 		// Same-origin only by default; the SPA is served from the same host.
 		InsecureSkipVerify: s.deps.Dev, // dev: allow the Vite origin
-	})
+	}
+	if s.deps.Desktop {
+		// In the desktop window the page is served by the Wails AssetServer under
+		// its own scheme (wails://wails, http://wails.localhost on Windows), which
+		// cannot carry a WebSocket upgrade — the SPA dials the 127.0.0.1 listener
+		// directly instead, so the upgrade is cross-origin by construction. Allow
+		// exactly those window origins, nothing broader.
+		opts.OriginPatterns = []string{"wails", "wails.localhost"}
+	}
+	c, err := websocket.Accept(w, r, opts)
 	if err != nil {
 		return
 	}

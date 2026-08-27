@@ -1,4 +1,4 @@
-//go:build prod && !desktop
+//go:build prod || desktop
 
 package api
 
@@ -11,7 +11,9 @@ import (
 //go:embed all:dist
 var distFS embed.FS
 
-// embeddedSPA serves the built React app with history-API fallback.
+// embeddedSPA serves the built React app with history-API fallback. The
+// desktop build embeds it too: the Wails AssetServer is pointed at this same
+// handler, so the SPA and the API share one origin inside the window.
 func (s *Server) embeddedSPA() http.Handler {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {

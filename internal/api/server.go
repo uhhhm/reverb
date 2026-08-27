@@ -116,7 +116,15 @@ type Deps struct {
 	Reload        ServiceReloader
 	Dev           bool
 	Desktop       bool
-	Version       string
+	// LocalAPIPort is the port of the plain 127.0.0.1 HTTP listener, published to
+	// the SPA as window.__REVERB_PORT__. Set it only when the page is served over
+	// a transport that cannot carry a WebSocket (the Wails AssetServer); 0 means
+	// same-origin, and the SPA derives the URL from location.
+	LocalAPIPort int
+	Version      string
+	// UpdateRepo is the GitHub "owner/name" the UI polls for releases.
+	// Empty disables the in-app update banner.
+	UpdateRepo string
 	// DataDir is the directory where Reverb persists app data (same dir as the
 	// SQLite DB). Used by the playlist-cover upload handler. When empty, cover
 	// uploads are unavailable.
@@ -380,5 +388,6 @@ func (s *Server) routes() {
 	})
 
 	// SPA (embed.FS in prod, Vite proxy in --dev) — must be last.
+	s.router.Get("/runtime-config.js", s.handleRuntimeConfig)
 	s.router.Handle("/*", s.spaHandler())
 }

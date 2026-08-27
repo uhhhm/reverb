@@ -19,11 +19,7 @@ func (s *Server) handleEverywhere(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no search sources configured"})
 		return
 	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "streaming unsupported"})
-		return
-	}
+	flush := sseFlush(w)
 
 	q := r.URL.Query().Get("q")
 	if strings.TrimSpace(q) == "" {
@@ -46,7 +42,7 @@ func (s *Server) handleEverywhere(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
+	flush()
 
 	ch := agg.Stream(r.Context(), q, et)
 	for {
@@ -64,7 +60,7 @@ func (s *Server) handleEverywhere(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte("data: "))
 			_, _ = w.Write(b)
 			_, _ = w.Write([]byte("\n\n"))
-			flusher.Flush()
+			flush()
 		}
 	}
 }

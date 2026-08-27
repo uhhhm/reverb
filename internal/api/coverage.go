@@ -60,16 +60,16 @@ func (s *Server) handleArtistProfile(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleArtistCoverage(w http.ResponseWriter, r *http.Request) {
 	cov := s.coverage()
-	flusher, ok := w.(http.Flusher)
-	if cov == nil || !ok {
+	if cov == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "coverage stream unavailable"})
 		return
 	}
+	flush := sseFlush(w)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
+	flush()
 	ch := cov.StreamCoverage(r.Context(), chi.URLParam(r, "source"), chi.URLParam(r, "id"))
 	for {
 		select {
@@ -86,7 +86,7 @@ func (s *Server) handleArtistCoverage(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte("data: "))
 			_, _ = w.Write(b)
 			_, _ = w.Write([]byte("\n\n"))
-			flusher.Flush()
+			flush()
 		}
 	}
 }

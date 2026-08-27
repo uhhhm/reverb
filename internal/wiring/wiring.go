@@ -71,7 +71,7 @@ func BuildLibraryAdapter(
 			return nil, fmt.Errorf("built-in library: subsonic is not a LibraryAdapter")
 		}
 		if err := lib.Init(map[string]any{
-			"url":      "http://127.0.0.1:4533",
+			"url":      embedded.BaseURL(getenv),
 			"username": creds.Username,
 			"password": creds.Password,
 		}); err != nil {
@@ -218,6 +218,15 @@ func BuildDownloaders(reg *registry.Registry, instances []db.AdapterInstance, ge
 			}
 			if sec := getenv("REVERB_SPOTIFY_CLIENT_SECRET"); sec != "" {
 				cfg["client_secret"] = sec
+			}
+		}
+		// Env overrides (ytdlp) before Init.
+		if inst.Name == "ytdlp" {
+			if p := getenv("REVERB_YTDLP_PATH"); p != "" {
+				cfg["binary_path"] = p
+			}
+			if d := getenv("REVERB_DOWNLOAD_DIR"); d != "" {
+				cfg["output_dir"] = d
 			}
 		}
 
@@ -626,6 +635,7 @@ func (b *Builder) Build(ctx context.Context) (ServiceBundle, error) {
 	if mode == embedded.ModeBuiltIn {
 		opts := embedded.DefaultNaviOptions(b.dataDir, embedded.MusicDir(b.getenv), creds.Password)
 		opts.Address = embedded.ListenAddress(b.getenv)
+		opts.Port = embedded.Port(b.getenv)
 		naviEnv = embedded.BuildNavidromeEnv(opts)
 	}
 	// RELOAD-PATH CONTRACT: Build is called both at boot (main.go) AND on every live
@@ -634,13 +644,13 @@ func (b *Builder) Build(ctx context.Context) (ServiceBundle, error) {
 	// path the returned bundle's Supervisor is intentionally NOT started or swapped into
 	// the running process — backend-mode changes are restart-only (matching the
 	// "takes effect after a restart" UI copy). Do NOT start this supervisor on the reload
-	// path: doing so would exec a SECOND Navidrome on 127.0.0.1:4533, causing a port
+	// path: doing so would exec a SECOND Navidrome on the same port, causing a port
 	// conflict and a broken resource invariant.
 	bundle.Supervisor = embedded.New(embedded.Options{
 		Mode:   mode,
 		Env:    naviEnv,
 		Runner: embedded.ExecRunner(b.naviBin()),
-		Probe:  embedded.PingProbe("http://127.0.0.1:4533", nil),
+		Probe:  embedded.PingProbe(embedded.BaseURL(b.getenv), nil),
 	})
 
 	// One matcher per library adapter, shared by the aggregator, the download
