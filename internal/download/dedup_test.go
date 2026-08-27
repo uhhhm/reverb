@@ -44,3 +44,31 @@ func TestDedupKeyDeterministicLength(t *testing.T) {
 		t.Fatalf("sha256 hex must be 64 chars, got %d (%q)", len(k), k)
 	}
 }
+
+// An upgrade must not join the original download's key, or it would be deduped
+// away against the already-completed job.
+func TestDedupKeyUpgradeDiffersFromOriginal(t *testing.T) {
+	orig := core.DownloadRequest{Source: "spotify", ExternalID: "5abc", Quality: core.QualityLow}
+	up := core.DownloadRequest{Source: "spotify", ExternalID: "5abc", Quality: core.QualityHigh, ForceOverwrite: true}
+	if DedupKey(orig) == DedupKey(up) {
+		t.Fatal("upgrade must get its own key")
+	}
+	best := core.DownloadRequest{Source: "spotify", ExternalID: "5abc", Quality: core.QualityBest, ForceOverwrite: true}
+	if DedupKey(up) == DedupKey(best) {
+		t.Fatal("upgrades to different tiers must not collide")
+	}
+	again := core.DownloadRequest{Source: "spotify", ExternalID: "5abc", Quality: core.QualityHigh, ForceOverwrite: true}
+	if DedupKey(up) != DedupKey(again) {
+		t.Fatal("repeating the same upgrade must be idempotent")
+	}
+}
+
+// Ordinary requests keep the historical key shape, so this change does not
+// invalidate dedup against jobs already in the store.
+func TestDedupKeyUnchangedForOrdinaryRequests(t *testing.T) {
+	a := core.DownloadRequest{Source: "spotify", ExternalID: "5abc"}
+	b := core.DownloadRequest{Source: "spotify", ExternalID: "5abc", Quality: core.QualityHigh}
+	if DedupKey(a) != DedupKey(b) {
+		t.Fatal("quality alone must not change an ordinary request's key")
+	}
+}

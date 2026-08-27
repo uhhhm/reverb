@@ -46,12 +46,14 @@ const defaultAudioQuality = "0"
 
 // Adapter implements download.Downloader for yt-dlp.
 type Adapter struct {
-	runner       Runner
-	outputDir    string
-	binary       string
-	audioFormat  string
-	audioQuality string
-	cookiesFile  string // path to a written cookies.txt, or "" if not configured
+	runner          Runner
+	outputDir       string
+	binary          string
+	audioFormat     string
+	audioQuality    string
+	audioFormatSet  bool // operator set audio_format explicitly; overrides quality tiers
+	audioQualitySet bool
+	cookiesFile     string // path to a written cookies.txt, or "" if not configured
 }
 
 func New() *Adapter {
@@ -78,10 +80,10 @@ func (a *Adapter) ConfigSchema() registry.ConfigSchema {
 		{Key: "output_dir", Label: "Output directory", Type: "string", Required: true},
 		{Key: "binary_path", Label: "yt-dlp binary path", Type: "string", Required: false,
 			Help: "Defaults to \"yt-dlp\" on PATH."},
-		{Key: "audio_format", Label: "Audio format", Type: "string", Required: false,
+		{Key: "audio_format", Label: "Audio format override", Type: "string", Required: false,
 			Help: "yt-dlp --audio-format value: mp3 (default), opus, m4a, flac, best."},
-		{Key: "audio_quality", Label: "Audio quality", Type: "string", Required: false,
-			Help: "yt-dlp --audio-quality value: 0 (best, default) to 10 (worst), or a bitrate like 192K."},
+		{Key: "audio_quality", Label: "Audio quality override", Type: "string", Required: false,
+			Help: "Leave empty to follow the download quality tier. Setting either override pins every download to these yt-dlp values instead: --audio-quality is 0 (best) to 10 (worst), or a bitrate like 192K."},
 		{
 			Key: "youtube_cookies", Label: "YouTube cookies (Netscape format) — optional",
 			Type: "textarea", Required: false, Secret: true,
@@ -101,13 +103,13 @@ func (a *Adapter) Init(cfg map[string]any) error {
 	if v, ok := cfg["binary_path"].(string); ok && v != "" {
 		a.binary = v
 	}
-	a.audioFormat = defaultAudioFormat
+	a.audioFormat, a.audioFormatSet = defaultAudioFormat, false
 	if v, ok := cfg["audio_format"].(string); ok && strings.TrimSpace(v) != "" {
-		a.audioFormat = strings.TrimSpace(v)
+		a.audioFormat, a.audioFormatSet = strings.TrimSpace(v), true
 	}
-	a.audioQuality = defaultAudioQuality
+	a.audioQuality, a.audioQualitySet = defaultAudioQuality, false
 	if v, ok := cfg["audio_quality"].(string); ok && strings.TrimSpace(v) != "" {
-		a.audioQuality = strings.TrimSpace(v)
+		a.audioQuality, a.audioQualitySet = strings.TrimSpace(v), true
 	}
 	a.cookiesFile = ""
 	if v, ok := cfg["youtube_cookies"].(string); ok && strings.TrimSpace(v) != "" {
@@ -214,6 +216,17 @@ func sanitizeSegment(s string) string {
 	return strings.TrimSpace(r.Replace(s))
 }
 
+// resolveAudioArgs picks the encode settings for this request. An explicitly
+// configured audio_format/audio_quality on the adapter instance wins outright —
+// that is an operator overriding the whole scheme. Otherwise the request's tier
+// decides, probing the source bitrate first so a tier never upscales.
+func (a *Adapter) resolveAudioArgs(ctx context.Context, req core.DownloadRequest, query string) []string {
+	if a.audioFormatSet || a.audioQualitySet {
+		return []string{"--audio-format", a.audioFormat, "--audio-quality", a.audioQuality}
+	}
+	return audioArgs(req.Quality, a.probeBitrate(ctx, query))
+}
+
 // metadataLiteral prepares a known tag value for the FROM side of --parse-metadata.
 // yt-dlp splits "FROM:TO" at the first UNESCAPED colon, so a colon inside the value
 // (e.g. "Lullaby of the New Moon (I) : Somnias a Luna") would otherwise truncate the
@@ -280,10 +293,16 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 		"--newline",     // progress as discrete lines, not a redrawn bar, so onLine sees each
 		"--no-warnings",
 		"--extract-audio",
-		"--audio-format", a.audioFormat,
-		"--audio-quality", a.audioQuality,
+	}
+	args = append(args, a.resolveAudioArgs(ctx, req, query)...)
+	args = append(args,
 		"--embed-metadata",
 		"--embed-thumbnail",
+	)
+	if req.ForceOverwrite {
+		// yt-dlp skips a target that already exists, which is exactly what a
+		// quality upgrade must not do.
+		args = append(args, "--force-overwrites")
 	}
 	if a.cookiesFile != "" {
 		args = append(args, "--cookies", a.cookiesFile)

@@ -122,6 +122,8 @@ type linkAddBody struct {
 	URL        string  `json:"url"`
 	PlaylistID *string `json:"playlistId"`
 	Download   *bool   `json:"download"`
+	// Quality overrides the configured download_quality for this one download.
+	Quality string `json:"quality,omitempty"`
 }
 
 func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
@@ -304,6 +306,7 @@ func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
 			Artist:     res.Artist,
 			Title:      res.Title,
 			Album:      res.Album,
+			Quality:    core.ParseAudioQuality(body.Quality, ""),
 		}
 		if res.Source == "youtube" {
 			req.ManualURL = strings.TrimSpace(res.URL)

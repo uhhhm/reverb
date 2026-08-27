@@ -1,4 +1,5 @@
 import { api } from './api'
+import type { AudioQuality } from './audioQuality'
 
 export interface ResolveResult {
   kind: string
@@ -24,10 +25,11 @@ export function resolveLink(url: string): Promise<ResolveResult> {
 
 export function addFromLink(
   url: string,
-  opts?: { playlistId?: string; download?: boolean },
+  opts?: { playlistId?: string; download?: boolean; quality?: AudioQuality },
 ): Promise<AddResult> {
   const body: Record<string, unknown> = { url }
   if (opts?.playlistId !== undefined) body.playlistId = opts.playlistId
   if (opts?.download !== undefined) body.download = opts.download
+  if (opts?.quality !== undefined) body.quality = opts.quality
   return api.post<AddResult>('/links/add', body)
 }

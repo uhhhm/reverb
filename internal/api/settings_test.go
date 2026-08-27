@@ -169,3 +169,50 @@ func TestLibraryBackendModeSetting(t *testing.T) {
 		t.Fatalf("mode = %q, want built-in", dto.LibraryBackendMode)
 	}
 }
+
+func TestSettingsDownloadQualityDefaultsToHigh(t *testing.T) {
+	srv, cookie := adapterTestServer(t, adapterServerOpts{dirty: &testDirty{}})
+	rec := do(t, srv, cookie, http.MethodGet, "/api/v1/settings", "")
+	var body struct {
+		DownloadQuality string `json:"downloadQuality"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.DownloadQuality != "high" {
+		t.Fatalf("downloadQuality = %q, want high", body.DownloadQuality)
+	}
+}
+
+func TestPutSettingsDownloadQuality(t *testing.T) {
+	srv, cookie := adapterTestServer(t, adapterServerOpts{dirty: &testDirty{}})
+	rec := do(t, srv, cookie, http.MethodPut, "/api/v1/settings", `{"downloadQuality":"best"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		DownloadQuality string `json:"downloadQuality"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.DownloadQuality != "best" {
+		t.Fatalf("downloadQuality = %q", body.DownloadQuality)
+	}
+	// And it survives a re-read.
+	rec = do(t, srv, cookie, http.MethodGet, "/api/v1/settings", "")
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.DownloadQuality != "best" {
+		t.Fatalf("after reload downloadQuality = %q", body.DownloadQuality)
+	}
+}
+
+func TestPutSettingsDownloadQualityRejectsUnknownTier(t *testing.T) {
+	srv, cookie := adapterTestServer(t, adapterServerOpts{dirty: &testDirty{}})
+	rec := do(t, srv, cookie, http.MethodPut, "/api/v1/settings", `{"downloadQuality":"lossless"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}

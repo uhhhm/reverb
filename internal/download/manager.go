@@ -212,9 +212,10 @@ type Manager struct {
 	rematcher       Rematcher
 	version         VersionBumper
 	clock           Clock
-	playlists       PlaylistAdder          // optional; non-nil only when a library is configured
-	resolve         func() BindingResolver // optional provider; Tasks 3-5 add call sites
-	canonicalMinter CanonicalMinter        // optional; mints catalog IDs at link time (Task 3)
+	playlists       PlaylistAdder                           // optional; non-nil only when a library is configured
+	resolve         func() BindingResolver                  // optional provider; Tasks 3-5 add call sites
+	canonicalMinter CanonicalMinter                         // optional; mints catalog IDs at link time (Task 3)
+	qualityFn       func(context.Context) core.AudioQuality // optional; supplies the configured default tier
 
 	queue chan string // job IDs to process
 
@@ -275,6 +276,27 @@ func NewManager(cfg Config, downloaders []DownloaderEntry, store JobStore, bus P
 		stopCh:          make(chan struct{}),
 		resumeCh:        closedChan(),
 	}
+}
+
+// SetQualityResolver injects the source of the configured default audio quality
+// (the download_quality setting), applied to any request that does not name a
+// tier of its own. Nil-safe: without it, requests fall back to
+// core.DefaultAudioQuality.
+func (m *Manager) SetQualityResolver(fn func(context.Context) core.AudioQuality) {
+	m.qualityFn = fn
+}
+
+// resolveQuality fills in an unset tier from the configured default.
+func (m *Manager) resolveQuality(ctx context.Context, q core.AudioQuality) core.AudioQuality {
+	if q.Valid() {
+		return q
+	}
+	if m.qualityFn != nil {
+		if got := m.qualityFn(ctx); got.Valid() {
+			return got
+		}
+	}
+	return core.DefaultAudioQuality
 }
 
 // SetCanonicalMinter injects the catalog minter after construction. Called by the
@@ -727,6 +749,7 @@ func (m *Manager) pickAfter(ctx context.Context, req core.DownloadRequest, after
 // pushes it to the worker pool. Concurrency-safe: simultaneous same-key enqueues
 // return the single existing job.
 func (m *Manager) Enqueue(ctx context.Context, req core.DownloadRequest) (core.DownloadJob, error) {
+	req.Quality = m.resolveQuality(ctx, req.Quality)
 	dedup := DedupKey(req)
 
 	// Serialize the dedup-check + insert so two same-key callers can't both create.
@@ -745,7 +768,9 @@ func (m *Manager) Enqueue(ctx context.Context, req core.DownloadRequest) (core.D
 	// clicking its bulk action must not create another completed/failed job for
 	// the same catalog track. Retrying a terminal job is intentionally explicit
 	// through Retry, where attempts and an optional manual URL are preserved.
-	if source, externalID := strings.TrimSpace(req.Source), strings.TrimSpace(req.ExternalID); source != "" && externalID != "" {
+	// A forced overwrite (quality upgrade) is by definition a repeat of a track
+	// that already has a terminal job, so the guard below must not swallow it.
+	if source, externalID := strings.TrimSpace(req.Source), strings.TrimSpace(req.ExternalID); source != "" && externalID != "" && !req.ForceOverwrite {
 		jobs, lerr := m.store.List(ctx)
 		if lerr != nil {
 			m.mu.Unlock()

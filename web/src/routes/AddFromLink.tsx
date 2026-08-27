@@ -7,12 +7,15 @@ import { useDocumentTitle } from '../lib/useDocumentTitle'
 import { useToastStore } from '../lib/toastStore'
 import { Button } from '../components/ui/Button'
 import { Checkbox } from '../components/ui/Checkbox'
+import { useSettings } from '../lib/settingsApi'
+import { AUDIO_QUALITIES, DEFAULT_AUDIO_QUALITY, type AudioQuality } from '../lib/audioQuality'
 
 export default function AddFromLink() {
   useDocumentTitle('Add from link')
   const navigate = useNavigate()
   const pushToast = useToastStore((s) => s.push)
   const { data: playlists } = useSyncedPlaylists()
+  const { data: settings } = useSettings()
 
   const [url, setUrl] = useState('')
   const [preview, setPreview] = useState<ResolveResult | null>(null)
@@ -21,6 +24,10 @@ export default function AddFromLink() {
 
   const [selectedPlaylist, setSelectedPlaylist] = useState('')
   const [downloadNow, setDownloadNow] = useState(true)
+  // Empty means "follow the configured default"; the select seeds from settings
+  // once they load so the user can see what they are about to get.
+  const [quality, setQuality] = useState<AudioQuality | ''>('')
+  const effectiveQuality: AudioQuality = quality || settings?.downloadQuality || DEFAULT_AUDIO_QUALITY
 
   const [addLoading, setAddLoading] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
@@ -66,6 +73,7 @@ export default function AddFromLink() {
       const res = await addFromLink(trimmed, {
         playlistId: selectedPlaylist || undefined,
         download: downloadNow,
+        quality: effectiveQuality,
       })
       const target = res.playlistId || selectedPlaylist
       if (target) {
@@ -102,7 +110,8 @@ export default function AddFromLink() {
       <header>
         <h1 className="text-3xl font-black tracking-tight text-text-primary">Add from link</h1>
         <p className="mt-1 text-sm text-text-secondary">
-          Add from link to your canonical library or a playlist. Downloads are source-native.
+          Add from link to your canonical library or a playlist. Downloads are source-native unless
+          you pick a tier that transcodes down.
         </p>
       </header>
 
@@ -198,10 +207,32 @@ export default function AddFromLink() {
             <Checkbox label="Download now" checked={downloadNow} onChange={setDownloadNow} />
             <span className="text-sm font-semibold text-text-primary">Download now</span>
           </label>
+
+          {downloadNow && (
+            <div className="space-y-1">
+              <label htmlFor="quality-select" className="text-sm font-semibold text-text-primary">
+                Audio quality
+              </label>
+              <select
+                id="quality-select"
+                aria-label="Audio quality"
+                value={effectiveQuality}
+                onChange={(e) => setQuality(e.target.value as AudioQuality)}
+                className="w-full appearance-none rounded-md border border-border-subtle bg-input px-3 py-2 text-sm text-text-primary outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+              >
+                {AUDIO_QUALITIES.map((q) => (
+                  <option key={q.value} value={q.value}>
+                    {q.label}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-text-muted">
+                {AUDIO_QUALITIES.find((q) => q.value === effectiveQuality)?.hint}
+              </p>
+            </div>
+          )}
           <p className="text-xs text-text-secondary">
-            Download runs on whichever device is chosen, result syncs to canonical library. Files are stored
-            source-native (best available, 256kbps or as high as source offers). The server will sync the result
-            to the canonical library.
+            The download runs on the server device and the result syncs to your canonical library.
           </p>
         </div>
 

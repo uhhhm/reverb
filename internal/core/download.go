@@ -49,6 +49,13 @@ type DownloadRequest struct {
 	// request. Empty defaults to GranularityTrack. Set by callers that want an
 	// album-granularity downloader (e.g. Lidarr) for a full-album import.
 	Granularity DownloadGranularity `json:"granularity,omitempty"`
+	// Quality is the requested audio quality tier (a ceiling — see AudioQuality).
+	// Empty means "use the download_quality setting".
+	Quality AudioQuality `json:"quality,omitempty"`
+	// ForceOverwrite tells the downloader to replace an existing file rather than
+	// skip it. Set by the quality-upgrade path, where an identical filename
+	// already sits in the output dir and skipping is exactly the wrong behaviour.
+	ForceOverwrite bool `json:"forceOverwrite,omitempty"`
 	// PreferDownloader names a downloader that should be tried first, ahead of the
 	// configured order, when it is present and its CanDownload accepts the request.
 	// Set server-side (hence json:"-") — e.g. a pasted YouTube link prefers "ytdlp"

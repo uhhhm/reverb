@@ -904,3 +904,37 @@ func TestEnsureSpotdlTempDirCreatesDir(t *testing.T) {
 	// Idempotent + concurrency-safe: a second call must not error or panic.
 	ensureSpotdlTempDir()
 }
+
+// spotDL's own default is 128k mp3, so the adapter must always pass a bitrate.
+// High maps to "auto" (the source's own bitrate) rather than a literal 320k:
+// the audio comes from YouTube Music, so forcing 320k would only inflate it.
+func TestQualityArgsMapping(t *testing.T) {
+	cases := []struct {
+		q    core.AudioQuality
+		want string
+	}{
+		{core.QualityLow, "--format mp3 --bitrate 128k"},
+		{core.QualityMedium, "--format mp3 --bitrate 192k"},
+		{core.QualityHigh, "--format mp3 --bitrate auto"},
+		{core.QualityBest, "--format m4a --bitrate disable"},
+		{"", "--format mp3 --bitrate auto"},
+	}
+	for _, c := range cases {
+		if got := strings.Join(qualityArgs(c.q), " "); got != c.want {
+			t.Errorf("qualityArgs(%q) = %q, want %q", c.q, got, c.want)
+		}
+	}
+}
+
+func TestForceOverwriteOverridesSpotdlSkipDefault(t *testing.T) {
+	r := &fakeRunner{}
+	a := newAdapter(t, r)
+	if _, err := a.Start(context.Background(), core.DownloadRequest{
+		Artist: "A", Title: "T", Quality: core.QualityHigh, ForceOverwrite: true,
+	}, func(int) {}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(r.gotArgs, " "), "--overwrite force") {
+		t.Errorf("upgrade must force overwrite: %v", r.gotArgs)
+	}
+}

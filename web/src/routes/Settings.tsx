@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { Chip } from '../components/ui'
 import { IntegrationsSection } from '../components/account/IntegrationsSection'
 import { AppearanceSection } from '../components/account/AppearanceSection'
+import { DownloadsSection } from '../components/account/DownloadsSection'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
 
-type Tab = 'integrations' | 'appearance'
+type Tab = 'integrations' | 'downloads' | 'appearance'
 
 export default function Settings() {
   useDocumentTitle('Settings')
@@ -20,6 +21,9 @@ export default function Settings() {
         <Chip selected={tab === 'integrations'} onClick={() => setTab('integrations')}>
           Integrations
         </Chip>
+        <Chip selected={tab === 'downloads'} onClick={() => setTab('downloads')}>
+          Downloads
+        </Chip>
         <Chip selected={tab === 'appearance'} onClick={() => setTab('appearance')}>
           Appearance
         </Chip>
@@ -27,6 +31,9 @@ export default function Settings() {
 
       {/* ── Integrations tab ─────────────────────────────────────────────────── */}
       {tab === 'integrations' && <IntegrationsSection />}
+
+      {/* ── Downloads tab ────────────────────────────────────────────────────── */}
+      {tab === 'downloads' && <DownloadsSection />}
 
       {/* ── Appearance tab ───────────────────────────────────────────────────── */}
       {tab === 'appearance' && <AppearanceSection />}

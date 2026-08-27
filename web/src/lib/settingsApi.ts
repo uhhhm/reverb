@@ -1,10 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
+import type { AudioQuality } from './audioQuality'
 
 export interface AppSettings {
   accentColor: string
   dynamicBackground: boolean
   libraryBackendMode: string // 'built-in' | 'external'
+  downloadQuality: AudioQuality
 }
 
 const DEFAULT_ACCENT_CHANNELS = '240 53 75' // #F0354B

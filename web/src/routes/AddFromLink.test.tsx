@@ -135,10 +135,9 @@ describe('AddFromLink route', () => {
     wrap()
     const cb = screen.getByLabelText(/download now/i) as HTMLInputElement
     expect(cb.checked).toBe(true)
-    expect(screen.getByText(/download runs on whichever device is chosen/i)).toBeInTheDocument()
-    expect(screen.getByText(/result syncs to canonical library/i)).toBeInTheDocument()
+    expect(screen.getByText(/the download runs on the server device/i)).toBeInTheDocument()
+    expect(screen.getByText(/syncs to your canonical library/i)).toBeInTheDocument()
     expect(screen.getAllByText(/source-native/i).length).toBeGreaterThan(0)
-    expect(screen.getByText(/256kbps or as high as source offers/i)).toBeInTheDocument()
   })
 
   it('Add from link calls addFromLink and toasts success', async () => {
@@ -147,7 +146,7 @@ describe('AddFromLink route', () => {
     fireEvent.change(input, { target: { value: 'https://open.spotify.com/track/sp123' } })
     // need preview first? not required but set url
     fireEvent.click(screen.getByRole('button', { name: /^add from link$/i }))
-    await waitFor(() => expect(mockAddFromLink).toHaveBeenCalledWith('https://open.spotify.com/track/sp123', { playlistId: undefined, download: true }))
+    await waitFor(() => expect(mockAddFromLink).toHaveBeenCalledWith('https://open.spotify.com/track/sp123', { playlistId: undefined, download: true, quality: 'high' }))
     expect(mockPush).toHaveBeenCalledWith('Added from link', 'success')
   })
 
@@ -164,7 +163,7 @@ describe('AddFromLink route', () => {
     const sel = screen.getByLabelText(/add to playlist/i) as HTMLSelectElement
     fireEvent.change(sel, { target: { value: 'pl1' } })
     fireEvent.click(screen.getByRole('button', { name: /^add from link$/i }))
-    await waitFor(() => expect(mockAddFromLink).toHaveBeenCalledWith('https://open.spotify.com/track/sp123', { playlistId: 'pl1', download: true }))
+    await waitFor(() => expect(mockAddFromLink).toHaveBeenCalledWith('https://open.spotify.com/track/sp123', { playlistId: 'pl1', download: true, quality: 'high' }))
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/playlist/pl1'))
   })
 
@@ -175,7 +174,7 @@ describe('AddFromLink route', () => {
     const cb = screen.getByLabelText(/download now/i)
     fireEvent.click(cb)
     fireEvent.click(screen.getByRole('button', { name: /^add from link$/i }))
-    await waitFor(() => expect(mockAddFromLink).toHaveBeenCalledWith('https://open.spotify.com/track/sp123', { playlistId: undefined, download: false }))
+    await waitFor(() => expect(mockAddFromLink).toHaveBeenCalledWith('https://open.spotify.com/track/sp123', { playlistId: undefined, download: false, quality: 'high' }))
   })
 
   it('handles 404 playlist not found', async () => {
@@ -251,5 +250,36 @@ describe('AddFromLink route', () => {
     fireEvent.click(screen.getByRole('button', { name: /^resolve$/i }))
     expect(await screen.findByText(/resolving/i)).toBeInTheDocument()
     resolve!()
+  })
+})
+
+describe('AddFromLink audio quality', () => {
+  it('defaults the quality select to the configured download quality', () => {
+    wrap()
+    const select = screen.getByLabelText(/audio quality/i) as HTMLSelectElement
+    expect(select.value).toBe('high')
+    expect(screen.getByText(/capped by what the source serves/i)).toBeInTheDocument()
+  })
+
+  it('passes a per-download quality override to addFromLink', async () => {
+    mockAddFromLink.mockResolvedValue({ resolve: {}, catalogId: 'trk_1' })
+    wrap()
+    fireEvent.change(screen.getByLabelText(/spotify or youtube url/i), {
+      target: { value: 'https://open.spotify.com/track/sp123' },
+    })
+    fireEvent.change(screen.getByLabelText(/audio quality/i), { target: { value: 'best' } })
+    fireEvent.click(screen.getByRole('button', { name: /add from link/i }))
+    await waitFor(() => expect(mockAddFromLink).toHaveBeenCalled())
+    expect(mockAddFromLink).toHaveBeenCalledWith('https://open.spotify.com/track/sp123', {
+      playlistId: undefined,
+      download: true,
+      quality: 'best',
+    })
+  })
+
+  it('hides the quality select when the download is not going to run', () => {
+    wrap()
+    fireEvent.click(screen.getByLabelText(/download now/i))
+    expect(screen.queryByLabelText(/audio quality/i)).toBeNull()
   })
 })

@@ -20,6 +20,9 @@ type createDownloadBody struct {
 	DurationMs      int    `json:"durationMs"`
 	PlayWhenReady   bool   `json:"playWhenReady"`
 	AddToPlaylistID string `json:"addToPlaylistId,omitempty"`
+	// Quality overrides the configured download_quality for this one download.
+	// Empty means "use the setting".
+	Quality string `json:"quality,omitempty"`
 }
 
 func (s *Server) handleCreateDownload(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +51,7 @@ func (s *Server) handleCreateDownload(w http.ResponseWriter, r *http.Request) {
 		DurationMs:      body.DurationMs,
 		PlayWhenReady:   body.PlayWhenReady,
 		AddToPlaylistID: body.AddToPlaylistID,
+		Quality:         core.ParseAudioQuality(body.Quality, ""),
 		InitiatedBy:     cu.ID,
 	})
 	if err != nil {

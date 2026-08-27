@@ -3,7 +3,9 @@ package api
 import (
 	"net/http"
 	"regexp"
+	"strings"
 
+	"github.com/maxjb-xyz/reverb/internal/core"
 	"github.com/maxjb-xyz/reverb/internal/store/db"
 )
 
@@ -11,6 +13,7 @@ const (
 	keyAccentColor        = "accent_color"
 	keyDynamicBackground  = "dynamic_background"
 	keyLibraryBackendMode = "library_backend_mode"
+	keyDownloadQuality    = "download_quality"
 	defaultAccentColor    = "#F0354B"
 )
 
@@ -20,10 +23,15 @@ type settingsDTO struct {
 	AccentColor        string `json:"accentColor"`
 	DynamicBackground  bool   `json:"dynamicBackground"`
 	LibraryBackendMode string `json:"libraryBackendMode"`
+	DownloadQuality    string `json:"downloadQuality"`
 }
 
 func (s *Server) currentSettings(r *http.Request) settingsDTO {
-	out := settingsDTO{AccentColor: defaultAccentColor, DynamicBackground: true}
+	out := settingsDTO{
+		AccentColor:       defaultAccentColor,
+		DynamicBackground: true,
+		DownloadQuality:   string(core.DefaultAudioQuality),
+	}
 	if s.deps.Adapters == nil {
 		return out
 	}
@@ -35,6 +43,9 @@ func (s *Server) currentSettings(r *http.Request) settingsDTO {
 	}
 	if v, err := s.deps.Adapters.GetSetting(r.Context(), keyLibraryBackendMode); err == nil && v != "" {
 		out.LibraryBackendMode = v
+	}
+	if v, err := s.deps.Adapters.GetSetting(r.Context(), keyDownloadQuality); err == nil && v != "" {
+		out.DownloadQuality = string(core.ParseAudioQuality(v, core.DefaultAudioQuality))
 	}
 	return out
 }
@@ -48,6 +59,7 @@ type putSettingsBody struct {
 	AccentColor        *string `json:"accentColor"`
 	DynamicBackground  *bool   `json:"dynamicBackground"`
 	LibraryBackendMode *string `json:"libraryBackendMode"`
+	DownloadQuality    *string `json:"downloadQuality"`
 }
 
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
@@ -87,6 +99,17 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.deps.Adapters.UpsertSetting(r.Context(), db.UpsertSettingParams{Key: keyLibraryBackendMode, Value: mode}); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save settings"})
+			return
+		}
+	}
+	if body.DownloadQuality != nil {
+		q := core.AudioQuality(strings.ToLower(strings.TrimSpace(*body.DownloadQuality)))
+		if !q.Valid() {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "downloadQuality must be one of: low, medium, high, best"})
+			return
+		}
+		if err := s.deps.Adapters.UpsertSetting(r.Context(), db.UpsertSettingParams{Key: keyDownloadQuality, Value: string(q)}); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save settings"})
 			return
 		}

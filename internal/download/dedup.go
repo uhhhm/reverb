@@ -26,6 +26,13 @@ func DedupKey(req core.DownloadRequest) string {
 			matching.Normalize(req.Title) + dedupSep +
 			matching.Normalize(req.Album)
 	}
+	// A quality upgrade deliberately targets a track that already has a terminal
+	// job. Folding the tier in gives each upgrade its own key, so it neither joins
+	// the original download nor blocks a later upgrade to a higher tier, while
+	// ordinary requests keep the historical key shape.
+	if req.ForceOverwrite {
+		raw += dedupSep + "upgrade" + dedupSep + string(req.Quality)
+	}
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
 }

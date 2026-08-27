@@ -63,7 +63,22 @@ paths:
       responses: { "200": { description: ok } }
     put:
       summary: Update app settings (sets the restart-to-apply flag)
-      responses: { "200": { description: ok, pendingRestart flag included } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accentColor: { type: string }
+                dynamicBackground: { type: boolean }
+                libraryBackendMode: { type: string, enum: ["", built-in, external] }
+                downloadQuality:
+                  type: string
+                  enum: [low, medium, high, best]
+                  description: Default audio quality tier for new downloads (a ceiling, never an upscale).
+      responses:
+        "200": { description: ok, pendingRestart flag included }
+        "400": { description: invalid value }
   /config/pending-restart:
     get:
       summary: Whether config changed since startup (restart-to-apply banner)
@@ -228,6 +243,10 @@ paths:
                 album: { type: string }
                 isrc: { type: string }
                 playWhenReady: { type: boolean }
+                quality:
+                  type: string
+                  enum: [low, medium, high, best]
+                  description: Overrides the configured default quality for this download.
               required: [source, externalId, artist, title]
       responses: { "200": { description: DownloadJob }, "400": { description: invalid } }
   /downloads/pause:
@@ -384,6 +403,10 @@ paths:
                 url: { type: string }
                 playlistId: { type: string }
                 download: { type: boolean }
+                quality:
+                  type: string
+                  enum: [low, medium, high, best]
+                  description: Overrides the configured default quality for this download.
               required: [url]
       responses:
         "200": { description: "{ resolve, job?, playlistId?, catalogId }" }

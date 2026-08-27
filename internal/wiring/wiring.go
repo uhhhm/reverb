@@ -374,6 +374,9 @@ type VersionStore interface {
 	SetLibraryVersion(ctx context.Context, v int64) error
 }
 
+// settingDownloadQuality mirrors the API's download_quality settings key.
+const settingDownloadQuality = "download_quality"
+
 const settingLibraryIdentity = "library_identity"
 const settingDownloadJobIdentity = "download_jobs_library_identity"
 
@@ -767,6 +770,19 @@ func (b *Builder) Build(ctx context.Context) (ServiceBundle, error) {
 			libAdapter, // PlaylistAdder (AddTracksToPlaylist) — subsonic adapter satisfies it
 			dlResolve,  // optional resolver provider; Tasks 3-5 add call sites
 		)
+		// The configured default quality tier, read per-request so a settings
+		// change takes effect without a rebuild. Applied to every enqueue path
+		// (search, coverage, playlist sync, add-from-link), not just the API.
+		bundle.Manager.SetQualityResolver(func(ctx context.Context) core.AudioQuality {
+			if b.queries == nil {
+				return core.DefaultAudioQuality
+			}
+			v, err := b.queries.GetSetting(ctx, settingDownloadQuality)
+			if err != nil {
+				return core.DefaultAudioQuality
+			}
+			return core.ParseAudioQuality(v, core.DefaultAudioQuality)
+		})
 		log.Printf("download manager active: %d downloader(s)", len(downloaders))
 	} else if len(downloaders) > 0 {
 		log.Printf("WARNING: downloaders configured but no library adapter — download manager disabled")

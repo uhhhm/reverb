@@ -170,6 +170,28 @@ func (a *Adapter) CanDownload(ctx context.Context, req core.DownloadRequest) (bo
 	return req.Title != "" && req.Artist != "", nil
 }
 
+// qualityArgs maps a tier onto spotDL's --format/--bitrate.
+//
+// spotDL's own default is 128k mp3, so passing nothing quietly produced the
+// worst tier. High maps to --bitrate auto ("use the bitrate of the original
+// file") rather than a literal 320k: the audio comes from YouTube Music, which
+// serves ~130-160 kbps Opus, and forcing 320k would inflate the file without
+// recovering any detail. Low and Medium pass a literal value because there the
+// point IS to transcode down. Best asks spotDL to skip conversion entirely,
+// which it only does for m4a/opus outputs.
+func qualityArgs(q core.AudioQuality) []string {
+	switch q {
+	case core.QualityLow:
+		return []string{"--format", "mp3", "--bitrate", "128k"}
+	case core.QualityMedium:
+		return []string{"--format", "mp3", "--bitrate", "192k"}
+	case core.QualityBest:
+		return []string{"--format", "m4a", "--bitrate", "disable"}
+	default: // QualityHigh and anything unset
+		return []string{"--format", "mp3", "--bitrate", "auto"}
+	}
+}
+
 // redactArgs renders args for logging with the --client-secret value masked.
 func redactArgs(args []string) string {
 	out := make([]string, len(args))
@@ -352,6 +374,12 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 	// logging) is what actually makes that detail reach stdout, where
 	// classifyFailure can see it.
 	args = append(args, "--log-level", "DEBUG")
+	args = append(args, qualityArgs(req.Quality)...)
+	if req.ForceOverwrite {
+		// spotDL's default is --overwrite skip, which would silently no-op the
+		// re-download a quality upgrade depends on.
+		args = append(args, "--overwrite", "force")
+	}
 	args = append(args, "--simple-tui", "--output", outputTemplate, "download", query)
 
 	// Pre-create spotDL's shared temp dir to defeat a concurrency race: spotDL does
