@@ -11,10 +11,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/maxjb-xyz/reverb/internal/catalog"
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/events"
-	"github.com/maxjb-xyz/reverb/internal/resolver"
+	"github.com/uhhhm/reverb/internal/catalog"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/events"
+	"github.com/uhhhm/reverb/internal/resolver"
 )
 
 // shortID trims a job UUID for compact log lines.

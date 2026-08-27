@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/core"
 )
 
 func doUpgrade(t *testing.T, mgr *fakeManager, method, path, body string) *httptest.ResponseRecorder {

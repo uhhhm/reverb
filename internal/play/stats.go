@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // SummaryStats holds aggregate listening metrics for a user over a time window.

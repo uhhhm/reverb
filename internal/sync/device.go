@@ -9,7 +9,7 @@ import (
 	"encoding/hex"
 
 	"github.com/google/uuid"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // Device mirrors the device table but with typed IsServer bool for convenience.

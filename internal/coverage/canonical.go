@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/matching"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/matching"
 )
 
 var editionMarkers = []string{"deluxe", "remaster", "expanded", "anniversary", "explicit", "special edition"}

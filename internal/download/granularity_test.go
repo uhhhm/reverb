@@ -3,8 +3,8 @@ package download_test
 import (
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/download"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/download"
 )
 
 // Tests for download.ResolveGranularityOrder.

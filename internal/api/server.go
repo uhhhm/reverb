@@ -10,17 +10,17 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/maxjb-xyz/reverb/internal/auth"
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/events"
-	"github.com/maxjb-xyz/reverb/internal/library"
-	"github.com/maxjb-xyz/reverb/internal/play"
-	"github.com/maxjb-xyz/reverb/internal/registry"
-	"github.com/maxjb-xyz/reverb/internal/resolver"
-	"github.com/maxjb-xyz/reverb/internal/scrobble"
-	"github.com/maxjb-xyz/reverb/internal/search"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
-	reverbsync "github.com/maxjb-xyz/reverb/internal/sync"
+	"github.com/uhhhm/reverb/internal/auth"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/events"
+	"github.com/uhhhm/reverb/internal/library"
+	"github.com/uhhhm/reverb/internal/play"
+	"github.com/uhhhm/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/resolver"
+	"github.com/uhhhm/reverb/internal/scrobble"
+	"github.com/uhhhm/reverb/internal/search"
+	"github.com/uhhhm/reverb/internal/store/db"
+	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
 
 // Streamer is the subset of *search.Aggregator the SSE handler needs.

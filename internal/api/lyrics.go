@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/maxjb-xyz/reverb/internal/library/lyrics"
+	"github.com/uhhhm/reverb/internal/library/lyrics"
 )
 
 // LyricsProvider is the seam the lyrics handler needs; *lyrics.Service

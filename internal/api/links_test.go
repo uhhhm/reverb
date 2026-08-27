@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/registry"
-	"github.com/maxjb-xyz/reverb/internal/store"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
-	reverbsync "github.com/maxjb-xyz/reverb/internal/sync"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/store/db"
+	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
 
 func linkTestServer(t *testing.T, mgr DownloadManager) (*Server, *store.Store, *http.Cookie, *fakeManager) {

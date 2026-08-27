@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/scrobble"
+	"github.com/uhhhm/reverb/internal/scrobble"
 )
 
 // ----------------------------------------------------------------------------

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/store/db"
 	"github.com/pressly/goose/v3"
+	"github.com/uhhhm/reverb/internal/store/db"
 	_ "modernc.org/sqlite"
 )
 

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // Identity holds all the metadata a caller knows about a library entity.

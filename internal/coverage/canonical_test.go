@@ -4,7 +4,7 @@ package coverage
 import (
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/core"
 )
 
 func TestCanonicalizeCollapsesEditions(t *testing.T) {

@@ -4,10 +4,10 @@ import (
 	"context"
 	"sync/atomic"
 
-	"github.com/maxjb-xyz/reverb/internal/api"
-	"github.com/maxjb-xyz/reverb/internal/library"
-	"github.com/maxjb-xyz/reverb/internal/resolver"
-	"github.com/maxjb-xyz/reverb/internal/wiring"
+	"github.com/uhhhm/reverb/internal/api"
+	"github.com/uhhhm/reverb/internal/library"
+	"github.com/uhhhm/reverb/internal/resolver"
+	"github.com/uhhhm/reverb/internal/wiring"
 )
 
 // matcherHolder wraps a resolver.Rematcher so it can live behind an atomic.Pointer

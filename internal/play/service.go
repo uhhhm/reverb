@@ -5,8 +5,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/catalog"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/catalog"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // PlayInput carries the metadata and timing for a single play event.

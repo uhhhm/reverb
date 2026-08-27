@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/core"
 )
 
 func TestSchedulerTickSyncsDue(t *testing.T) {

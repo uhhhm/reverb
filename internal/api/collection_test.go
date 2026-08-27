@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/core"
 )
 
 // TestCollectionReportsTrueArtistTotals asserts the collection summary reports

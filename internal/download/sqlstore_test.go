@@ -6,8 +6,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/store"
 	_ "modernc.org/sqlite"
 )
 

@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // SyncStore provides changelog helpers around Querier.

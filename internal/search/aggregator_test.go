@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/registry"
 )
 
 // scriptedSource returns canned results after an artificial delay.

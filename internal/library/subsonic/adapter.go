@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/library"
-	"github.com/maxjb-xyz/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/library"
+	"github.com/uhhhm/reverb/internal/registry"
 )
 
 // compile-time assertions

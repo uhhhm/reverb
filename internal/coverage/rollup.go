@@ -4,7 +4,7 @@ package coverage
 import (
 	"context"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/core"
 )
 
 // Matcher is the slice of *matching.Service the rollup needs.

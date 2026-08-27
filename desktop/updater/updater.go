@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/config"
+	"github.com/uhhhm/reverb/internal/config"
 )
 
 // Release holds the tag, body and assets for a GitHub release.

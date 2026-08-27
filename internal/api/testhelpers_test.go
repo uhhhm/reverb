@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/auth"
-	"github.com/maxjb-xyz/reverb/internal/registry"
-	"github.com/maxjb-xyz/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/auth"
+	"github.com/uhhhm/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/store"
 )
 
 // testDirty is a minimal ConfigDirty for tests.

@@ -9,12 +9,14 @@ node_modules/
 /dev/navidrome/
 dev/music/*
 !dev/music/.gitkeep
+skills-lock.json
 
 # internal planning artifacts (kept locally, never published)
 reverb-plan.md
 docs/HANDOFF-*.md
 docs/superpowers/
 docs/task-reports/
+docs/user-notes.md
 
 .agents/
 .claude/

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/maxjb-xyz/reverb/internal/sync"
+	"github.com/uhhhm/reverb/internal/sync"
 )
 
 type syncDeviceKey int

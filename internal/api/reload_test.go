@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/library"
+	"github.com/uhhhm/reverb/internal/library"
 )
 
 // stoppableManager is a fakeManager that records whether Stop was called.

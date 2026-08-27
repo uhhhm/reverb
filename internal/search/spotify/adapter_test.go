@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/search"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/search"
 )
 
 // fixtureServer serves token + search/album fixtures based on the path & type.

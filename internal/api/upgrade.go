@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/core"
 )
 
 // upgradeBody identifies the track to re-fetch. Source/externalId are used when

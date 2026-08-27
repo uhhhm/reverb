@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/maxjb-xyz/reverb/internal/resolver"
-	"github.com/maxjb-xyz/reverb/internal/store"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/resolver"
+	"github.com/uhhhm/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // sweepResolver is a test BindingResolver that records which catalog IDs were

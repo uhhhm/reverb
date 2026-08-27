@@ -4,11 +4,11 @@ import (
 	"context"
 	"database/sql"
 
-	"github.com/maxjb-xyz/reverb/internal/coverage"
-	"github.com/maxjb-xyz/reverb/internal/library"
-	"github.com/maxjb-xyz/reverb/internal/matching"
-	"github.com/maxjb-xyz/reverb/internal/search"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/coverage"
+	"github.com/uhhhm/reverb/internal/library"
+	"github.com/uhhhm/reverb/internal/matching"
+	"github.com/uhhhm/reverb/internal/search"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // coverageCache adapts *db.Queries to coverage.CoverageCache, translating between

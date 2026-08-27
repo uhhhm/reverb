@@ -1,6 +1,6 @@
 # Deploying Reverb
 
-> Fork of [maxjb-xyz/reverb](https://github.com/maxjb-xyz/reverb) — this guide is for [uhhhm/reverb](https://github.com/uhhhm/reverb) (`ghcr.io/uhhhm/reverb`).
+> Fork of [uhhhm/reverb](https://github.com/uhhhm/reverb) — this guide is for [uhhhm/reverb](https://github.com/uhhhm/reverb) (`ghcr.io/uhhhm/reverb`).
 
 Reverb ships as a single Docker image: a static Go binary with the web UI
 embedded, plus Python 3, ffmpeg, and a pinned spotDL. This guide covers a

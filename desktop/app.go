@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/api"
-	"github.com/maxjb-xyz/reverb/internal/scrobble"
-	"github.com/maxjb-xyz/reverb/internal/store"
-	"github.com/maxjb-xyz/reverb/internal/wiring"
+	"github.com/uhhhm/reverb/internal/api"
+	"github.com/uhhhm/reverb/internal/scrobble"
+	"github.com/uhhhm/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/wiring"
 )
 
 // App is the Wails application lifecycle. It owns the local HTTP server

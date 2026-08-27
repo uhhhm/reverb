@@ -8,7 +8,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // maxAttempts is the number of attempts before a queue row is permanently failed.

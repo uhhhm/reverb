@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/registry"
-	"github.com/maxjb-xyz/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/store"
 )
 
 // fakeLibrary implements library.LibraryAdapter (+ browse interfaces) for tests.

@@ -1,8 +1,8 @@
 package wiring
 
 import (
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/download"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/download"
 )
 
 // resolveGranularityOrder is the package-local alias kept for backward

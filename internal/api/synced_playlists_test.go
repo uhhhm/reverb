@@ -16,12 +16,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/maxjb-xyz/reverb/internal/auth"
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/playlistsync"
-	"github.com/maxjb-xyz/reverb/internal/registry"
-	"github.com/maxjb-xyz/reverb/internal/store"
-	"github.com/maxjb-xyz/reverb/internal/wiring"
+	"github.com/uhhhm/reverb/internal/auth"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/playlistsync"
+	"github.com/uhhhm/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/wiring"
 )
 
 // fakeSync is a controllable SyncService for handler tests.

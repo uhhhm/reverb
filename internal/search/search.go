@@ -6,8 +6,8 @@ package search
 import (
 	"context"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/registry"
 )
 
 // SearchSource is an external catalog (MVP: Spotify). ISRC/MBID are DATA on the

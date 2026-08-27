@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/download"
-	"github.com/maxjb-xyz/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/download"
+	"github.com/uhhhm/reverb/internal/registry"
 )
 
 // fakeRunner replays canned stdout lines (incl. one malformed line) and records

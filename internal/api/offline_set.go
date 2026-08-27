@@ -7,8 +7,8 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/maxjb-xyz/reverb/internal/offlineset"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/offlineset"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // OfflineSetStore is the persistence slice the offline-set handlers need.

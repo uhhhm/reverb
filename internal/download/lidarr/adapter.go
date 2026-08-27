@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/download"
-	"github.com/maxjb-xyz/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/download"
+	"github.com/uhhhm/reverb/internal/registry"
 )
 
 // Adapter implements download.Downloader and download.AsyncDownloader for Lidarr.

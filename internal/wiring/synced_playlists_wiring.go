@@ -6,14 +6,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/download"
-	"github.com/maxjb-xyz/reverb/internal/library"
-	"github.com/maxjb-xyz/reverb/internal/matching"
-	"github.com/maxjb-xyz/reverb/internal/playlistsync"
-	"github.com/maxjb-xyz/reverb/internal/search"
-	"github.com/maxjb-xyz/reverb/internal/search/spotify"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/download"
+	"github.com/uhhhm/reverb/internal/library"
+	"github.com/uhhhm/reverb/internal/matching"
+	"github.com/uhhhm/reverb/internal/playlistsync"
+	"github.com/uhhhm/reverb/internal/search"
+	"github.com/uhhhm/reverb/internal/search/spotify"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // syncStore adapts *db.Queries to playlistsync.Store, mapping db.SyncedPlaylist

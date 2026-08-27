@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/maxjb-xyz/reverb/internal/play"
-	"github.com/maxjb-xyz/reverb/internal/scrobble"
+	"github.com/uhhhm/reverb/internal/play"
+	"github.com/uhhhm/reverb/internal/scrobble"
 )
 
 // handlePlay serves POST /api/v1/plays.

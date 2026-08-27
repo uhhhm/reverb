@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/auth"
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/library"
-	"github.com/maxjb-xyz/reverb/internal/registry"
-	"github.com/maxjb-xyz/reverb/internal/resolver"
-	"github.com/maxjb-xyz/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/auth"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/library"
+	"github.com/uhhhm/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/resolver"
+	"github.com/uhhhm/reverb/internal/store"
 )
 
 func TestStreamProxyForwardsRangeAnd206(t *testing.T) {

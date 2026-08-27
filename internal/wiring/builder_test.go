@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/maxjb-xyz/reverb/internal/download/spotdl"
-	"github.com/maxjb-xyz/reverb/internal/events"
-	"github.com/maxjb-xyz/reverb/internal/registry"
-	"github.com/maxjb-xyz/reverb/internal/store"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/download/spotdl"
+	"github.com/uhhhm/reverb/internal/events"
+	"github.com/uhhhm/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 func newTestStore(t *testing.T) *store.Store {

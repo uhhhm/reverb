@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/auth"
-	"github.com/maxjb-xyz/reverb/internal/catalog"
-	"github.com/maxjb-xyz/reverb/internal/play"
-	"github.com/maxjb-xyz/reverb/internal/registry"
-	"github.com/maxjb-xyz/reverb/internal/store"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/auth"
+	"github.com/uhhhm/reverb/internal/catalog"
+	"github.com/uhhhm/reverb/internal/play"
+	"github.com/uhhhm/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // playsTestServer builds a Server with a real play.Service wired in.

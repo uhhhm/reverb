@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/store"
 )
 
 func newRec() *httptest.ResponseRecorder { return httptest.NewRecorder() }

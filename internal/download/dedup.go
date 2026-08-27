@@ -5,8 +5,8 @@ import (
 	"encoding/hex"
 	"strings"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/matching"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/matching"
 )
 
 // dedupSep is the unit-separator rune (␟) joining the normalized fields, matching

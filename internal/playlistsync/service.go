@@ -8,9 +8,9 @@ import (
 	"log"
 	"strings"
 
-	"github.com/maxjb-xyz/reverb/internal/catalog"
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/resolver"
+	"github.com/uhhhm/reverb/internal/catalog"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/resolver"
 )
 
 // BindingResolver is the narrow catalog-resolution seam playlistsync.Service will

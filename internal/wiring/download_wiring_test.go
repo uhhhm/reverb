@@ -3,11 +3,11 @@ package wiring
 import (
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/download/spotdl"
-	"github.com/maxjb-xyz/reverb/internal/download/ytdlp"
-	"github.com/maxjb-xyz/reverb/internal/registry"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/download/spotdl"
+	"github.com/uhhhm/reverb/internal/download/ytdlp"
+	"github.com/uhhhm/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 func env(m map[string]string) func(string) string {

@@ -14,10 +14,10 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/maxjb-xyz/reverb/internal/auth"
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/playlistsync"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/auth"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/playlistsync"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 var validIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)

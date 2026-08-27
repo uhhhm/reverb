@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"sort"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/core"
 )
 
 type collectionArtist struct {

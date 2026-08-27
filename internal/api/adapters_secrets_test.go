@@ -3,7 +3,7 @@ package api
 import (
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/registry"
 )
 
 func schema() registry.ConfigSchema {

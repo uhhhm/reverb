@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/store"
 )
 
 func TestEnsureInternalCredentials_GeneratesOnceAndPersists(t *testing.T) {

@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/catalog"
-	"github.com/maxjb-xyz/reverb/internal/play"
-	"github.com/maxjb-xyz/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/catalog"
+	"github.com/uhhhm/reverb/internal/play"
+	"github.com/uhhhm/reverb/internal/store"
 )
 
 // newTestStatsHarness opens a real sqlite store, migrates it, and returns a

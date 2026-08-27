@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/maxjb-xyz/reverb/internal/auth"
+	"github.com/uhhhm/reverb/internal/auth"
 )
 
 const sessionCookie = "reverb_session"

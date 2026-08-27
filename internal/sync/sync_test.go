@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/store"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
-	syncpkg "github.com/maxjb-xyz/reverb/internal/sync"
+	"github.com/uhhhm/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/store/db"
+	syncpkg "github.com/uhhhm/reverb/internal/sync"
 )
 
 func newTestStoreSync(t *testing.T) *store.Store {

@@ -1,6 +1,6 @@
 package download
 
-import "github.com/maxjb-xyz/reverb/internal/core"
+import "github.com/uhhhm/reverb/internal/core"
 
 // ResolveGranularityOrder maps each active granularity to its chain order for a
 // single downloader instance.

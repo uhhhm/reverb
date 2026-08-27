@@ -16,8 +16,8 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // Addressing is the resolved backend location for a catalog entity.

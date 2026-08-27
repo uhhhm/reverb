@@ -4,8 +4,8 @@ package coverage
 import (
 	"context"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/matching"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/matching"
 )
 
 // ResolveArtist maps a library artist to an external artist id, caching the result.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/store"
 )
 
 // buildIntegrationServer creates a Server with Adapters wired and a seeded

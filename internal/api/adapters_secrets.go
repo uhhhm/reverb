@@ -3,7 +3,7 @@ package api
 import (
 	"strings"
 
-	"github.com/maxjb-xyz/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/registry"
 )
 
 // secretSentinel is the placeholder returned for a SET secret. The browser never

@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/core"
 )
 
 // probeBitrate asks yt-dlp for the source's average audio bitrate without

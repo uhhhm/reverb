@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/play"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/play"
 )
 
 type statsMetadataProvider interface {

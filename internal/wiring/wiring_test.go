@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/library/embedded"
-	"github.com/maxjb-xyz/reverb/internal/library/subsonic"
-	"github.com/maxjb-xyz/reverb/internal/registry"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/library/embedded"
+	"github.com/uhhhm/reverb/internal/library/subsonic"
+	"github.com/uhhhm/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 func libReg() *registry.Registry {

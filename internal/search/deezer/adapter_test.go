@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/search"
-	"github.com/maxjb-xyz/reverb/internal/search/deezer"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/search"
+	"github.com/uhhhm/reverb/internal/search/deezer"
 )
 
 const trackJSON = `{"id": 3135556, "title": "Harder, Better, Faster, Stronger",

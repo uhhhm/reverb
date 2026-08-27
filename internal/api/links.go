@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/linkresolve"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
-	reverbsync "github.com/maxjb-xyz/reverb/internal/sync"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/linkresolve"
+	"github.com/uhhhm/reverb/internal/store/db"
+	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
 
 // LinkStore is the persistence slice the add-from-link handlers need.

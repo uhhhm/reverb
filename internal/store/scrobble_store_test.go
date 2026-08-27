@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 func TestScrobbleLink_UpsertAndGet(t *testing.T) {

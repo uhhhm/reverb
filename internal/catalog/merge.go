@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/maxjb-xyz/reverb/internal/matching"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/matching"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // corroborates returns true if the entity stored under otherID has a Fingerprint

@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/library/lyrics"
-	"github.com/maxjb-xyz/reverb/internal/registry"
-	"github.com/maxjb-xyz/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/library/lyrics"
+	"github.com/uhhhm/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/store"
 )
 
 // fakeLyrics implements the LyricsProvider seam.

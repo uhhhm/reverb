@@ -1,4 +1,4 @@
-module github.com/maxjb-xyz/reverb
+module github.com/uhhhm/reverb
 
 go 1.25.0
 

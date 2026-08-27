@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/core"
 )
 
 // fakeDisco implements DiscoSource for tests.

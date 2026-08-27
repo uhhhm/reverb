@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/maxjb-xyz/reverb/internal/library/peaks"
+	"github.com/uhhhm/reverb/internal/library/peaks"
 )
 
 // localTrackPath is deliberately optional: remote/Subsonic libraries do not

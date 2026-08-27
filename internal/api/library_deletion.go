@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	reverbsync "github.com/maxjb-xyz/reverb/internal/sync"
+	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
 
 // emitPlaylistDeletion emits a playlist __deleted tombstone via SyncStore.

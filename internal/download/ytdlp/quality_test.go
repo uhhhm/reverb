@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/core"
 )
 
 // A tier is a ceiling: a source at or below it is kept as-is rather than

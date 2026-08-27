@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // Entry is the domain view of an offline_set row.

@@ -14,9 +14,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/maxjb-xyz/reverb/internal/matching"
-	"github.com/maxjb-xyz/reverb/internal/registry"
-	"github.com/maxjb-xyz/reverb/internal/scrobble"
+	"github.com/uhhhm/reverb/internal/matching"
+	"github.com/uhhhm/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/scrobble"
 )
 
 const (

@@ -6,7 +6,7 @@ import (
 	"log"
 
 	"github.com/google/uuid"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // seedBundledDownloader ensures the bundled spotDL downloader is present as a

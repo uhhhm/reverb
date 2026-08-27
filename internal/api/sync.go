@@ -5,8 +5,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/maxjb-xyz/reverb/internal/store/db"
-	"github.com/maxjb-xyz/reverb/internal/sync"
+	"github.com/uhhhm/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/sync"
 )
 
 // SyncStoreInterface is the seam sync handlers need.

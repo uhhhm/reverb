@@ -5,11 +5,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/maxjb-xyz/reverb/internal/library"
-	"github.com/maxjb-xyz/reverb/internal/library/embedded"
-	"github.com/maxjb-xyz/reverb/internal/library/subsonic"
-	"github.com/maxjb-xyz/reverb/internal/registry"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/library"
+	"github.com/uhhhm/reverb/internal/library/embedded"
+	"github.com/uhhhm/reverb/internal/library/subsonic"
+	"github.com/uhhhm/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // stubLib captures the config passed to Init so we can assert env override + parse.

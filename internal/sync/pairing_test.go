@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/store"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
-	syncpkg "github.com/maxjb-xyz/reverb/internal/sync"
+	"github.com/uhhhm/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/store/db"
+	syncpkg "github.com/uhhhm/reverb/internal/sync"
 )
 
 func newTestStorePairing(t *testing.T) *store.Store {

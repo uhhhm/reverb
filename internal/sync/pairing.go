@@ -11,7 +11,7 @@ import (
 	"unicode"
 
 	"github.com/google/uuid"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 const codeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"

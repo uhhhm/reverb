@@ -7,8 +7,8 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/maxjb-xyz/reverb/internal/store/db"
-	"github.com/maxjb-xyz/reverb/internal/sync"
+	"github.com/uhhhm/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/sync"
 )
 
 // PairingStore is the persistence seam pairing handlers need.

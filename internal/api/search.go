@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/core"
 )
 
 // handleEverywhere streams per-source search envelopes as Server-Sent Events.

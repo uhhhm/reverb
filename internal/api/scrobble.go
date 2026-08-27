@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/maxjb-xyz/reverb/internal/scrobble"
+	"github.com/uhhhm/reverb/internal/scrobble"
 )
 
 // handleScrobbleAuthURL serves POST /api/v1/scrobble/lastfm/auth-url.

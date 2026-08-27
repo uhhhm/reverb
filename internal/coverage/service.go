@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/matching"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/matching"
 )
 
 // DiscoSource is the external source used for discography + resolution.

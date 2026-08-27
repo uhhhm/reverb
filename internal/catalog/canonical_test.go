@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/store"
 )
 
 // newTestService opens a migrated temp sqlite store and returns a *Service.

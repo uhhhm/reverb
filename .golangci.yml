@@ -28,7 +28,7 @@ linters:
         - (io.ReadCloser).Close
         - (*os.File).Close
         - (*github.com/coder/websocket.Conn).Close
-        - (*github.com/maxjb-xyz/reverb/internal/store.Store).Close
+        - (*github.com/uhhhm/reverb/internal/store.Store).Close
   exclusions:
     rules:
       # Test code legitimately ignores errors from setup/teardown helpers and

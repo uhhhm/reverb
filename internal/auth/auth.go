@@ -10,7 +10,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // OwnerID is the stable identity of the single local user.

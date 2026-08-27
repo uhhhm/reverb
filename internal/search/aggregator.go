@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/maxjb-xyz/reverb/internal/core"
-	"github.com/maxjb-xyz/reverb/internal/matching"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/matching"
 )
 
 // Matcher pre-matches an external result against the library. Implemented by
