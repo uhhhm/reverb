@@ -85,9 +85,9 @@ describe('AddFromLink route', () => {
     expect(screen.getByRole('heading', { level: 1, name: /add from link/i })).toBeInTheDocument()
   })
 
-  it('has input with placeholder Paste Spotify or YouTube URL', () => {
+  it('has a multi-line URL input', () => {
     wrap()
-    expect(screen.getByPlaceholderText('Paste Spotify or YouTube URL')).toBeInTheDocument()
+    expect(screen.getByLabelText(/spotify or youtube urls/i)).toBeInTheDocument()
   })
 
   it('validates empty URL client side on Resolve', async () => {
@@ -103,7 +103,7 @@ describe('AddFromLink route', () => {
     const { ApiError } = await import('../lib/api')
     mockResolveLink.mockRejectedValue(new ApiError('POST', '/links/resolve', 422))
     wrap()
-    const input = screen.getByPlaceholderText('Paste Spotify or YouTube URL')
+    const input = screen.getByLabelText(/spotify or youtube urls/i)
     fireEvent.change(input, { target: { value: 'https://example.com/foo' } })
     fireEvent.click(screen.getByRole('button', { name: /^resolve$/i }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/unsupported url/i)
@@ -112,7 +112,7 @@ describe('AddFromLink route', () => {
 
   it('resolves and shows preview card with title, artist, album, source, kind, cover', async () => {
     wrap()
-    const input = screen.getByPlaceholderText('Paste Spotify or YouTube URL')
+    const input = screen.getByLabelText(/spotify or youtube urls/i)
     fireEvent.change(input, { target: { value: 'https://open.spotify.com/track/sp123' } })
     fireEvent.click(screen.getByRole('button', { name: /^resolve$/i }))
     const card = await screen.findByTestId('preview-card')
@@ -142,12 +142,12 @@ describe('AddFromLink route', () => {
 
   it('Add from link calls addFromLink and toasts success', async () => {
     wrap()
-    const input = screen.getByPlaceholderText('Paste Spotify or YouTube URL')
+    const input = screen.getByLabelText(/spotify or youtube urls/i)
     fireEvent.change(input, { target: { value: 'https://open.spotify.com/track/sp123' } })
     // need preview first? not required but set url
     fireEvent.click(screen.getByRole('button', { name: /^add from link$/i }))
     await waitFor(() => expect(mockAddFromLink).toHaveBeenCalledWith('https://open.spotify.com/track/sp123', { playlistId: undefined, download: true, quality: 'high' }))
-    expect(mockPush).toHaveBeenCalledWith('Added from link', 'success')
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('Added 1 link', 'success'))
   })
 
   it('Add from link with playlist selected passes playlistId', async () => {
@@ -158,7 +158,7 @@ describe('AddFromLink route', () => {
       job: { id: 'j1' },
     })
     wrap()
-    const input = screen.getByPlaceholderText('Paste Spotify or YouTube URL')
+    const input = screen.getByLabelText(/spotify or youtube urls/i)
     fireEvent.change(input, { target: { value: 'https://open.spotify.com/track/sp123' } })
     const sel = screen.getByLabelText(/add to playlist/i) as HTMLSelectElement
     fireEvent.change(sel, { target: { value: 'pl1' } })
@@ -169,7 +169,7 @@ describe('AddFromLink route', () => {
 
   it('Download checkbox unchecked passes download false', async () => {
     wrap()
-    const input = screen.getByPlaceholderText('Paste Spotify or YouTube URL')
+    const input = screen.getByLabelText(/spotify or youtube urls/i)
     fireEvent.change(input, { target: { value: 'https://open.spotify.com/track/sp123' } })
     const cb = screen.getByLabelText(/download now/i)
     fireEvent.click(cb)
@@ -181,26 +181,25 @@ describe('AddFromLink route', () => {
     const { ApiError } = await import('../lib/api')
     mockAddFromLink.mockRejectedValue(new ApiError('POST', '/links/add', 404))
     wrap()
-    const input = screen.getByPlaceholderText('Paste Spotify or YouTube URL')
+    const input = screen.getByLabelText(/spotify or youtube urls/i)
     fireEvent.change(input, { target: { value: 'https://open.spotify.com/track/sp123' } })
     fireEvent.click(screen.getByRole('button', { name: /^add from link$/i }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(/playlist not found/i)
+    expect(await screen.findByTestId('add-results')).toHaveTextContent(/playlist not found/i)
   })
 
   it('handles 422 unsupported on add', async () => {
     const { ApiError } = await import('../lib/api')
     mockAddFromLink.mockRejectedValue(new ApiError('POST', '/links/add', 422))
     wrap()
-    const input = screen.getByPlaceholderText('Paste Spotify or YouTube URL')
+    const input = screen.getByLabelText(/spotify or youtube urls/i)
     fireEvent.change(input, { target: { value: 'https://example.com/foo' } })
     fireEvent.click(screen.getByRole('button', { name: /^add from link$/i }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(/unsupported url/i)
+    expect(await screen.findByTestId('add-results')).toHaveTextContent(/unsupported url/i)
   })
 
-  it('validates empty URL on Add from link', async () => {
+  it('disables Add until at least one link is entered', () => {
     wrap()
-    fireEvent.click(screen.getByRole('button', { name: /^add from link$/i }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(/enter a url/i)
+    expect(screen.getByRole('button', { name: /^add from link$/i })).toBeDisabled()
   })
 
   it('shows success status when added to canonical library without playlist', async () => {
@@ -209,10 +208,10 @@ describe('AddFromLink route', () => {
       catalogId: 'trk_link_sp123',
     })
     wrap()
-    const input = screen.getByPlaceholderText('Paste Spotify or YouTube URL')
+    const input = screen.getByLabelText(/spotify or youtube urls/i)
     fireEvent.change(input, { target: { value: 'https://open.spotify.com/track/sp123' } })
     fireEvent.click(screen.getByRole('button', { name: /^add from link$/i }))
-    expect(await screen.findByRole('status')).toHaveTextContent(/canonical library/i)
+    expect(await screen.findByRole('status')).toHaveTextContent(/added 1 link/i)
   })
 
   it('respects vocab: does not contain forbidden terms', () => {
@@ -245,11 +244,111 @@ describe('AddFromLink route', () => {
     let resolve: () => void
     mockResolveLink.mockReturnValue(new Promise((r) => (resolve = () => r({ kind: 'track', source: 'spotify', externalId: 'x', title: 't', artist: 'a', album: '', url: 'u' }))))
     wrap()
-    const input = screen.getByPlaceholderText('Paste Spotify or YouTube URL')
+    const input = screen.getByLabelText(/spotify or youtube urls/i)
     fireEvent.change(input, { target: { value: 'https://open.spotify.com/track/x' } })
     fireEvent.click(screen.getByRole('button', { name: /^resolve$/i }))
     expect(await screen.findByText(/resolving/i)).toBeInTheDocument()
     resolve!()
+  })
+  it('adds every pasted link and reports each outcome', async () => {
+    const { ApiError } = await import('../lib/api')
+    mockAddFromLink.mockReset()
+    mockAddFromLink
+      .mockResolvedValueOnce({ resolve: {}, catalogId: 'trk_a' })
+      .mockRejectedValueOnce(new ApiError('POST', '/links/add', 422))
+      .mockResolvedValueOnce({ resolve: {}, catalogId: 'trk_c' })
+
+    wrap()
+    fireEvent.change(screen.getByLabelText(/spotify or youtube urls/i), {
+      target: { value: 'https://a\nhttps://bad\nhttps://c' },
+    })
+    expect(screen.getByRole('button', { name: /add 3 links/i })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /add 3 links/i }))
+
+    await waitFor(() => expect(mockAddFromLink).toHaveBeenCalledTimes(3))
+    const results = await screen.findByTestId('add-results')
+    expect(results).toHaveTextContent('https://a')
+    expect(results).toHaveTextContent(/unsupported url/i)
+    expect(results).toHaveTextContent('https://c')
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('Added 2 of 3 links', 'error'))
+  })
+
+  it('previews every pasted link', async () => {
+    mockResolveLink.mockReset()
+    mockResolveLink
+      .mockResolvedValueOnce({ kind: 'track', source: 'spotify', externalId: '1', title: 'First', artist: 'A', album: '', url: 'https://a' })
+      .mockResolvedValueOnce({ kind: 'track', source: 'spotify', externalId: '2', title: 'Second', artist: 'B', album: '', url: 'https://b' })
+
+    wrap()
+    fireEvent.change(screen.getByLabelText(/spotify or youtube urls/i), {
+      target: { value: 'https://a\nhttps://b' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^resolve$/i }))
+
+    await waitFor(() => expect(screen.getAllByTestId('preview-card')).toHaveLength(2))
+    const cards = screen.getAllByTestId('preview-card')
+    expect(cards[0]).toHaveTextContent('First')
+    expect(cards[1]).toHaveTextContent('Second')
+  })
+
+  it('sends each link its own trim range', async () => {
+    mockAddFromLink.mockReset()
+    mockAddFromLink.mockResolvedValue({ resolve: {}, catalogId: 'trk_a' })
+
+    wrap()
+    fireEvent.change(screen.getByLabelText(/spotify or youtube urls/i), {
+      target: { value: 'https://www.youtube.com/watch?v=one\nhttps://www.youtube.com/watch?v=two' },
+    })
+
+    // Open the first link's advanced panel and trim only that one.
+    fireEvent.click(
+      screen.getByRole('button', { name: /advanced options for https:\/\/www\.youtube\.com\/watch\?v=one/i }),
+    )
+    fireEvent.change(
+      screen.getByLabelText(/start time for https:\/\/www\.youtube\.com\/watch\?v=one/i),
+      { target: { value: '1:30' } },
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /add 2 links/i }))
+    await waitFor(() => expect(mockAddFromLink).toHaveBeenCalledTimes(2))
+
+    expect(mockAddFromLink).toHaveBeenNthCalledWith(
+      1,
+      'https://www.youtube.com/watch?v=one',
+      expect.objectContaining({ startTime: '1:30' }),
+    )
+    // The second link must be untouched by the first link's settings.
+    expect(mockAddFromLink).toHaveBeenNthCalledWith(
+      2,
+      'https://www.youtube.com/watch?v=two',
+      expect.not.objectContaining({ startTime: '1:30' }),
+    )
+  })
+
+  it('reports how many chapters a split produced', async () => {
+    mockAddFromLink.mockReset()
+    mockAddFromLink.mockResolvedValue({
+      resolve: {},
+      catalogId: 'trk_a',
+      jobs: [{ id: 'j1' }, { id: 'j2' }, { id: 'j3' }],
+    })
+
+    wrap()
+    fireEvent.change(screen.getByLabelText(/spotify or youtube urls/i), {
+      target: { value: 'https://www.youtube.com/watch?v=chap' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^add from link$/i }))
+
+    const results = await screen.findByTestId('add-results')
+    expect(results).toHaveTextContent(/as 3 chapters/i)
+  })
+
+  it('offers no trim options for a Spotify link', () => {
+    wrap()
+    fireEvent.change(screen.getByLabelText(/spotify or youtube urls/i), {
+      target: { value: 'https://open.spotify.com/track/sp1' },
+    })
+    expect(screen.queryByTestId('link-options')).not.toBeInTheDocument()
   })
 })
 
@@ -282,4 +381,5 @@ describe('AddFromLink audio quality', () => {
     fireEvent.click(screen.getByLabelText(/download now/i))
     expect(screen.queryByLabelText(/audio quality/i)).toBeNull()
   })
+
 })

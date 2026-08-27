@@ -1,14 +1,38 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError } from '../lib/api'
-import { resolveLink, addFromLink, type ResolveResult } from '../lib/linkApi'
+import { resolveLink, addFromLink, type ResolveResult, type LinkOptions } from '../lib/linkApi'
 import { useSyncedPlaylists } from '../lib/syncedPlaylistApi'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
+import { parseLinks } from '../lib/parseLinks'
+import { LinkOptionsPanel } from '../components/LinkOptionsPanel'
+import { isYouTubeLink } from '../lib/parseLinks'
 import { useToastStore } from '../lib/toastStore'
 import { Button } from '../components/ui/Button'
 import { Checkbox } from '../components/ui/Checkbox'
 import { useSettings } from '../lib/settingsApi'
 import { AUDIO_QUALITIES, DEFAULT_AUDIO_QUALITY, type AudioQuality } from '../lib/audioQuality'
+
+interface LinkPreview {
+  url: string
+  result?: ResolveResult
+  error?: string
+}
+
+interface LinkOutcome {
+  url: string
+  ok: boolean
+  message: string
+}
+
+function describeError(e: unknown, fallback: string): string {
+  if (e instanceof ApiError) {
+    if (e.status === 422) return 'Unsupported URL'
+    if (e.status === 404) return 'Playlist not found'
+    return e.message
+  }
+  return e instanceof Error ? e.message : fallback
+}
 
 export default function AddFromLink() {
   useDocumentTitle('Add from link')
@@ -17,8 +41,8 @@ export default function AddFromLink() {
   const { data: playlists } = useSyncedPlaylists()
   const { data: settings } = useSettings()
 
-  const [url, setUrl] = useState('')
-  const [preview, setPreview] = useState<ResolveResult | null>(null)
+  const [urls, setUrls] = useState('')
+  const [previews, setPreviews] = useState<LinkPreview[]>([])
   const [resolveLoading, setResolveLoading] = useState(false)
   const [resolveError, setResolveError] = useState<string | null>(null)
 
@@ -32,10 +56,21 @@ export default function AddFromLink() {
   const [addLoading, setAddLoading] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
   const [addSuccess, setAddSuccess] = useState<string | null>(null)
+  const [addResults, setAddResults] = useState<LinkOutcome[]>([])
+  // Per-link trim/split options, keyed by the link itself so editing the
+  // textarea does not shuffle settings onto the wrong video.
+  const [linkOptions, setLinkOptions] = useState<Record<string, LinkOptions>>({})
+
+  const parsedUrls = parseLinks(urls)
+  const addLabel = addLoading
+    ? `Adding${addResults.length ? ` ${addResults.length}/${parsedUrls.length}` : ''}...`
+    : parsedUrls.length > 1
+      ? `Add ${parsedUrls.length} links`
+      : 'Add from link'
 
   async function onResolve() {
-    const trimmed = url.trim()
-    if (!trimmed) {
+    const links = parseLinks(urls)
+    if (links.length === 0) {
       setResolveError('Enter a URL')
       return
     }
@@ -43,65 +78,81 @@ export default function AddFromLink() {
     setResolveError(null)
     setAddError(null)
     setAddSuccess(null)
-    try {
-      const res = await resolveLink(trimmed)
-      setPreview(res)
-    } catch (e) {
-      setPreview(null)
-      if (e instanceof ApiError && e.status === 422) {
-        setResolveError('Unsupported URL')
-      } else if (e instanceof Error) {
-        setResolveError(e.message)
-      } else {
-        setResolveError('Could not resolve link')
-      }
-    } finally {
-      setResolveLoading(false)
-    }
+    setAddResults([])
+    // Resolve concurrently — each link stands alone, so one bad URL must not
+    // hide the previews for the rest.
+    const settled = await Promise.all(
+      links.map(async (link): Promise<LinkPreview> => {
+        try {
+          return { url: link, result: await resolveLink(link) }
+        } catch (e) {
+          return { url: link, error: describeError(e, 'Could not resolve link') }
+        }
+      }),
+    )
+    setPreviews(settled)
+    setResolveLoading(false)
   }
 
   async function onAdd() {
-    const trimmed = url.trim()
-    if (!trimmed) {
+    const links = parseLinks(urls)
+    if (links.length === 0) {
       setAddError('Enter a URL')
       return
     }
     setAddLoading(true)
     setAddError(null)
     setAddSuccess(null)
-    try {
-      const res = await addFromLink(trimmed, {
-        playlistId: selectedPlaylist || undefined,
-        download: downloadNow,
-        quality: effectiveQuality,
-      })
-      const target = res.playlistId || selectedPlaylist
-      if (target) {
-        pushToast('Added from link', 'success')
-        navigate(`/playlist/${encodeURIComponent(target)}`)
-      } else {
-        pushToast('Added from link', 'success')
-        if (res.catalogId) {
-          setAddSuccess(`Added to canonical library: ${res.catalogId}`)
-        } else {
-          setAddSuccess('Added to canonical library')
-        }
-        if (res.job) {
-          // job enqueued, already toasted
-        }
+    setAddResults([])
+
+    // Added one at a time: each add can enqueue a download, and firing a whole
+    // paste-list at the server at once would stampede the download queue.
+    const outcomes: LinkOutcome[] = []
+    let lastPlaylistId = ''
+    for (const link of links) {
+      try {
+        const res = await addFromLink(link, {
+          playlistId: selectedPlaylist || undefined,
+          download: downloadNow,
+          quality: effectiveQuality,
+          ...(linkOptions[link] ?? {}),
+        })
+        const target = res.playlistId || selectedPlaylist
+        if (target) lastPlaylistId = target
+        const chapterCount = Array.isArray(res.jobs) ? res.jobs.length : 0
+        const where = target ? 'Added to playlist' : 'Added to library'
+        outcomes.push({
+          url: link,
+          ok: true,
+          message: chapterCount > 1 ? `${where} as ${chapterCount} chapters` : where,
+        })
+      } catch (e) {
+        outcomes.push({ url: link, ok: false, message: describeError(e, 'Could not add from link') })
       }
-    } catch (e) {
-      if (e instanceof ApiError) {
-        if (e.status === 422) setAddError('Unsupported URL')
-        else if (e.status === 404) setAddError('Playlist not found')
-        else setAddError(e.message)
-      } else if (e instanceof Error) {
-        setAddError(e.message)
-      } else {
-        setAddError('Could not add from link')
-      }
-    } finally {
-      setAddLoading(false)
+      setAddResults([...outcomes])
+    }
+    setAddLoading(false)
+
+    const added = outcomes.filter((o) => o.ok).length
+    const failed = outcomes.length - added
+    if (added > 0) {
+      pushToast(
+        failed === 0
+          ? `Added ${added} link${added === 1 ? '' : 's'}`
+          : `Added ${added} of ${outcomes.length} links`,
+        failed === 0 ? 'success' : 'error',
+      )
+    } else {
+      pushToast('Nothing could be added', 'error')
+    }
+    if (failed > 0) setAddError(`${failed} link${failed === 1 ? '' : 's'} failed — see below.`)
+
+    // Only follow a single-link add through to its playlist; on a batch the
+    // results list is the more useful thing to stay on.
+    if (added > 0 && outcomes.length === 1 && lastPlaylistId) {
+      navigate(`/playlist/${encodeURIComponent(lastPlaylistId)}`)
+    } else if (added > 0) {
+      setAddSuccess(`Added ${added} link${added === 1 ? '' : 's'} to your library.`)
     }
   }
 
@@ -110,8 +161,8 @@ export default function AddFromLink() {
       <header>
         <h1 className="text-3xl font-black tracking-tight text-text-primary">Add from link</h1>
         <p className="mt-1 text-sm text-text-secondary">
-          Add from link to your canonical library or a playlist. Downloads are source-native unless
-          you pick a tier that transcodes down.
+          Add one or many links to your canonical library or a playlist. Downloads are
+          source-native unless you pick a tier that transcodes down.
         </p>
       </header>
 
@@ -120,22 +171,24 @@ export default function AddFromLink() {
 
         <div className="space-y-2">
           <label htmlFor="add-link-url" className="text-sm font-semibold text-text-primary">
-            Spotify or YouTube URL
+            Spotify or YouTube URLs
           </label>
           <div className="flex gap-2">
-            <input
+            <textarea
               id="add-link-url"
-              aria-label="Spotify or YouTube URL"
-              placeholder="Paste Spotify or YouTube URL"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              aria-label="Spotify or YouTube URLs"
+              placeholder={'Paste one link per line\nhttps://open.spotify.com/track/...\nhttps://youtube.com/watch?v=...'}
+              rows={4}
+              value={urls}
+              onChange={(e) => setUrls(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') {
+                // Enter inserts a newline (links are one per line); Ctrl/Cmd+Enter resolves.
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault()
                   void onResolve()
                 }
               }}
-              className="flex-1 rounded-md border border-border-subtle bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+              className="flex-1 resize-y rounded-md border border-border-subtle bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent focus:ring-1 focus:ring-accent"
             />
             <Button
               variant="secondary"
@@ -147,6 +200,28 @@ export default function AddFromLink() {
               {resolveLoading ? 'Resolving...' : 'Resolve'}
             </Button>
           </div>
+          <p className="text-xs text-text-muted">
+            {parsedUrls.length === 0
+              ? 'One link per line — spaces and commas work too.'
+              : `${parsedUrls.length} link${parsedUrls.length === 1 ? '' : 's'} ready.`}
+          </p>
+
+          {/* Per-link trim / chapter options. YouTube only — nothing else has a
+              timeline Reverb can address. */}
+          {parsedUrls.some(isYouTubeLink) && (
+            <div className="space-y-2 pt-1" data-testid="link-options">
+              {parsedUrls.filter(isYouTubeLink).map((link) => (
+                <div key={link} className="space-y-1">
+                  <p className="truncate text-xs text-text-muted">{link}</p>
+                  <LinkOptionsPanel
+                    url={link}
+                    value={linkOptions[link] ?? {}}
+                    onChange={(next) => setLinkOptions((prev) => ({ ...prev, [link]: next }))}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
           {resolveError && (
             <p role="alert" className="text-sm text-error">
               {resolveError}
@@ -154,30 +229,44 @@ export default function AddFromLink() {
           )}
         </div>
 
-        {preview && (
-          <div
-            data-testid="preview-card"
-            className="rounded-md border border-border-subtle bg-surface p-4 space-y-2"
-          >
-            <div className="flex gap-3">
-              {preview.coverUrl ? (
-                <img
-                  src={preview.coverUrl}
-                  alt={preview.title}
-                  className="h-16 w-16 flex-none rounded-md object-cover bg-raised"
-                />
-              ) : (
-                <div className="h-16 w-16 flex-none rounded-md bg-raised" data-testid="preview-cover-placeholder" />
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-bold text-text-primary truncate">{preview.title}</p>
-                <p className="text-sm text-text-secondary truncate">{preview.artist}</p>
-                {preview.album && <p className="text-xs text-text-muted truncate">{preview.album}</p>}
-                <p className="mt-1 text-xs text-text-muted">
-                  {preview.source} · {preview.kind}
-                </p>
+        {previews.length > 0 && (
+          <div className="space-y-2" data-testid="preview-list">
+            {previews.map((p) => (
+              <div
+                key={p.url}
+                data-testid="preview-card"
+                className="rounded-md border border-border-subtle bg-surface p-4"
+              >
+                {p.result ? (
+                  <div className="flex gap-3">
+                    {p.result.coverUrl ? (
+                      <img
+                        src={p.result.coverUrl}
+                        alt={p.result.title}
+                        className="h-16 w-16 flex-none rounded-md object-cover bg-raised"
+                      />
+                    ) : (
+                      <div className="h-16 w-16 flex-none rounded-md bg-raised" data-testid="preview-cover-placeholder" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-text-primary truncate">{p.result.title}</p>
+                      <p className="text-sm text-text-secondary truncate">{p.result.artist}</p>
+                      {p.result.album && <p className="text-xs text-text-muted truncate">{p.result.album}</p>}
+                      <p className="mt-1 text-xs text-text-muted">
+                        {p.result.source} · {p.result.kind}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="min-w-0">
+                    <p className="truncate text-sm text-text-secondary">{p.url}</p>
+                    <p role="alert" className="mt-1 text-sm text-error">
+                      {p.error}
+                    </p>
+                  </div>
+                )}
               </div>
-            </div>
+            ))}
           </div>
         )}
 
@@ -240,11 +329,11 @@ export default function AddFromLink() {
           <Button
             variant="primary"
             size="sm"
-            aria-label="Add from link"
-            disabled={addLoading}
+            aria-label={addLabel}
+            disabled={addLoading || parsedUrls.length === 0}
             onClick={() => void onAdd()}
           >
-            {addLoading ? 'Adding...' : 'Add from link'}
+            {addLabel}
           </Button>
           {addError && (
             <p role="alert" className="text-sm text-error">
@@ -255,6 +344,19 @@ export default function AddFromLink() {
             <p role="status" className="text-sm text-green-400">
               {addSuccess}
             </p>
+          )}
+          {addResults.length > 0 && (
+            <ul className="space-y-1" data-testid="add-results">
+              {addResults.map((r) => (
+                <li key={r.url} className="flex gap-2 text-xs">
+                  <span className={r.ok ? 'text-green-400' : 'text-error'} aria-hidden="true">
+                    {r.ok ? '✓' : '✕'}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-text-secondary">{r.url}</span>
+                  <span className={r.ok ? 'text-text-muted' : 'text-error'}>{r.message}</span>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       </section>
