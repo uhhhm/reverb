@@ -1,4 +1,4 @@
-.PHONY: gen test build web dev clean
+.PHONY: gen test build web dev clean desktop desktop-dev desktop-deps
 
 VERSION ?= dev
 
@@ -21,6 +21,15 @@ dev:
 	@echo "Run in two shells:"
 	@echo "  1) cd web && npm run dev"
 	@echo "  2) go run ./cmd/reverb --dev"
+
+desktop: web
+	go build -tags desktop -ldflags "-X main.version=$(VERSION)" -o dist/reverb-desktop ./desktop
+
+desktop-dev:
+	wails dev -projectdir ./desktop
+
+desktop-deps: # fetch ffmpeg static + navidrome per TARGETARCH (tools/fetch-*.sh)
+	@echo "desktop-deps: fetch ffmpeg static + navidrome per TARGETARCH (tools/fetch-*.sh) - not yet implemented"
 
 clean:
 	rm -rf reverb web/dist internal/api/dist

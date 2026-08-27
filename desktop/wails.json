@@ -1,0 +1,10 @@
+{
+  "name": "Reverb",
+  "outputfilename": "reverb-desktop",
+  "frontend:dir": "../web",
+  "frontend:build": "npm run build",
+  "frontend:install": "npm install",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "http://localhost:5173",
+  "assetServer:frontend:fallback": "index.html"
+}

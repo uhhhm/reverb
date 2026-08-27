@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Reverb
+Comment=Self-hosted music app
+Exec=reverb-desktop
+Icon=reverb-desktop
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Music;
+StartupWMClass=Reverb

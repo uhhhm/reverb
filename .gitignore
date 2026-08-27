@@ -14,3 +14,10 @@ dev/music/*
 reverb-plan.md
 docs/HANDOFF-*.md
 docs/superpowers/
+
+.agents/
+.claude/
+
+# Wails desktop build tools/cache (per-arch ffmpeg, navidrome, etc.)
+desktop/tools/
+dist/
