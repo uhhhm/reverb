@@ -170,17 +170,49 @@ export default function Pairing() {
       <header>
         <h1 className="text-3xl font-black tracking-tight text-text-primary">Pairing</h1>
         <p className="mt-1 text-sm text-text-secondary">
-          Pair a device with the server using a one-time pairing code. The sync token is stored on this device to
-          authorize future sync.
+          Connect two devices with a one-time code. One device generates the code, the other enters it — no
+          passwords to type twice. A sync token is stored on the new device to authorize future sync.
         </p>
       </header>
 
+      {/* How it works */}
+      <section className="rounded-lg border border-accent/20 bg-accent/5 p-5 space-y-3">
+        <h2 className="text-sm font-bold tracking-wide text-text-primary uppercase">How to pair two devices</h2>
+        <ol className="list-decimal space-y-2 pl-5 text-sm leading-relaxed text-text-secondary">
+          <li>
+            <span className="font-semibold text-text-primary">On Device A — the device you are using right now</span>{' '}
+            (or any device already paired): tap{' '}
+            <span className="font-semibold text-text-primary">Generate pairing code</span> in Step 1 below and copy
+            the <span className="font-mono font-semibold">XXXX-XXXX</span> code.
+          </li>
+          <li>
+            <span className="font-semibold text-text-primary">On Device B — the new device you want to add</span>:
+            open Reverb → <span className="font-semibold">Pairing</span> → paste that code into{' '}
+            <span className="font-semibold text-text-primary">Pairing code from your other device</span> in Step 2,
+            give <em>this</em> device a name, then tap <span className="font-semibold">Pair device</span>.
+          </li>
+        </ol>
+        <p className="text-xs leading-relaxed text-text-muted">
+          Tip: keep both devices online. Codes expire in 10 minutes and can only be used once. After pairing, both
+          devices appear in <span className="font-semibold">Paired devices</span> below.
+        </p>
+      </section>
+
       {/* Generate pairing code */}
       <section className="rounded-lg border border-border-subtle bg-raised p-6 space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center rounded-full bg-accent px-2.5 py-0.5 text-xs font-bold text-on-accent">
+            Step 1
+          </span>
+          <span className="inline-flex items-center rounded-full border border-border-subtle bg-surface px-2.5 py-0.5 text-xs font-semibold text-text-secondary">
+            Do this on Device A — this device (where you are now)
+          </span>
+        </div>
         <h2 className="text-lg font-extrabold tracking-tight text-text-primary">Generate pairing code</h2>
-        <p className="text-xs text-text-secondary">
-          Create a one-time pairing code to add another device. The pairing code expires in 10 minutes and can only
-          be used once. Share it with the device you want to pair.
+        <p className="text-xs leading-relaxed text-text-secondary">
+          Create a one-time code <span className="font-semibold">on this device</span> to give to your other device.
+          You will enter it on the other device in Step 2. Share it directly — it expires in 10 minutes and can only
+          be used once.
         </p>
         <Button variant="primary" size="sm" onClick={() => void onGenerate()} disabled={genLoading}>
           {genLoading ? 'Generating...' : 'Generate pairing code'}
@@ -192,6 +224,9 @@ export default function Pairing() {
         )}
         {pairingCode && (
           <div className="rounded-md border border-border-subtle bg-surface p-4 space-y-2">
+            <p className="text-xs font-semibold tracking-wide text-text-muted uppercase">
+              Code to enter on your other device (Device B)
+            </p>
             <div className="flex items-center gap-3">
               <span className="font-mono text-xl font-bold tracking-widest text-text-primary" data-testid="pairing-code">
                 {pairingCode.code}
@@ -203,7 +238,9 @@ export default function Pairing() {
             {expired ? (
               <p className="text-xs text-error">Pairing code expired. Generate a new pairing code.</p>
             ) : (
-              <p className="text-xs text-text-secondary">Code expires in {formatExpiry(expiresIn)}</p>
+              <p className="text-xs text-text-secondary">
+                Code expires in {formatExpiry(expiresIn)} — paste it into Step 2 on your other device.
+              </p>
             )}
           </div>
         )}
@@ -264,6 +301,14 @@ export default function Pairing() {
 
       {/* Redeem pairing code */}
       <section className="rounded-lg border border-border-subtle bg-raised p-6 space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center rounded-full bg-accent px-2.5 py-0.5 text-xs font-bold text-on-accent">
+            Step 2
+          </span>
+          <span className="inline-flex items-center rounded-full border border-border-subtle bg-surface px-2.5 py-0.5 text-xs font-semibold text-text-secondary">
+            Do this on Device B — the new device you want to add
+          </span>
+        </div>
         <h2 className="text-lg font-extrabold tracking-tight text-text-primary">Enter pairing code</h2>
         {paired ? (
           <div className="space-y-3">
@@ -281,11 +326,15 @@ export default function Pairing() {
             <p className="text-xs text-text-muted">Clear the sync token to pair this device again with a new pairing code.</p>
           </div>
         ) : (
-          <form onSubmit={onRedeem} className="space-y-3">
+          <form onSubmit={onRedeem} className="space-y-4">
             <div className="space-y-1">
               <label htmlFor="pairing-code-input" className="text-sm font-semibold text-text-primary">
-                Pairing code
+                Pairing code from your other device
               </label>
+              <p className="text-xs leading-relaxed text-text-muted">
+                Paste the <span className="font-mono font-semibold">XXXX-XXXX</span> code you generated in Step 1 on
+                Device A. This field is on the <span className="font-semibold">new</span> device (Device B).
+              </p>
               <input
                 id="pairing-code-input"
                 aria-label="Pairing code"
@@ -295,20 +344,56 @@ export default function Pairing() {
                 maxLength={9}
                 className="w-full rounded-md border border-border-subtle bg-surface px-3 py-2 text-sm font-mono tracking-widest text-text-primary placeholder:text-text-muted outline-none focus:border-accent focus:ring-1 focus:ring-accent"
               />
-              <p className="text-xs text-text-muted">Accepts with or without dash; auto-uppercase.</p>
+              <p className="text-xs text-text-muted">Accepts with or without dash; auto-uppercases to XXXX-XXXX.</p>
             </div>
             <div className="space-y-1">
               <label htmlFor="device-name-input" className="text-sm font-semibold text-text-primary">
-                Device name
+                Device name for this device
               </label>
+              <p className="text-xs leading-relaxed text-text-muted">
+                How <em>this</em> device (Device B) will appear in the Paired devices list. Use any name you will
+                recognise later.
+              </p>
               <input
                 id="device-name-input"
                 aria-label="Device name"
-                placeholder="Laptop"
+                placeholder="e.g. Work Laptop"
                 value={deviceName}
                 onChange={(e) => setDeviceName(e.target.value)}
                 className="w-full rounded-md border border-border-subtle bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent focus:ring-1 focus:ring-accent"
               />
+              <details className="group rounded-md border border-border-subtle bg-surface/60 px-3 py-2">
+                <summary className="cursor-pointer list-none text-xs font-semibold text-text-secondary group-open:text-text-primary">
+                  <span className="inline-flex items-center gap-1">
+                    <span className="transition-transform group-open:rotate-90">›</span> How to find your device name
+                  </span>
+                </summary>
+                <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-relaxed text-text-muted">
+                  <li>
+                    <span className="font-semibold text-text-secondary">Windows:</span> Settings → System → About →
+                    Device name
+                  </li>
+                  <li>
+                    <span className="font-semibold text-text-secondary">macOS:</span> System Settings → General →
+                    About → Name
+                  </li>
+                  <li>
+                    <span className="font-semibold text-text-secondary">Linux:</span> run{' '}
+                    <code className="rounded bg-raised px-1 py-0.5 font-mono">hostname</code> in a terminal
+                  </li>
+                  <li>
+                    <span className="font-semibold text-text-secondary">iPhone / iPad:</span> Settings → General →
+                    About → Name
+                  </li>
+                  <li>
+                    <span className="font-semibold text-text-secondary">Android:</span> Settings → About phone →
+                    Device name
+                  </li>
+                  <li className="list-none pl-0 pt-1 text-text-muted">
+                    Or just pick anything memorable, e.g. “Kitchen Tablet” or “John’s Phone”.
+                  </li>
+                </ul>
+              </details>
             </div>
             {redeemError && (
               <p role="alert" className="text-sm text-error">
