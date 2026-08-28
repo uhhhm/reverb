@@ -30,8 +30,8 @@ func (s *Server) authenticateSync(r *http.Request) (string, error) {
 		return dev.ID, nil
 	}
 	// No Bearer token: allow server-device fallback only for locally-
-	// authenticated requests. Reverb is single-user with no login; every
-	// request that passes requireAuth has LocalUser in context, while
+	// authenticated requests. The browser UI is implicitly the household owner, so
+	// every request that passes requireAuth has LocalUser in context, while
 	// anonymous requests outside that group have none. Checking
 	// currentUser (not raw Cookie existence) fixes fresh installs that
 	// never set reverb_session and prevents bypass via Cookie: reverb_session=anything.

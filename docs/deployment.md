@@ -136,11 +136,8 @@ server {
 
 Before you expose Reverb beyond a trusted LAN:
 
-- **Put a TLS-terminating reverse proxy in front of it.** Reverb serves plain HTTP
-  and is a single-user instance with no login; never expose port 8090 directly.
-- **The proxy must set/overwrite `X-Forwarded-Proto`** so Reverb knows the original
-  request was HTTPS. Caddy does this automatically; the nginx config above sets it
-  explicitly (`proxy_set_header X-Forwarded-Proto $scheme;`).
+- **Put a TLS-terminating reverse proxy in front of it.** Reverb serves plain HTTP. The browser UI on the server is implicitly authenticated as the single household owner (`local`) with no password; never expose port 8090 directly. Paired devices authenticate separately: `/sync` via Bearer sync tokens issued from one-time pairing codes (`POST /pairing/code` → `POST /pairing/redeem`, `XXXX-XXXX`, 10 min TTL, single-use) and P2P via libp2p peer IDs bound at pairing (`p2p_peer` trust set, Ed25519 keys). Treat pairing codes and sync tokens like passwords — they grant full sync and `can_manage_library` access.
+- **The proxy must set/overwrite `X-Forwarded-Proto`** so Reverb knows the original request was HTTPS. Caddy does this automatically; the nginx config above sets it explicitly (`proxy_set_header X-Forwarded-Proto $scheme;`).
 - Keep the data volume sensitive — see [Secrets at rest](#secrets-at-rest).
 
 ## Backups
@@ -176,10 +173,13 @@ container is stopped.
 ### Secrets at rest
 
 Adapter credentials (Spotify Client Secret, Subsonic/Navidrome password, Lidarr
-API key) and the bundled-Navidrome admin password are currently stored
-**unencrypted** in the SQLite database. Treat the data volume (and any DB backups
-you copy out) as **sensitive**: restrict file permissions, keep backups off shared
-storage, and don't commit them anywhere.
+API key), the bundled-Navidrome admin password, and paired-device sync tokens
+(`device.token_hash`) plus pairing codes (`pairing_code`) are currently stored
+**unencrypted** in the SQLite database. P2P peer bindings (`p2p_peer`) and per-device
+Ed25519 verification keys (`device.public_key`) and signed sync changes
+(`sync_change.sig`, HLC vector) are also persisted for CRDT convergence. Treat the
+data volume (and any DB backups you copy out) as **sensitive**: restrict file
+permissions, keep backups off shared storage, and don't commit them anywhere.
 
 ## Upgrades
 

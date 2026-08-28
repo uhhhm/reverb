@@ -109,7 +109,7 @@ func TestWSHandshake(t *testing.T) {
 	wsURL := "ws" + hs.URL[len("http"):] + "/api/v1/ws"
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	// No cookie → the handshake still succeeds: Reverb is single-user (no login).
+	// No cookie → the handshake still succeeds: the local UI is implicitly the household owner.
 	c, _, err := websocket.Dial(ctx, wsURL, nil)
 	if err != nil {
 		t.Fatalf("dial without auth should succeed, got %v", err)

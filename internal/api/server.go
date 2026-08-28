@@ -288,9 +288,10 @@ func (s *Server) routes() {
 	s.router.Use(s.securityHeaders)
 
 	s.router.Route("/api/v1", func(r chi.Router) {
-		// Reject cross-origin state-changing requests. Reverb has no login, so
-		// this Origin check is the only CSRF defense — it guards every mutation,
-		// public or not.
+		// Reject cross-origin state-changing requests. The browser UI is implicitly
+		// authenticated as the household owner with no session cookie, so this
+		// Origin check is the primary CSRF defense — it guards every mutation,
+		// public or not. Bearer-token /sync calls are exempted in csrfGuard.
 		r.Use(s.csrfGuard)
 
 		// public
@@ -301,8 +302,9 @@ func (s *Server) routes() {
 		// pairing redeem is public (no auth) — laptop not yet paired.
 		r.Post("/pairing/redeem", s.handlePairingRedeem)
 
-		// Everything else is implicitly authenticated: Reverb is single-user
-		// (no login), so requireAuth injects the one local user on every request.
+		// Everything else is implicitly authenticated as the household owner for
+		// local UI requests (requireAuth injects LocalUser). Paired devices
+		// authenticate to /sync and P2P via Bearer tokens / peer trust, not this.
 		r.Group(func(pr chi.Router) {
 			pr.Use(s.requireAuth)
 			// sync rendezvous — Bearer sync token OR local fallback.

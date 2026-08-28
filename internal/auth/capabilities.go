@@ -14,8 +14,9 @@ type Capability struct {
 	Description string `json:"description"`
 }
 
-// AllCapabilities is the fixed registry, in display order. The single owner
-// holds every one of them.
+// AllCapabilities is the fixed registry, in display order. The household owner
+// holds every one of them; paired-device and capability checks are still gated
+// through this owner identity.
 func AllCapabilities() []Capability {
 	return []Capability{
 		{CapAdmin, "Full administrator", "Complete access; bypasses all restrictions."},

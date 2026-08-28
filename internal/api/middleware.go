@@ -19,8 +19,9 @@ func currentUser(r *http.Request) (auth.CurrentUser, bool) {
 	return cu, ok
 }
 
-// requireAuth authenticates every request as the single local user. Reverb has
-// no login, so there is nothing to verify: the one owner is always present.
+// requireAuth authenticates every local request as the household owner.
+// Browser UI requests arriving over loopback are implicitly the owner; paired
+// devices use Bearer tokens on /sync and peer IDs on P2P, not this middleware.
 func (s *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cu := auth.LocalUser()
@@ -30,7 +31,8 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 }
 
 // requireCapability gates a handler on the current user holding a capability.
-// The single local user holds every capability, so these gates always pass.
+// The household owner holds every capability, so local UI gates always pass;
+// paired-device requests are scoped to capabilities via the same identity.
 func (s *Server) requireCapability(cap string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

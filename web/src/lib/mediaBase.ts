@@ -11,7 +11,8 @@
  *
  * So audio dials the plain 127.0.0.1 listener directly, the same escape hatch
  * the WebSocket already uses — see handleRuntimeConfig and realtime.ts. The API
- * is single-user and loopback-only (requireAuth injects the local user), so the
+ * is owner-authenticated and loopback-only (requireAuth injects the local owner
+ * for browser requests; paired devices use sync tokens/P2P), so the
  * cross-origin GET needs no credentials.
  */
 export function mediaBase(): string {

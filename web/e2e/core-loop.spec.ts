@@ -8,7 +8,7 @@ test('core loop: search everywhere -> download -> in-library -> play', async ({ 
   // Install WS mock and get the trigger object; does NOT send any frame yet.
   const ws = await installWsMock(page)
 
-  // 1) Load the app (single-user, no login) and wait for the shell.
+  // 1) Load the app (household owner, no login gate) and wait for the shell.
   await page.goto('/')
   await expect(page.getByTestId('app-shell-root')).toBeVisible()
 

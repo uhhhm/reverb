@@ -1,7 +1,9 @@
-// Package auth models identity for Reverb's single-user, no-login model. There
-// is exactly one local user ("local"), who owns every resource and holds every
-// capability. The users table exists only as the FK target for attribution
-// columns (download_jobs.initiated_by, synced_playlists.owner_user_id).
+// Package auth models identity for Reverb's household owner model. There is one
+// local owner ("local") who holds every capability and owns the canonical
+// library. Paired devices sync via Bearer tokens (see internal/sync/pairing.go)
+// and P2P peer trust (see internal/p2p) but do not create separate user rows:
+// the users table exists only as the FK target for attribution columns
+// (download_jobs.initiated_by, synced_playlists.owner_user_id).
 package auth
 
 import (
@@ -16,8 +18,9 @@ import (
 // OwnerID is the stable identity of the single local user.
 const OwnerID = "local"
 
-// CurrentUser is the authenticated identity attached to every request. With a
-// single user, requireAuth always injects LocalUser().
+// CurrentUser is the authenticated identity attached to every local request.
+// For browser requests via loopback, requireAuth always injects LocalUser();
+// paired devices authenticate to /sync and P2P via Bearer tokens / peer IDs.
 type CurrentUser struct {
 	ID        string
 	Username  string
@@ -31,8 +34,9 @@ type CurrentUser struct {
 // Has reports whether the user holds the given capability.
 func (u CurrentUser) Has(cap string) bool { return u.Caps[cap] }
 
-// LocalUser is the single user every request is attributed to. The owner holds
-// every capability, so capability-gated routes are open to it.
+// LocalUser is the household owner every local request is attributed to. The
+// owner holds every capability, so capability-gated routes are open to it.
+// Paired-device sync requests are attributed via sync device IDs, not this.
 func LocalUser() CurrentUser {
 	caps := make(map[string]bool)
 	for _, c := range AllCapabilities() {
@@ -48,29 +52,30 @@ func LocalUser() CurrentUser {
 	}
 }
 
-// Querier is the persistence slice the single-user Service needs.
+// Querier is the persistence slice the owner Service needs.
 // *db.Queries satisfies it.
 type Querier interface {
 	GetUserByID(ctx context.Context, id string) (db.User, error)
 	CreateUser(ctx context.Context, arg db.CreateUserParams) error
 }
 
-// Service seeds and reports on the single local user. It has no login, session,
-// role, or user-management surface.
+// Service seeds and reports on the single household owner. It has no password
+// login; multi-device access is via pairing codes and sync tokens (see
+// internal/sync).
 type Service struct {
 	q   Querier
 	now func() time.Time
 }
 
-// NewService constructs the single-user Service.
+// NewService constructs the owner Service.
 func NewService(q Querier, now func() time.Time) *Service {
 	return &Service{q: q, now: now}
 }
 
-// EnsureSeed ensures the single local owner row exists. It is idempotent: each
-// startup checks for the local row by ID and creates it only when missing, so a
-// database migrated from the old multi-user schema converges to the same state
-// as a fresh install even if the migration's own seed did not run.
+// EnsureSeed ensures the household owner row ("local") exists. It is idempotent:
+// each startup checks for the local row by ID and creates it only when missing,
+// so a database migrated from the old multi-user schema converges to the same
+// state as a fresh install even if the migration's own seed did not run.
 func (s *Service) EnsureSeed(ctx context.Context) error {
 	if _, err := s.q.GetUserByID(ctx, OwnerID); err == nil {
 		return nil

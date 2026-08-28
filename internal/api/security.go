@@ -39,8 +39,8 @@ const desktopContentSecurityPolicy = "default-src 'self'; " +
 	"frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 
 // securityHeaders sets defensive response headers on every response (SPA + API).
-// These are safe defaults for a same-origin single-page app served over a trusted
-// reverse proxy; see contentSecurityPolicy for the CSP rationale.
+// These are safe defaults for a same-origin SPA served over a trusted reverse
+// proxy plus paired-device sync; see contentSecurityPolicy for the CSP rationale.
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -68,11 +68,12 @@ func isStateChanging(method string) bool {
 }
 
 // csrfGuard rejects state-changing requests whose Origin (or, absent that,
-// Referer) names a host other than the one the request targeted. Reverb is
-// single-user with no login, so there is no session cookie to gate on — this
-// Origin check is the only protection against drive-by cross-site requests. A
-// browser always attaches Origin to a cross-site POST/PUT/DELETE, so a forged
-// request is caught here.
+// Referer) names a host other than the one the request targeted. The browser UI
+// is implicitly authenticated as the household owner with no session cookie to
+// gate on — this Origin check is the primary protection against drive-by
+// cross-site requests. Paired-device /sync calls use Bearer tokens and are
+// exempted (see the sync prefix bypass below). A browser always attaches Origin
+// to a cross-site POST/PUT/DELETE, so a forged request is caught here.
 //
 // Requests that carry neither header (curl, native apps, server-to-server) are
 // allowed through: those clients cannot be driven by a malicious web page, which

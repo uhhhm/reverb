@@ -18,7 +18,7 @@ test('completeness: artist coverage -> partial album -> download missing -> flip
   // WS mock for the MISSING-TRACK completion. Does NOT send any frame until complete().
   const ws = await installCompletenessWsMock(page)
 
-  // 1) Load the app (single-user, no login) and wait for the shell.
+  // 1) Load the app (household owner, no login gate) and wait for the shell.
   await page.goto('/')
   await expect(page.getByTestId('app-shell-root')).toBeVisible()
 

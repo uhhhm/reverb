@@ -27,7 +27,7 @@ beforeEach(() => {
   useAuthStore.setState({ me: null, loading: false, refresh: async () => {} })
 })
 
-test('renders the app shell regardless of auth (single-user, no login)', async () => {
+test('renders the app shell regardless of auth (household owner, no login gate)', async () => {
   seedMe()
   render(
     <MemoryRouter initialEntries={['/search']}>

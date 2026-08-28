@@ -65,14 +65,16 @@ Library modes (`internal/library/embedded`): **built-in** bundles Navidrome as a
 
 ### Composition & control flow
 
-- `internal/app/build.go` — composes `auth`, `catalog`, `resolver`, `download.Manager`, `playlistsync`, `scrobble`, `extstream`, `api.Deps`; entry points call `Build` then `StartBackground` (supervisor, manager, backfill, sync scheduler, scrobble worker).
+- `internal/app/build.go` — composes `auth`, `catalog`, `resolver`, `download.Manager`, `playlistsync`, `scrobble`, `extstream`, `api.Deps`, `sync`, `p2p`; entry points call `Build` then `StartBackground` (supervisor, manager, backfill, sync scheduler, scrobble worker, p2p host + sync/file handlers).
 - `internal/core` — domain types (`Artist`/`Album`/`ExternalResult`/`DownloadRequest`/etc.) crossing all seams.
 - `internal/events/bus.go` — in-process EventBus backing `internal/api/stream.go` (WebSocket) and download progress; primary live channel to the frontend.
 - `internal/matching` — matches search results against library (ISRC/metadata) to mark owned.
 - `internal/resolver` — resolves adapter/track identity; constructed against `ServiceReloader.MatcherProvider()` so it reads the live matcher per-resolve.
+- `internal/sync` — CRDT sync (HLC vector, per-field LWW, device pairing codes, Bearer token auth, Ed25519-signed changes, file manifests).
+- `internal/p2p` — libp2p host, peer trust (`p2p_peer`), manifest/file sync handlers, pull replication.
 - `internal/store` — SQLite (`modernc.org/sqlite`), migrations `internal/store/migrations/*.sql` (goose), sqlc `internal/store/queries` -> `internal/store/db` (`make gen`).
 - `internal/api` — chi handlers, OpenAPI at `/api/v1/openapi.yaml` (keep in sync), `embed.go` embeds SPA.
-- `internal/auth` + `internal/api/roles.go` — session/cookie auth + roles.
+- `internal/auth` + `internal/api/roles.go` — single household owner (`local`, holds every capability) plus paired-device Bearer auth for `/sync` and libp2p peer auth for P2P; capability gates (`can_manage_library`, etc.) still checked via the owner identity.
 
 ### Frontend (`web/`)
 

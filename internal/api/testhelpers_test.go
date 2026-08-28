@@ -73,9 +73,9 @@ func adapterTestServer(t *testing.T, opts adapterServerOpts) (*Server, *http.Coo
 	return srv, &http.Cookie{Name: sessionCookie, Value: tok}
 }
 
-// seededAuthToken seeds the single local user and returns the auth service plus a
-// (now meaningless) session token. Reverb is single-user with no login, so the
-// token value is ignored by requireAuth; kept for test-compat with doGET/do.
+// seededAuthToken seeds the household owner and returns the auth service plus a
+// (now meaningless) session token. The browser UI is implicitly the owner, so
+// the token value is ignored by requireAuth; kept for test-compat with doGET/do.
 func seededAuthToken(t *testing.T, st *store.Store) (*auth.Service, string) {
 	t.Helper()
 	authSvc := auth.NewService(st.Q(), time.Now)

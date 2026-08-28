@@ -5,8 +5,10 @@ info:
   description: >
     Reverb is a self-hosted music app unifying a Subsonic/Navidrome library,
     Spotify search, and spotDL one-click download. All paths are served under
-    /api/v1. Reverb is single-user with no login: every route is implicitly
-    authenticated as the single local user.
+    /api/v1. The local browser UI is implicitly authenticated as the single
+    household owner ("local"); paired devices authenticate to /sync with Bearer
+    sync tokens (issued from one-time pairing codes) and to P2P via libp2p peer
+    IDs bound at pairing.
 servers:
   - url: /api/v1
 paths:
@@ -31,7 +33,7 @@ paths:
       responses: { "200": { description: yaml } }
   /me:
     get:
-      summary: The single local user's identity and capabilities
+      summary: The household owner's identity and capabilities (local owner)
       responses: { "200": { description: ok } }
   /adapters/available:
     get:

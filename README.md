@@ -61,6 +61,8 @@ _The web player — queue, shuffle, repeat, seek, and keyboard shortcuts._
   optional authenticated YouTube cookies and automatic cooldown/retry pacing for
   rate limits and bot challenges.
 - Pluggable adapters (library / search / downloader) configured in-app.
+- Multi-device sync: pair laptops/phones with a one-time `XXXX-XXXX` code (10 min TTL), sync library edits via Bearer-token CRDT (HLC vector, per-field LWW) and direct P2P file replication.
+- Per-device offline sets (keep selected playlists locally; never syncs) and P2P status/peering UI.
 - Single static binary, SPA embedded; ships as one Docker image (Python3 +
   ffmpeg + pinned spotDL included).
 - Responsive UI (desktop + mobile), installable as a PWA with OS media-key /
@@ -135,12 +137,7 @@ provided via environment / `.env` only — never committed. `.env` is gitignored
 
 ### Exposing Reverb to the internet
 
-Reverb serves plain HTTP and relies on a same-origin session cookie. Before you
-expose it beyond a trusted LAN, put it behind a **TLS-terminating reverse proxy**
-(Caddy, nginx, Traefik, …). The proxy MUST set/overwrite the `X-Forwarded-Proto`
-header so Reverb can tell that the original request was HTTPS. See
-[docs/deployment.md](docs/deployment.md#reverse-proxy--tls) for ready-to-use
-Caddy and nginx configs.
+Reverb serves plain HTTP. Local browser requests are implicitly authenticated as the single household owner (`local`); paired devices authenticate to `/sync` with a Bearer sync token obtained via a one-time pairing code, and to P2P with libp2p peer IDs bound at pairing. Before you expose it beyond a trusted LAN, put it behind a **TLS-terminating reverse proxy** (Caddy, nginx, Traefik, …). The proxy MUST set/overwrite the `X-Forwarded-Proto` header so Reverb can tell that the original request was HTTPS. See [docs/deployment.md](docs/deployment.md#reverse-proxy--tls) for ready-to-use Caddy and nginx configs.
 
 ## Legal & ethical use
 
@@ -166,7 +163,10 @@ Reverb is a **modular monolith**: a single Go binary organized around clean
 `downloader` (spotDL) — each registered explicitly at the composition root (no
 `init()` side-effects). The frontend is a React/TypeScript SPA embedded into the
 binary at build time (`-tags prod`). State and events flow through an in-process
-EventBus that backs both the WebSocket and the download manager. The full design
+EventBus that backs both the WebSocket and the download manager. A single canonical
+library lives on the always-on server; additional devices pair via one-time codes
+and stay in sync through a CRDT sync service (HLC vector, per-field LWW) with
+optional libp2p P2P file replication and per-device offline sets. The full design
 rationale follows those explicit adapter boundaries and the package-level tests.
 The HTTP API is documented in OpenAPI, served live at `/api/v1/openapi.yaml`.
 

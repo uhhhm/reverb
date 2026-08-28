@@ -58,8 +58,9 @@ const queryClient = new QueryClient({
 function Routed() {
   const refresh = useAuthStore((st) => st.refresh)
 
-  // Boot-hydrate the auth store so `can()` is populated app-wide. Reverb is
-  // single-user with no login, so there is no gate: the shell always renders.
+  // Boot-hydrate the auth store so `can()` is populated app-wide. The local UI
+  // is implicitly the household owner, so there is no login gate: the shell
+  // always renders. Paired devices use pairing codes + sync tokens separately.
   useEffect(() => {
     void refresh()
   }, [refresh])
