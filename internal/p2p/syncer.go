@@ -18,17 +18,18 @@ type Syncer struct {
 	host          host.Host
 	store         *reverbsync.SyncStore
 	guard         *Guard
+	keys          DeviceKeyStore
 	localDeviceID string
 	interval      time.Duration
 	mu            stdsync.Mutex
 	peerVectors   map[peer.ID]map[string]int64
 }
 
-func NewSyncer(h host.Host, store *reverbsync.SyncStore, guard *Guard, localDeviceID string) *Syncer {
+func NewSyncer(h host.Host, store *reverbsync.SyncStore, guard *Guard, keys DeviceKeyStore, localDeviceID string) *Syncer {
 	if h == nil {
-		return &Syncer{store: store, guard: guard, localDeviceID: localDeviceID, interval: 30 * time.Second, peerVectors: make(map[peer.ID]map[string]int64)}
+		return &Syncer{store: store, guard: guard, keys: keys, localDeviceID: localDeviceID, interval: 30 * time.Second, peerVectors: make(map[peer.ID]map[string]int64)}
 	}
-	return &Syncer{host: h, store: store, guard: guard, localDeviceID: localDeviceID, interval: 30 * time.Second, peerVectors: make(map[peer.ID]map[string]int64)}
+	return &Syncer{host: h, store: store, guard: guard, keys: keys, localDeviceID: localDeviceID, interval: 30 * time.Second, peerVectors: make(map[peer.ID]map[string]int64)}
 }
 
 // Run blocks until ctx canceled, ticking every interval.
@@ -109,6 +110,7 @@ func (s *Syncer) syncPeer(ctx context.Context, pid peer.ID) error {
 		DeviceID: s.localDeviceID,
 		Vector:   seqMap,
 		Changes:  changes,
+		Devices:  LocalDeviceAnnouncements(ctx, s.keys),
 	}
 	if err := json.NewEncoder(st).Encode(req); err != nil {
 		return err
@@ -128,33 +130,28 @@ func (s *Syncer) syncPeer(ctx context.Context, pid peer.ID) error {
 		s.peerVectors[pid] = cp
 		s.mu.Unlock()
 	}
-	// Apply changes from the peer, but only those it is entitled to author.
-	// Changes are unsigned, so a relayed third-party change is indistinguishable
-	// from one this peer invented; accepting them would let any paired device
-	// forge history as any other. Convergence still holds for a fully paired
-	// mesh, where every device exchanges directly.
+	// Apply changes from the peer. A change it authored is accepted on the
+	// strength of the authenticated connection; a change authored by anyone
+	// else must carry that author's signature, so relaying a third party's
+	// changes is safe without trusting the relay.
 	if len(resp.Changes) > 0 {
 		peerDevice, derr := s.guard.DeviceFor(ctx, pid)
 		if derr != nil || peerDevice == "" {
 			log.Printf("p2p syncer: no device binding for peer %s, dropping %d changes", pid, len(resp.Changes))
 			return nil
 		}
-		batch := make([]reverbsync.SyncChange, 0, len(resp.Changes))
-		dropped := 0
-		for _, ch := range resp.Changes {
-			if ch.DeviceID != "" && ch.DeviceID != peerDevice {
-				dropped++
-				continue
-			}
-			ch.DeviceID = peerDevice
-			batch = append(batch, ch)
+		ApplyDeviceAnnouncements(ctx, s.keys, resp.Devices)
+		accepted, refused := filterAuthorizedChanges(ctx, s.store, peerDevice, resp.Changes)
+		if refused > 0 {
+			log.Printf("p2p syncer: dropped %d unverifiable change(s) from %s", refused, pid)
 		}
-		if dropped > 0 {
-			log.Printf("p2p syncer: dropped %d change(s) from %s not authored by its paired device %s", dropped, pid, peerDevice)
+		byDevice := make(map[string][]reverbsync.SyncChange)
+		for _, ch := range accepted {
+			byDevice[ch.DeviceID] = append(byDevice[ch.DeviceID], ch)
 		}
-		if len(batch) > 0 {
-			if _, _, _, err := s.store.Reconcile(ctx, peerDevice, 0, batch); err != nil {
-				log.Printf("p2p syncer: Reconcile failed for device %s from %s: %v", peerDevice, pid, err)
+		for did, batch := range byDevice {
+			if _, _, _, err := s.store.Reconcile(ctx, did, 0, batch); err != nil {
+				log.Printf("p2p syncer: Reconcile failed for device %s from %s: %v", did, pid, err)
 			}
 		}
 	}

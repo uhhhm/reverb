@@ -37,7 +37,7 @@ func (q *Queries) AppendSyncChange(ctx context.Context, arg AppendSyncChangePara
 }
 
 const appendSyncChangeWithHLC = `-- name: AppendSyncChangeWithHLC :one
-INSERT INTO sync_change (device_id, entity_type, entity_id, field, value_json, updated_at, hlc, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING revision
+INSERT INTO sync_change (device_id, entity_type, entity_id, field, value_json, updated_at, hlc, seq, sig) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING revision
 `
 
 type AppendSyncChangeWithHLCParams struct {
@@ -49,6 +49,7 @@ type AppendSyncChangeWithHLCParams struct {
 	UpdatedAt  int64  `json:"updated_at"`
 	Hlc        int64  `json:"hlc"`
 	Seq        int64  `json:"seq"`
+	Sig        string `json:"sig"`
 }
 
 func (q *Queries) AppendSyncChangeWithHLC(ctx context.Context, arg AppendSyncChangeWithHLCParams) (int64, error) {
@@ -61,6 +62,7 @@ func (q *Queries) AppendSyncChangeWithHLC(ctx context.Context, arg AppendSyncCha
 		arg.UpdatedAt,
 		arg.Hlc,
 		arg.Seq,
+		arg.Sig,
 	)
 	var revision int64
 	err := row.Scan(&revision)
@@ -97,7 +99,7 @@ func (q *Queries) DeleteSyncVector(ctx context.Context, deviceID string) error {
 }
 
 const getLatestSyncChangeForField = `-- name: GetLatestSyncChangeForField :one
-SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq FROM sync_change WHERE entity_type = ? AND entity_id = ? AND field = ? ORDER BY revision DESC LIMIT 1
+SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq, sig FROM sync_change WHERE entity_type = ? AND entity_id = ? AND field = ? ORDER BY revision DESC LIMIT 1
 `
 
 type GetLatestSyncChangeForFieldParams struct {
@@ -120,12 +122,13 @@ func (q *Queries) GetLatestSyncChangeForField(ctx context.Context, arg GetLatest
 		&i.CreatedAt,
 		&i.Hlc,
 		&i.Seq,
+		&i.Sig,
 	)
 	return i, err
 }
 
 const getLatestSyncChangeForFieldByHLC = `-- name: GetLatestSyncChangeForFieldByHLC :one
-SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq FROM sync_change WHERE entity_type = ? AND entity_id = ? AND field = ? ORDER BY hlc DESC, revision DESC LIMIT 1
+SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq, sig FROM sync_change WHERE entity_type = ? AND entity_id = ? AND field = ? ORDER BY hlc DESC, revision DESC LIMIT 1
 `
 
 type GetLatestSyncChangeForFieldByHLCParams struct {
@@ -148,6 +151,7 @@ func (q *Queries) GetLatestSyncChangeForFieldByHLC(ctx context.Context, arg GetL
 		&i.CreatedAt,
 		&i.Hlc,
 		&i.Seq,
+		&i.Sig,
 	)
 	return i, err
 }
@@ -202,7 +206,7 @@ func (q *Queries) GetSyncVector(ctx context.Context, deviceID string) (SyncVecto
 }
 
 const listSyncChangesSince = `-- name: ListSyncChangesSince :many
-SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq FROM sync_change WHERE revision > ? ORDER BY revision ASC LIMIT ?
+SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq, sig FROM sync_change WHERE revision > ? ORDER BY revision ASC LIMIT ?
 `
 
 type ListSyncChangesSinceParams struct {
@@ -230,6 +234,7 @@ func (q *Queries) ListSyncChangesSince(ctx context.Context, arg ListSyncChangesS
 			&i.CreatedAt,
 			&i.Hlc,
 			&i.Seq,
+			&i.Sig,
 		); err != nil {
 			return nil, err
 		}
@@ -245,7 +250,7 @@ func (q *Queries) ListSyncChangesSince(ctx context.Context, arg ListSyncChangesS
 }
 
 const listSyncChangesSinceHLC = `-- name: ListSyncChangesSinceHLC :many
-SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq FROM sync_change WHERE hlc > ? ORDER BY hlc ASC, revision ASC LIMIT ?
+SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq, sig FROM sync_change WHERE hlc > ? ORDER BY hlc ASC, revision ASC LIMIT ?
 `
 
 type ListSyncChangesSinceHLCParams struct {
@@ -273,6 +278,7 @@ func (q *Queries) ListSyncChangesSinceHLC(ctx context.Context, arg ListSyncChang
 			&i.CreatedAt,
 			&i.Hlc,
 			&i.Seq,
+			&i.Sig,
 		); err != nil {
 			return nil, err
 		}

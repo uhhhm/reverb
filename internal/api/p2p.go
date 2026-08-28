@@ -94,7 +94,7 @@ func (s *Server) handleP2PRedeem(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "peer trust store unavailable"})
 		return
 	}
-	deviceID, token, err := p2p.RedeemViaPeer(r.Context(), h.LibHost(), guard, body.PeerID, body.Code, body.DeviceName)
+	deviceID, token, err := p2p.RedeemViaPeer(r.Context(), h.LibHost(), guard, s.deps.DeviceKeys, body.PeerID, body.Code, body.DeviceName)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

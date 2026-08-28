@@ -40,7 +40,7 @@ func (q *Queries) DeleteDevice(ctx context.Context, id string) error {
 }
 
 const getDeviceByID = `-- name: GetDeviceByID :one
-SELECT id, name, token_hash, is_server, created_at, last_seen FROM device WHERE id = ?
+SELECT id, name, token_hash, is_server, created_at, last_seen, public_key FROM device WHERE id = ?
 `
 
 func (q *Queries) GetDeviceByID(ctx context.Context, id string) (Device, error) {
@@ -53,12 +53,13 @@ func (q *Queries) GetDeviceByID(ctx context.Context, id string) (Device, error) 
 		&i.IsServer,
 		&i.CreatedAt,
 		&i.LastSeen,
+		&i.PublicKey,
 	)
 	return i, err
 }
 
 const getDeviceByTokenHash = `-- name: GetDeviceByTokenHash :one
-SELECT id, name, token_hash, is_server, created_at, last_seen FROM device WHERE token_hash = ?
+SELECT id, name, token_hash, is_server, created_at, last_seen, public_key FROM device WHERE token_hash = ?
 `
 
 func (q *Queries) GetDeviceByTokenHash(ctx context.Context, tokenHash string) (Device, error) {
@@ -71,12 +72,24 @@ func (q *Queries) GetDeviceByTokenHash(ctx context.Context, tokenHash string) (D
 		&i.IsServer,
 		&i.CreatedAt,
 		&i.LastSeen,
+		&i.PublicKey,
 	)
 	return i, err
 }
 
+const getDevicePublicKey = `-- name: GetDevicePublicKey :one
+SELECT public_key FROM device WHERE id = ?
+`
+
+func (q *Queries) GetDevicePublicKey(ctx context.Context, id string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getDevicePublicKey, id)
+	var public_key string
+	err := row.Scan(&public_key)
+	return public_key, err
+}
+
 const listDevices = `-- name: ListDevices :many
-SELECT id, name, token_hash, is_server, created_at, last_seen FROM device ORDER BY created_at
+SELECT id, name, token_hash, is_server, created_at, last_seen, public_key FROM device ORDER BY created_at
 `
 
 func (q *Queries) ListDevices(ctx context.Context) ([]Device, error) {
@@ -95,6 +108,7 @@ func (q *Queries) ListDevices(ctx context.Context) ([]Device, error) {
 			&i.IsServer,
 			&i.CreatedAt,
 			&i.LastSeen,
+			&i.PublicKey,
 		); err != nil {
 			return nil, err
 		}
@@ -109,11 +123,84 @@ func (q *Queries) ListDevices(ctx context.Context) ([]Device, error) {
 	return items, nil
 }
 
+const listDevicesWithKeys = `-- name: ListDevicesWithKeys :many
+SELECT id, name, public_key FROM device WHERE public_key != '' ORDER BY created_at
+`
+
+type ListDevicesWithKeysRow struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	PublicKey string `json:"public_key"`
+}
+
+func (q *Queries) ListDevicesWithKeys(ctx context.Context) ([]ListDevicesWithKeysRow, error) {
+	rows, err := q.db.QueryContext(ctx, listDevicesWithKeys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDevicesWithKeysRow
+	for rows.Next() {
+		var i ListDevicesWithKeysRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.PublicKey); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setDevicePublicKey = `-- name: SetDevicePublicKey :exec
+UPDATE device SET public_key = ? WHERE id = ?
+`
+
+type SetDevicePublicKeyParams struct {
+	PublicKey string `json:"public_key"`
+	ID        string `json:"id"`
+}
+
+func (q *Queries) SetDevicePublicKey(ctx context.Context, arg SetDevicePublicKeyParams) error {
+	_, err := q.db.ExecContext(ctx, setDevicePublicKey, arg.PublicKey, arg.ID)
+	return err
+}
+
 const touchDeviceLastSeen = `-- name: TouchDeviceLastSeen :exec
 UPDATE device SET last_seen = unixepoch() WHERE id = ?
 `
 
 func (q *Queries) TouchDeviceLastSeen(ctx context.Context, id string) error {
 	_, err := q.db.ExecContext(ctx, touchDeviceLastSeen, id)
+	return err
+}
+
+const upsertPeerDevice = `-- name: UpsertPeerDevice :exec
+INSERT INTO device (id, name, token_hash, is_server, public_key, created_at, last_seen)
+VALUES (?, ?, ?, 0, ?, unixepoch(), unixepoch())
+ON CONFLICT(id) DO UPDATE SET
+  name = excluded.name,
+  last_seen = unixepoch(),
+  public_key = CASE WHEN device.public_key = '' THEN excluded.public_key ELSE device.public_key END
+`
+
+type UpsertPeerDeviceParams struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	TokenHash string `json:"token_hash"`
+	PublicKey string `json:"public_key"`
+}
+
+func (q *Queries) UpsertPeerDevice(ctx context.Context, arg UpsertPeerDeviceParams) error {
+	_, err := q.db.ExecContext(ctx, upsertPeerDevice,
+		arg.ID,
+		arg.Name,
+		arg.TokenHash,
+		arg.PublicKey,
+	)
 	return err
 }

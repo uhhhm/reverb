@@ -82,6 +82,7 @@ type Device struct {
 	IsServer  int64  `json:"is_server"`
 	CreatedAt int64  `json:"created_at"`
 	LastSeen  int64  `json:"last_seen"`
+	PublicKey string `json:"public_key"`
 }
 
 type DiscographyCache struct {
@@ -228,6 +229,7 @@ type SyncChange struct {
 	CreatedAt  int64  `json:"created_at"`
 	Hlc        int64  `json:"hlc"`
 	Seq        int64  `json:"seq"`
+	Sig        string `json:"sig"`
 }
 
 type SyncCursor struct {

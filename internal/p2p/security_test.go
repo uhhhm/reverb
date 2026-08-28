@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"context"
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -205,5 +206,60 @@ func TestValidateRelPathRejectsTraversal(t *testing.T) {
 	}
 	if got, err := validateRelPath("Artist/Album/01.flac"); err != nil || got == "" {
 		t.Fatalf("valid path rejected: %v", err)
+	}
+}
+
+// The host key must be stable across restarts: a new key means a new peer ID,
+// which would silently invalidate every existing pairing.
+func TestIdentityIsStableAcrossRestarts(t *testing.T) {
+	ctx := context.Background()
+	q := newTrustStore(t)
+	first, err := LoadOrCreateIdentity(ctx, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := LoadOrCreateIdentity(ctx, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Equals(second) {
+		t.Fatal("identity changed between loads; peer ID would not survive a restart")
+	}
+	idA, err := peer.IDFromPrivateKey(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idB, err := peer.IDFromPrivateKey(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idA != idB {
+		t.Fatalf("peer ID changed: %s != %s", idA, idB)
+	}
+}
+
+// An Ed25519 peer ID carries its own public key, which is what lets pairing
+// bind a verification key without a separate exchange.
+func TestPublicKeyBase64MatchesPeerIdentity(t *testing.T) {
+	ctx := context.Background()
+	q := newTrustStore(t)
+	priv, err := LoadOrCreateIdentity(ctx, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := peer.IDFromPrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := PublicKeyBase64(pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := priv.GetPublic().Raw()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != base64.StdEncoding.EncodeToString(raw) {
+		t.Fatal("key derived from peer ID does not match the host key")
 	}
 }

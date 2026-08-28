@@ -11,6 +11,7 @@ package app
 
 import (
 	"context"
+	"crypto/ed25519"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -254,6 +255,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		Pairing:      bundle.Pairing,
 		SyncStore:    bundle.SyncStore,
 		PairingStore: st.Q(),
+		DeviceKeys:   st.Q(),
 		PairingDB:    st.DB(),
 		OfflineSet:   st.Q(),
 		LinkStore:    st.Q(),
@@ -317,7 +319,11 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 	// P2P host for LAN + WAN discovery (mDNS, DHT, relay). Best-effort; if it
 	// fails we log and continue — sync still works via HTTP.
 	if r.P2P == nil {
-		if h, err := p2p.NewHost(ctx); err != nil {
+		priv, kerr := p2p.LoadOrCreateIdentity(ctx, r.Store.Q())
+		if kerr != nil {
+			logf("WARNING: p2p identity: %v", kerr)
+		}
+		if h, err := p2p.NewHost(ctx, priv); err != nil {
 			logf("WARNING: p2p host: %v", err)
 		} else {
 			r.P2P = h
@@ -328,12 +334,12 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 			guard := p2p.NewGuard(r.Store.Q())
 			r.P2PGuard = guard
 			if r.Deps.Pairing != nil && h.LibHost() != nil {
-				p2p.RegisterPairingHandler(h.LibHost(), r.Deps.Pairing, guard, func(c context.Context) (string, error) {
+				p2p.RegisterPairingHandler(h.LibHost(), r.Deps.Pairing, guard, r.Store.Q(), func(c context.Context) (string, error) {
 					return reverbsync.LocalDeviceID(c, r.Store.Q())
 				})
 			}
 			if r.Deps.SyncStore != nil && h.LibHost() != nil {
-				p2p.RegisterSyncHandler(h.LibHost(), r.Deps.SyncStore, guard)
+				p2p.RegisterSyncHandler(h.LibHost(), r.Deps.SyncStore, guard, r.Store.Q())
 			}
 			// File sync: hash local music dir and keep file_manifest up to date.
 			getenv := r.Getenv
@@ -354,11 +360,24 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 				}
 			}
 			if localID != "" {
+				// Install the signing key for locally-authored changes and
+				// publish our own verification key, so peers can verify our
+				// changes when they arrive relayed by someone else.
+				if priv != nil {
+					if raw, rerr := priv.Raw(); rerr == nil && len(raw) == ed25519.PrivateKeySize {
+						r.Deps.SyncStore.SetSigner(ed25519.PrivateKey(raw), localID)
+						if pubB64, perr := p2p.PublicKeyBase64(h.LibHost().ID()); perr == nil {
+							if err := r.Deps.SyncStore.RecordDeviceKey(ctx, localID, pubB64); err != nil {
+								logf("WARNING: p2p: record local device key: %v", err)
+							}
+						}
+					}
+				}
 				fs := p2p.NewFileSyncer(r.Store.Q(), localID, musicDir)
 				go fs.Run(ctx)
 				// P2P anti-entropy for sync changes over libp2p.
 				if r.Deps.SyncStore != nil && h.LibHost() != nil {
-					syncer := p2p.NewSyncer(h.LibHost(), r.Deps.SyncStore, guard, localID)
+					syncer := p2p.NewSyncer(h.LibHost(), r.Deps.SyncStore, guard, r.Store.Q(), localID)
 					go syncer.Run(ctx)
 				}
 			}

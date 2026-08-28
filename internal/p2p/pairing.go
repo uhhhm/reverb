@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/host"
@@ -31,7 +32,10 @@ type pairResponse struct {
 	// against the responder's peer ID so it can later verify which device that
 	// peer is entitled to speak for.
 	PeerDeviceID string `json:"peerDeviceId,omitempty"`
-	Error        string `json:"error,omitempty"`
+	// PeerPublicKey is the responder's verification key, so the redeemer can
+	// check changes it later authors.
+	PeerPublicKey string `json:"peerPublicKey,omitempty"`
+	Error         string `json:"error,omitempty"`
 }
 
 // pairLimiter throttles pairing attempts per remote peer and globally. Pairing
@@ -44,7 +48,7 @@ var pairLimiter = newAttemptLimiter(pairAttemptsPerPeer, pairAttemptsGlobal, pai
 // is rate limited and binds the caller's libp2p peer ID to the device row it
 // creates. localDeviceID supplies this node's own device ID for the response;
 // it may be nil, in which case the peer cannot bind us to a device.
-func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, localDeviceID func(context.Context) (string, error)) {
+func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, keys DeviceKeyStore, localDeviceID func(context.Context) (string, error)) {
 	h.SetStreamHandler("/reverb/pair/1.0.0", func(s network.Stream) {
 		defer s.Close()
 		_ = s.SetDeadline(time.Now().Add(10 * time.Second))
@@ -73,11 +77,21 @@ func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, l
 				return
 			}
 		}
+		// Bind the peer's verification key to the device row. The key is
+		// carried inside the Ed25519 peer ID, so pairing needs no separate key
+		// exchange, and the binding is what lets us later verify this device's
+		// changes when another peer relays them.
+		if pubB64, kerr := PublicKeyBase64(remote); kerr == nil && keys != nil {
+			if err := RecordPeerDevice(ctx, keys, deviceID, req.DeviceName, pubB64); err != nil {
+				log.Printf("p2p pair: record device key for %s: %v", deviceID, err)
+			}
+		}
 		pairLimiter.Reset(remote.String())
 		resp := pairResponse{DeviceID: deviceID, Token: token}
 		if localDeviceID != nil {
 			if id, err := localDeviceID(ctx); err == nil {
 				resp.PeerDeviceID = id
+				resp.PeerPublicKey, _ = PublicKeyBase64(h.ID())
 			}
 		}
 		_ = json.NewEncoder(s).Encode(resp)
@@ -92,7 +106,7 @@ func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, l
 // On success the responding peer is added to the local trust set, bound to the
 // device ID it reported for itself. This is the redeemer half of the mutual
 // binding the pairing handler performs on the other side.
-func RedeemViaPeer(ctx context.Context, h host.Host, guard *Guard, peerIDStr, code, deviceName string) (string, string, error) {
+func RedeemViaPeer(ctx context.Context, h host.Host, guard *Guard, keys DeviceKeyStore, peerIDStr, code, deviceName string) (string, string, error) {
 	if h == nil {
 		return "", "", fmt.Errorf("host is nil")
 	}
@@ -120,6 +134,20 @@ func RedeemViaPeer(ctx context.Context, h host.Host, guard *Guard, peerIDStr, co
 	}
 	if resp.DeviceID == "" || resp.Token == "" {
 		return "", "", fmt.Errorf("invalid pair response")
+	}
+	// Record the responder as a known device with its verification key. Its
+	// key is derivable from the peer ID we dialed, so a lying response cannot
+	// substitute a different one.
+	if resp.PeerDeviceID != "" && keys != nil {
+		pubB64, kerr := PublicKeyBase64(pid)
+		if kerr == nil {
+			if resp.PeerPublicKey != "" && resp.PeerPublicKey != pubB64 {
+				return "", "", fmt.Errorf("peer announced a key that does not match its peer ID")
+			}
+			if err := RecordPeerDevice(ctx, keys, resp.PeerDeviceID, deviceName, pubB64); err != nil {
+				return "", "", fmt.Errorf("record peer device: %w", err)
+			}
+		}
 	}
 	if guard != nil {
 		if err := guard.Trust(ctx, pid, resp.PeerDeviceID, deviceName); err != nil {

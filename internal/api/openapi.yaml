@@ -702,3 +702,132 @@ paths:
                 required: [revision, deviceCount]
         "401": { description: invalid sync token }
         "503": { description: sync unavailable }
+  /p2p/status:
+    get:
+      summary: Local libp2p host status (manage-library capability required)
+      responses:
+        "200":
+          description: host status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  peerId: { type: string, description: Stable libp2p peer ID; also this device's Ed25519 verification key }
+                  addrs: { type: array, items: { type: string }, description: Listen multiaddrs }
+                  peerCount: { type: integer, description: Currently connected peers, paired or not }
+                  vector:
+                    type: object
+                    additionalProperties: { type: integer, format: int64 }
+                    description: Per-device sequence vector
+                  hlc: { type: integer, format: int64, description: Highest hybrid logical clock seen }
+                required: [peerId, addrs, peerCount]
+        "503": { description: p2p unavailable }
+  /p2p/peers:
+    get:
+      summary: List connected libp2p peers (manage-library capability required)
+      description: >
+        Lists transport-level connections. Discovery is not trust: mDNS and DHT
+        connect to unpaired peers, which are refused by the sync and file
+        protocols. Pairing state is not reflected here.
+      responses:
+        "200":
+          description: connected peers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    peerId: { type: string }
+                    addrs: { type: array, items: { type: string } }
+                    conns: { type: integer }
+                    connected: { type: boolean }
+                  required: [peerId, addrs, conns, connected]
+        "503": { description: p2p unavailable }
+  /p2p/pair/redeem:
+    post:
+      summary: Redeem a pairing code against a peer over libp2p (manage-library capability required)
+      description: >
+        Dials peerId and redeems code on it. On success both sides record each
+        other as paired, binding the libp2p peer ID to a device row and its
+        Ed25519 verification key. Rate limited per peer and globally.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                peerId: { type: string }
+                code: { type: string, example: "AB12-CD34" }
+                deviceName: { type: string }
+              required: [peerId, code, deviceName]
+      responses:
+        "200":
+          description: paired
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deviceId: { type: string }
+                  token: { type: string }
+                required: [deviceId, token]
+        "400": { description: peerId, code and deviceName are required }
+        "500": { description: pairing failed }
+        "503": { description: p2p unavailable or peer trust store unavailable }
+  /p2p/manifests:
+    get:
+      summary: List the local file manifest (manage-library capability required)
+      responses:
+        "200":
+          description: file manifest rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    canonical_id: { type: string, description: "deviceId:relPath" }
+                    content_hash: { type: string, description: SHA-256 of the file }
+                    size: { type: integer, format: int64 }
+                    rel_path: { type: string }
+                    mtime: { type: integer, format: int64 }
+                    device_id: { type: string }
+                  required: [canonical_id, content_hash, size, rel_path, mtime, device_id]
+        "500": { description: could not list manifests }
+  /p2p/fetch:
+    post:
+      summary: Fetch a file from a paired peer (manage-library capability required)
+      description: >
+        contentHash is required and verified: the transfer lands in a temp file
+        and is renamed into place only if the SHA-256 matches, so a hostile or
+        failed fetch cannot replace a good local file. Take the hash from the
+        peer's /p2p/manifests entry.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                peerId: { type: string }
+                relPath: { type: string, description: Path relative to the music dir; traversal and symlink escapes are rejected }
+                contentHash: { type: string, description: Expected SHA-256, hex encoded }
+              required: [peerId, relPath, contentHash]
+      responses:
+        "200":
+          description: fetched
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                required: [ok]
+        "400": { description: peerId, relPath and contentHash are required }
+        "500": { description: fetch failed or hash mismatch }
+        "503": { description: p2p unavailable, file store unavailable, or local device not initialized }

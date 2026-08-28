@@ -102,6 +102,14 @@ func (g *Guard) Trust(ctx context.Context, pid peer.ID, deviceID, name string) e
 	return nil
 }
 
+// Touch records that a paired peer was seen, for the devices UI.
+func (g *Guard) Touch(ctx context.Context, pid peer.ID) {
+	if g == nil || g.store == nil {
+		return
+	}
+	_ = g.store.TouchTrustedPeer(ctx, pid.String())
+}
+
 // Forget drops pid from the local cache so the next lookup re-reads the DB.
 // Call after unpairing a device.
 func (g *Guard) Forget(pid peer.ID) {

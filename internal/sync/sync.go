@@ -13,6 +13,8 @@ type SyncRequest struct {
 	Vector        map[string]int64 `json:"vector,omitempty"`
 	DeviceID      string           `json:"deviceId,omitempty"`
 	Changes       []SyncChange     `json:"changes"`
+	// Devices announces verification keys the peer may not have yet.
+	Devices []DeviceAnnounce `json:"devices,omitempty"`
 }
 
 // SyncChange is a per-field mutation. Field=="__deleted" is the sentinel for deletion.
@@ -28,6 +30,20 @@ type SyncChange struct {
 	Revision   int64  `json:"revision,omitempty"`
 	HLC        int64  `json:"hlc,omitempty"`
 	Seq        int64  `json:"seq,omitempty"`
+	// ValueJSON is the exact persisted value_json. It travels on the wire so a
+	// verifier reconstructs the signed bytes exactly, rather than re-marshaling
+	// Value and risking a different encoding.
+	ValueJSON string `json:"valueJson,omitempty"`
+	// Sig is the author's base64 Ed25519 signature over the change.
+	Sig string `json:"sig,omitempty"`
+}
+
+// DeviceAnnounce carries a device's verification key so peers can check
+// changes authored by devices they never paired with directly.
+type DeviceAnnounce struct {
+	DeviceID  string `json:"deviceId"`
+	PublicKey string `json:"publicKey"`
+	Name      string `json:"name,omitempty"`
 }
 
 // SyncResponse is returned by the server after merging inbound changes.
@@ -38,6 +54,8 @@ type SyncResponse struct {
 	Vector      map[string]int64 `json:"vector,omitempty"`
 	Accepted    int              `json:"accepted"`
 	Rejected    []SyncChange     `json:"rejected,omitempty"`
+	// Devices announces verification keys the peer may not have yet.
+	Devices []DeviceAnnounce `json:"devices,omitempty"`
 }
 
 // MergePolicy decides whether incoming wins over existing for same entity+field.

@@ -3,6 +3,7 @@ package p2p
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/host"
@@ -16,7 +17,7 @@ import (
 // device ID a peer claims in SyncRequest is only honoured when it matches the
 // device bound to that peer at pairing time; a device ID is not a secret (it
 // travels in the author field of every change) and cannot authenticate anyone.
-func RegisterSyncHandler(h host.Host, store *sync.SyncStore, guard *Guard) {
+func RegisterSyncHandler(h host.Host, store *sync.SyncStore, guard *Guard, keys DeviceKeyStore) {
 	h.SetStreamHandler("/reverb/sync/1.0.0", func(s network.Stream) {
 		defer s.Close()
 		_ = s.SetDeadline(time.Now().Add(30 * time.Second))
@@ -49,17 +50,16 @@ func RegisterSyncHandler(h host.Host, store *sync.SyncStore, guard *Guard) {
 			_ = json.NewEncoder(s).Encode(map[string]string{"error": "unknown deviceId: pairing required"})
 			return
 		}
-		// Inbound changes may only be authored by the peer we authenticated.
-		// Accepting a third party's device ID here would let any paired peer
-		// forge changes as any other device.
-		for i := range req.Changes {
-			if req.Changes[i].DeviceID != "" && req.Changes[i].DeviceID != deviceID {
-				_ = json.NewEncoder(s).Encode(map[string]string{"error": "change author does not match paired identity"})
-				return
-			}
-			req.Changes[i].DeviceID = deviceID
+		// Learn any device keys the peer knows before verifying authorship, so
+		// a relayed change from a device we have never paired with can be
+		// checked against its own key.
+		ApplyDeviceAnnouncements(ctx, keys, req.Devices)
+		accepted, refused := filterAuthorizedChanges(ctx, store, deviceID, req.Changes)
+		if refused > 0 {
+			log.Printf("p2p sync: dropped %d unverifiable change(s) from device %s", refused, deviceID)
 		}
-		_ = guard.store.TouchTrustedPeer(ctx, s.Conn().RemotePeer().String())
+		req.Changes = accepted
+		guard.Touch(ctx, s.Conn().RemotePeer())
 
 		sinceRev := req.SinceRevision
 		// Vector-based filtering: if peer supplied vector, we filter outbound to only
@@ -94,6 +94,7 @@ func RegisterSyncHandler(h host.Host, store *sync.SyncStore, guard *Guard) {
 			return
 		}
 		resp := sync.SyncResponse{
+			Devices:     LocalDeviceAnnouncements(ctx, keys),
 			Changes:     outbound,
 			NewRevision: newRev,
 			NewHLC:      newHLC,
@@ -103,4 +104,28 @@ func RegisterSyncHandler(h host.Host, store *sync.SyncStore, guard *Guard) {
 		}
 		_ = json.NewEncoder(s).Encode(resp)
 	})
+}
+
+// filterAuthorizedChanges keeps only the changes a peer is entitled to deliver.
+//
+// A change authored by the peer itself is accepted on the strength of the
+// authenticated connection. A change authored by anyone else is accepted only
+// if it carries a valid signature from that author, which is what makes relayed
+// sync safe: the relaying peer never has to be trusted to speak for the author.
+func filterAuthorizedChanges(ctx context.Context, store *sync.SyncStore, peerDevice string, in []sync.SyncChange) ([]sync.SyncChange, int) {
+	out := make([]sync.SyncChange, 0, len(in))
+	refused := 0
+	for _, ch := range in {
+		if ch.DeviceID == "" || ch.DeviceID == peerDevice {
+			ch.DeviceID = peerDevice
+			out = append(out, ch)
+			continue
+		}
+		if err := store.VerifyChangeAuthorship(ctx, ch); err != nil {
+			refused++
+			continue
+		}
+		out = append(out, ch)
+	}
+	return out, refused
 }

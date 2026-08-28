@@ -9,6 +9,7 @@ import (
 
 	"github.com/libp2p/go-libp2p"
 	dht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -40,12 +41,15 @@ func (n *discoveryNotifee) HandlePeerFound(pi peer.AddrInfo) {
 const mdnsTag = "_reverb._tcp"
 
 // NewHost creates a libp2p host listening on random ports, with mDNS and DHT.
-func NewHost(ctx context.Context) (*Host, error) {
+// priv is this node's persistent identity; it must be stable across restarts or
+// every pairing bound to the resulting peer ID is invalidated. See
+// LoadOrCreateIdentity.
+func NewHost(ctx context.Context, priv crypto.PrivKey) (*Host, error) {
 	cm, err := connmgr.NewConnManager(10, 50)
 	if err != nil {
 		return nil, fmt.Errorf("connmgr: %w", err)
 	}
-	h, err := libp2p.New(
+	opts := []libp2p.Option{
 		libp2p.ListenAddrStrings(
 			"/ip4/0.0.0.0/tcp/0",
 			"/ip4/0.0.0.0/udp/0/quic-v1",
@@ -55,7 +59,11 @@ func NewHost(ctx context.Context) (*Host, error) {
 		libp2p.EnableNATService(),
 		libp2p.EnableRelay(),
 		libp2p.EnableHolePunching(),
-	)
+	}
+	if priv != nil {
+		opts = append(opts, libp2p.Identity(priv))
+	}
+	h, err := libp2p.New(opts...)
 	if err != nil {
 		return nil, err
 	}

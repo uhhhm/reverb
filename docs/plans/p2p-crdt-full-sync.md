@@ -206,12 +206,22 @@ binds a libp2p peer ID to a `device` row.
   device ID travels in the author field of every change, so it is not a secret
   and cannot authenticate anyone. `SyncRequest.DeviceID` is honoured only when it
   matches the peer's bound device.
-- **Changes are accepted only from their author.** Because changes carry no
-  signature, a relayed third-party change is indistinguishable from one the
-  sending peer invented, so forwarding is refused. Convergence therefore requires
-  a fully paired mesh: every pair of devices that must agree has to pair
-  directly. Transitive propagation needs per-device change signing — the natural
-  follow-up if the mesh becomes inconvenient.
+- **Changes carry the author's Ed25519 signature** (`sync_change.sig`,
+  migration `0032`), so a relayed change can be verified without trusting the
+  relay. A change authored by the sending peer is accepted on the strength of
+  the authenticated connection; any other change must verify against its
+  author's key. Transitive propagation therefore works: A and C converge through
+  B without pairing directly.
+- **Keys are the libp2p host identity.** Ed25519 peer IDs embed their public
+  key, so pairing binds a verification key with no separate exchange, and
+  `device.public_key` is just that key. The host key is persisted
+  (`p2p_host_key` setting) — it must survive restarts, since a new key means a
+  new peer ID and every existing pairing would break.
+- **Device keys spread trust-on-first-use.** Peers gossip known device keys in
+  `SyncRequest.Devices`/`SyncResponse.Devices`. The first key seen for a device
+  wins and is never replaced: introducing an unknown device asserts nothing a
+  peer could not have claimed under its own name, but rebinding a known
+  device's key would be identity takeover and is refused.
 - Every stream decoder reads through a byte cap (`internal/p2p/limits.go`), and
   peer file fetches require a content hash, land in a temp file, and are renamed
   into place only after the digest matches.

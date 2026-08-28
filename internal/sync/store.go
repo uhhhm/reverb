@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"crypto/ed25519"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,31 @@ type SyncStore struct {
 	policy MergePolicy
 	mu     sync.Mutex
 	hlc    *HLC
+
+	// signer signs changes this device authors; localDeviceID says which
+	// author ID that key speaks for. Both are empty until SetSigner runs, in
+	// which case changes go out unsigned and peers will only accept them
+	// directly from us.
+	signer        ed25519.PrivateKey
+	localDeviceID string
+}
+
+// SetSigner installs the key used to sign locally-authored changes. deviceID
+// must be this node's own device ID: it is covered by the signature, so a
+// mismatch would produce signatures no peer can verify.
+func (s *SyncStore) SetSigner(priv ed25519.PrivateKey, deviceID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.signer = priv
+	s.localDeviceID = deviceID
+}
+
+// signerFor returns the signing key when deviceID is this node's own identity.
+func (s *SyncStore) signerFor(deviceID string) ed25519.PrivateKey {
+	if s.localDeviceID == "" || deviceID != s.localDeviceID {
+		return nil
+	}
+	return s.signer
 }
 
 // NewSyncStore creates a store with default LWWPolicy.
@@ -38,6 +64,11 @@ func NewSyncStoreWithPolicy(q Querier, p MergePolicy) *SyncStore {
 }
 
 func marshalValue(ch SyncChange) (string, error) {
+	// A signed change carries the exact bytes its signature covers; re-encoding
+	// Value could produce different JSON and invalidate the signature.
+	if ch.ValueJSON != "" {
+		return ch.ValueJSON, nil
+	}
 	if ch.Field == "__deleted" {
 		return "true", nil
 	}
@@ -76,6 +107,8 @@ func dbToSyncChange(row db.SyncChange) SyncChange {
 		Revision:   row.Revision,
 		HLC:        row.Hlc,
 		Seq:        row.Seq,
+		ValueJSON:  row.ValueJson,
+		Sig:        row.Sig,
 	}
 }
 
@@ -319,6 +352,21 @@ func (s *SyncStore) nextSeqLocked(ctx context.Context, deviceID string) (int64, 
 	return newSeq, newHLC, nil
 }
 
+// signatureFor returns the signature to persist with a change: the author's
+// own signature when relaying someone else's change, or a fresh one when this
+// device is the author. Signing happens after HLC/seq assignment because both
+// are covered by the signature.
+func (s *SyncStore) signatureFor(deviceID string, ch SyncChange, valueJSON string, rowHLC, rowSeq int64) string {
+	if ch.Sig != "" {
+		return ch.Sig
+	}
+	priv := s.signerFor(deviceID)
+	if priv == nil {
+		return ""
+	}
+	return SignChange(priv, deviceID, ch.EntityType, ch.EntityID, ch.Field, valueJSON, ch.UpdatedAt, rowHLC, rowSeq)
+}
+
 // AppendChange appends a single change for deviceID. Value is marshaled to value_json.
 func (s *SyncStore) AppendChange(ctx context.Context, deviceID string, ch SyncChange) (int64, error) {
 	s.mu.Lock()
@@ -340,6 +388,7 @@ func (s *SyncStore) AppendChange(ctx context.Context, deviceID string, ch SyncCh
 		UpdatedAt:  ch.UpdatedAt,
 		Hlc:        rowHLC,
 		Seq:        rowSeq,
+		Sig:        s.signatureFor(deviceID, ch, valueJSON, rowHLC, rowSeq),
 	})
 }
 
@@ -361,6 +410,7 @@ func (s *SyncStore) appendChangeLocked(ctx context.Context, deviceID string, ch 
 		UpdatedAt:  ch.UpdatedAt,
 		Hlc:        rowHLC,
 		Seq:        rowSeq,
+		Sig:        s.signatureFor(deviceID, ch, valueJSON, rowHLC, rowSeq),
 	})
 }
 
