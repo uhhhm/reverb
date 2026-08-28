@@ -378,11 +378,11 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 					}
 				}
 				fs := p2p.NewFileSyncer(r.Store.Q(), localID, musicDir)
-				go fs.Run(ctx)
+				p2p.SafeGo("file sync", func() { fs.Run(ctx) })
 				// P2P anti-entropy for sync changes over libp2p.
 				if r.Deps.SyncStore != nil && h.LibHost() != nil {
 					syncer := p2p.NewSyncer(h.LibHost(), r.Deps.SyncStore, guard, r.Store.Q(), localID)
-					go syncer.Run(ctx)
+					p2p.SafeGo("syncer", func() { _ = syncer.Run(ctx) })
 				}
 			}
 		}

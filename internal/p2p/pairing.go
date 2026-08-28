@@ -49,7 +49,7 @@ var pairLimiter = newAttemptLimiter(pairAttemptsPerPeer, pairAttemptsGlobal, pai
 // creates. localDeviceID supplies this node's own device ID for the response;
 // it may be nil, in which case the peer cannot bind us to a device.
 func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, keys DeviceKeyStore, localDeviceID func(context.Context) (string, error)) {
-	h.SetStreamHandler("/reverb/pair/1.0.0", func(s network.Stream) {
+	h.SetStreamHandler("/reverb/pair/1.0.0", safeHandler("pair", func(s network.Stream) {
 		defer s.Close()
 		_ = s.SetDeadline(time.Now().Add(10 * time.Second))
 		remote := s.Conn().RemotePeer()
@@ -95,7 +95,7 @@ func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, k
 			}
 		}
 		_ = json.NewEncoder(s).Encode(resp)
-	})
+	}))
 }
 
 // RedeemViaPeer dials peerID via the host and redeems a pairing code over libp2p.

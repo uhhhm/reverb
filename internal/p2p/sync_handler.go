@@ -19,7 +19,7 @@ import (
 // device bound to that peer at pairing time; a device ID is not a secret (it
 // travels in the author field of every change) and cannot authenticate anyone.
 func RegisterSyncHandler(h host.Host, store *sync.SyncStore, guard *Guard, keys DeviceKeyStore) {
-	h.SetStreamHandler("/reverb/sync/1.0.0", func(s network.Stream) {
+	h.SetStreamHandler("/reverb/sync/1.0.0", safeHandler("sync", func(s network.Stream) {
 		defer s.Close()
 		_ = s.SetDeadline(time.Now().Add(30 * time.Second))
 		if guard == nil {
@@ -104,7 +104,7 @@ func RegisterSyncHandler(h host.Host, store *sync.SyncStore, guard *Guard, keys 
 			Rejected:    rejectedChanges,
 		}
 		_ = json.NewEncoder(s).Encode(resp)
-	})
+	}))
 }
 
 // filterAuthorizedChanges keeps only the changes a peer is entitled to deliver.

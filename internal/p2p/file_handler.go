@@ -20,7 +20,7 @@ type fileRequest struct {
 // paired peers only. guard is required: without it the handler would hand any
 // file under musicDir to any dialer on the LAN or via DHT/relay.
 func RegisterFileHandler(h host.Host, musicDir string, guard *Guard) {
-	h.SetStreamHandler("/reverb/file/1.0.0", func(s network.Stream) {
+	h.SetStreamHandler("/reverb/file/1.0.0", safeHandler("file", func(s network.Stream) {
 		defer s.Close()
 		_ = s.SetDeadline(time.Now().Add(60 * time.Second))
 		if musicDir == "" || guard == nil {
@@ -71,5 +71,5 @@ func RegisterFileHandler(h host.Host, musicDir string, guard *Guard) {
 			_ = s.Reset()
 			return
 		}
-	})
+	}))
 }
