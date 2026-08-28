@@ -1,13 +1,13 @@
-
-
 ## What this is
 
-This is a fork of Reverb, a self-hosted music app. It is an Go single-binary modular monolith with an
+This is a fork of Reverb, a self-hosted music app. It is a Go single-binary modular monolith with an
 embedded React/TypeScript SPA. It unifies an existing music library (Subsonic/
 Navidrome), online search (Deezer/Spotify), and one-click downloading (spotDL)
 in one web UI. License is AGPL-3.0-only.
 
-IMPORTANT: This is a fork, so published instructions and README are may be out of date. Keep this in mind when working and giving user advice. Furthermore, although it is single-user, you should still be security-conscious.
+IMPORTANT: This is a fork, so published instructions and README are may be out of date. Keep this in mind when working and giving user advice. You should be security-conscious.
+
+> **Desktop is primary.** The user runs only the Wails desktop app (`desktop/`). Treat it as the primary entry point — prefer `make desktop` / `make desktop-dev` and `desktop/tools/` bundled deps, build via `internal/app` (the shared composition root), and verify desktop paths/behavior. Docker/server (`cmd/reverb`, `docker-compose.yml`) is secondary/reference only.
 
 ## Commands
 
@@ -25,10 +25,13 @@ npm run lint            # eslint
 make gen     # regenerate sqlc code (queries -> Go) into internal/store/db
 make web     # build the SPA, copy web/dist -> internal/api/dist
 make build   # web + production binary (-tags prod) -> ./reverb
+make desktop      # web + Wails desktop binary -> ./dist/reverb-desktop
+make desktop-dev  # wails dev -projectdir ./desktop (hot reload via Vite :5173)
+make desktop-deps # fetch ffmpeg/navidrome/deno + spotDL venv into desktop/tools/
 make test    # backend tests + frontend unit tests
 make clean   # remove build artifacts
 
-# Run locally (two shells, hot reload)
+# Run locally (two shells, hot reload) — server mode
 cd web && npm run dev          # shell 1: Vite dev server
 go run ./cmd/reverb --dev       # shell 2: Go server proxying Vite, prints URL (default :8090)
 
@@ -46,7 +49,51 @@ implementation commits; keep suites green.
 
 ## Architecture
 
+Go modular monolith — single binary, React SPA embedded at build time (`-tags prod` via `internal/api/embed.go`; `--dev` proxies Vite). Both entry points (`cmd/reverb` server and `desktop/` Wails) share one composition root in `internal/app/build.go` (`Build` wires, `StartBackground` starts) so dependencies are wired once; entry points only own how they listen/shut down. Hot-reload of adapters happens live via `internal/app/reload.go` (`ServiceReloader`) with no restart.
+
 ### Adapter/seam pattern (the core design)
+
+Three pluggable seams, same shape: interface + adapters + conformance suite + explicit registry, **no `init()` side-effects**.
+
+- **`library`** — `internal/library/library.go` (`LibraryAdapter`); adapters `internal/library/subsonic` + `internal/library/embedded` (built-in vs external, see below); `conformance.go`. Library data is never persisted by Reverb, solely proxied.
+- **`search`** — `internal/search/search.go` (`SearchSource`); adapters `internal/search/deezer` (keyless), `internal/search/spotify`; `aggregator.go` fans out to all enabled sources concurrently over SSE with per-source `Envelope{Status,Results,Error}`; `conformance.go`. Optional caps via type assertion: `DiscographyProvider`, `TrackProvider`, `PlaylistProvider`, `PlaylistSearchProvider`.
+- **`downloader`** — `internal/download/download.go` (`Downloader` + `DownloaderEntry{Order}` for per-instance granularity); adapters `internal/download/spotdl`, `internal/download/lidarr`, `internal/download/ytdlp`; `conformance.go`; `download/manager.go` owns queue/workers/dedup-join/fallback/scan-debounce/cancel/retry. Optional caps via type assertion: `AsyncDownloader` (Submit/Poll, reconciler lane) and `ChapterLister`.
+
+Registration: `internal/registry/registry.go` holds constructors by name; `internal/app/build.go` registers `subsonic` / `spotify`+`deezer` / `spotdl`+`lidarr`+`ytdlp` explicitly, plus `registry.RegisterCapability("async", ...)`. `internal/wiring/wiring.go` (`Builder`) builds the active `ServiceBundle` from enabled `adapter_instance` DB rows; `internal/app/reload.go` rebuilds it on API mutations (`internal/api` adapter handlers) and publishes the new matcher/aggregator via holder so `resolver` and `extstream` see it live.
+
+Library modes (`internal/library/embedded`): **built-in** bundles Navidrome as a supervised child process against the same music dir (waveform-peaks via local file access); **external** points at a user-provided Subsonic/Navidrome. Mode is boot-bound (restart to change).
+
+### Composition & control flow
+
+- `internal/app/build.go` — composes `auth`, `catalog`, `resolver`, `download.Manager`, `playlistsync`, `scrobble`, `extstream`, `api.Deps`; entry points call `Build` then `StartBackground` (supervisor, manager, backfill, sync scheduler, scrobble worker).
+- `internal/core` — domain types (`Artist`/`Album`/`ExternalResult`/`DownloadRequest`/etc.) crossing all seams.
+- `internal/events/bus.go` — in-process EventBus backing `internal/api/stream.go` (WebSocket) and download progress; primary live channel to the frontend.
+- `internal/matching` — matches search results against library (ISRC/metadata) to mark owned.
+- `internal/resolver` — resolves adapter/track identity; constructed against `ServiceReloader.MatcherProvider()` so it reads the live matcher per-resolve.
+- `internal/store` — SQLite (`modernc.org/sqlite`), migrations `internal/store/migrations/*.sql` (goose), sqlc `internal/store/queries` -> `internal/store/db` (`make gen`).
+- `internal/api` — chi handlers, OpenAPI at `/api/v1/openapi.yaml` (keep in sync), `embed.go` embeds SPA.
+- `internal/auth` + `internal/api/roles.go` — session/cookie auth + roles.
+
+### Frontend (`web/`)
+
+React 19 + TypeScript, Vite, TanStack Query, Zustand, Tailwind, react-router.
+- `web/src/routes/` — one file per page (Home, Library, Search, Album, Artist, Downloads, Requests, Settings, Admin, Stats, …) with co-located `*.test.tsx`.
+- `web/src/lib/` — thin `*Api.ts` fetch wrappers, Zustand `*Store.ts` (player, download, coverage, auth, library revision, everywhere/search, now-playing, pending-play), `audioEngine.ts`, `mediaSession.ts`, `playTracker.ts`, `realtime.ts` (WebSocket), `paletteService.ts`/`paletteWorker.ts`.
+- `web/src/components/` — shared UI.
+- Dev: Go proxies Vite (`--dev`); prod: SPA embedded into binary (`-tags prod`).
+
+### Desktop (`desktop/`)
+
+Wails wrapper — same monolith on `127.0.0.1:0` (`desktop/main.go:boot`, `desktop/app.go:App`). Listens on random port, publishes `LocalAPIPort` so the AssetServer-served SPA dials the real API (WS cannot upgrade through Wails). DB at `~/Library/Application Support/Reverb/reverb.db` (macOS) / `~/.config/reverb/reverb.db` (Linux XDG) with legacy `./data/reverb.db` migration; downloads in `~/Music/Reverb` (`internal/desktop/paths.go`). Bundled `ffmpeg`/`navidrome`/`spotdl`/`yt-dlp`/`deno` resolved via `desktop/bundle.go:ResolveBundledTools` and injected before `config.Load` (`ApplyBundledToolEnv`); fetched into `desktop/tools/` via `make desktop-deps`. Build tags `desktop,production,webkit2_41` (`desktop/frontend.go` vs `desktop/run_fallback.go` plain HTTP). Single-instance lock in `desktop/singleinstance.go`.
+
+### Configuration
+
+Flags > env > defaults. Flags: `--port`/`--db`/`--dev`/`--update-repo`. Env: `REVERB_PORT`/`REVERB_DB`/`REVERB_DEV`/`REVERB_DOWNLOAD_DIR`/`REVERB_ADMIN_PASSWORD` (first-run) / `REVERB_SPOTIFY_CLIENT_ID/SECRET` / `REVERB_LIBRARY_PASSWORD` / `REVERB_SPOTDL_PATH`/`REVERB_NAVIDROME_BIN`/`REVERB_YTDLP_PATH`/`REVERB_DENO_PATH` (+ navidrome listen/port vars) — see `README.md` + `internal/config`. Secrets via env/`.env` only (gitignored; `.env.example` template).
+
+### Linting
+
+`.golangci.yml`: errcheck, govet, ineffassign, misspell, staticcheck, unconvert. Deferred `Close()` ignores pre-configured. staticcheck disables QF1001/QF1003/ST1000/ST1003 (ST1003 because `CoverUrl` etc. is pervasive).
+
 ## Project rules
 
 **Write the current truth, not its history.** Do not layer a correction on top of
@@ -58,112 +105,10 @@ why. Delete the rest.
 
 Do not pad documentation and docstrings with filler sections, redundant summaries, or boilerplate.
 
-**Responding:** Keep responses focused, brief, and concise. Keep disclaimers and caveats short, and spend most of the response on the main answer. 
+**Responding:** Keep responses focused, brief, and concise. Keep disclaimers and caveats short, and spend most of the response on the main answer.
 
 ## Developing
 
-- When asked to commit, commit on main branch. Do not create seperate branches.
-- Do not user claude browser to preview/test - the user does this themselves.
-- Use ripgrep instead of grep - its much faster.
-Reverb has three pluggable seams, each with the same shape:
-
-- **`library`** (Subsonic/Navidrome) — `internal/library/library.go` defines the
-  interface; `internal/library/subsonic` and `internal/library/embedded` are
-  concrete adapters; `internal/library/conformance.go` is a shared test suite
-  every adapter must pass.
-- **`search`** (Deezer / Spotify) — `internal/search/search.go` interface;
-  `internal/search/deezer`, `internal/search/spotify` adapters;
-  `internal/search/aggregator.go` fans a query out to all enabled sources
-  concurrently (SSE streaming); `internal/search/conformance.go`.
-- **`downloader`** (spotDL) — `internal/download/download.go` interface;
-  `internal/download/spotdl`, `internal/download/lidarr` adapters;
-  `internal/download/conformance.go`.
-
-New adapters register explicitly at the composition root — **no `init()`
-side-effects**. The registry (`internal/registry/registry.go`) holds
-constructors by name; `internal/wiring/wiring.go` builds the active
-library/search/download services from the enabled `adapter_instance` DB rows.
-Wiring is invoked both at startup (`cmd/reverb`) and on live adapter
-config changes via the API (no restart required) — see `cmd/reverb/reload.go`
-and `internal/api` adapter mutation handlers.
-
-Library backend has two modes (`internal/library/embedded`): **built-in**
-(bundles Navidrome as a supervised child process against the same music dir)
-and **external** (points at a user-provided Subsonic/Navidrome server). Only
-built-in mode wires a local music dir into the subsonic adapter (enables the
-waveform-peaks endpoint via local file access).
-
-### Composition & control flow
-
-- `cmd/reverb/main.go` / `serve.go` — composition root: opens the store, runs
-  migrations, builds adapters via `wiring`, starts the HTTP server.
-- `internal/core` — cross-cutting domain types and orchestration
-  (`download.go`, `coverage.go`, `request.go`, `playlistsync.go`,
-  `notification.go`, `external.go`) that coordinate across the seams.
-- `internal/events/bus.go` — in-process EventBus; backs both the WebSocket
-  (`internal/api/stream.go`) and the download manager's progress events. This
-  is the primary way backend state changes reach the frontend live.
-- `internal/matching` — matches search results against the library (by
-  ISRC/metadata) to determine what's already owned.
-- `internal/resolver` — resolves adapter/track identity across sources.
-- `internal/store` — SQLite (via `modernc.org/sqlite`), migrations in
-  `internal/store/migrations/*.sql` (goose), generated query code in
-  `internal/store/db` (via sqlc — run `make gen` after editing
-  `internal/store/queries`).
-- `internal/api` — HTTP handlers (chi router). API is documented in OpenAPI,
-  served live at `/api/v1/openapi.yaml` — keep it in sync with handler
-  changes. `internal/api/embed.go` embeds the built SPA (`-tags prod`).
-- `internal/auth` — session/cookie auth; `internal/registry` roles system
-  files live alongside in `internal/api/roles.go`, `users.go`.
-
-### Frontend (`web/`)
-
-React 19 + TypeScript, Vite, TanStack Query, Zustand, Tailwind, react-router.
-- `web/src/routes/` — one file per page (Home, Library, Search, Album, Artist,
-  Downloads, Requests, Settings, Admin, Stats, ...), each with a co-located
-  `*.test.tsx`.
-- `web/src/lib/` — API clients (`*Api.ts`, thin fetch wrappers per backend
-  resource), Zustand stores (`*Store.ts`: player, download, coverage, auth,
-  library revision, everywhere/search, now-playing, pending-play), and
-  cross-cutting utilities (`audioEngine.ts`, `mediaSession.ts`,
-  `playTracker.ts`, `realtime.ts` for the WebSocket connection,
-  `paletteService.ts`/`paletteWorker.ts` for cover-art color extraction).
-- `web/src/components/` — shared UI components.
-- Dev mode: Go proxies Vite (`--dev` flag) for hot reload; production build
-  embeds the SPA into the Go binary via `-tags prod`.
-
-### Configuration
-
-Flags > environment variables > defaults. See README.md for the full flag/env
-reference (`--port`/`REVERB_PORT`, `--db`/`REVERB_DB`, `--dev`/`REVERB_DEV`,
-`REVERB_DOWNLOAD_DIR`, `REVERB_ADMIN_PASSWORD` (first-run only),
-`REVERB_SPOTIFY_CLIENT_ID/SECRET`, `REVERB_LIBRARY_PASSWORD`,
-`REVERB_SPOTDL_PATH`, `REVERB_NAVIDROME_BIN`). Secrets are env/`.env`-only,
-never committed; `.env` is gitignored, `.env.example` is the template.
-
-### Linting
-
-`.golangci.yml` enables errcheck, govet, ineffassign, misspell, staticcheck,
-unconvert. Deferred-`Close()` errcheck ignores are pre-configured for common
-`io.Closer` types. staticcheck runs "all" minus a few disabled stylistic
-checks (QF1001, QF1003, ST1000, ST1003 — the last because existing naming uses
-initialisms like `CoverUrl` pervasively, not `CoverURL`).
-
-## Project rules (important)
-
-**Write the current truth, not its history.** Do not layer a correction on top of
-a claim you are correcting — delete the claim and state what is true now.
-
-Likewise for decisions: a section headed "the open decision" followed by
-"resolved" followed by "superseded" is archaeology. Record what is being done and
-why. Delete the rest.
-
-Do not pad documentation and docstrings with filler sections, redundant summaries, or boilerplate. Keep it concise, short and straight to the point!!! (please)
-
-**Responding:** Keep responses focused, brief, and concise. Keep disclaimers and caveats short, and spend most of the response on the main answer. 
-
-## Developing
-
-- When asked to commit, commit on main branch. Do not create seperate branches.
-- Do not user claude browser to preview/test - the user does this themselves.
-- Use ripgrep instead of grep - its much faster.
+- When asked to commit, commit on main branch. Do not create separate branches.
+- Do not use claude browser to preview/test — the user does this themselves.
+- Use ripgrep instead of grep — its much faster.
