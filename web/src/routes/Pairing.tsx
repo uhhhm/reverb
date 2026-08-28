@@ -7,6 +7,7 @@ import {
   getSyncStatus,
   storeSyncCredentials,
   getSyncToken,
+  getSyncDeviceId,
   clearSyncCredentials,
   type PairingCode,
   type DeviceInfo,
@@ -20,6 +21,15 @@ function formatPairingInput(value: string): string {
   return `${raw.slice(0, 4)}-${raw.slice(4)}`
 }
 
+function formatLastSeen(seconds: number, nowSec: number): string {
+  if (!seconds) return 'never'
+  const delta = Math.max(0, nowSec - seconds)
+  if (delta < 60) return 'just now'
+  if (delta < 3600) return `${Math.floor(delta / 60)}m ago`
+  if (delta < 86400) return `${Math.floor(delta / 3600)}h ago`
+  return `${Math.floor(delta / 86400)}d ago`
+}
+
 function formatExpiry(seconds: number): string {
   if (seconds <= 0) return '0:00'
   const m = Math.floor(seconds / 60)
@@ -31,6 +41,7 @@ export default function Pairing() {
   useDocumentTitle('Pairing')
 
   const [paired, setPaired] = useState(() => getSyncToken() !== null)
+  const [thisDeviceId, setThisDeviceId] = useState(() => getSyncDeviceId())
 
   const [pairingCode, setPairingCode] = useState<PairingCode | null>(null)
   const [genLoading, setGenLoading] = useState(false)
@@ -51,19 +62,24 @@ export default function Pairing() {
   const [devicesLoading, setDevicesLoading] = useState(true)
   const [devicesError, setDevicesError] = useState<string | null>(null)
 
+  const [confirmUnpairId, setConfirmUnpairId] = useState<string | null>(null)
+  const [unpairingId, setUnpairingId] = useState<string | null>(null)
+
   const [syncStatus, setSyncStatus] = useState<{ revision: number; deviceCount: number } | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
 
-  async function refreshDevices() {
-    setDevicesLoading(true)
+  async function refreshDevices(opts?: { silent?: boolean }) {
+    const silent = opts?.silent ?? false
+    if (!silent) setDevicesLoading(true)
     setDevicesError(null)
     try {
       const list = await listDevices()
       setDevices(list)
+      setNowSec(Math.floor(Date.now() / 1000))
     } catch (e) {
       setDevicesError(e instanceof Error ? e.message : 'Could not load devices')
     } finally {
-      setDevicesLoading(false)
+      if (!silent) setDevicesLoading(false)
     }
   }
 
@@ -83,6 +99,18 @@ export default function Pairing() {
     void refreshSync()
   }, [])
   /* eslint-enable react-hooks/set-state-in-effect */
+
+  // Keep the paired list (and its last-seen times) current while the page is open.
+  useEffect(() => {
+    const id = window.setInterval(() => void refreshDevices({ silent: true }), 15000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  // Keep last-seen captions fresh without a network round-trip.
+  useEffect(() => {
+    const id = window.setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 30000)
+    return () => window.clearInterval(id)
+  }, [])
 
   useEffect(() => {
     if (!pairingCode) return
@@ -122,6 +150,7 @@ export default function Pairing() {
     try {
       const result = await redeemPairingCode(redeemInput, deviceName.trim())
       storeSyncCredentials(result.token, result.deviceId)
+      setThisDeviceId(result.deviceId)
       setPaired(true)
       setRedeemSuccess(`Device paired. Sync token stored for device ${result.deviceId}.`)
       setRedeemInput('')
@@ -135,18 +164,24 @@ export default function Pairing() {
     }
   }
 
-  async function onDeleteDevice(id: string) {
+  async function onUnpairDevice(id: string) {
+    setUnpairingId(id)
+    setDevicesError(null)
     try {
       await deleteDevice(id)
+      setConfirmUnpairId(null)
       void refreshDevices()
       void refreshSync()
     } catch (e) {
-      setDevicesError(e instanceof Error ? e.message : 'Could not delete device')
+      setDevicesError(e instanceof Error ? e.message : 'Could not unpair device')
+    } finally {
+      setUnpairingId(null)
     }
   }
 
   function onClearPaired() {
     clearSyncCredentials()
+    setThisDeviceId(null)
     setPaired(false)
     setRedeemSuccess(null)
   }
@@ -248,8 +283,18 @@ export default function Pairing() {
 
       {/* Paired devices */}
       <section className="rounded-lg border border-border-subtle bg-raised p-6 space-y-4">
-        <h2 className="text-lg font-extrabold tracking-tight text-text-primary">Paired devices</h2>
-        <p className="text-xs text-text-secondary">All devices paired with this server. The server device cannot be removed.</p>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-lg font-extrabold tracking-tight text-text-primary">Paired devices</h2>
+          {devices && (
+            <span className="text-xs font-semibold text-text-secondary" data-testid="paired-device-count">
+              {devices.length} device{devices.length === 1 ? '' : 's'} currently paired
+            </span>
+          )}
+        </div>
+        <p className="text-xs text-text-secondary">
+          These devices share your library over sync. Unpairing revokes a device&apos;s access immediately — it stops
+          syncing and must redeem a new pairing code to rejoin. The server device cannot be unpaired.
+        </p>
         {devicesLoading ? (
           <p className="text-sm text-text-muted">Loading devices...</p>
         ) : devicesError ? (
@@ -257,31 +302,68 @@ export default function Pairing() {
             {devicesError}
           </p>
         ) : devices && devices.length === 0 ? (
-          <p className="text-sm text-text-muted">No devices found.</p>
+          <p className="text-sm text-text-muted">No devices paired yet. Generate a code in Step 1 to add one.</p>
         ) : (
           <ul className="space-y-2">
             {devices?.map((d) => (
               <li
                 key={d.id}
-                className="flex items-center justify-between gap-3 rounded-md border border-border-subtle bg-surface px-3 py-2"
+                className="rounded-md border border-border-subtle bg-surface px-3 py-2 space-y-2"
+                data-testid={`device-${d.id}`}
               >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-text-primary truncate">{d.name}</span>
-                    {d.isServer && (
-                      <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-xs font-bold text-on-accent">
-                        server
-                      </span>
-                    )}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-text-primary truncate">{d.name}</span>
+                      {d.isServer && (
+                        <span className="inline-flex items-center rounded-full bg-accent px-2 py-0.5 text-xs font-bold text-on-accent">
+                          server
+                        </span>
+                      )}
+                      {d.id === thisDeviceId && (
+                        <span className="inline-flex items-center rounded-full border border-border-subtle px-2 py-0.5 text-xs font-semibold text-text-secondary">
+                          this device
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-text-muted">Last seen {formatLastSeen(d.lastSeen, nowSec)}</div>
+                    <div className="text-xs text-text-muted font-mono truncate">{d.id}</div>
                   </div>
-                  <div className="text-xs text-text-muted font-mono truncate">{d.id}</div>
+                  {d.isServer ? (
+                    <span className="text-xs text-text-muted">cannot unpair server device</span>
+                  ) : confirmUnpairId === d.id ? null : (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`Unpair ${d.name}`}
+                      onClick={() => setConfirmUnpairId(d.id)}
+                    >
+                      Unpair
+                    </Button>
+                  )}
                 </div>
-                {d.isServer ? (
-                  <span className="text-xs text-text-muted">cannot delete server device</span>
-                ) : (
-                  <Button variant="ghost" size="sm" aria-label={`Delete device ${d.name}`} onClick={() => void onDeleteDevice(d.id)}>
-                    Delete
-                  </Button>
+                {confirmUnpairId === d.id && (
+                  <div role="alertdialog" aria-label={`Confirm unpair ${d.name}`} className="rounded border border-error/40 bg-error/5 p-3 space-y-2">
+                    <p className="text-xs leading-relaxed text-text-secondary">
+                      Unpair <span className="font-semibold text-text-primary">{d.name}</span>? It will lose access to
+                      this library and stop syncing. Files already downloaded onto that device stay there. To reconnect
+                      it later you will need a new pairing code.
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        aria-label={`Confirm unpairing ${d.name}`}
+                        disabled={unpairingId === d.id}
+                        onClick={() => void onUnpairDevice(d.id)}
+                      >
+                        {unpairingId === d.id ? 'Unpairing...' : 'Yes, unpair'}
+                      </Button>
+                      <Button variant="secondary" size="sm" onClick={() => setConfirmUnpairId(null)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
                 )}
               </li>
             ))}

@@ -11,6 +11,7 @@ const mockDeleteDevice = vi.fn()
 const mockGetSyncStatus = vi.fn()
 const mockStoreSyncCredentials = vi.fn()
 const mockGetSyncToken = vi.fn()
+const mockGetSyncDeviceId = vi.fn()
 const mockClearSyncCredentials = vi.fn()
 
 vi.mock('../lib/pairingApi', () => ({
@@ -21,6 +22,7 @@ vi.mock('../lib/pairingApi', () => ({
   getSyncStatus: (...args: unknown[]) => mockGetSyncStatus(...args),
   storeSyncCredentials: (...args: unknown[]) => mockStoreSyncCredentials(...args),
   getSyncToken: (...args: unknown[]) => mockGetSyncToken(...args),
+  getSyncDeviceId: () => mockGetSyncDeviceId(),
   clearSyncCredentials: (...args: unknown[]) => mockClearSyncCredentials(...args),
   SYNC_TOKEN_KEY: 'reverb:syncToken',
   SYNC_DEVICE_ID_KEY: 'reverb:syncDeviceId',
@@ -40,6 +42,7 @@ function wrap() {
 describe('Pairing', () => {
   beforeEach(() => {
     mockGetSyncToken.mockReturnValue(null)
+    mockGetSyncDeviceId.mockReturnValue('dev_1')
     mockListDevices.mockResolvedValue([
       { id: 'srv_1', name: 'Reverb Server', isServer: true, createdAt: 1000, lastSeen: 2000 },
       { id: 'dev_1', name: 'My Laptop', isServer: false, createdAt: 1100, lastSeen: 2100 },
@@ -93,21 +96,42 @@ describe('Pairing', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/failed to generate/i)
   })
 
-  it('shows paired devices with server badge and delete protection', async () => {
+  it('shows paired devices with server badge, device count and unpair protection', async () => {
     wrap()
     expect(await screen.findByText('Reverb Server')).toBeInTheDocument()
     expect(screen.getByText('My Laptop')).toBeInTheDocument()
     expect(screen.getByText('server')).toBeInTheDocument()
-    // server device cannot be deleted: no delete button for it, but shown text
-    expect(screen.getByText(/cannot delete server device/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /delete device my laptop/i })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /delete device reverb server/i })).not.toBeInTheDocument()
+    expect(screen.getByText('this device')).toBeInTheDocument()
+    expect(screen.getByTestId('paired-device-count')).toHaveTextContent('2 devices currently paired')
+    // server device cannot be unpaired: no unpair button for it, but shown text
+    expect(screen.getByText(/cannot unpair server device/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^unpair my laptop$/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^unpair reverb server$/i })).not.toBeInTheDocument()
   })
 
-  it('delete button calls deleteDevice and refreshes list', async () => {
+  it('asks for confirmation before unpairing and does not call the API until confirmed', async () => {
     wrap()
     await screen.findByText('My Laptop')
-    fireEvent.click(screen.getByRole('button', { name: /delete device my laptop/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^unpair my laptop$/i }))
+    expect(await screen.findByRole('alertdialog', { name: /confirm unpair my laptop/i })).toBeInTheDocument()
+    expect(mockDeleteDevice).not.toHaveBeenCalled()
+  })
+
+  it('cancelling the confirmation leaves the device paired', async () => {
+    wrap()
+    await screen.findByText('My Laptop')
+    fireEvent.click(screen.getByRole('button', { name: /^unpair my laptop$/i }))
+    await screen.findByRole('alertdialog')
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(mockDeleteDevice).not.toHaveBeenCalled()
+  })
+
+  it('confirming unpair calls deleteDevice and refreshes list', async () => {
+    wrap()
+    await screen.findByText('My Laptop')
+    fireEvent.click(screen.getByRole('button', { name: /^unpair my laptop$/i }))
+    fireEvent.click(await screen.findByRole('button', { name: /confirm unpairing my laptop/i }))
     await waitFor(() => expect(mockDeleteDevice).toHaveBeenCalledWith('dev_1'))
   })
 

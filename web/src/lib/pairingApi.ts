@@ -54,6 +54,11 @@ export function getSyncToken(): string | null {
   return window.localStorage.getItem(SYNC_TOKEN_KEY)
 }
 
+export function getSyncDeviceId(): string | null {
+  if (typeof window === 'undefined') return null
+  return window.localStorage.getItem(SYNC_DEVICE_ID_KEY)
+}
+
 export function clearSyncCredentials(): void {
   if (typeof window === 'undefined') return
   window.localStorage.removeItem(SYNC_TOKEN_KEY)

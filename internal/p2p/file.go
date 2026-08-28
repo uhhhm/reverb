@@ -1,12 +1,13 @@
 package p2p
 
 // FileManifest mirrors the file_manifest table for the file sync protocol.
-// Phase 4 will implement want/have over /reverb/file/1.0.0.
+// It is the wire type for /reverb/manifest/1.0.0, so the json tags are part of
+// the protocol — do not rename them.
 type FileManifest struct {
-	CanonicalID string
-	ContentHash string
-	Size        int64
-	RelPath     string
-	Mtime       int64
-	DeviceID    string
+	CanonicalID string `json:"canonicalId"`
+	ContentHash string `json:"contentHash"`
+	Size        int64  `json:"size"`
+	RelPath     string `json:"relPath"`
+	Mtime       int64  `json:"mtime"`
+	DeviceID    string `json:"deviceId"`
 }
