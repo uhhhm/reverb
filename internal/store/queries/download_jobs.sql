@@ -20,6 +20,15 @@ WHERE dedup_key = ? AND status IN ('queued', 'running')
 ORDER BY created_at ASC
 LIMIT 1;
 
+-- name: GetDownloadJobByDedup :one
+SELECT id, dedup_key, request_json, downloader_name, status, progress, error,
+       output_path, library_track_id, cover_art_id, canonical_id, priority, requested_by, attempts,
+       downloader_ref, created_at, started_at, finished_at
+FROM download_jobs
+WHERE dedup_key = ?
+ORDER BY created_at ASC
+LIMIT 1;
+
 -- name: ListDownloadJobs :many
 SELECT id, dedup_key, request_json, downloader_name, status, progress, error,
        output_path, library_track_id, cover_art_id, canonical_id, priority, requested_by, attempts,

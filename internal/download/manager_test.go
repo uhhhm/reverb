@@ -193,6 +193,16 @@ func (s *memStore) ActiveByDedup(_ context.Context, dedup string) (core.Download
 	}
 	return core.DownloadJob{}, false, nil
 }
+func (s *memStore) GetByDedup(_ context.Context, dedup string) (core.DownloadJob, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, j := range s.jobs {
+		if j.DedupKey == dedup {
+			return j, true, nil
+		}
+	}
+	return core.DownloadJob{}, false, nil
+}
 func (s *memStore) List(_ context.Context) ([]core.DownloadJob, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

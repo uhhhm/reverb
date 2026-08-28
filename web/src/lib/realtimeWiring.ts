@@ -4,41 +4,13 @@ import { RealtimeConnection, type WebSocketLike } from './realtime'
 import { useDownloads } from './downloadStore'
 import { useLibraryRevision } from './libraryRevisionStore'
 import { getDownloads, getQueueState } from './downloadApi'
-import { usePlayer } from './playerStore'
-import { useToastStore } from './toastStore'
-import { usePendingPlay } from './pendingPlayStore'
-import type { DownloadEvent, DownloadRemovedEvent, LibraryUpdatedEvent, QueueStateEvent, RealtimeEvent, Track } from './types'
-
-// trackFromJob synthesizes a minimal library Track for play-when-ready auto-play,
-// using the re-matched libraryTrackId. The stream proxy plays by id; the rest is
-// best-effort display metadata.
-function trackFromJob(libraryTrackId: string, meta: { title?: string; album?: string; artist?: string; durationMs?: number; isrc?: string }): Track {
-  return {
-    id: libraryTrackId,
-    title: meta.title ?? '',
-    albumId: '',
-    album: meta.album ?? '',
-    artistId: '',
-    artist: meta.artist ?? '',
-    coverArtId: '',
-    trackNumber: 0,
-    discNumber: 0,
-    durationMs: meta.durationMs ?? 0,
-    bitRate: 0,
-    suffix: '',
-    contentType: '',
-    isrc: meta.isrc,
-  }
-}
+import type { DownloadEvent, DownloadRemovedEvent, LibraryUpdatedEvent, QueueStateEvent, RealtimeEvent } from './types'
 
 // useRealtime opens ONE app-wide WebSocket (distinct from the SSE search stream),
-// fans typed events into the download store, drives TanStack invalidation, and
-// auto-plays a completion whose job was started with playWhenReady. makeSocket is
-// injectable for tests (a stub socket; no real network/media).
+// fans typed events into the download store and drives TanStack invalidation.
+// makeSocket is injectable for tests (a stub socket; no real network/media).
 export function useRealtime(makeSocket?: (url: string) => WebSocketLike): void {
   const qc = useQueryClient()
-  // Read the player action imperatively to avoid re-subscribing the effect.
-  const playTrackList = usePlayer((s) => s.playTrackList)
 
   useEffect(() => {
     // Broad library invalidation is the MVP behavior; per-album/artist is a
@@ -62,31 +34,12 @@ export function useRealtime(makeSocket?: (url: string) => WebSocketLike): void {
         case 'download.failed': {
           const event = frame.payload as DownloadEvent
           useDownloads.getState().applyEvent(event)
-          if (event.status === 'running') usePendingPlay.getState().update(event.jobId, event.progress)
-          if (event.status === 'failed' || event.status === 'canceled') usePendingPlay.getState().fail(event.jobId)
           break
         }
         case 'download.complete': {
           const ev = frame.payload as DownloadEvent
           useDownloads.getState().applyEvent(ev)
-          // After applying, read the job to see if it was play-when-ready.
-          const job = useDownloads.getState().jobs[ev.jobId]
-          const trackId = ev.libraryTrackId || job?.libraryTrackId || ''
-          // playWhenReady: auto-play only if nothing is currently playing. If the
-          // user is already listening to something else, don't hijack playback —
-          // queue the freshly-downloaded track instead and let them know via toast.
-          if (job?.playWhenReady && trackId) {
-            const track = trackFromJob(trackId, { title: job.title, album: job.album, artist: job.artist, isrc: job.isrc })
-            if (usePlayer.getState().current === null) {
-              playTrackList([track], 0)
-            } else {
-              usePlayer.getState().enqueue(track)
-              useToastStore.getState().push(`"${job.title}" is ready — added to your queue`, 'success')
-            }
-          }
-          usePendingPlay.getState().clear(ev.jobId)
           invalidateLibrary({ artistId: ev.artistId, albumId: ev.albumId })
-          // Bump the library revision so coverage streams re-open and chips flip.
           useLibraryRevision.getState().bump()
           break
         }
@@ -123,8 +76,6 @@ export function useRealtime(makeSocket?: (url: string) => WebSocketLike): void {
 
     const conn = new RealtimeConnection({ onEvent, onOpen }, makeSocket)
     return () => conn.close()
-    // playTrackList is stable (zustand action); makeSocket is test-only/stable.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qc])
 
   // Polling fallback: while any download is active, refresh the job list on an

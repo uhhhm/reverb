@@ -47,33 +47,13 @@ func (s *Server) authenticateSync(r *http.Request) (string, error) {
 
 func (s *Server) syncServerDeviceID(ctx context.Context) (string, error) {
 	if s.deps.PairingStore != nil {
-		if id, err := s.deps.PairingStore.GetSetting(ctx, "server_device_id"); err == nil && id != "" {
-			if dev, err := s.deps.PairingStore.GetDeviceByID(ctx, id); err == nil {
-				return dev.ID, nil
-			}
-		}
-		devices, err := s.deps.PairingStore.ListDevices(ctx)
-		if err == nil {
-			for _, d := range devices {
-				if d.IsServer == 1 {
-					return d.ID, nil
-				}
-			}
+		if id, err := sync.ServerDeviceID(ctx, s.deps.PairingStore); err == nil {
+			return id, nil
 		}
 	}
 	if s.deps.OfflineSet != nil {
-		if id, err := s.deps.OfflineSet.GetSetting(ctx, "server_device_id"); err == nil && id != "" {
-			if dev, err := s.deps.OfflineSet.GetDeviceByID(ctx, id); err == nil {
-				return dev.ID, nil
-			}
-		}
-		devices, err := s.deps.OfflineSet.ListDevices(ctx)
-		if err == nil {
-			for _, d := range devices {
-				if d.IsServer == 1 {
-					return d.ID, nil
-				}
-			}
+		if id, err := sync.ServerDeviceID(ctx, s.deps.OfflineSet); err == nil {
+			return id, nil
 		}
 	}
 	return "", sql.ErrNoRows

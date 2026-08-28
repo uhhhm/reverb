@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/uhhhm/reverb/internal/offlineset"
 	"github.com/uhhhm/reverb/internal/store/db"
+	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
 
 // OfflineSetStore is the persistence slice the offline-set handlers need.
@@ -25,30 +26,17 @@ type OfflineSetStore interface {
 	ListDevices(ctx context.Context) ([]db.Device, error)
 }
 
-// serverDeviceID returns the server device id (is_server=1) using the
-// settings key server_device_id with a ListDevices fallback.
+// serverDeviceID returns the server device id (is_server=1) via the single
+// canonical sync.ServerDeviceID implementation.
 func (s *Server) serverDeviceID(ctx context.Context) (string, error) {
 	if s.deps.OfflineSet == nil {
 		return "", sql.ErrNoRows
 	}
-	// Try settings key.
-	if id, err := s.deps.OfflineSet.GetSetting(ctx, "server_device_id"); err == nil && id != "" {
-		if dev, err := s.deps.OfflineSet.GetDeviceByID(ctx, id); err == nil {
-			return dev.ID, nil
-		} else if !errors.Is(err, sql.ErrNoRows) {
-			// fall through to list fallback on any error
-		}
-	}
-	devices, err := s.deps.OfflineSet.ListDevices(ctx)
+	id, err := reverbsync.ServerDeviceID(ctx, s.deps.OfflineSet)
 	if err != nil {
-		return "", err
+		return "", sql.ErrNoRows
 	}
-	for _, d := range devices {
-		if d.IsServer == 1 {
-			return d.ID, nil
-		}
-	}
-	return "", sql.ErrNoRows
+	return id, nil
 }
 
 type offlineSetListItem struct {

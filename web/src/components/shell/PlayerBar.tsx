@@ -23,7 +23,6 @@ import { IconButton } from '../ui/IconButton'
 import { Icon } from '../ui/Icon'
 import { AddToPlaylistMenu } from '../AddToPlaylistMenu'
 import { ProgressRing } from '../ui/ProgressRing'
-import { usePendingPlay } from '../../lib/pendingPlayStore'
 import { usePeaks } from '../../lib/peaksApi'
 import { useLyrics } from '../../lib/lyricsApi'
 
@@ -154,8 +153,6 @@ export function PlayerBar() {
   const toggleLyrics = useUI((s) => s.toggleLyrics)
   const loadingNow = usePlayer((s) => s.loading)
   const loading = useSettledFlag(loadingNow, 400)
-  const pending = usePendingPlay((s) => s.pending)
-  const clearPending = usePendingPlay((s) => s.clear)
   const { data: lyricsData } = useLyrics(current)
   const hasLyrics = lyricsData != null
 
@@ -229,15 +226,15 @@ export function PlayerBar() {
       {/* ── LEFT: cover + meta (hugs left; add-to-playlist control lands here) ─ */}
       <div className="relative z-10 flex items-center gap-3.5 pl-2">
         <Cover
-          src={coverSrc ?? (pending?.coverArtId ? coverUrl(pending.coverArtId, 80) : undefined)}
-          alt={current?.title ?? pending?.title ?? 'Nothing playing'}
+          src={coverSrc}
+          alt={current?.title ?? 'Nothing playing'}
           size={56}
           rounded="md"
           className="shadow-cover flex-none"
         />
         <div className="min-w-0">
-          <div className={['truncate text-sm font-semibold', palette ? '' : 'text-text-primary', !current && pending ? 'opacity-70' : ''].filter(Boolean).join(' ')}>
-            {current ? current.title : pending?.title ?? 'Nothing playing'}
+          <div className={['truncate text-sm font-semibold', palette ? '' : 'text-text-primary'].filter(Boolean).join(' ')}>
+            {current ? current.title : 'Nothing playing'}
           </div>
           {current?.artist && (current.artistExternalId || current.artistId) ? (
             <button
@@ -253,16 +250,11 @@ export function PlayerBar() {
             </button>
           ) : (
             <div className={['truncate text-xs', palette ? 'opacity-70' : 'text-text-secondary'].filter(Boolean).join(' ')}>
-              {current?.artist ?? pending?.artist ?? ''}
+              {current?.artist ?? ''}
             </div>
           )}
-          {!current && pending && <div className={pending.failed ? 'text-xs text-error' : 'text-xs text-text-muted'}>{pending.failed ? 'Download failed' : 'Starts when ready'}</div>}
-          {/* A track that isn't in the library has to be resolved to a source
-              before any audio exists, which takes a few seconds. */}
           {current && loading && <div className="text-xs text-text-muted">Loading…</div>}
         </div>
-
-        {!current && pending && (pending.failed ? <IconButton name="x" label="Dismiss" size="sm" onClick={() => clearPending(pending.jobId)} /> : <ProgressRing size={20} value={pending.progress} indeterminate={pending.progress < 0} />)}
 
         {current && loading && <ProgressRing size={20} value={-1} indeterminate />}
 

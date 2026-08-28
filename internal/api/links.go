@@ -37,50 +37,20 @@ func (s *Server) linkStore() LinkStore {
 }
 
 func (s *Server) linkServerDeviceID(ctx context.Context) (string, error) {
-	// Prefer LinkStore
 	if ls := s.linkStore(); ls != nil {
-		if id, err := ls.GetSetting(ctx, "server_device_id"); err == nil && id != "" {
-			if dev, err := ls.GetDeviceByID(ctx, id); err == nil {
-				return dev.ID, nil
-			}
-		}
-		if devices, err := ls.ListDevices(ctx); err == nil {
-			for _, d := range devices {
-				if d.IsServer == 1 {
-					return d.ID, nil
-				}
-			}
+		if id, err := reverbsync.ServerDeviceID(ctx, ls); err == nil {
+			return id, nil
 		}
 	}
-	// Fallback to OfflineSet
 	if s.deps.OfflineSet != nil {
-		if id, err := s.deps.OfflineSet.GetSetting(ctx, "server_device_id"); err == nil && id != "" {
-			if dev, err := s.deps.OfflineSet.GetDeviceByID(ctx, id); err == nil {
-				return dev.ID, nil
-			}
-		}
-		if devices, err := s.deps.OfflineSet.ListDevices(ctx); err == nil {
-			for _, d := range devices {
-				if d.IsServer == 1 {
-					return d.ID, nil
-				}
-			}
+		if id, err := reverbsync.ServerDeviceID(ctx, s.deps.OfflineSet); err == nil {
+			return id, nil
 		}
 	}
 	if s.deps.PairingStore != nil {
-		if devices, err := s.deps.PairingStore.ListDevices(ctx); err == nil {
-			for _, d := range devices {
-				if d.IsServer == 1 {
-					return d.ID, nil
-				}
-			}
+		if id, err := reverbsync.ServerDeviceID(ctx, s.deps.PairingStore); err == nil {
+			return id, nil
 		}
-	}
-	// Fallback to SyncStore via type assertion to Querier with ListDevices
-	if s.deps.SyncStore != nil {
-		// SyncStore wraps Querier but not exposed; try to ensure server device via store-level Ensure
-		// Attempt to call EnsureServerDevice if we have a LinkStore querier; otherwise fallback to error.
-		// We already tried; return not found.
 	}
 	return "", sql.ErrNoRows
 }

@@ -165,6 +165,7 @@ type Deps struct {
 	Pairing      *reverbsync.PairingService
 	SyncStore    *reverbsync.SyncStore
 	PairingStore PairingStore
+	Deletion     *reverbsync.DeletionService
 	// PairingDB is the raw DB handle for FK cleanup on device delete (pairing_code
 	// and sync_change reference device). When set, handlePairingDeviceDelete
 	// clears those rows before DeleteDevice so the delete does not hit

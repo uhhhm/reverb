@@ -74,24 +74,7 @@ func (s *DeletionService) IsDeleted(ctx context.Context, entityType, entityID st
 
 // resolveServerDevice mirrors offline_set serverDeviceID lookup: settings key then ListDevices fallback.
 func resolveServerDevice(ctx context.Context, q Querier) (string, error) {
-	if q == nil {
-		return "", ErrNoServerDevice
-	}
-	if id, err := q.GetSetting(ctx, serverDeviceIDKey); err == nil && id != "" {
-		if dev, err := q.GetDeviceByID(ctx, id); err == nil {
-			return dev.ID, nil
-		}
-	}
-	devices, err := q.ListDevices(ctx)
-	if err != nil {
-		return "", err
-	}
-	for _, d := range devices {
-		if d.IsServer == 1 {
-			return d.ID, nil
-		}
-	}
-	return "", ErrNoServerDevice
+	return ServerDeviceID(ctx, q)
 }
 
 // ErrNoServerDevice is returned when no server device can be resolved.

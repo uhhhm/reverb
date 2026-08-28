@@ -8,11 +8,19 @@ import (
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
 
-// emitPlaylistDeletion emits a playlist __deleted tombstone via SyncStore.
-// Best-effort: logs on error and never fails the caller. Used by T5 for canonical
-// library deletion propagation; offline-set removal must NOT call this.
+// emitPlaylistDeletion emits a playlist __deleted tombstone via DeletionService
+// (or SyncStore fallback). Best-effort: logs on error and never fails the caller.
 func (s *Server) emitPlaylistDeletion(ctx context.Context, playlistID string) {
-	if s.deps.SyncStore == nil || playlistID == "" {
+	if playlistID == "" {
+		return
+	}
+	if s.deps.Deletion != nil {
+		if _, err := s.deps.Deletion.DeletePlaylist(ctx, "", playlistID, 0); err != nil {
+			log.Printf("sync tombstone playlist %q: %v", playlistID, err)
+		}
+		return
+	}
+	if s.deps.SyncStore == nil {
 		return
 	}
 	deviceID := s.resolveServerDeviceForSync(ctx)
@@ -29,10 +37,18 @@ func (s *Server) emitPlaylistDeletion(ctx context.Context, playlistID string) {
 	}
 }
 
-// emitTrackDeletion emits a track __deleted tombstone via SyncStore.
-// Best-effort: logs on error and never fails the caller.
+// emitTrackDeletion emits a track __deleted tombstone via DeletionService.
 func (s *Server) emitTrackDeletion(ctx context.Context, catalogID string) {
-	if s.deps.SyncStore == nil || catalogID == "" {
+	if catalogID == "" {
+		return
+	}
+	if s.deps.Deletion != nil {
+		if _, err := s.deps.Deletion.DeleteTrack(ctx, "", catalogID, 0); err != nil {
+			log.Printf("sync tombstone track %q: %v", catalogID, err)
+		}
+		return
+	}
+	if s.deps.SyncStore == nil {
 		return
 	}
 	deviceID := s.resolveServerDeviceForSync(ctx)
@@ -49,28 +65,19 @@ func (s *Server) emitTrackDeletion(ctx context.Context, catalogID string) {
 	}
 }
 
-// resolveServerDeviceForSync returns the server device ID for sync tombstone emission.
-// It tries OfflineSet.serverDeviceID first, then PairingStore, then OfflineSet ListDevices fallback.
+// resolveServerDeviceForSync returns the server device ID via the canonical sync helper.
 func (s *Server) resolveServerDeviceForSync(ctx context.Context) string {
 	if sid, err := s.serverDeviceID(ctx); err == nil && sid != "" {
 		return sid
 	}
 	if s.deps.PairingStore != nil {
-		if devices, err := s.deps.PairingStore.ListDevices(ctx); err == nil {
-			for _, d := range devices {
-				if d.IsServer == 1 {
-					return d.ID
-				}
-			}
+		if id, err := reverbsync.ServerDeviceID(ctx, s.deps.PairingStore); err == nil {
+			return id
 		}
 	}
 	if s.deps.OfflineSet != nil {
-		if devices, err := s.deps.OfflineSet.ListDevices(ctx); err == nil {
-			for _, d := range devices {
-				if d.IsServer == 1 {
-					return d.ID
-				}
-			}
+		if id, err := reverbsync.ServerDeviceID(ctx, s.deps.OfflineSet); err == nil {
+			return id
 		}
 	}
 	return ""

@@ -44,6 +44,10 @@ type JobStore interface {
 	Insert(ctx context.Context, j core.DownloadJob, req core.DownloadRequest) error
 	Get(ctx context.Context, id string) (core.DownloadJob, bool, error)
 	ActiveByDedup(ctx context.Context, dedupKey string) (core.DownloadJob, bool, error)
+	// GetByDedup returns any job (active or terminal) with dedupKey.
+	// Used as the terminal guard: a coverage page remains "missing" until a scan,
+	// and repeated clicks must not create another terminal job for the same identity.
+	GetByDedup(ctx context.Context, dedupKey string) (core.DownloadJob, bool, error)
 	List(ctx context.Context) ([]core.DownloadJob, error)
 	Update(ctx context.Context, j core.DownloadJob) error
 	// UpdateRequest re-persists the originating DownloadRequest for job id into
@@ -441,10 +445,7 @@ func (m *Manager) recoverAfterRestart() {
 			log.Printf("download recovery: marked interrupted job %s as failed", shortID(job.ID))
 		case core.DownloadQueued:
 			if async := m.asyncFor(job.DownloaderName); async != nil {
-				req, ok, _ := m.store.GetRequest(ctx, job.ID)
-				if !ok {
-					req = core.DownloadRequest{Source: job.Source, ExternalID: job.ExternalID, Artist: job.Artist, Title: job.Title, Album: job.Album, ISRC: job.ISRC, DurationMs: job.DurationMs, PlayWhenReady: job.PlayWhenReady, AddToPlaylistID: job.AddToPlaylistID}
-				}
+				req := m.requestForJob(ctx, job)
 				go m.submitAsync(ctx, job, req, async)
 				continue
 			}
@@ -808,17 +809,25 @@ func (m *Manager) Enqueue(ctx context.Context, req core.DownloadRequest) (core.D
 		m.mu.Unlock()
 		return existing, nil // dedup-join: no second dispatch
 	}
-	// The active-job key above protects normal concurrent submissions. Also use
-	// the stable source/external-id identity as a terminal guard: a coverage page
-	// remains "missing" until a post-download scan completes, and repeatedly
-	// clicking its bulk action must not create another completed/failed job for
-	// the same catalog track. Retrying a terminal job is intentionally explicit
-	// through Retry, where attempts and an optional manual URL are preserved.
-	// A forced overwrite (quality upgrade) is by definition a repeat of a track
-	// that already has a terminal job, so the guard below must not swallow it.
-	// The trim range is part of the identity too: a chapter split enqueues one
-	// request per chapter under a single external id.
+	// Terminal guard: same dedup identity already exists as a terminal job
+	// (completed/failed). Re-clicking a coverage page's bulk action must not
+	// create another job for the same track; retry is explicit via Retry.
+	// ForceOverwrite (quality upgrade) bypasses this by design — its dedup
+	// includes the upgrade tier and therefore never collides.
 	if source, externalID := strings.TrimSpace(req.Source), strings.TrimSpace(req.ExternalID); source != "" && externalID != "" && !req.ForceOverwrite {
+		if existing, ok, err := m.store.GetByDedup(ctx, dedup); err != nil {
+			m.mu.Unlock()
+			return core.DownloadJob{}, err
+		} else if ok {
+			m.mu.Unlock()
+			return existing, nil
+		}
+		// Legacy fallback: rows inserted before dedup included section/quality
+		// (or with a mismatched dedup due to test fixture "old-key") are not
+		// found via the indexed lookup. Fall back to the field-by-field scan
+		// so the terminal guard remains correct for those rows. This path is
+		// expected to be rare (only legacy rows) and will be removed after a
+		// one-shot backfill (same pattern as BackfillCanonicalIDs).
 		jobs, lerr := m.store.List(ctx)
 		if lerr != nil {
 			m.mu.Unlock()
@@ -896,11 +905,29 @@ func (m *Manager) Enqueue(ctx context.Context, req core.DownloadRequest) (core.D
 	return job, nil
 }
 
+// requestForJob returns the originating DownloadRequest for job, preferring the
+// in-memory map (fast path) then the persisted request_json, falling back to a
+// minimal reconstruction from the job's denormalized columns. Single rehydration
+// point so a new request field is added once, not four times.
+func (m *Manager) requestForJob(ctx context.Context, job core.DownloadJob) core.DownloadRequest {
+	m.mu.Lock()
+	req, ok := m.reqs[job.ID]
+	m.mu.Unlock()
+	if ok {
+		return req
+	}
+	if stored, found, _ := m.store.GetRequest(ctx, job.ID); found {
+		return stored
+	}
+	return core.DownloadRequest{
+		Source: job.Source, ExternalID: job.ExternalID, Artist: job.Artist,
+		Title: job.Title, Album: job.Album, ISRC: job.ISRC, DurationMs: job.DurationMs,
+		PlayWhenReady: job.PlayWhenReady, AddToPlaylistID: job.AddToPlaylistID, Quality: job.Quality,
+	}
+}
+
 // sameSectionRange reports whether an existing job was created for the same trim
-// range as req. Chapter splitting enqueues one request per chapter under a single
-// source/external id, so the terminal-duplicate guard must compare the ranges as
-// well or every chapter after the first collapses into the first one's job. A job
-// with no persisted request is treated as untrimmed.
+// range as req. Kept for legacy fallback where dedup does not match (pre-section dedup).
 func (m *Manager) sameSectionRange(ctx context.Context, jobID string, req core.DownloadRequest) (bool, error) {
 	start, end := strings.TrimSpace(req.SectionStart), strings.TrimSpace(req.SectionEnd)
 	prev, ok := m.reqs[jobID]
@@ -995,24 +1022,8 @@ func (m *Manager) process(id string) {
 	m.mu.Lock()
 	req, haveReq := m.reqs[id]
 	m.mu.Unlock()
-	// Fall back to the request rehydrated onto the job from request_json (durable
-	// across restart) when the in-memory map has nothing (e.g. a retried/loaded job).
-	// Use !haveReq as the sole sentinel: a map hit is always valid even when
-	// ExternalID=="" (non-Spotify jobs have a real request with an empty ExternalID).
 	if !haveReq {
-		// Recover Granularity from the persisted request_json so that a cross-restart
-		// album sync job (e.g. spotDL album mode) uses AlbumJobTimeout and the correct
-		// /album/ URL rather than silently defaulting to track. Other fields (artist,
-		// title, album, ISRC, etc.) are already denormalized onto the job row; only
-		// Granularity is absent from the flat columns and must be read from request_json.
-		stored, _, _ := m.store.GetRequest(ctx, id)
-		req = core.DownloadRequest{
-			Source: job.Source, ExternalID: job.ExternalID, Artist: job.Artist,
-			Title: job.Title, Album: job.Album, ISRC: job.ISRC,
-			PlayWhenReady:   job.PlayWhenReady,
-			AddToPlaylistID: job.AddToPlaylistID,
-			Granularity:     stored.Granularity,
-		}
+		req = m.requestForJob(ctx, job)
 	}
 	m.mu.Lock()
 	jobTmo := m.jobTimeout(req)
@@ -1462,18 +1473,11 @@ func (m *Manager) Retry(ctx context.Context, jobID string, manualURL string) (co
 	if manualURL != "" {
 		m.mu.Lock()
 		req, haveReq := m.reqs[job.ID]
-		// Use !haveReq as the sole sentinel — a map hit is always valid even when
-		// ExternalID=="" (non-Spotify jobs have an empty ExternalID but a real request).
 		if !haveReq {
-			// Recover Granularity from request_json; fall back to job fields for the
-			// remaining metadata. This ensures a ManualURL retry on a cross-restart job
-			// also gets the correct granularity (album vs track).
-			stored, _, _ := m.store.GetRequest(ctx, job.ID)
-			req = core.DownloadRequest{
-				Source: job.Source, ExternalID: job.ExternalID, Artist: job.Artist,
-				Title: job.Title, Album: job.Album, ISRC: job.ISRC,
-				PlayWhenReady: job.PlayWhenReady,
-				Granularity:   stored.Granularity,
+			if stored, found, _ := m.store.GetRequest(ctx, job.ID); found {
+				req = stored
+			} else {
+				req = core.DownloadRequest{Source: job.Source, ExternalID: job.ExternalID, Artist: job.Artist, Title: job.Title, Album: job.Album, ISRC: job.ISRC, PlayWhenReady: job.PlayWhenReady, AddToPlaylistID: job.AddToPlaylistID, Quality: job.Quality}
 			}
 		}
 		req.ManualURL = manualURL
@@ -1486,21 +1490,13 @@ func (m *Manager) Retry(ctx context.Context, jobID string, manualURL string) (co
 		}
 	}
 
-	// Ensure the in-memory request is seeded for dispatch. If it's not already in
-	// m.reqs (cross-restart case or plain retry with no prior SeedRequest), reconstruct
-	// it from the job fields and recover Granularity from the persisted request_json.
-	// This guarantees the async-routing branch below and submitAsync both receive a
-	// request with the correct Granularity (album vs track).
 	m.mu.Lock()
 	req, haveReq := m.reqs[job.ID]
 	if !haveReq {
-		stored, _, _ := m.store.GetRequest(ctx, job.ID)
-		req = core.DownloadRequest{
-			Source: job.Source, ExternalID: job.ExternalID, Artist: job.Artist,
-			Title: job.Title, Album: job.Album, ISRC: job.ISRC,
-			PlayWhenReady:   job.PlayWhenReady,
-			AddToPlaylistID: job.AddToPlaylistID,
-			Granularity:     stored.Granularity,
+		if stored, found, _ := m.store.GetRequest(ctx, job.ID); found {
+			req = stored
+		} else {
+			req = core.DownloadRequest{Source: job.Source, ExternalID: job.ExternalID, Artist: job.Artist, Title: job.Title, Album: job.Album, ISRC: job.ISRC, PlayWhenReady: job.PlayWhenReady, AddToPlaylistID: job.AddToPlaylistID, Quality: job.Quality}
 		}
 		m.reqs[job.ID] = req
 	}

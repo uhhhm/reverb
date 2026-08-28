@@ -48,6 +48,38 @@ type Querier interface {
 
 const serverDeviceIDKey = "server_device_id"
 
+// ServerDeviceQuerier is the minimal store seam for server-device resolution.
+// *db.Queries satisfies it, as do the api OfflineSetStore/PairingStore aliases.
+type ServerDeviceQuerier interface {
+	GetSetting(ctx context.Context, key string) (string, error)
+	GetDeviceByID(ctx context.Context, id string) (db.Device, error)
+	ListDevices(ctx context.Context) ([]db.Device, error)
+}
+
+// ServerDeviceID returns the server device id (is_server=1) using the
+// settings key server_device_id with a ListDevices fallback. Single canonical
+// implementation for all callers; api helpers delegate here.
+func ServerDeviceID(ctx context.Context, q ServerDeviceQuerier) (string, error) {
+	if q == nil {
+		return "", ErrNoServerDevice
+	}
+	if id, err := q.GetSetting(ctx, serverDeviceIDKey); err == nil && id != "" {
+		if dev, err := q.GetDeviceByID(ctx, id); err == nil {
+			return dev.ID, nil
+		}
+	}
+	devices, err := q.ListDevices(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, d := range devices {
+		if d.IsServer == 1 {
+			return d.ID, nil
+		}
+	}
+	return "", ErrNoServerDevice
+}
+
 func generateToken() (string, string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
