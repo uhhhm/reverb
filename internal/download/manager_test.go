@@ -3504,3 +3504,29 @@ func TestPickPreferDownloaderFallsBack(t *testing.T) {
 		t.Fatalf("should fall back to configured chain, got %q", job.DownloaderName)
 	}
 }
+
+func TestEnqueueChapterSplitCreatesJobPerChapter(t *testing.T) {
+	dl := &fakeDL{name: "dl", canDownload: true}
+	store := newMemStore()
+	m, _ := testManager(t, []Downloader{dl}, store, nil, nil, nil)
+	base := core.DownloadRequest{Source: "youtube", ExternalID: "vid1", Artist: "A", Album: "Video"}
+
+	var ids []string
+	for _, ch := range [][2]string{{"0", "120"}, {"120", "240"}, {"240", ""}} {
+		req := base
+		req.Title = "Chapter " + ch[0]
+		req.SectionStart, req.SectionEnd = ch[0], ch[1]
+		j, err := m.Enqueue(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, j.ID)
+	}
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if seen[id] {
+			t.Fatalf("chapters collapsed into one job: %v", ids)
+		}
+		seen[id] = true
+	}
+}

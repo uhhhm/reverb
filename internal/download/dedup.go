@@ -33,6 +33,12 @@ func DedupKey(req core.DownloadRequest) string {
 	if req.ForceOverwrite {
 		raw += dedupSep + "upgrade" + dedupSep + string(req.Quality)
 	}
+	// A trimmed request produces a different audio file from the same source, so
+	// it has its own identity: a chapter split enqueues one request per chapter,
+	// all sharing a source/external id, and they must not collapse into one job.
+	if start, end := strings.TrimSpace(req.SectionStart), strings.TrimSpace(req.SectionEnd); start != "" || end != "" {
+		raw += dedupSep + "section" + dedupSep + start + dedupSep + end
+	}
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
 }

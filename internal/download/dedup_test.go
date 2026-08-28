@@ -72,3 +72,19 @@ func TestDedupKeyUnchangedForOrdinaryRequests(t *testing.T) {
 		t.Fatal("quality alone must not change an ordinary request's key")
 	}
 }
+
+func TestDedupKeySeparatesSectionRanges(t *testing.T) {
+	whole := core.DownloadRequest{Source: "youtube", ExternalID: "vid1"}
+	ch1 := core.DownloadRequest{Source: "youtube", ExternalID: "vid1", SectionStart: "0", SectionEnd: "120"}
+	ch2 := core.DownloadRequest{Source: "youtube", ExternalID: "vid1", SectionStart: "120", SectionEnd: "240"}
+
+	if DedupKey(ch1) == DedupKey(ch2) {
+		t.Fatal("chapters with different ranges must not share a dedup key")
+	}
+	if DedupKey(ch1) == DedupKey(whole) {
+		t.Fatal("a trimmed request must not share a dedup key with the untrimmed source")
+	}
+	if DedupKey(ch2) != DedupKey(core.DownloadRequest{Source: "youtube", ExternalID: "vid1", SectionStart: "120", SectionEnd: "240"}) {
+		t.Fatal("same range must be stable")
+	}
+}

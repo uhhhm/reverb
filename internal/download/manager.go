@@ -770,6 +770,8 @@ func (m *Manager) Enqueue(ctx context.Context, req core.DownloadRequest) (core.D
 	// through Retry, where attempts and an optional manual URL are preserved.
 	// A forced overwrite (quality upgrade) is by definition a repeat of a track
 	// that already has a terminal job, so the guard below must not swallow it.
+	// The trim range is part of the identity too: a chapter split enqueues one
+	// request per chapter under a single external id.
 	if source, externalID := strings.TrimSpace(req.Source), strings.TrimSpace(req.ExternalID); source != "" && externalID != "" && !req.ForceOverwrite {
 		jobs, lerr := m.store.List(ctx)
 		if lerr != nil {
@@ -777,7 +779,15 @@ func (m *Manager) Enqueue(ctx context.Context, req core.DownloadRequest) (core.D
 			return core.DownloadJob{}, lerr
 		}
 		for _, job := range jobs {
-			if strings.EqualFold(job.Source, source) && job.ExternalID == externalID {
+			if !strings.EqualFold(job.Source, source) || job.ExternalID != externalID {
+				continue
+			}
+			same, serr := m.sameSectionRange(ctx, job.ID, req)
+			if serr != nil {
+				m.mu.Unlock()
+				return core.DownloadJob{}, serr
+			}
+			if same {
 				m.mu.Unlock()
 				return job, nil
 			}
@@ -838,6 +848,26 @@ func (m *Manager) Enqueue(ctx context.Context, req core.DownloadRequest) (core.D
 	case <-m.stopCh:
 	}
 	return job, nil
+}
+
+// sameSectionRange reports whether an existing job was created for the same trim
+// range as req. Chapter splitting enqueues one request per chapter under a single
+// source/external id, so the terminal-duplicate guard must compare the ranges as
+// well or every chapter after the first collapses into the first one's job. A job
+// with no persisted request is treated as untrimmed.
+func (m *Manager) sameSectionRange(ctx context.Context, jobID string, req core.DownloadRequest) (bool, error) {
+	start, end := strings.TrimSpace(req.SectionStart), strings.TrimSpace(req.SectionEnd)
+	prev, ok := m.reqs[jobID]
+	if !ok {
+		stored, found, err := m.store.GetRequest(ctx, jobID)
+		if err != nil {
+			return false, err
+		}
+		if found {
+			prev = stored
+		}
+	}
+	return strings.TrimSpace(prev.SectionStart) == start && strings.TrimSpace(prev.SectionEnd) == end, nil
 }
 
 // Status returns the current persisted job.
