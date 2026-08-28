@@ -116,6 +116,17 @@ func fromGetDedupRow(r db.GetActiveDownloadJobByDedupRow) rowFields {
 	}
 }
 
+func fromGetByDedupRow(r db.GetDownloadJobByDedupRow) rowFields {
+	return rowFields{
+		id: r.ID, dedupKey: r.DedupKey, requestJson: r.RequestJson,
+		downloaderName: r.DownloaderName, status: r.Status, progress: r.Progress,
+		errStr: r.Error, outputPath: r.OutputPath,
+		libraryTrackID: r.LibraryTrackID, coverArtID: r.CoverArtID, canonicalID: r.CanonicalID,
+		priority: r.Priority, attempts: r.Attempts, downloaderRef: r.DownloaderRef,
+		createdAt: r.CreatedAt, startedAt: r.StartedAt, finishedAt: r.FinishedAt,
+	}
+}
+
 func fromListRow(r db.ListDownloadJobsRow) rowFields {
 	return rowFields{
 		id: r.ID, dedupKey: r.DedupKey, requestJson: r.RequestJson,
@@ -186,15 +197,7 @@ func (s *sqlStore) GetByDedup(ctx context.Context, dedup string) (core.DownloadJ
 	if err != nil {
 		return core.DownloadJob{}, false, err
 	}
-	// Reuse fromGetDedupRow shape via manual mapping (same columns as active).
-	j, err := toCoreFlatRow(rowFields{
-		id: r.ID, dedupKey: r.DedupKey, requestJson: r.RequestJson,
-		downloaderName: r.DownloaderName, status: r.Status, progress: r.Progress,
-		errStr: r.Error, outputPath: r.OutputPath,
-		libraryTrackID: r.LibraryTrackID, coverArtID: r.CoverArtID, canonicalID: r.CanonicalID,
-		priority: r.Priority, attempts: r.Attempts, downloaderRef: r.DownloaderRef,
-		createdAt: r.CreatedAt, startedAt: r.StartedAt, finishedAt: r.FinishedAt,
-	})
+	j, err := toCoreFlatRow(fromGetByDedupRow(r))
 	if err != nil {
 		return core.DownloadJob{}, false, err
 	}

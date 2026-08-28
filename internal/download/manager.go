@@ -919,10 +919,17 @@ func (m *Manager) requestForJob(ctx context.Context, job core.DownloadJob) core.
 	if stored, found, _ := m.store.GetRequest(ctx, job.ID); found {
 		return stored
 	}
+	// Fallback for legacy rows with empty request_json (or transient GetRequest
+	// error). Granularity/Section*/ManualURL/ForceOverwrite/PreferDownloader/
+	// InitiatedBy are not denormalized on DownloadJob, so they cannot be
+	// recovered here and remain zero — the caller will get an untrimmed/track-
+	// granularity request. Modern jobs always hit the stored path above.
 	return core.DownloadRequest{
 		Source: job.Source, ExternalID: job.ExternalID, Artist: job.Artist,
 		Title: job.Title, Album: job.Album, ISRC: job.ISRC, DurationMs: job.DurationMs,
 		PlayWhenReady: job.PlayWhenReady, AddToPlaylistID: job.AddToPlaylistID, Quality: job.Quality,
+		Granularity: "", SectionStart: "", SectionEnd: "", ManualURL: "", ForceOverwrite: false,
+		PreferDownloader: "", InitiatedBy: "",
 	}
 }
 
@@ -1469,38 +1476,29 @@ func (m *Manager) Retry(ctx context.Context, jobID string, manualURL string) (co
 	}
 	// When a manual URL is provided, seed (or update) the in-memory request AND
 	// persist it to request_json so the ManualURL survives a server restart between
-	// Retry and the worker picking up the job.
+	// Retry and the worker picking up the job. Centralized via requestForJob so
+	// DurationMs/Quality/Granularity/Section* are preserved (legacy fallback is
+	// documented on requestForJob).
 	if manualURL != "" {
-		m.mu.Lock()
-		req, haveReq := m.reqs[job.ID]
-		if !haveReq {
-			if stored, found, _ := m.store.GetRequest(ctx, job.ID); found {
-				req = stored
-			} else {
-				req = core.DownloadRequest{Source: job.Source, ExternalID: job.ExternalID, Artist: job.Artist, Title: job.Title, Album: job.Album, ISRC: job.ISRC, PlayWhenReady: job.PlayWhenReady, AddToPlaylistID: job.AddToPlaylistID, Quality: job.Quality}
-			}
-		}
+		req := m.requestForJob(ctx, job)
 		req.ManualURL = manualURL
+		m.mu.Lock()
 		m.reqs[job.ID] = req
 		m.mu.Unlock()
-		// Persist to the store so request_json carries ManualURL after a restart.
 		if err := m.store.UpdateRequest(ctx, job.ID, req); err != nil {
 			log.Printf("download: Retry %s: failed to persist ManualURL to store: %v", shortID(job.ID), err)
-			// Non-fatal: the in-memory path still works for the no-restart fast path.
 		}
 	}
 
 	m.mu.Lock()
 	req, haveReq := m.reqs[job.ID]
-	if !haveReq {
-		if stored, found, _ := m.store.GetRequest(ctx, job.ID); found {
-			req = stored
-		} else {
-			req = core.DownloadRequest{Source: job.Source, ExternalID: job.ExternalID, Artist: job.Artist, Title: job.Title, Album: job.Album, ISRC: job.ISRC, PlayWhenReady: job.PlayWhenReady, AddToPlaylistID: job.AddToPlaylistID, Quality: job.Quality}
-		}
-		m.reqs[job.ID] = req
-	}
 	m.mu.Unlock()
+	if !haveReq {
+		req = m.requestForJob(ctx, job)
+		m.mu.Lock()
+		m.reqs[job.ID] = req
+		m.mu.Unlock()
+	}
 
 	m.publishEvent(TopicQueued, job, "")
 

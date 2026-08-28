@@ -32,11 +32,7 @@ func (s *Server) serverDeviceID(ctx context.Context) (string, error) {
 	if s.deps.OfflineSet == nil {
 		return "", sql.ErrNoRows
 	}
-	id, err := reverbsync.ServerDeviceID(ctx, s.deps.OfflineSet)
-	if err != nil {
-		return "", sql.ErrNoRows
-	}
-	return id, nil
+	return reverbsync.ServerDeviceID(ctx, s.deps.OfflineSet)
 }
 
 type offlineSetListItem struct {
