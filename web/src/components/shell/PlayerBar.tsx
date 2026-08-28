@@ -27,6 +27,27 @@ import { usePendingPlay } from '../../lib/pendingPlayStore'
 import { usePeaks } from '../../lib/peaksApi'
 import { useLyrics } from '../../lib/lyricsApi'
 
+/**
+ * Gates a transient flag behind a delay. A library track is playable in well
+ * under 100ms, so showing its load state immediately would flash a spinner on
+ * every track change; only a load that actually drags — an external track being
+ * resolved to a source — should surface. Clears immediately when the flag does.
+ */
+function useSettledFlag(active: boolean, delayMs: number): boolean {
+  const [settled, setSettled] = useState(false)
+  useEffect(() => {
+    if (!active) return
+    const id = setTimeout(() => setSettled(true), delayMs)
+    // Reset on the way out, so the next load starts from "not yet showing"
+    // rather than flashing the previous track's indicator.
+    return () => {
+      clearTimeout(id)
+      setSettled(false)
+    }
+  }, [active, delayMs])
+  return settled
+}
+
 // ---------------------------------------------------------------------------
 // SeekBar — thin 4 px track with a thumb that appears on hover, driven by
 // position/duration from the player store. Click-to-seek updates seekMs.
@@ -37,7 +58,8 @@ function SeekBar() {
   const durationMs = usePlayer((s) => s.durationMs)
   const bufferedMs = usePlayer((s) => s.bufferedMs)
   const seekMs = usePlayer((s) => s.seekMs)
-  const peaks = usePeaks(trackId).data
+  const isExternal = usePlayer((s) => !!s.current?.externalStream)
+  const peaks = usePeaks(trackId, isExternal).data
 
   const pct = durationMs > 0 ? (currentTimeMs / durationMs) * 100 : 0
   const bufPct = durationMs > 0 ? (bufferedMs / durationMs) * 100 : 0
@@ -130,6 +152,8 @@ export function PlayerBar() {
   const rightPanel = useUI((s) => s.rightPanel)
   const lyricsOpen = useUI((s) => s.lyricsOpen)
   const toggleLyrics = useUI((s) => s.toggleLyrics)
+  const loadingNow = usePlayer((s) => s.loading)
+  const loading = useSettledFlag(loadingNow, 400)
   const pending = usePendingPlay((s) => s.pending)
   const clearPending = usePendingPlay((s) => s.clear)
   const { data: lyricsData } = useLyrics(current)
@@ -233,9 +257,14 @@ export function PlayerBar() {
             </div>
           )}
           {!current && pending && <div className={pending.failed ? 'text-xs text-error' : 'text-xs text-text-muted'}>{pending.failed ? 'Download failed' : 'Starts when ready'}</div>}
+          {/* A track that isn't in the library has to be resolved to a source
+              before any audio exists, which takes a few seconds. */}
+          {current && loading && <div className="text-xs text-text-muted">Loading…</div>}
         </div>
 
         {!current && pending && (pending.failed ? <IconButton name="x" label="Dismiss" size="sm" onClick={() => clearPending(pending.jobId)} /> : <ProgressRing size={20} value={pending.progress} indeterminate={pending.progress < 0} />)}
+
+        {current && loading && <ProgressRing size={20} value={-1} indeterminate />}
 
         {current && (
           <div className="relative flex-none">

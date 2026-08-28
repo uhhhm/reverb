@@ -276,3 +276,46 @@ describe('AudioEngine default source resolution', () => {
     expect(audios[0].src).toContain('/api/v1/external/stream/deezer/dz-1')
   })
 })
+
+// An external track has no audio until the server has resolved it to a source,
+// which takes seconds. Without a loading flag the UI has nothing to show and
+// looks frozen.
+describe('AudioEngine loading state', () => {
+  it('is loading from the moment a track is loaded until it can play', () => {
+    const { engine, audios } = newEngine()
+    expect(engine.getState().loading).toBe(false)
+    engine.playTrackList([track('1')], 0)
+    expect(engine.getState().loading).toBe(true)
+    audios[0].fire('canplay')
+    expect(engine.getState().loading).toBe(false)
+  })
+
+  it('returns to loading when playback stalls mid-track', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([track('1')], 0)
+    audios[0].fire('canplay')
+    audios[0].fire('waiting')
+    expect(engine.getState().loading).toBe(true)
+    audios[0].fire('playing')
+    expect(engine.getState().loading).toBe(false)
+  })
+
+  // A resolve that fails must not leave the spinner up forever.
+  it('clears loading when the source errors', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([track('1')], 0)
+    expect(engine.getState().loading).toBe(true)
+    audios[0].fire('error')
+    expect(engine.getState().loading).toBe(false)
+  })
+
+  it('notifies subscribers when loading changes', () => {
+    const { engine, audios } = newEngine()
+    const seen: boolean[] = []
+    engine.subscribe((s) => seen.push(s.loading))
+    engine.playTrackList([track('1')], 0)
+    audios[0].fire('canplay')
+    expect(seen).toContain(true)
+    expect(seen[seen.length - 1]).toBe(false)
+  })
+})

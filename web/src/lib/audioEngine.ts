@@ -25,6 +25,12 @@ export interface PlayerState {
   currentTimeMs: number
   durationMs: number
   bufferedMs: number
+  /**
+   * True while the current track has no playable audio yet. An external track
+   * (not in the library) has to be resolved to a source before its first byte
+   * exists, which takes seconds — without this the UI looks frozen.
+   */
+  loading: boolean
   volume: number
   shuffle: boolean
   repeat: RepeatMode
@@ -55,6 +61,8 @@ export class AudioEngine {
   private shuffleOrder: number[] = []
   private shufflePos = -1
 
+  private loading = false
+
   // stream-error recovery
   private consecutiveErrors = 0
   private repeatOneReloadAttempted = false
@@ -81,6 +89,10 @@ export class AudioEngine {
     this.active.addEventListener('play', this.onPlayState)
     this.active.addEventListener('pause', this.onPlayState)
     this.active.addEventListener('error', this.onError)
+    this.active.addEventListener('waiting', this.onWaiting)
+    this.active.addEventListener('stalled', this.onWaiting)
+    this.active.addEventListener('canplay', this.onLoaded)
+    this.active.addEventListener('playing', this.onLoaded)
     // Note: preload errors are intentionally not handled — a preload error should
     // null/ignore the preload src silently, never advance the queue.
   }
@@ -97,6 +109,20 @@ export class AudioEngine {
     this.emit()
   }
 
+  private onWaiting = () => {
+    this.setLoading(true)
+  }
+
+  private onLoaded = () => {
+    this.setLoading(false)
+  }
+
+  private setLoading = (v: boolean) => {
+    if (this.loading === v) return
+    this.loading = v
+    this.emit()
+  }
+
   private onPlayState = () => {
     this.playing = !this.active.paused
     if (!this.active.paused) {
@@ -108,6 +134,10 @@ export class AudioEngine {
   }
 
   private onError = () => {
+    // Whatever the recovery, this source produced no audio: clear the spinner so
+    // a failed track never leaves the UI stuck on "loading". A reload or a skip
+    // sets it again through loadCurrent.
+    this.loading = false
     if (this.repeat === 'one') {
       // Attempt ONE reload on the pinned track. If the reload itself fires another error,
       // stop — never skip off the pinned track under repeat-one.
@@ -163,6 +193,7 @@ export class AudioEngine {
       currentTimeMs: this.currentTimeMs,
       durationMs: this.durationMs,
       bufferedMs: this.bufferedMs,
+      loading: this.loading,
       volume: this.volume,
       shuffle: this.shuffle,
       repeat: this.repeat,
@@ -227,6 +258,7 @@ export class AudioEngine {
     }
     this.active.src = this.resolveSrc(t)
     this.active.load()
+    this.loading = true
     this.currentTimeMs = 0
     if (autoplay) {
       void this.active.play()

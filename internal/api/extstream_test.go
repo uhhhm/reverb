@@ -159,3 +159,23 @@ func TestExternalStreamReportsResolveFailure(t *testing.T) {
 		t.Errorf("body = %q, want the resolve failure surfaced", rec.Body.String())
 	}
 }
+
+// A track that isn't in the library has no file and is unknown to the backend,
+// so the lyrics handler's optional local-file lookup must be skipped for it —
+// otherwise every play logs a "Song not found" error against the library.
+func TestIsExternalTrackID(t *testing.T) {
+	for _, tc := range []struct {
+		id   string
+		want bool
+	}{
+		{"deezer:1144909952", true},
+		{"spotify:4h47YiL87c9mmfBGwMTvai", true},
+		{"al2f3c9d8e7b6a5", false},
+		{"trk_abc123", false},
+		{"", false},
+	} {
+		if got := isExternalTrackID(tc.id); got != tc.want {
+			t.Errorf("isExternalTrackID(%q) = %v, want %v", tc.id, got, tc.want)
+		}
+	}
+}

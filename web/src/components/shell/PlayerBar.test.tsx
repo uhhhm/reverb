@@ -42,6 +42,36 @@ describe('PlayerBar (shell)', () => {
     })
   })
 
+  // Resolving an external track to a source takes seconds, and until then there
+  // is no audio — the bar must say so rather than sit silent. A library track
+  // loads instantly, so the indicator is delayed to avoid flashing on every
+  // track change.
+  it('shows a loading indicator only once loading has dragged on', () => {
+    vi.useFakeTimers()
+    try {
+      render(<PlayerBar />)
+      // playTrackList in beforeEach left the engine loading (no canplay in jsdom).
+      expect(screen.queryByText('Loading…')).toBeNull()
+      act(() => { vi.advanceTimersByTime(500) })
+      expect(screen.getByText('Loading…')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('hides the loading indicator once the track can play', () => {
+    vi.useFakeTimers()
+    try {
+      render(<PlayerBar />)
+      act(() => { vi.advanceTimersByTime(500) })
+      expect(screen.getByText('Loading…')).toBeInTheDocument()
+      act(() => { usePlayer.setState({ loading: false }) })
+      expect(screen.queryByText('Loading…')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('shows the current track title and artist', () => {
     render(<PlayerBar />)
     expect(screen.getByText('Song 1')).toBeInTheDocument()

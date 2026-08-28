@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -13,6 +14,13 @@ import (
 type ExternalStreamResolver interface {
 	Resolve(ctx context.Context, source, externalID string) (string, error)
 	Invalidate(source, externalID string)
+}
+
+// isExternalTrackID reports whether id names a track that is not in the library.
+// The SPA synthesises "<source>:<externalId>" for such rows; real backend track
+// ids never contain a colon.
+func isExternalTrackID(id string) bool {
+	return strings.Contains(id, ":")
 }
 
 // extStreamClient has no timeout: the response body is a whole audio stream that

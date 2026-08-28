@@ -27,7 +27,7 @@ export function CinemaView() {
   const currentTimeMs = usePlayer((s) => s.currentTimeMs)
   const durationMs = usePlayer((s) => s.durationMs)
   const palette = useAlbumPalette(current ? trackCoverUrl(current, 80) : undefined)
-  const peaks = usePeaks(current?.id).data
+  const peaks = usePeaks(current?.id, !!current?.externalStream).data
   const [sideView, setSideView] = useState<'queue' | 'lyrics'>('queue')
   const { data: lyrics } = useLyrics(open ? current : null)
   const activeIndex = useActiveLyricLine(lyrics?.synced ? lyrics.lines : undefined)
