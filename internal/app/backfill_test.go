@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -23,7 +23,7 @@ func TestWaitReadyThenBackfill_CallsBackfillOnceWhenReadyBecomesTrue(t *testing.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	waitReadyThenBackfillEvery(ctx, readyFn, backfillFn, 5*time.Millisecond, 2*time.Second)
+	WaitReadyThenBackfillEvery(ctx, readyFn, backfillFn, 5*time.Millisecond, 2*time.Second)
 
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("backfill call count: got %d, want 1", got)
@@ -43,7 +43,7 @@ func TestWaitReadyThenBackfill_NeverCallsBackfillIfCtxCanceled(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		waitReadyThenBackfillEvery(ctx, readyFn, backfillFn, 5*time.Millisecond, 2*time.Second)
+		WaitReadyThenBackfillEvery(ctx, readyFn, backfillFn, 5*time.Millisecond, 2*time.Second)
 	}()
 
 	// Cancel the context after a short delay to let a few poll ticks pass.
@@ -53,7 +53,7 @@ func TestWaitReadyThenBackfill_NeverCallsBackfillIfCtxCanceled(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("waitReadyThenBackfillEvery did not return after ctx cancel")
+		t.Fatal("WaitReadyThenBackfillEvery did not return after ctx cancel")
 	}
 
 	if got := calls.Load(); got != 0 {
@@ -70,7 +70,7 @@ func TestWaitReadyThenBackfill_NeverCallsBackfillIfTimeout(t *testing.T) {
 	backfillFn := func() { calls.Add(1) }
 
 	ctx := context.Background()
-	waitReadyThenBackfillEvery(ctx, readyFn, backfillFn, 5*time.Millisecond, 30*time.Millisecond)
+	WaitReadyThenBackfillEvery(ctx, readyFn, backfillFn, 5*time.Millisecond, 30*time.Millisecond)
 
 	if got := calls.Load(); got != 0 {
 		t.Fatalf("backfill call count: got %d, want 0 (timed out)", got)
@@ -86,7 +86,7 @@ func TestWaitReadyThenBackfill_CallsBackfillImmediatelyIfAlreadyReady(t *testing
 	backfillFn := func() { calls.Add(1) }
 
 	ctx := context.Background()
-	waitReadyThenBackfillEvery(ctx, readyFn, backfillFn, 5*time.Millisecond, 2*time.Second)
+	WaitReadyThenBackfillEvery(ctx, readyFn, backfillFn, 5*time.Millisecond, 2*time.Second)
 
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("backfill call count: got %d, want 1", got)

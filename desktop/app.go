@@ -8,9 +8,7 @@ import (
 	"time"
 
 	"github.com/uhhhm/reverb/internal/api"
-	"github.com/uhhhm/reverb/internal/scrobble"
-	"github.com/uhhhm/reverb/internal/store"
-	"github.com/uhhhm/reverb/internal/wiring"
+	"github.com/uhhhm/reverb/internal/app"
 )
 
 // App is the Wails application lifecycle. It owns the local HTTP server
@@ -20,13 +18,12 @@ type App struct {
 	cancel context.CancelFunc
 	srv    *http.Server
 	ln     net.Listener
-	bundle wiring.ServiceBundle
 	deps   api.Deps
 	port   int
-	// store is closed on shutdown. boot() opens it and hands ownership here.
-	store *store.Store
-	// scrobble is started by StartServices.
-	scrobble *scrobble.Service
+	// runtime owns the services, the store and the wiring bundle. boot() builds
+	// it via internal/app — the same construction the server binary uses — and
+	// hands ownership here; OnShutdown closes it.
+	runtime *app.Runtime
 }
 
 // NewApp creates a new desktop App.
@@ -83,16 +80,14 @@ func (a *App) OnShutdown(ctx context.Context) {
 		defer cancel()
 		_ = a.srv.Shutdown(shutCtx)
 	}
-	if a.bundle.Supervisor != nil {
-		shutCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		_ = a.bundle.Supervisor.Shutdown(shutCtx)
-	}
-	if a.bundle.Manager != nil {
-		a.bundle.Manager.Stop()
-	}
-	if a.store != nil {
-		_ = a.store.Close()
+	if a.runtime != nil {
+		if a.runtime.Bundle.Supervisor != nil {
+			shutCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			_ = a.runtime.Bundle.Supervisor.Shutdown(shutCtx)
+		}
+		// Stops the download manager and closes the store.
+		a.runtime.Close()
 	}
 }
 

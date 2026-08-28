@@ -7,38 +7,15 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/uhhhm/reverb/internal/api"
-	"github.com/uhhhm/reverb/internal/auth"
-	"github.com/uhhhm/reverb/internal/catalog"
+	"github.com/uhhhm/reverb/internal/app"
 	"github.com/uhhhm/reverb/internal/config"
-	"github.com/uhhhm/reverb/internal/download"
-	"github.com/uhhhm/reverb/internal/download/lidarr"
-	"github.com/uhhhm/reverb/internal/download/spotdl"
-	"github.com/uhhhm/reverb/internal/download/ytdlp"
-	"github.com/uhhhm/reverb/internal/events"
-	"github.com/uhhhm/reverb/internal/extstream"
-	"github.com/uhhhm/reverb/internal/library/embedded"
-	"github.com/uhhhm/reverb/internal/library/lyrics"
-	"github.com/uhhhm/reverb/internal/library/subsonic"
-	"github.com/uhhhm/reverb/internal/override"
-	"github.com/uhhhm/reverb/internal/play"
-	"github.com/uhhhm/reverb/internal/playlistsync"
-	"github.com/uhhhm/reverb/internal/registry"
-	"github.com/uhhhm/reverb/internal/resolver"
-	"github.com/uhhhm/reverb/internal/scrobble"
-	"github.com/uhhhm/reverb/internal/scrobble/lastfm"
-	"github.com/uhhhm/reverb/internal/search/deezer"
-	"github.com/uhhhm/reverb/internal/search/spotify"
-	"github.com/uhhhm/reverb/internal/store"
-	reverbsync "github.com/uhhhm/reverb/internal/sync"
-	"github.com/uhhhm/reverb/internal/wiring"
 )
 
+// main is the server entry point. Everything except listening and shutdown is
+// built by internal/app, which the desktop build shares.
 func main() {
 	log.Printf("reverb %s starting", version)
 
@@ -52,237 +29,19 @@ func main() {
 		log.Fatal(err)
 	}
 
-	st, err := store.Open(cfg.DBPath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer st.Close()
-	if err := st.Migrate(); err != nil {
-		log.Fatal(err)
-	}
-
-	authSvc := auth.NewService(st.Q(), time.Now)
-	// Ensure the single local user row exists (the FK target for
-	// download_jobs.initiated_by / synced_playlists.owner_user_id). Idempotent.
-	if err := authSvc.EnsureSeed(context.Background()); err != nil {
-		log.Fatalf("seed identity: %v", err)
-	}
-
-	// spotDL is bundled with the image, so present it as a configured downloader
-	// out of the box (no manual setup) when none exists yet.
-	seedBundledDownloader(context.Background(), st.Q(), os.Getenv)
-
-	// T8: ensure server device row exists (is_server=1) before wiring. Idempotent.
-	if serverID, err := reverbsync.EnsureServerDevice(context.Background(), st.Q()); err != nil {
-		log.Printf("WARNING: ensure server device: %v", err)
-	} else {
-		log.Printf("server device %s ready", serverID)
-	}
-
-	// Registries (explicit registration at the composition root — no init() side-effects).
-	libraryReg := registry.NewRegistry("library")
-	libraryReg.Register("subsonic", func() registry.Plugin { return subsonic.New() })
-	searchReg := registry.NewRegistry("search")
-	searchReg.Register("spotify", func() registry.Plugin { return spotify.New() })
-	searchReg.Register("deezer", func() registry.Plugin { return deezer.New() })
-	downloaderReg := registry.NewRegistry("downloader")
-	downloaderReg.Register("spotdl", func() registry.Plugin { return spotdl.New() })
-	downloaderReg.Register("lidarr", func() registry.Plugin { return lidarr.New() })
-	downloaderReg.Register("ytdlp", func() registry.Plugin { return ytdlp.New() })
-	// Surface the async capability to the admin UI (/adapters/available).
-	registry.RegisterCapability("async", func(p registry.Plugin) bool {
-		_, ok := p.(download.AsyncDownloader)
-		return ok
+	rt, err := app.Build(ctx, app.Options{
+		DBPath:     cfg.DBPath,
+		Version:    version,
+		UpdateRepo: cfg.UpdateRepo,
+		Dev:        cfg.Dev,
+		Getenv:     os.Getenv,
 	})
-	// grain:album removed: granularity info is now exposed directly on the adapter
-	// instance DTO via SupportedGranularities and Granularities fields.
-
-	// EventBus backs both the WS endpoint and the Manager's typed events.
-	bus := events.New()
-
-	dirty := &atomicDirty{}
-
-	// The Builder constructs the active library/search/download services from the
-	// current enabled adapter_instance rows. It is used for the initial build here
-	// and reused by the API server to rebuild live on any adapter mutation.
-	builder := wiring.NewBuilder(
-		libraryReg, searchReg, downloaderReg,
-		st.Q(), st, bus, download.RealClock{}, os.Getenv,
-		filepath.Dir(cfg.DBPath),
-	)
-
-	// P2 construction order: reloader → resolver → SetResolverProvider → Build.
-	//
-	// The reloader owns the live-matcher atomic holder. It is created BEFORE Build
-	// so we can construct the resolver singleton against it (the provider reads the
-	// holder per-resolve; the holder is empty until publishMatcher below, which is
-	// fine — live services only call Resolve at runtime, after the matcher is up).
-	//
-	// The resolverProvider func is set on the Builder BEFORE the first Build call so
-	// that download.Manager and playlistsync.Service (both constructed inside Build)
-	// receive the resolver dep. They do NOT call it during Build — Tasks 3-5 add the
-	// actual Resolve/RefreshLinked call sites. The matcher-provider seam is unchanged:
-	// the resolver still reads s.matcher() per-resolve for hot-reload correctness.
-	reloader := newServiceReloader(builder)
-	resolverSvc := resolver.NewService(st.Q(), reloader.matcherProvider(), time.Now)
-	builder.SetResolverProvider(func() wiring.BindingResolver { return resolverSvc })
-
-	// P2 Task 3: catalogSvc is backend-independent (st.Q() + time + uuid only) so it
-	// is constructed BEFORE builder.Build and injected into the Manager via
-	// SetCanonicalMinter AFTER Build returns the Manager. catalogSvc is used as both
-	// the download.CanonicalMinter and the play/stats service dependency below.
-	catalogSvc := catalog.NewService(st.Q(), time.Now, uuid.NewString)
-	// P2 Task 5: wire catalogSvc as the CanonicalMinter for the sync service so that
-	// AddTrack mints stable catalog ids for library-source tracks at persist time.
-	// Must be set BEFORE Build so BuildSyncService picks it up via b.canonicalMinter.
-	builder.SetCanonicalMinter(catalogSvc)
-
-	bundle, err := builder.Build(context.Background())
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer rt.Close()
 
-	// Publish the boot matcher (may be nil when no library is configured) into the
-	// live-matcher holder so the resolver singleton sees it on its first call.
-	// Matches the pre-P2 behaviour (publishMatcher was called here before the reorder).
-	reloader.publishMatcher(bundle.Matcher)
-	if bundle.Aggregator != nil {
-		reloader.publishTrackLookup(bundle.Aggregator)
-	}
-
-	// External streaming: play a search result that is not in the library without
-	// downloading it. Reads the LIVE aggregator (see trackLookupProvider) so it
-	// survives adapter hot-reloads, and shares yt-dlp's binary path and cookies
-	// with the downloader — cookies are what get the resolve past YouTube's bot
-	// checks.
-	extStream := extstream.NewFromEnv(
-		providerLookup{get: reloader.trackLookupProvider()},
-		os.Getenv,
-	)
-
-	// Start the bundled-library supervisor (no-op in external mode).
-	if bundle.Supervisor != nil {
-		bundle.Supervisor.Start()
-	}
-
-	if bundle.Manager != nil {
-		// Task 3: inject the canonical minter so the Manager mints stable catalog ids
-		// at link time (BackfillUnlinked / runScan). Nil-safe if catalogSvc is nil.
-		bundle.Manager.SetCanonicalMinter(catalogSvc)
-		bundle.Manager.Start()
-		defer bundle.Manager.Stop()
-	}
-
-	// Re-run the backfill after the bundled Navidrome reports ready so that the
-	// boot-race (backfill at Start() fires before Navidrome is serving) is healed.
-	if bundle.Supervisor != nil && bundle.Manager != nil {
-		go waitReadyThenBackfill(ctx, bundle.Supervisor.Ready, bundle.Manager.BackfillUnlinked)
-	}
-
-	// Start the playlist-sync scheduler when a sync service is configured. It ticks
-	// every 15 minutes, syncing due playlists, and stops when ctx is cancelled.
-	if bundle.Sync != nil {
-		go playlistsync.NewScheduler(bundle.Sync, 15*time.Minute).Run(ctx)
-		// One-time migration: copy existing Navidrome playlists into managed playlists.
-		// Runs in the background so startup is not blocked; guarded by a settings flag.
-		go func() {
-			if err := bundle.Sync.MigrateLibraryPlaylists(ctx); err != nil {
-				log.Printf("WARNING: library playlist migration: %v", err)
-			}
-		}()
-	}
-
-	// catalogSvc is already constructed above (before Build) and injected into the Manager.
-	playSvc := play.NewService(st.Q(), catalogSvc, time.Now, uuid.NewString)
-	statsSvc := play.NewStats(st.Q())
-
-	// Scrobbling: cfg() reads app key/secret from settings on every call so that
-	// admin changes (Task 5 UI) take effect without a restart.
-	scrobbleCfg := func() scrobble.Creds {
-		ctx := context.Background()
-		key, _ := st.Q().GetSetting(ctx, "scrobble:lastfm:api_key")
-		secret, _ := st.Q().GetSetting(ctx, "scrobble:lastfm:api_secret")
-		return scrobble.Creds{APIKey: key, APISecret: secret}
-	}
-	scrobbleSvc := scrobble.NewService(st.Q(), lastfm.New(), scrobbleCfg, time.Now, uuid.NewString)
-	go scrobbleSvc.RunWorker(ctx, 30*time.Second)
-
-	deps := api.Deps{
-		Auth:           authSvc,
-		Library:        bundle.Library,
-		Lib:            libraryReg,
-		Search:         searchReg,
-		Downloader:     downloaderReg,
-		Adapters:       st.Q(),
-		PlaylistOwner:  st.Q(),
-		Events:         bus,
-		ConfigDirty:    dirty,
-		Reload:         reloader,
-		Dev:            cfg.Dev,
-		Version:        version,
-		UpdateRepo:     cfg.UpdateRepo,
-		DataDir:        filepath.Dir(cfg.DBPath),
-		Resolver:       resolverSvc,
-		ExternalStream: extStream,
-		Overrides:      override.New(st.Q()),
-		Play:           playSvc,
-		Stats:          statsSvc,
-		Scrobble:       scrobbleSvc,
-		Lyrics: &lyrics.Service{
-			Store: st.Q(),
-			Client: &lyrics.LRCLibClient{
-				UserAgent: "Reverb/" + version + " (https://github.com/uhhhm/reverb)",
-			},
-		},
-		// T8 multi-device: wiring.Build already ensured server device and built
-		// stateless wrappers around st.Q(); wire them directly into deps so
-		// handlers are live (instead of 503) in production. Explicit
-		// construction at the composition root, no init() side effects.
-		Pairing:      bundle.Pairing,
-		SyncStore:    bundle.SyncStore,
-		PairingStore: st.Q(),
-		PairingDB:    st.DB(),
-		OfflineSet:   st.Q(),
-		LinkStore:    st.Q(),
-	}
-	// T8 fallback: if wiring bundle somehow missed (e.g. older Build), ensure live.
-	if deps.Pairing == nil {
-		deps.Pairing = reverbsync.NewPairingService(st.Q())
-	}
-	if deps.SyncStore == nil {
-		deps.SyncStore = reverbsync.NewSyncStore(st.Q())
-	}
-	// Guard against the "non-nil interface wrapping a nil pointer" trap: only set
-	// the interface fields when the concrete service is actually present.
-	if bundle.Aggregator != nil {
-		deps.SearchAggregator = bundle.Aggregator
-	}
-	if bundle.Coverage != nil {
-		deps.Coverage = bundle.Coverage
-	}
-	if bundle.Manager != nil {
-		deps.Downloads = bundle.Manager
-	}
-	if bundle.Sync != nil {
-		deps.Sync = bundle.Sync
-	}
-	if bundle.Supervisor != nil {
-		sup := bundle.Supervisor
-		// LibraryStatus closure and supervisor are boot-bound: backend-mode changes are
-		// restart-only, so bundle is immutable after wiring. The unsynchronised
-		// bundle.Library read below is safe — the bundle is never mutated post-boot.
-		deps.LibraryStatus = func() (string, string) {
-			h := sup.Health()
-			if h == embedded.HealthExternal {
-				if bundle.Library != nil {
-					return "external", "ready"
-				}
-				return "external", "unconfigured"
-			}
-			return "built-in", string(h)
-		}
-	}
-	srv := api.NewServer(deps)
+	rt.StartBackground(ctx)
 
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	ln, err := net.Listen("tcp", addr)
@@ -296,10 +55,10 @@ func main() {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	go func() { <-sig; close(stop) }()
 
-	httpSrv := newHTTPServer(srv.Handler())
+	httpSrv := newHTTPServer(api.NewServer(rt.Deps).Handler())
 	if err := serveWithShutdown(httpSrv, ln, stop, func(ctx context.Context) error {
-		if bundle.Supervisor != nil {
-			return bundle.Supervisor.Shutdown(ctx)
+		if rt.Bundle.Supervisor != nil {
+			return rt.Bundle.Supervisor.Shutdown(ctx)
 		}
 		return nil
 	}); err != nil {

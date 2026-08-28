@@ -219,7 +219,7 @@ func TestBootStartsBundledNavidrome(t *testing.T) {
 	if os.Getenv("REVERB_NAVIDROME_BIN") == "" {
 		t.Skip("no bundled navidrome present — run desktop/tools/fetch-navidrome.sh")
 	}
-	if app.bundle.Supervisor == nil {
+	if app.runtime.Bundle.Supervisor == nil {
 		t.Fatal("boot did not build a navidrome supervisor")
 	}
 	app.StartServices()
@@ -236,13 +236,13 @@ func TestBootStartsBundledNavidrome(t *testing.T) {
 				// healthy child that Reverb believes is down still fails — but
 				// give its probe (every 500ms) time to observe what we just saw.
 				for time.Now().Before(deadline) {
-					if app.bundle.Supervisor.Ready() {
+					if app.runtime.Bundle.Supervisor.Ready() {
 						return
 					}
 					time.Sleep(250 * time.Millisecond)
 				}
 				t.Fatalf("navidrome answers on %s but the supervisor never left health %q",
-					base, app.bundle.Supervisor.Health())
+					base, app.runtime.Bundle.Supervisor.Health())
 			}
 			lastErr = fmt.Errorf("ping status %d", resp.StatusCode)
 		} else {

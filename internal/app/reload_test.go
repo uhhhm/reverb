@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -30,7 +30,7 @@ func TestResolverProvider_FollowsReload(t *testing.T) {
 	// A reloader whose successive Build()s yield bundles carrying M1 then M2.
 	bundles := []wiring.ServiceBundle{{Matcher: m1}, {Matcher: m2}}
 	var idx int
-	rl := newServiceReloaderFunc(func(context.Context) (wiring.ServiceBundle, error) {
+	rl := NewServiceReloaderFunc(func(context.Context) (wiring.ServiceBundle, error) {
 		b := bundles[idx]
 		idx++
 		return b, nil
@@ -42,8 +42,8 @@ func TestResolverProvider_FollowsReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rl.publishMatcher(boot.Matcher)
-	provider := rl.matcherProvider()
+	rl.PublishMatcher(boot.Matcher)
+	provider := rl.MatcherProvider()
 
 	if got := provider(); got != resolver.Rematcher(m1) {
 		t.Fatalf("provider() before reload = %v, want M1", got)
@@ -61,15 +61,15 @@ func TestResolverProvider_FollowsReload(t *testing.T) {
 // TestResolverProvider_NilMatcherIsSafe verifies the provider returns nil safely
 // when no library is configured (bundle.Matcher == nil), without panicking.
 func TestResolverProvider_NilMatcherIsSafe(t *testing.T) {
-	rl := newServiceReloaderFunc(func(context.Context) (wiring.ServiceBundle, error) {
+	rl := NewServiceReloaderFunc(func(context.Context) (wiring.ServiceBundle, error) {
 		return wiring.ServiceBundle{Matcher: nil}, nil
 	})
 	boot, err := rl.builder.Build(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	rl.publishMatcher(boot.Matcher)
-	provider := rl.matcherProvider()
+	rl.PublishMatcher(boot.Matcher)
+	provider := rl.MatcherProvider()
 
 	if got := provider(); got != nil {
 		t.Fatalf("provider() with no matcher = %v, want nil", got)
@@ -100,14 +100,14 @@ func TestResolverProviderSeam_P2ConstructionOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Step 1: create reloader (atomic holder + matcherProvider) BEFORE Build.
-	rl := newServiceReloaderFunc(func(context.Context) (wiring.ServiceBundle, error) {
+	// Step 1: create reloader (atomic holder + MatcherProvider) BEFORE Build.
+	rl := NewServiceReloaderFunc(func(context.Context) (wiring.ServiceBundle, error) {
 		return wiring.ServiceBundle{}, nil
 	})
 
 	// Step 2: construct the resolver singleton against the holder-backed provider.
 	// The holder is empty (no matcher published yet) — mirrors the P2 boot sequence.
-	resolverSvc := resolver.NewService(st.Q(), rl.matcherProvider(), time.Now)
+	resolverSvc := resolver.NewService(st.Q(), rl.MatcherProvider(), time.Now)
 
 	// Step 3: set the resolverProvider on the Builder BEFORE Build.
 	// resolverSvc is the singleton; the provider returns it every time.
@@ -155,10 +155,10 @@ func TestResolverProviderSeam_BuilderAcceptsProvider(t *testing.T) {
 	}
 
 	// Construct reloader + resolver before Build (P2 order).
-	rl := newServiceReloaderFunc(func(context.Context) (wiring.ServiceBundle, error) {
+	rl := NewServiceReloaderFunc(func(context.Context) (wiring.ServiceBundle, error) {
 		return wiring.ServiceBundle{}, nil
 	})
-	resolverSvc := resolver.NewService(st.Q(), rl.matcherProvider(), time.Now)
+	resolverSvc := resolver.NewService(st.Q(), rl.MatcherProvider(), time.Now)
 
 	// Build a minimal Builder (no registries wired — just verifying the seam compiles
 	// and that SetResolverProvider doesn't panic).
