@@ -248,3 +248,31 @@ describe('AudioEngine stream-error recovery', () => {
     expect(engine.getState().playing).toBe(true) // still playing (skipped to next)
   })
 })
+
+// The default resolver is what decides where audio comes from. A track carrying
+// externalStream isn't in the library, so the library stream endpoint (which
+// only knows library ids) would 404 — it must go to the external proxy instead.
+describe('AudioEngine default source resolution', () => {
+  function engineWithDefaultResolver() {
+    const audios: FakeAudio[] = []
+    const engine = new AudioEngine(() => {
+      const a = new FakeAudio()
+      audios.push(a)
+      return a
+    })
+    return { engine, audios }
+  }
+
+  it('streams a library track from the library endpoint', () => {
+    const { engine, audios } = engineWithDefaultResolver()
+    engine.playTrackList([track('lib-1')], 0)
+    expect(audios[0].src).toContain('/api/v1/stream/lib-1')
+  })
+
+  it('streams an external track from the external proxy', () => {
+    const { engine, audios } = engineWithDefaultResolver()
+    const t = { ...track('deezer:dz-1'), externalStream: { source: 'deezer', externalId: 'dz-1' } }
+    engine.playTrackList([t], 0)
+    expect(audios[0].src).toContain('/api/v1/external/stream/deezer/dz-1')
+  })
+})

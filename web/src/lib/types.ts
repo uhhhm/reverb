@@ -14,6 +14,12 @@ export interface Track {
   contentType: string
   isrc?: string
   artistExternalId?: string
+  /**
+   * Set only for a search result that is not in the library. The player streams
+   * it from the source instead of the library, so it plays without being
+   * downloaded — id is then a display key, not a library track id.
+   */
+  externalStream?: { source: string; externalId: string }
 }
 
 export interface Album {

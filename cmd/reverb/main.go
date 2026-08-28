@@ -21,6 +21,7 @@ import (
 	"github.com/uhhhm/reverb/internal/download/spotdl"
 	"github.com/uhhhm/reverb/internal/download/ytdlp"
 	"github.com/uhhhm/reverb/internal/events"
+	"github.com/uhhhm/reverb/internal/extstream"
 	"github.com/uhhhm/reverb/internal/library/embedded"
 	"github.com/uhhhm/reverb/internal/library/lyrics"
 	"github.com/uhhhm/reverb/internal/library/subsonic"
@@ -145,6 +146,20 @@ func main() {
 	// live-matcher holder so the resolver singleton sees it on its first call.
 	// Matches the pre-P2 behaviour (publishMatcher was called here before the reorder).
 	reloader.publishMatcher(bundle.Matcher)
+	if bundle.Aggregator != nil {
+		reloader.publishTrackLookup(bundle.Aggregator)
+	}
+
+	// External streaming: play a search result that is not in the library without
+	// downloading it. Reads the LIVE aggregator (see trackLookupProvider) so it
+	// survives adapter hot-reloads, and shares yt-dlp's binary path and cookies
+	// with the downloader — cookies are what get the resolve past YouTube's bot
+	// checks.
+	extStream := extstream.New(
+		providerLookup{get: reloader.trackLookupProvider()},
+		extstream.WithBinary(os.Getenv("REVERB_YTDLP_PATH")),
+		extstream.WithCookiesFile(existingPath(ytdlpCookiesPath())),
+	)
 
 	// Start the bundled-library supervisor (no-op in external mode).
 	if bundle.Supervisor != nil {
@@ -194,25 +209,26 @@ func main() {
 	go scrobbleSvc.RunWorker(ctx, 30*time.Second)
 
 	deps := api.Deps{
-		Auth:          authSvc,
-		Library:       bundle.Library,
-		Lib:           libraryReg,
-		Search:        searchReg,
-		Downloader:    downloaderReg,
-		Adapters:      st.Q(),
-		PlaylistOwner: st.Q(),
-		Events:        bus,
-		ConfigDirty:   dirty,
-		Reload:        reloader,
-		Dev:           cfg.Dev,
-		Version:       version,
-		UpdateRepo:    cfg.UpdateRepo,
-		DataDir:       filepath.Dir(cfg.DBPath),
-		Resolver:      resolverSvc,
-		Overrides:     override.New(st.Q()),
-		Play:          playSvc,
-		Stats:         statsSvc,
-		Scrobble:      scrobbleSvc,
+		Auth:           authSvc,
+		Library:        bundle.Library,
+		Lib:            libraryReg,
+		Search:         searchReg,
+		Downloader:     downloaderReg,
+		Adapters:       st.Q(),
+		PlaylistOwner:  st.Q(),
+		Events:         bus,
+		ConfigDirty:    dirty,
+		Reload:         reloader,
+		Dev:            cfg.Dev,
+		Version:        version,
+		UpdateRepo:     cfg.UpdateRepo,
+		DataDir:        filepath.Dir(cfg.DBPath),
+		Resolver:       resolverSvc,
+		ExternalStream: extStream,
+		Overrides:      override.New(st.Q()),
+		Play:           playSvc,
+		Stats:          statsSvc,
+		Scrobble:       scrobbleSvc,
 		Lyrics: &lyrics.Service{
 			Store: st.Q(),
 			Client: &lyrics.LRCLibClient{

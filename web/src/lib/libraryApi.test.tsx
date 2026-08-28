@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { coverUrl, streamUrl, trackCoverUrl, useLibrarySearch } from './libraryApi'
+import { coverUrl, externalStreamUrl, streamUrl, trackCoverUrl, useLibrarySearch } from './libraryApi'
 
 describe('url builders', () => {
   it('builds stream and cover urls', () => {
@@ -51,5 +51,14 @@ describe('useLibrarySearch', () => {
     const { result } = renderHook(() => useLibrarySearch('hello'), { wrapper })
     await waitFor(() => expect(result.current.isSuccess).toBe(true))
     expect(result.current.data?.tracks[0].title).toBe('Song')
+  })
+})
+
+describe('externalStreamUrl', () => {
+  // Playing an un-owned result goes to the external proxy, never the library
+  // stream endpoint — that endpoint only knows library track ids.
+  it('points at the external proxy and escapes both segments', () => {
+    expect(externalStreamUrl('deezer', 'dz 1/2')).toContain('/api/v1/external/stream/deezer/dz%201%2F2')
+    expect(externalStreamUrl('deezer', '1')).not.toContain('/api/v1/stream/')
   })
 })

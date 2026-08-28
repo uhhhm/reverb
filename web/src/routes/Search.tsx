@@ -3,9 +3,8 @@ import { useLibrarySearch } from '../lib/libraryApi'
 import { dedupKey, useEverywhere } from '../lib/everywhereStore'
 import { usePlayer } from '../lib/playerStore'
 import { useSearch } from '../lib/searchStore'
-import { postDownload, reqFromResult } from '../lib/downloadApi'
+import { postDownload } from '../lib/downloadApi'
 import { useDownloads } from '../lib/downloadStore'
-import { useToastStore } from '../lib/toastStore'
 import { DownloadAction } from '../components/download/DownloadAction'
 import { useState } from 'react'
 import {
@@ -22,7 +21,6 @@ import type { SourceStatus } from '../lib/everywhereStore'
 import type { ExternalResult, EnvelopeStatus, Track } from '../lib/types'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
 import { useDebouncedValue } from '../lib/useDebouncedValue'
-import { usePendingPlay } from '../lib/pendingPlayStore'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -269,6 +267,9 @@ export default function Search() {
                   suffix: '',
                   contentType: '',
                   isrc: r.isrc,
+                  // Not in the library: play it straight from the source instead
+                  // of downloading it first.
+                  externalStream: { source: r.source, externalId: r.externalId },
                 }
 
                 // For non-library results, link artist/album to external pages if IDs are present.
@@ -303,25 +304,10 @@ export default function Search() {
                     artistNode={artistNode}
                     albumNode={albumNode}
                     onPlay={() => {
-                      if (syntheticTrack) {
-                        playTrackList([syntheticTrack], 0)
-                      } else {
-                        // Not in your library yet — clicking the song downloads it
-                        // (server picks the downloader via the fallback chain).
-                        const wasPlaying = usePlayer.getState().current !== null
-                        postDownload({ ...reqFromResult(r), playWhenReady: true })
-                          .then((j) => {
-                            useDownloads.getState().upsert(j)
-                            usePendingPlay.getState().begin({ jobId: j.id, title: r.title, artist: r.artist, coverArtId: r.coverArtId })
-                            // The pending-play indicator in PlayerBar only shows when
-                            // nothing is playing — if the user is mid-listen, a toast
-                            // is their only feedback that the download was queued.
-                            if (wasPlaying) {
-                              useToastStore.getState().push(`Downloading "${r.title}" — it'll be added to your queue`, 'info')
-                            }
-                          })
-                          .catch(() => {})
-                      }
+                      // A result that isn't in the library streams from the source
+                      // (displayTrack carries externalStream). Playing never
+                      // downloads — Download is the only thing that adds a track.
+                      playTrackList([syntheticTrack ?? displayTrack], 0)
                     }}
                     right={
                       <DownloadAction

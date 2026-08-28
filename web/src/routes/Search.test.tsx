@@ -156,6 +156,57 @@ describe('Search (blended results)', () => {
     vi.unstubAllGlobals()
   })
 
+  // Playing and adding to the library are separate actions: double-clicking a
+  // result that isn't in the library streams it from the source and must not
+  // enqueue a download. Only the Download button adds a track.
+  it('streams an external result on play without downloading it', async () => {
+    let inst: { onmessage: ((ev: { data: string }) => void) | null; onerror: (() => void) | null; close(): void } | null = null
+    class StubES {
+      onmessage: ((ev: { data: string }) => void) | null = null
+      onerror: (() => void) | null = null
+      constructor() { inst = this }
+      close() {}
+    }
+    vi.stubGlobal('EventSource', StubES as unknown as typeof EventSource)
+    postDownloadMock.mockClear()
+    const spy = vi.spyOn(engine, 'playTrackList').mockImplementation(() => {})
+
+    render(wrap(<Search />))
+    fireEvent.change(screen.getByPlaceholderText(/search your library/i), { target: { value: 'found' } })
+    await waitFor(() => expect(inst).not.toBeNull())
+    act(() => {
+      inst!.onmessage?.({
+        data: JSON.stringify({
+          source: 'deezer',
+          status: 'ok',
+          results: [
+            {
+              source: 'deezer',
+              externalId: 'dz-1',
+              title: 'External Only Song',
+              artist: 'B',
+              album: 'B',
+              durationMs: 200000,
+              type: 'track',
+              match: { status: 'not_in_library', libraryTrackId: '', method: 'none', confidence: 0 },
+            },
+          ],
+        }),
+      })
+    })
+    await waitFor(() => expect(screen.getByText('External Only Song')).toBeInTheDocument())
+
+    fireEvent.doubleClick(screen.getByText('External Only Song'))
+
+    expect(postDownloadMock).not.toHaveBeenCalled()
+    expect(spy).toHaveBeenCalledOnce()
+    const [tracks] = spy.mock.calls[0] as [Array<{ externalStream?: { source: string; externalId: string } }>, number]
+    expect(tracks[0].externalStream).toEqual({ source: 'deezer', externalId: 'dz-1' })
+
+    spy.mockRestore()
+    vi.unstubAllGlobals()
+  })
+
   it('does not show "No tracks found." when the library has songs and external has none', async () => {
     let inst: { onmessage: ((ev: { data: string }) => void) | null; onerror: (() => void) | null; close(): void } | null = null
     class StubES {

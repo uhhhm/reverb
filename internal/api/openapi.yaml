@@ -196,6 +196,20 @@ paths:
       summary: Stream/transcode-proxy a library track by id (Range supported)
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses: { "200": { description: audio bytes }, "206": { description: partial content }, "404": { description: not found } }
+  /external/stream/{source}/{id}:
+    get:
+      summary: >
+        Stream a search result that is not in the library, without downloading it
+        (Range supported). Writes no file, creates no download job, and triggers
+        no library scan.
+      parameters:
+        - { name: source, in: path, required: true, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: audio bytes }
+        "206": { description: partial content }
+        "502": { description: could not resolve a playable source }
+        "503": { description: external streaming unavailable (no search source configured) }
   /cover/{id}:
     get:
       summary: Cover art proxy by id

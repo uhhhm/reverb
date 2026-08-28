@@ -26,6 +26,11 @@ export function streamUrl(id: string): string {
   return `${mediaBase()}/api/v1/stream/${encodeURIComponent(id)}`
 }
 
+/** Streams a track that is not in the library, without downloading it. */
+export function externalStreamUrl(source: string, externalId: string): string {
+  return `${mediaBase()}/api/v1/external/stream/${encodeURIComponent(source)}/${encodeURIComponent(externalId)}`
+}
+
 // Task 9 Part A — DEFERRED to SP3:
 // coverUrl(id) already accepts a canonical id in its path (no change needed for P1).
 // A `?v=<libraryVersion>` cache-bust has no consumer in P1: live views use backend ids that

@@ -4,7 +4,13 @@ import (
 	"context"
 	"sync/atomic"
 
+	"fmt"
+	"os"
+	"path/filepath"
+
 	"github.com/uhhhm/reverb/internal/api"
+	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/extstream"
 	"github.com/uhhhm/reverb/internal/library"
 	"github.com/uhhhm/reverb/internal/resolver"
 	"github.com/uhhhm/reverb/internal/wiring"
@@ -14,6 +20,11 @@ import (
 // (atomic.Pointer needs a concrete pointee). The wrapped matcher may be nil when no
 // library is configured.
 type matcherHolder struct{ m resolver.Rematcher }
+
+// lookupHolder wraps an extstream.TrackLookup for the same reason matcherHolder
+// wraps a Rematcher: atomic.Pointer needs a concrete type, and the held value
+// may legitimately be nil (no search source configured).
+type lookupHolder struct{ l extstream.TrackLookup }
 
 // bundleBuilder is the seam serviceReloader builds a fresh ServiceBundle through.
 // *wiring.Builder satisfies it; tests inject a stub to drive successive matchers.
@@ -36,6 +47,10 @@ type serviceReloader struct {
 	// matcher and never a stale captured one. Holds a *matcherHolder whose .m may be
 	// nil (no library) — the provider tolerates that.
 	liveMatcher atomic.Pointer[matcherHolder]
+	// liveLookup is the same arrangement for the search aggregator, read by the
+	// external-stream service so playing an un-owned track resolves against the
+	// CURRENT search adapters rather than the ones present at boot.
+	liveLookup atomic.Pointer[lookupHolder]
 }
 
 var _ api.ServiceReloader = (*serviceReloader)(nil)
@@ -77,6 +92,25 @@ func (r *serviceReloader) matcherProvider() func() resolver.Rematcher {
 	}
 }
 
+// publishTrackLookup installs l as the current live search lookup. Called once at
+// boot and again after every rebuild. l may be nil.
+func (r *serviceReloader) publishTrackLookup(l extstream.TrackLookup) {
+	r.liveLookup.Store(&lookupHolder{l: l})
+}
+
+// trackLookupProvider returns a func reading the current live lookup, so the
+// long-lived external-stream service follows hot-reloads instead of capturing a
+// stale aggregator. Returns nil safely before any publish.
+func (r *serviceReloader) trackLookupProvider() func() extstream.TrackLookup {
+	return func() extstream.TrackLookup {
+		h := r.liveLookup.Load()
+		if h == nil {
+			return nil
+		}
+		return h.l
+	}
+}
+
 func (r *serviceReloader) Reload(ctx context.Context) (library.LibraryAdapter, api.Streamer, api.CoverageService, api.DownloadManager, api.SyncService, error) {
 	bundle, err := r.builder.Build(ctx)
 	if err != nil {
@@ -86,6 +120,12 @@ func (r *serviceReloader) Reload(ctx context.Context) (library.LibraryAdapter, a
 	// Publish the freshly-built matcher (may be nil) so the resolver singleton
 	// re-matches against the live adapter rather than the one it was wired with.
 	r.publishMatcher(bundle.Matcher)
+	// Same for the search aggregator (may be nil when no search source is on).
+	if bundle.Aggregator != nil {
+		r.publishTrackLookup(bundle.Aggregator)
+	} else {
+		r.publishTrackLookup(nil)
+	}
 
 	// LibraryAdapter is itself an interface; a nil bundle.Library is a usable nil
 	// interface and the libraryReady guard handles it.
@@ -115,4 +155,39 @@ func (r *serviceReloader) Reload(ctx context.Context) (library.LibraryAdapter, a
 	}
 
 	return lib, srch, cov, dl, snc, nil
+}
+
+// providerLookup adapts a live-lookup provider to extstream.TrackLookup, so the
+// long-lived stream service never captures a specific aggregator.
+type providerLookup struct{ get func() extstream.TrackLookup }
+
+func (p providerLookup) GetTrack(ctx context.Context, source, externalID string) (core.ExternalResult, error) {
+	l := p.get()
+	if l == nil {
+		return core.ExternalResult{}, fmt.Errorf("no search source configured")
+	}
+	return l.GetTrack(ctx, source, externalID)
+}
+
+// ytdlpCookiesPath is where the yt-dlp adapter writes the operator's cookies.txt.
+// The stream resolver reuses that same file rather than asking for it twice.
+func ytdlpCookiesPath() string {
+	cfg, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(cfg, "yt-dlp", "cookies.txt")
+}
+
+// existingPath returns path if it exists, else "" — the stream resolver treats an
+// absent cookies file as "no cookies configured" rather than passing yt-dlp a
+// path it will reject.
+func existingPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	return path
 }

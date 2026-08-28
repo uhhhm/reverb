@@ -138,6 +138,10 @@ type Deps struct {
 	// the LIVE matcher, so it survives adapter hot-reloads (the matcher is rebuilt
 	// on each reload). Nil in tests/legacy that don't use the addressing boundary.
 	Resolver Resolver
+	// ExternalStream resolves and proxies audio for a search result that is not
+	// in the library, so it can be played without being downloaded. Nil when no
+	// search source is configured — the endpoint then reports unavailable.
+	ExternalStream ExternalStreamResolver
 	// Overrides applies user-supplied track renames on read and records them on
 	// write. Nil disables renaming (handlers return 503).
 	Overrides *override.Service
@@ -295,6 +299,7 @@ func (s *Server) routes() {
 			pr.Get("/library/track/{id}/lyrics", s.handleTrackLyrics)
 			pr.Get("/collection", s.handleCollection)
 			pr.Get("/stream/{id}", s.handleStream)
+			pr.Get("/external/stream/{source}/{id}", s.handleExternalStream)
 			pr.Get("/cover/{id}", s.handleCover)
 			pr.Get("/search/everywhere", s.handleEverywhere)
 			pr.Get("/artist/{source}/{id}", s.handleArtistDetail)
