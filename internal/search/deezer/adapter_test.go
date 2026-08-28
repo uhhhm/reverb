@@ -18,6 +18,14 @@ const trackJSON = `{"id": 3135556, "title": "Harder, Better, Faster, Stronger",
   "album": {"id": 302127, "title": "Discovery",
     "cover_medium": "https://cdn.example/m.jpg", "cover_big": "https://cdn.example/b.jpg"}}`
 
+// Deezer returns an ISRC from /track/{id} but not from /search/track, so the
+// detail fixture carries one and trackJSON deliberately does not.
+const trackDetailJSON = `{"id": 3135556, "title": "Harder, Better, Faster, Stronger",
+  "duration": 224, "isrc": "GBDUW0000059",
+  "artist": {"id": 27, "name": "Daft Punk"},
+  "album": {"id": 302127, "title": "Discovery",
+    "cover_medium": "https://cdn.example/m.jpg", "cover_big": "https://cdn.example/b.jpg"}}`
+
 func fixtureServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -34,7 +42,7 @@ func fixtureServer(t *testing.T) *httptest.Server {
 			"picture_medium": "https://cdn.example/a.jpg"}]}`))
 	})
 	mux.HandleFunc("/track/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(trackJSON))
+		w.Write([]byte(trackDetailJSON))
 	})
 	mux.HandleFunc("/artist/", func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/albums") {
@@ -171,5 +179,27 @@ func TestTestConnection(t *testing.T) {
 	uninit := deezer.New()
 	if err := uninit.TestConnection(context.Background()); err == nil {
 		t.Fatal("expected error on uninitialized adapter")
+	}
+}
+
+// The ISRC is what lets a download skip spotDL's ~28s fuzzy text search (and
+// lets library matching key off an identifier instead of fuzzy metadata). It is
+// absent from search payloads and present on /track/{id}, so only GetTrack fills
+// it in — dropping it on the floor there is the whole cost.
+func TestGetTrackCarriesISRC(t *testing.T) {
+	a := newAdapter(t)
+	track, err := a.GetTrack(context.Background(), "3135556")
+	if err != nil {
+		t.Fatalf("GetTrack: %v", err)
+	}
+	if track.ISRC != "GBDUW0000059" {
+		t.Errorf("ISRC = %q, want GBDUW0000059", track.ISRC)
+	}
+	res, err := a.Search(context.Background(), "daft punk", core.EntityTrack)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res) == 0 || res[0].ISRC != "" {
+		t.Errorf("search results carry no ISRC; got %+v", res)
 	}
 }

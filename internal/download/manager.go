@@ -116,6 +116,18 @@ type PlaylistAdder interface {
 	AddTracksToPlaylist(ctx context.Context, playlistID string, trackIDs []string) error
 }
 
+// TrackEnricher fetches a durable source track by id. *search.Aggregator fits.
+// Used at enqueue only, to recover an ISRC the search payload omitted; may be
+// nil when no search source is configured.
+type TrackEnricher interface {
+	GetTrack(ctx context.Context, source, externalID string) (core.ExternalResult, error)
+}
+
+// enrichTimeout bounds the enqueue-time ISRC lookup. Enqueue is on the request
+// path, and the lookup is an optimisation — a slow source must not hold up
+// queueing the job.
+const enrichTimeout = 5 * time.Second
+
 // Config tunes the Manager. Zero values are replaced with safe defaults.
 type Config struct {
 	Workers        int
@@ -216,6 +228,7 @@ type Manager struct {
 	resolve         func() BindingResolver                  // optional provider; Tasks 3-5 add call sites
 	canonicalMinter CanonicalMinter                         // optional; mints catalog IDs at link time (Task 3)
 	qualityFn       func(context.Context) core.AudioQuality // optional; supplies the configured default tier
+	trackEnricher   TrackEnricher                           // optional; recovers a missing ISRC at enqueue
 
 	queue chan string // job IDs to process
 
@@ -304,6 +317,36 @@ func (m *Manager) resolveQuality(ctx context.Context, q core.AudioQuality) core.
 // before Build runs. Nil-safe: if never called, minting is silently skipped.
 func (m *Manager) SetCanonicalMinter(minter CanonicalMinter) {
 	m.canonicalMinter = minter
+}
+
+// SetTrackEnricher injects the search-side track lookup after construction (the
+// aggregator is built alongside the manager at the composition root). Nil-safe:
+// if never called, enrichment is silently skipped.
+func (m *Manager) SetTrackEnricher(e TrackEnricher) {
+	m.trackEnricher = e
+}
+
+// enrichISRC fills in an ISRC the search payload omitted — Deezer returns one
+// from /track/{id} but never from /search/track, so every Deezer download would
+// otherwise reach spotDL as a fuzzy text query (~28s of guessing that an "isrc:"
+// lookup does exactly). The ISRC also lands on the job row, where the
+// post-download rematcher uses it instead of fuzzy metadata.
+//
+// Best-effort throughout: a nil enricher, an error, or a source with no ISRC all
+// leave req unchanged rather than failing the enqueue.
+func (m *Manager) enrichISRC(ctx context.Context, req core.DownloadRequest) core.DownloadRequest {
+	if m.trackEnricher == nil || req.ISRC != "" || req.Source == "" || req.ExternalID == "" {
+		return req
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, enrichTimeout)
+	defer cancel()
+	res, err := m.trackEnricher.GetTrack(lookupCtx, req.Source, req.ExternalID)
+	if err != nil {
+		log.Printf("download: ISRC lookup for %s:%s failed (continuing without): %v", req.Source, req.ExternalID, err)
+		return req
+	}
+	req.ISRC = res.ISRC
+	return req
 }
 
 // mintAndStoreCanonicalID mints (or resolves) a catalog entity id for job j and
@@ -750,6 +793,9 @@ func (m *Manager) pickAfter(ctx context.Context, req core.DownloadRequest, after
 // return the single existing job.
 func (m *Manager) Enqueue(ctx context.Context, req core.DownloadRequest) (core.DownloadJob, error) {
 	req.Quality = m.resolveQuality(ctx, req.Quality)
+	// Before DedupKey purely for readability — DedupKey does not read ISRC, so
+	// enrichment cannot shift a job onto a different key.
+	req = m.enrichISRC(ctx, req)
 	dedup := DedupKey(req)
 
 	// Serialize the dedup-check + insert so two same-key callers can't both create.

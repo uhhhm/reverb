@@ -3530,3 +3530,73 @@ func TestEnqueueChapterSplitCreatesJobPerChapter(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+// fakeEnricher records lookups and answers from a fixed table.
+type fakeEnricher struct {
+	isrc  map[string]string
+	err   error
+	calls int
+}
+
+func (f *fakeEnricher) GetTrack(_ context.Context, source, id string) (core.ExternalResult, error) {
+	f.calls++
+	if f.err != nil {
+		return core.ExternalResult{}, f.err
+	}
+	return core.ExternalResult{Source: source, ExternalID: id, ISRC: f.isrc[source+":"+id]}, nil
+}
+
+// Deezer search payloads carry no ISRC, so without enrichment a Deezer download
+// reaches spotDL as a fuzzy "<artist> - <title>" query — ~28s of guessing that an
+// isrc: lookup does exactly. One /track/{id} call at enqueue buys that, and the
+// ISRC lands on the job row where the post-download rematcher reads it too.
+func TestEnqueueEnrichesMissingISRC(t *testing.T) {
+	store := newMemStore()
+	m := NewManager(Config{}, wrapDownloaders([]Downloader{&fakeDL{name: "dl", canDownload: true}}), store, events.New(), &fakeScanner{}, nil, nil, RealClock{}, nil, nil)
+	enr := &fakeEnricher{isrc: map[string]string{"deezer:123": "GBDUW0000059"}}
+	m.SetTrackEnricher(enr)
+
+	job, err := m.Enqueue(context.Background(), core.DownloadRequest{Source: "deezer", ExternalID: "123", Artist: "A", Title: "T"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.ISRC != "GBDUW0000059" {
+		t.Fatalf("job ISRC = %q, want it enriched onto the row", job.ISRC)
+	}
+}
+
+// An ISRC we already have needs no network call, and enrichment must never
+// overwrite one the caller supplied.
+func TestEnqueueSkipsEnrichmentWhenISRCPresent(t *testing.T) {
+	store := newMemStore()
+	m := NewManager(Config{}, wrapDownloaders([]Downloader{&fakeDL{name: "dl", canDownload: true}}), store, events.New(), &fakeScanner{}, nil, nil, RealClock{}, nil, nil)
+	enr := &fakeEnricher{isrc: map[string]string{"deezer:123": "OTHER0000000"}}
+	m.SetTrackEnricher(enr)
+
+	job, err := m.Enqueue(context.Background(), core.DownloadRequest{Source: "deezer", ExternalID: "123", Artist: "A", Title: "T", ISRC: "GBDUW0000059"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.ISRC != "GBDUW0000059" {
+		t.Fatalf("job ISRC = %q, want the caller's value untouched", job.ISRC)
+	}
+	if enr.calls != 0 {
+		t.Fatalf("enricher called %d times, want 0", enr.calls)
+	}
+}
+
+// Enrichment is an optimisation. A search source that is down, rate-limited, or
+// simply has no ISRC must not stop the download from being queued.
+func TestEnqueueSurvivesEnricherFailure(t *testing.T) {
+	store := newMemStore()
+	m := NewManager(Config{}, wrapDownloaders([]Downloader{&fakeDL{name: "dl", canDownload: true}}), store, events.New(), &fakeScanner{}, nil, nil, RealClock{}, nil, nil)
+	m.SetTrackEnricher(&fakeEnricher{err: errors.New("deezer down")})
+
+	job, err := m.Enqueue(context.Background(), core.DownloadRequest{Source: "deezer", ExternalID: "123", Artist: "A", Title: "T"})
+	if err != nil {
+		t.Fatalf("enricher failure must not fail the enqueue: %v", err)
+	}
+	if job.ISRC != "" {
+		t.Fatalf("job ISRC = %q, want empty", job.ISRC)
+	}
+}

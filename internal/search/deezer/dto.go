@@ -15,11 +15,13 @@ type albumRefDTO struct {
 }
 
 type trackDTO struct {
-	ID       int64        `json:"id"`
-	Title    string       `json:"title"`
-	Duration int          `json:"duration"` // seconds
-	Artist   artistRefDTO `json:"artist"`
-	Album    albumRefDTO  `json:"album"`
+	ID       int64  `json:"id"`
+	Title    string `json:"title"`
+	Duration int    `json:"duration"` // seconds
+	// Isrc is returned by /track/{id} only — search and album payloads omit it.
+	Isrc   string       `json:"isrc"`
+	Artist artistRefDTO `json:"artist"`
+	Album  albumRefDTO  `json:"album"`
 }
 
 type albumSearchDTO struct {

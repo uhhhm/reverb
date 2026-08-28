@@ -783,6 +783,12 @@ func (b *Builder) Build(ctx context.Context) (ServiceBundle, error) {
 			}
 			return core.ParseAudioQuality(v, core.DefaultAudioQuality)
 		})
+		// Recovers an ISRC that search payloads omit (Deezer returns one only from
+		// /track/{id}), which lets spotDL do one exact "isrc:" lookup instead of a
+		// fuzzy text search, and gives the rematcher an identifier to key on.
+		if bundle.Aggregator != nil {
+			bundle.Manager.SetTrackEnricher(bundle.Aggregator)
+		}
 		log.Printf("download manager active: %d downloader(s)", len(downloaders))
 	} else if len(downloaders) > 0 {
 		log.Printf("WARNING: downloaders configured but no library adapter — download manager disabled")

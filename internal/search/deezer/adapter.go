@@ -87,8 +87,10 @@ func yearFromReleaseDate(s string) int {
 	return 0
 }
 
-// mapTrack converts a Deezer track. ISRC is absent from Deezer search/album
-// payloads, so it stays empty — library matching falls back to metadata.
+// mapTrack converts a Deezer track. ISRC is present only on /track/{id}
+// payloads; on search/album rows it stays empty and matching falls back to
+// metadata. Callers that need it (the download path, to skip spotDL's fuzzy
+// text search) enrich via GetTrack.
 func mapTrack(t trackDTO) core.ExternalResult {
 	cover := t.Album.CoverBig
 	if cover == "" {
@@ -101,6 +103,7 @@ func mapTrack(t trackDTO) core.ExternalResult {
 		Artist:           t.Artist.Name,
 		Album:            t.Album.Title,
 		DurationMs:       t.Duration * 1000,
+		ISRC:             t.Isrc,
 		CoverURL:         cover,
 		Type:             core.EntityTrack,
 		ArtistExternalID: id64(t.Artist.ID),
