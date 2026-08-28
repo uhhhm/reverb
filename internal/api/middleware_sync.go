@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"net"
 	"net/http"
 	"strings"
 
@@ -29,13 +30,18 @@ func (s *Server) authenticateSync(r *http.Request) (string, error) {
 		}
 		return dev.ID, nil
 	}
-	// No Bearer token: allow server-device fallback only for locally-
-	// authenticated requests. The browser UI is implicitly the household owner, so
-	// every request that passes requireAuth has LocalUser in context, while
-	// anonymous requests outside that group have none. Checking
-	// currentUser (not raw Cookie existence) fixes fresh installs that
-	// never set reverb_session and prevents bypass via Cookie: reverb_session=anything.
+	// No Bearer token: fall back to the server device only for a request that
+	// arrived over loopback. The browser UI is implicitly the household owner, so
+	// requireAuth puts LocalUser in the context of every request it wraps -- that
+	// alone proves nothing about who sent it. The server binds 0.0.0.0 by default,
+	// so without the transport check any host on the network could author sync
+	// changes as the server device with no pairing token at all. Loopback keeps
+	// the built-in UI (desktop and locally-browsed server) working unpaired while
+	// remote paired devices must present a Bearer sync token.
 	if _, ok := currentUser(r); !ok {
+		return "", sync.ErrInvalidToken
+	}
+	if !isLoopbackRequest(r) {
 		return "", sync.ErrInvalidToken
 	}
 	id, err := s.syncServerDeviceID(r.Context())
@@ -43,6 +49,25 @@ func (s *Server) authenticateSync(r *http.Request) (string, error) {
 		return "", err
 	}
 	return id, nil
+}
+
+// isLoopbackRequest reports whether the request came from the local machine.
+// It reads the transport peer address only: X-Forwarded-For and friends are
+// attacker-controlled, so trusting them here would reopen the bypass.
+func isLoopbackRequest(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if host == "" {
+		return false
+	}
+	// A unix-socket or in-process listener reports no usable peer address.
+	if host == "@" || strings.HasPrefix(host, "/") {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }
 
 func (s *Server) syncServerDeviceID(ctx context.Context) (string, error) {

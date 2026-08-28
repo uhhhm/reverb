@@ -88,3 +88,38 @@ func (s *SyncStore) VerifyChangeAuthorship(ctx context.Context, ch SyncChange) e
 	}
 	return VerifyChange(pub, ch.Sig, ch.DeviceID, ch.EntityType, ch.EntityID, ch.Field, valueJSON, ch.UpdatedAt, ch.HLC, ch.Seq)
 }
+
+// AuthorizeInbound splits changes submitted by senderDeviceID into those the
+// sender is entitled to deliver and those it is not.
+//
+// A change the sender authored itself is accepted on the strength of the
+// authenticated transport. A change naming any other author is accepted only if
+// it carries a valid signature from that author, which is what makes relayed
+// sync safe: the sender never has to be trusted to speak for the author.
+//
+// A self-authored change whose signature does not verify is refused, because it
+// would be stored as-is and fail verification on the next hop. The one
+// exception is a missing verification key, which is expected before the
+// author's key has propagated.
+func (s *SyncStore) AuthorizeInbound(ctx context.Context, senderDeviceID string, in []SyncChange) (authorized, refused []SyncChange) {
+	authorized = make([]SyncChange, 0, len(in))
+	for _, ch := range in {
+		if ch.DeviceID == "" || ch.DeviceID == senderDeviceID {
+			ch.DeviceID = senderDeviceID
+			if ch.Sig != "" {
+				if err := s.VerifyChangeAuthorship(ctx, ch); err != nil && !errors.Is(err, ErrNoAuthorKey) {
+					refused = append(refused, ch)
+					continue
+				}
+			}
+			authorized = append(authorized, ch)
+			continue
+		}
+		if err := s.VerifyChangeAuthorship(ctx, ch); err != nil {
+			refused = append(refused, ch)
+			continue
+		}
+		authorized = append(authorized, ch)
+	}
+	return authorized, refused
+}

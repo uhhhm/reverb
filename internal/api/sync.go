@@ -44,18 +44,26 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	if req.Changes == nil {
 		req.Changes = []sync.SyncChange{}
 	}
+	// Gate authorship the same way the P2P handler does. Reconcile stores each
+	// change under the deviceId the body names, so without this a caller could
+	// author changes as any other device -- forging tombstones and field edits
+	// that win conflict resolution and replicate to every peer.
+	submitted := len(req.Changes)
+	var unauthorized []sync.SyncChange
+	req.Changes, unauthorized = s.deps.SyncStore.AuthorizeInbound(r.Context(), deviceID, req.Changes)
 	outbound, newRev, rejected, err := s.deps.SyncStore.Reconcile(r.Context(), deviceID, req.SinceRevision, req.Changes)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	rejected = append(rejected, unauthorized...)
 	if outbound == nil {
 		outbound = []sync.SyncChange{}
 	}
 	if rejected == nil {
 		rejected = []sync.SyncChange{}
 	}
-	accepted := len(req.Changes) - len(rejected)
+	accepted := submitted - len(rejected)
 	if accepted < 0 {
 		accepted = 0
 	}

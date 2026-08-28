@@ -81,6 +81,8 @@ func doSync(t *testing.T, srv *Server, token string, since int64, changes []sync
 		httpReq.Header.Set("Authorization", "Bearer "+token)
 	} else {
 		httpReq.AddCookie(&http.Cookie{Name: "reverb_session", Value: "test"})
+		// The tokenless server-device fallback is loopback-only.
+		httpReq.RemoteAddr = "127.0.0.1:54321"
 	}
 	srv.Handler().ServeHTTP(rec, httpReq)
 	var resp syncpkg.SyncResponse
@@ -98,6 +100,8 @@ func doSyncStatus(t *testing.T, srv *Server, token string) *httptest.ResponseRec
 		req.Header.Set("Authorization", "Bearer "+token)
 	} else {
 		req.AddCookie(&http.Cookie{Name: "reverb_session", Value: "test"})
+		// The tokenless server-device fallback is loopback-only.
+		req.RemoteAddr = "127.0.0.1:54321"
 	}
 	srv.Handler().ServeHTTP(rec, req)
 	return rec
@@ -404,3 +408,91 @@ func TestSyncAPI(t *testing.T) {
 
 // helpers for sync tests that need db import to avoid unused
 var _ db.Device
+
+// TestSyncRemoteFallbackRejected covers the tokenless server-device fallback
+// being loopback-only. requireAuth injects the local user into every request,
+// so before this gate any host on the network could author sync changes as the
+// server device with no pairing token at all.
+func TestSyncRemoteFallbackRejected(t *testing.T) {
+	srv, st, serverID := newSyncTestServer(t)
+	changes := []syncpkg.SyncChange{{EntityType: "track", EntityID: "tRemote", Field: "title", Value: "pwned", UpdatedAt: 2000}}
+	body, _ := json.Marshal(syncpkg.SyncRequest{SinceRevision: 0, Changes: changes})
+
+	for _, remote := range []string{"192.168.1.50:44444", "10.0.0.7:1234", "[2001:db8::1]:443"} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(&http.Cookie{Name: "reverb_session", Value: "test"})
+		req.RemoteAddr = remote
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("tokenless sync from %s = %d, want 401", remote, rec.Code)
+		}
+	}
+
+	// A forged X-Forwarded-For must not buy loopback treatment.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-For", "127.0.0.1")
+	req.AddCookie(&http.Cookie{Name: "reverb_session", Value: "test"})
+	req.RemoteAddr = "192.168.1.50:44444"
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("spoofed X-Forwarded-For = %d, want 401", rec.Code)
+	}
+
+	latest, err := syncpkg.NewSyncStore(st.Q()).GetLatestForField(context.Background(), "track", "tRemote", "title")
+	if err != nil {
+		t.Fatalf("GetLatest: %v", err)
+	}
+	if latest != nil {
+		t.Fatalf("remote caller wrote a change as %v (server device %v)", latest.DeviceID, serverID)
+	}
+
+	// Loopback still works, so the built-in UI is unaffected.
+	if code, _ := doSync(t, srv, "", 0, changes); code != http.StatusOK {
+		t.Fatalf("loopback fallback = %d, want 200", code)
+	}
+}
+
+// TestSyncDeviceIDSpoofRejected covers the HTTP path enforcing the same
+// authorship gate as the P2P path: a paired device may not author changes
+// attributed to another device without a valid signature from that device.
+func TestSyncDeviceIDSpoofRejected(t *testing.T) {
+	srv, st, serverID := newSyncTestServer(t)
+	_, attackerToken := redeemDevice(t, srv, "attacker")
+	victimID, _ := redeemDevice(t, srv, "victim")
+
+	for _, spoofed := range []string{victimID, serverID} {
+		changes := []syncpkg.SyncChange{{
+			DeviceID:   spoofed,
+			EntityType: "playlist",
+			EntityID:   "pl-" + spoofed,
+			Field:      "name",
+			Value:      "pwned",
+			UpdatedAt:  9999999999999,
+		}}
+		code, resp := doSync(t, srv, attackerToken, 0, changes)
+		if code != http.StatusOK {
+			t.Fatalf("spoof as %s = %d, want 200 with rejection", spoofed, code)
+		}
+		if resp.Accepted != 0 || len(resp.Rejected) != 1 {
+			t.Fatalf("spoof as %s: accepted=%d rejected=%d, want 0 and 1", spoofed, resp.Accepted, len(resp.Rejected))
+		}
+		latest, err := syncpkg.NewSyncStore(st.Q()).GetLatestForField(context.Background(), "playlist", "pl-"+spoofed, "name")
+		if err != nil {
+			t.Fatalf("GetLatest: %v", err)
+		}
+		if latest != nil {
+			t.Fatalf("forged change stored as %v", latest.DeviceID)
+		}
+	}
+
+	// The attacker can still author under its own identity.
+	own := []syncpkg.SyncChange{{EntityType: "playlist", EntityID: "pl-own", Field: "name", Value: "mine", UpdatedAt: 1000}}
+	code, resp := doSync(t, srv, attackerToken, 0, own)
+	if code != http.StatusOK || resp.Accepted != 1 {
+		t.Fatalf("own-device change = %d accepted=%d, want 200 and 1", code, resp.Accepted)
+	}
+}
