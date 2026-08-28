@@ -323,65 +323,13 @@ func (s *SyncStore) nextSeqLocked(ctx context.Context, deviceID string) (int64, 
 func (s *SyncStore) AppendChange(ctx context.Context, deviceID string, ch SyncChange) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.ensureHLC(ctx)
 	valueJSON, err := marshalValue(ch)
 	if err != nil {
 		return 0, err
 	}
-	// If inbound HLC is supplied (replayed remote), observe it; otherwise tick wall time.
-	var rowHLC int64
-	if ch.HLC != 0 {
-		s.hlc.Observe(ch.HLC)
-		rowHLC = ch.HLC
-	} else {
-		wall := ch.UpdatedAt
-		if wall == 0 {
-			wall = time.Now().UnixMilli()
-		}
-		rowHLC = s.hlc.Tick(wall)
-	}
-	rowSeq := ch.Seq
-	var vectorSeq, vectorHLC int64
-	if rowSeq == 0 {
-		ns, curHLC, err := s.nextSeqLocked(ctx, deviceID)
-		if err != nil {
-			return 0, err
-		}
-		rowSeq = ns
-		vectorSeq = ns
-		vectorHLC = curHLC
-		if vectorHLC < rowHLC {
-			vectorHLC = rowHLC
-		}
-		if vectorHLC < s.hlc.Current() {
-			vectorHLC = s.hlc.Current()
-		}
-		rowHLC = vectorHLC
-		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: vectorSeq, Hlc: vectorHLC}); err != nil {
-			return 0, err
-		}
-	} else {
-		curSeq, curHLC, err := s.GetVector(ctx, deviceID)
-		if err != nil {
-			return 0, err
-		}
-		if curHLC > s.hlc.Current() {
-			s.hlc.Observe(curHLC)
-		}
-		vectorSeq = curSeq
-		if rowSeq > curSeq {
-			vectorSeq = rowSeq
-		}
-		vectorHLC = s.hlc.Current()
-		if vectorHLC < curHLC {
-			vectorHLC = curHLC
-		}
-		if vectorHLC < rowHLC {
-			vectorHLC = rowHLC
-		}
-		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: vectorSeq, Hlc: vectorHLC}); err != nil {
-			return 0, err
-		}
+	rowHLC, rowSeq, err := s.prepareHLCVector(ctx, deviceID, ch)
+	if err != nil {
+		return 0, err
 	}
 	return s.appendSyncChangeWithHLC(ctx, db.AppendSyncChangeWithHLCParams{
 		DeviceID:   deviceID,
@@ -400,60 +348,9 @@ func (s *SyncStore) appendChangeLocked(ctx context.Context, deviceID string, ch 
 	if err != nil {
 		return 0, err
 	}
-	s.ensureHLC(ctx)
-	var rowHLC int64
-	if ch.HLC != 0 {
-		s.hlc.Observe(ch.HLC)
-		rowHLC = ch.HLC
-	} else {
-		wall := ch.UpdatedAt
-		if wall == 0 {
-			wall = time.Now().UnixMilli()
-		}
-		rowHLC = s.hlc.Tick(wall)
-	}
-	rowSeq := ch.Seq
-	var vectorSeq, vectorHLC int64
-	if rowSeq == 0 {
-		ns, curHLC, err := s.nextSeqLocked(ctx, deviceID)
-		if err != nil {
-			return 0, err
-		}
-		rowSeq = ns
-		vectorSeq = ns
-		vectorHLC = curHLC
-		if vectorHLC < rowHLC {
-			vectorHLC = rowHLC
-		}
-		if vectorHLC < s.hlc.Current() {
-			vectorHLC = s.hlc.Current()
-		}
-		rowHLC = vectorHLC
-		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: vectorSeq, Hlc: vectorHLC}); err != nil {
-			return 0, err
-		}
-	} else {
-		curSeq, curHLC, err := s.GetVector(ctx, deviceID)
-		if err != nil {
-			return 0, err
-		}
-		if curHLC > s.hlc.Current() {
-			s.hlc.Observe(curHLC)
-		}
-		vectorSeq = curSeq
-		if rowSeq > curSeq {
-			vectorSeq = rowSeq
-		}
-		vectorHLC = s.hlc.Current()
-		if vectorHLC < curHLC {
-			vectorHLC = curHLC
-		}
-		if vectorHLC < rowHLC {
-			vectorHLC = rowHLC
-		}
-		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: vectorSeq, Hlc: vectorHLC}); err != nil {
-			return 0, err
-		}
+	rowHLC, rowSeq, err := s.prepareHLCVector(ctx, deviceID, ch)
+	if err != nil {
+		return 0, err
 	}
 	return s.appendSyncChangeWithHLC(ctx, db.AppendSyncChangeWithHLCParams{
 		DeviceID:   deviceID,
@@ -534,11 +431,10 @@ func (s *SyncStore) ListSinceVector(ctx context.Context, vector map[string]int64
 	for int64(len(out)) < limit {
 		need := limit - int64(len(out))
 		fetch := batch
-		if need < int64(batch) && need > 0 {
-			// Still fetch at least batch to amortize, but cap final batch if we overshoot heavily.
-			fetch = int(need + 100)
-			if fetch < batch {
-				fetch = batch
+		if need < int64(batch) {
+			fetch = int(need)
+			if fetch < 1 {
+				fetch = 1
 			}
 		}
 		if fetch > 10000 {
@@ -552,8 +448,19 @@ func (s *SyncStore) ListSinceVector(ctx context.Context, vector map[string]int64
 			break
 		}
 		for _, ch := range rows {
-			if seen, ok := vector[ch.DeviceID]; ok && ch.Seq != 0 && ch.Seq <= seen {
-				continue
+			if seen, ok := vector[ch.DeviceID]; ok {
+				if ch.Seq != 0 {
+					if ch.Seq <= seen {
+						continue
+					}
+				} else {
+					// Legacy rows (pre-0029) have seq==0. After backfill (0030) none remain,
+					// but for old DBs not yet migrated, treat legacy as seen if peer already
+					// has any seq for this device to avoid infinite resend every round.
+					if seen > 0 {
+						continue
+					}
+				}
 			}
 			out = append(out, ch)
 			if int64(len(out)) >= limit {
@@ -667,6 +574,22 @@ func (s *SyncStore) GetVectorMap(ctx context.Context) (map[string]int64, map[str
 	return seqMap, hlcMap, nil
 }
 
+// ValidateDevice checks that deviceID exists. Returns sql.ErrNoRows wrapped if not found.
+func (s *SyncStore) ValidateDevice(ctx context.Context, deviceID string) error {
+	if deviceID == "" {
+		return fmt.Errorf("missing deviceId")
+	}
+	if _, err := s.q.GetDeviceByID(ctx, deviceID); err != nil {
+		return err
+	}
+	return nil
+}
+
+// LocalDeviceID returns the local device id via settings + device table.
+func (s *SyncStore) LocalDeviceID(ctx context.Context) (string, error) {
+	return LocalDeviceID(ctx, s.q)
+}
+
 // isServer checks if deviceID belongs to a server device; lookup failure => false.
 func (s *SyncStore) isServer(ctx context.Context, deviceID string) bool {
 	if deviceID == "" {
@@ -677,6 +600,71 @@ func (s *SyncStore) isServer(ctx context.Context, deviceID string) bool {
 		return false
 	}
 	return dev.IsServer == 1
+}
+
+// prepareHLCVector computes rowHLC/rowSeq and upserts the sync vector for deviceID.
+// It handles both locally-generated (ch.Seq==0, assign next seq) and replayed
+// (ch.Seq!=0, advance vector if needed) cases. Caller must hold s.mu or be in
+// a transaction's isolated txStore. It ensures HLC is seeded and advances it
+// as needed, then upserts sync_vector. Returns the final rowHLC and rowSeq to
+// be persisted with the change.
+func (s *SyncStore) prepareHLCVector(ctx context.Context, deviceID string, ch SyncChange) (int64, int64, error) {
+	s.ensureHLC(ctx)
+	var rowHLC int64
+	if ch.HLC != 0 {
+		s.hlc.Observe(ch.HLC)
+		rowHLC = ch.HLC
+	} else {
+		wall := ch.UpdatedAt
+		if wall == 0 {
+			wall = time.Now().UnixMilli()
+		}
+		rowHLC = s.hlc.Tick(wall)
+	}
+	rowSeq := ch.Seq
+	var vectorSeq, vectorHLC int64
+	if rowSeq == 0 {
+		ns, curHLC, err := s.nextSeqLocked(ctx, deviceID)
+		if err != nil {
+			return 0, 0, err
+		}
+		rowSeq = ns
+		vectorSeq = ns
+		vectorHLC = curHLC
+		if vectorHLC < rowHLC {
+			vectorHLC = rowHLC
+		}
+		if vectorHLC < s.hlc.Current() {
+			vectorHLC = s.hlc.Current()
+		}
+		rowHLC = vectorHLC
+		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: vectorSeq, Hlc: vectorHLC}); err != nil {
+			return 0, 0, err
+		}
+	} else {
+		curSeq, curHLC, err := s.GetVector(ctx, deviceID)
+		if err != nil {
+			return 0, 0, err
+		}
+		if curHLC > s.hlc.Current() {
+			s.hlc.Observe(curHLC)
+		}
+		vectorSeq = curSeq
+		if rowSeq > curSeq {
+			vectorSeq = rowSeq
+		}
+		vectorHLC = s.hlc.Current()
+		if vectorHLC < curHLC {
+			vectorHLC = curHLC
+		}
+		if vectorHLC < rowHLC {
+			vectorHLC = rowHLC
+		}
+		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: vectorSeq, Hlc: vectorHLC}); err != nil {
+			return 0, 0, err
+		}
+	}
+	return rowHLC, rowSeq, nil
 }
 
 func (s *SyncStore) effectivePolicy(ctx context.Context) MergePolicy {
@@ -741,6 +729,15 @@ func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int
 }
 
 func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange, policy MergePolicy) (outbound []SyncChange, newRev int64, rejected []SyncChange, err error) {
+	// Validate sender exists (defense in depth; p2p handler also validates).
+	if deviceID != "" {
+		if err := s.ValidateDevice(ctx, deviceID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, 0, nil, fmt.Errorf("unknown device %q: %w", deviceID, err)
+			}
+			return nil, 0, nil, err
+		}
+	}
 	// Observe inbound HLCs to advance clock (P2P). Single pass before processing.
 	for _, inc := range inbound {
 		if inc.HLC != 0 {
@@ -754,6 +751,15 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 		effectiveID := inc.DeviceID
 		if effectiveID == "" {
 			effectiveID = deviceID
+		}
+		// Validate that the claimed author exists; reject forged/unknown devices
+		// instead of creating vector rows for arbitrary IDs.
+		if err := s.ValidateDevice(ctx, effectiveID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				rejected = append(rejected, inc)
+				continue
+			}
+			return nil, 0, nil, err
 		}
 
 		if inc.Field != "__deleted" {

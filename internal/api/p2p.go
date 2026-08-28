@@ -133,8 +133,10 @@ func (s *Server) handleP2PFetch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if deviceID == "" && s.deps.SyncStore != nil {
-		// Fallback: try to resolve via SyncStore's vector if PairingStore unavailable.
-		if seqMap, _, err := s.deps.SyncStore.GetVectorMap(r.Context()); err == nil && len(seqMap) == 1 {
+		if id, err := s.deps.SyncStore.LocalDeviceID(r.Context()); err == nil && id != "" {
+			deviceID = id
+		} else if seqMap, _, err := s.deps.SyncStore.GetVectorMap(r.Context()); err == nil && len(seqMap) > 0 {
+			// Legacy fallback: pick any device from vector (covers fresh DB where settings not yet migrated).
 			for k := range seqMap {
 				deviceID = k
 				break
@@ -150,6 +152,10 @@ func (s *Server) handleP2PFetch(w http.ResponseWriter, r *http.Request) {
 		store = s.deps.FileStore
 	} else if fs, ok := any(s.deps.PairingStore).(p2p.FileStore); ok {
 		store = fs
+	}
+	if store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "file store unavailable"})
+		return
 	}
 	if musicDir != "" {
 		fs := p2p.NewFileSyncer(store, deviceID, musicDir)

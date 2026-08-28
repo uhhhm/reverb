@@ -3,6 +3,7 @@ package p2p
 import (
 	"context"
 	"encoding/json"
+	"log"
 	stdsync "sync"
 	"time"
 
@@ -75,15 +76,27 @@ func (s *Syncer) syncPeer(ctx context.Context, pid peer.ID) error {
 
 	// Send our vector and recent changes. Peer filters its outbound by our vector.
 	// If we have a remembered peer vector, only send changes the peer hasn't seen.
-	seqMap, _, _ := s.store.GetVectorMap(ctx)
+	seqMap, _, err := s.store.GetVectorMap(ctx)
+	if err != nil {
+		log.Printf("p2p syncer: GetVectorMap failed for %s: %v", pid, err)
+		seqMap = nil
+	}
 	s.mu.Lock()
 	peerVec := s.peerVectors[pid]
 	s.mu.Unlock()
 	var changes []reverbsync.SyncChange
 	if len(peerVec) > 0 {
-		changes, _ = s.store.ListSinceVector(ctx, peerVec, 10000)
+		changes, err = s.store.ListSinceVector(ctx, peerVec, 10000)
+		if err != nil {
+			log.Printf("p2p syncer: ListSinceVector failed for %s: %v", pid, err)
+			return err
+		}
 	} else {
-		changes, _ = s.store.ListSince(ctx, 0, 10000)
+		changes, err = s.store.ListSince(ctx, 0, 10000)
+		if err != nil {
+			log.Printf("p2p syncer: ListSince failed for %s: %v", pid, err)
+			return err
+		}
 	}
 	req := reverbsync.SyncRequest{
 		DeviceID: s.localDeviceID,
@@ -121,7 +134,9 @@ func (s *Syncer) syncPeer(ctx context.Context, pid peer.ID) error {
 			byDevice[did] = append(byDevice[did], ch)
 		}
 		for did, batch := range byDevice {
-			_, _, _, _ = s.store.Reconcile(ctx, did, 0, batch)
+			if _, _, _, err := s.store.Reconcile(ctx, did, 0, batch); err != nil {
+				log.Printf("p2p syncer: Reconcile failed for device %s from %s: %v", did, pid, err)
+			}
 		}
 	}
 	return nil

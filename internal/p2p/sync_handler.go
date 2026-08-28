@@ -2,7 +2,9 @@ package p2p
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/host"
@@ -28,13 +30,21 @@ func RegisterSyncHandler(h host.Host, store *sync.SyncStore) {
 			_ = json.NewEncoder(s).Encode(map[string]string{"error": "missing deviceId: pairing required"})
 			return
 		}
+		ctx := context.Background()
+		if err := store.ValidateDevice(ctx, deviceID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				_ = json.NewEncoder(s).Encode(map[string]string{"error": "unknown deviceId: pairing required"})
+			} else {
+				_ = json.NewEncoder(s).Encode(map[string]string{"error": err.Error()})
+			}
+			return
+		}
 		sinceRev := req.SinceRevision
 		// Vector-based filtering: if peer supplied vector, we filter outbound to only
 		// changes the peer hasn't seen (seq > peerVector[deviceID]).
 		peerVector := req.Vector
 		_ = req.SinceHLC
 
-		ctx := context.Background()
 		outbound, newRev, rejected, err := store.Reconcile(ctx, deviceID, sinceRev, req.Changes)
 		if err != nil {
 			_ = json.NewEncoder(s).Encode(map[string]string{"error": err.Error()})
@@ -51,8 +61,14 @@ func RegisterSyncHandler(h host.Host, store *sync.SyncStore) {
 			}
 			outbound = vecOutbound
 		}
-		newHLC, _ := store.GetMaxHLC(ctx)
-		seqMap, _, _ := store.GetVectorMap(ctx)
+		newHLC, err := store.GetMaxHLC(ctx)
+		if err != nil {
+			newHLC = 0
+		}
+		seqMap, _, err := store.GetVectorMap(ctx)
+		if err != nil {
+			seqMap = nil
+		}
 		resp := sync.SyncResponse{
 			Changes:     outbound,
 			NewRevision: newRev,

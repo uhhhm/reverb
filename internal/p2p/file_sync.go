@@ -206,6 +206,20 @@ func (f *FileSyncer) FetchFileViaPeer(ctx context.Context, h host.Host, peerIDSt
 	if f == nil || h == nil {
 		return fmt.Errorf("nil syncer or host")
 	}
+	// Validate relPath before any network I/O (saves dial) and before FS mutation.
+	cleanRel := filepath.Clean(filepath.FromSlash(relPath))
+	if cleanRel == "." || cleanRel == "" || filepath.IsAbs(cleanRel) || cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("invalid relPath: %q", relPath)
+	}
+	if f.musicDir == "" {
+		return fmt.Errorf("musicDir not configured")
+	}
+	dstPath := filepath.Join(f.musicDir, cleanRel)
+	// Defense in depth: ensure dstPath is within musicDir.
+	rel, err := filepath.Rel(f.musicDir, dstPath)
+	if err != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("invalid relPath: %q", relPath)
+	}
 	pid, err := peer.Decode(peerIDStr)
 	if err != nil {
 		return err
@@ -220,17 +234,6 @@ func (f *FileSyncer) FetchFileViaPeer(ctx context.Context, h host.Host, peerIDSt
 		return err
 	}
 	_ = s.CloseWrite()
-	// Validate relPath before any FS mutation (mirror file_handler.go defenses on fetch side).
-	cleanRel := filepath.Clean(filepath.FromSlash(relPath))
-	if cleanRel == "." || cleanRel == "" || filepath.IsAbs(cleanRel) || cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("invalid relPath: %q", relPath)
-	}
-	dstPath := filepath.Join(f.musicDir, cleanRel)
-	// Defense in depth: ensure dstPath is within musicDir.
-	rel, err := filepath.Rel(f.musicDir, dstPath)
-	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("invalid relPath: %q", relPath)
-	}
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 		return err
 	}
