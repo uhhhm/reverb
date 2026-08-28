@@ -938,3 +938,157 @@ func TestForceOverwriteOverridesSpotdlSkipDefault(t *testing.T) {
 		t.Errorf("upgrade must force overwrite: %v", r.gotArgs)
 	}
 }
+
+// Reverb never reads the lyrics spotDL fetches, but the three default providers
+// cost ~17s per track (AZLyrics alone spends ~8s scraping its JS at downloader
+// init, before any track is processed). --lyrics takes nargs="*", so passing it
+// bare selects no providers at all. It must be followed by another option, never
+// by the "download" positional, or argparse's greedy nargs="*" swallows it.
+func TestStartDisablesLyricsProviders(t *testing.T) {
+	r := &fakeRunner{}
+	a := newAdapter(t, r)
+	if _, err := a.Start(context.Background(), core.DownloadRequest{Artist: "A", Title: "T"}, func(int) {}); err != nil {
+		t.Fatal(err)
+	}
+	for i, arg := range r.gotArgs {
+		if arg != "--lyrics" {
+			continue
+		}
+		if i+1 >= len(r.gotArgs) || !strings.HasPrefix(r.gotArgs[i+1], "--") {
+			t.Fatalf("--lyrics must be followed by another option, got %v", r.gotArgs)
+		}
+		return
+	}
+	t.Fatalf("args %v missing --lyrics", r.gotArgs)
+}
+
+// scriptedRunner answers successive Run calls from a script and records every
+// invocation's args, so retry behaviour is observable.
+type scriptedRunner struct {
+	calls []struct {
+		lines []string
+		err   error
+	}
+	n       int
+	allArgs [][]string
+}
+
+func (s *scriptedRunner) Run(ctx context.Context, name string, args []string, onLine func(string)) error {
+	s.allArgs = append(s.allArgs, args)
+	if s.n >= len(s.calls) {
+		s.n++
+		return nil
+	}
+	c := s.calls[s.n]
+	s.n++
+	for _, l := range c.lines {
+		onLine(l)
+	}
+	return c.err
+}
+
+func lastArg(args []string) string { return args[len(args)-1] }
+
+// A Deezer-sourced request has no Spotify id, so the query falls back to fuzzy
+// "<artist> - <title>" text — which costs ~28s in spotDL's Spotify search. When
+// the request carries an ISRC, Spotify's own isrc: search filter turns that into
+// a single exact lookup.
+func TestStartUsesISRCQueryWhenNoSpotifyID(t *testing.T) {
+	r := &fakeRunner{}
+	a := newAdapter(t, r)
+	req := core.DownloadRequest{Source: "deezer", Artist: "Air", Title: "Alone in Kyoto", ISRC: "gbaaa0400266"}
+	if _, err := a.Start(context.Background(), req, func(int) {}); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastArg(r.gotArgs); got != "isrc:GBAAA0400266" {
+		t.Fatalf("query = %q, want %q", got, "isrc:GBAAA0400266")
+	}
+}
+
+// A Spotify id is still more precise than an ISRC search, and a manual URL is an
+// explicit user override — neither may be displaced by the ISRC path.
+func TestStartPrefersSpotifyURLAndManualURLOverISRC(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		req  core.DownloadRequest
+		want string
+	}{
+		{"spotify id wins", core.DownloadRequest{Source: "spotify", ExternalID: "abc", ISRC: "GBAAA0400266"}, "https://open.spotify.com/track/abc"},
+		{"manual url wins", core.DownloadRequest{Source: "deezer", ManualURL: "https://youtu.be/xyz", ISRC: "GBAAA0400266"}, "https://www.youtube.com/watch?v=xyz"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &fakeRunner{}
+			a := newAdapter(t, r)
+			if _, err := a.Start(context.Background(), tc.req, func(int) {}); err != nil {
+				t.Fatal(err)
+			}
+			if got := lastArg(r.gotArgs); got != tc.want {
+				t.Fatalf("query = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// A malformed ISRC would send spotDL after a query that cannot match; fall
+// straight through to the text search instead.
+func TestStartIgnoresMalformedISRC(t *testing.T) {
+	r := &fakeRunner{}
+	a := newAdapter(t, r)
+	req := core.DownloadRequest{Source: "deezer", Artist: "Air", Title: "Alone in Kyoto", ISRC: "not-an-isrc"}
+	if _, err := a.Start(context.Background(), req, func(int) {}); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastArg(r.gotArgs); got != "Air - Alone in Kyoto" {
+		t.Fatalf("query = %q, want the text search", got)
+	}
+}
+
+// Not every ISRC is in Spotify's catalog. When the isrc: lookup finds nothing,
+// the text search must still get its chance rather than the job failing outright.
+func TestStartRetriesTextQueryWhenISRCFindsNothing(t *testing.T) {
+	r := &scriptedRunner{}
+	r.calls = append(r.calls, struct {
+		lines []string
+		err   error
+	}{lines: []string{"SongError: No results found for: isrc:GBAAA0400266"}, err: errors.New("exit status 1")})
+	r.calls = append(r.calls, struct {
+		lines []string
+		err   error
+	}{lines: []string{"Air - Alone in Kyoto: Done"}})
+	a := newAdapter(t, r)
+	req := core.DownloadRequest{Source: "deezer", Artist: "Air", Title: "Alone in Kyoto", ISRC: "GBAAA0400266"}
+	dir, err := a.Start(context.Background(), req, func(int) {})
+	if err != nil {
+		t.Fatalf("expected the text-query retry to succeed, got %v", err)
+	}
+	if dir != "/tmp/music" {
+		t.Fatalf("dir = %q", dir)
+	}
+	if len(r.allArgs) != 2 {
+		t.Fatalf("want 2 invocations (isrc then text), got %d", len(r.allArgs))
+	}
+	if got := lastArg(r.allArgs[0]); got != "isrc:GBAAA0400266" {
+		t.Fatalf("first query = %q", got)
+	}
+	if got := lastArg(r.allArgs[1]); got != "Air - Alone in Kyoto" {
+		t.Fatalf("retry query = %q", got)
+	}
+}
+
+// A genuine download failure (not a lookup miss) must not be retried — retrying
+// a rate-limit or a bot-check just doubles the wait and loses the classification.
+func TestStartDoesNotRetryOnRealFailure(t *testing.T) {
+	r := &scriptedRunner{}
+	r.calls = append(r.calls, struct {
+		lines []string
+		err   error
+	}{lines: []string{"AudioProviderError: YT-DLP download error - https://x", "HTTP Error 429: Too Many Requests"}})
+	a := newAdapter(t, r)
+	req := core.DownloadRequest{Source: "deezer", Artist: "Air", Title: "Alone in Kyoto", ISRC: "GBAAA0400266"}
+	if _, err := a.Start(context.Background(), req, func(int) {}); err == nil {
+		t.Fatal("want an error")
+	}
+	if len(r.allArgs) != 1 {
+		t.Fatalf("want exactly 1 invocation, got %d", len(r.allArgs))
+	}
+}

@@ -30,6 +30,11 @@ var progressRe = regexp.MustCompile(`(\d{1,3})\s*%`)
 
 // failureRe matches the fatal spotDL errors that mean no file was produced even
 // though the process exits 0 (per-song failures don't change the exit code).
+// noResultsRe matches spotDL's SongError when a query resolves to no track at
+// all. Distinct from failureRe: this is a lookup miss, retryable under a
+// different query, not a download failure.
+var noResultsRe = regexp.MustCompile(`No results found for:`)
+
 var failureRe = regexp.MustCompile(`AudioProviderError|YT-DLP download error|LookupError|DownloaderError`)
 
 // classifyFailure turns the captured spotDL failure context into a FailureClass
@@ -264,6 +269,22 @@ func spotifyTargetURL(req core.DownloadRequest) string {
 	return "https://open.spotify.com/" + segment + "/" + req.ExternalID
 }
 
+// normalizeISRC upper-cases an ISRC and returns "" unless it has the canonical
+// shape (12 alphanumerics, e.g. GBAAA0400266). Anything else would send spotDL
+// after a query that cannot match, so callers fall back to the text search.
+func normalizeISRC(raw string) string {
+	s := strings.ToUpper(strings.TrimSpace(raw))
+	if len(s) != 12 {
+		return ""
+	}
+	for _, r := range s {
+		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
+			return ""
+		}
+	}
+	return s
+}
+
 // normalizeManualURL strips YouTube playlist/radio parameters so yt-dlp fetches only
 // the single video. Without this, a URL like ?v=abc&list=RDabc&start_radio=1 causes
 // yt-dlp to download the entire radio playlist — hanging the job for minutes.
@@ -323,7 +344,8 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 	// so yt-dlp fetches only the one video instead of the entire playlist or radio queue.
 	manualURL = normalizeManualURL(manualURL)
 
-	var query string
+	var query, fallbackQuery string
+	textQuery := strings.TrimSpace(req.Artist + " - " + req.Title)
 	if manualURL != "" && req.Source == "spotify" && req.ExternalID != "" {
 		// Pipe: manual audio source FIRST, Spotify metadata URL SECOND (spotDL
 		// requires "<audio-url>|<spotify-url>" — the spotify URL must be the 2nd half).
@@ -333,8 +355,16 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 		query = manualURL
 	} else if req.Source == "spotify" && req.ExternalID != "" {
 		query = spotifyTargetURL(req)
+	} else if isrc := normalizeISRC(req.ISRC); isrc != "" {
+		// 4. No Spotify id (e.g. a Deezer result) but an ISRC: Spotify's search
+		//    supports an "isrc:" filter, which turns spotDL's fuzzy text search
+		//    — ~28s of guessing, and occasionally the wrong recording — into one
+		//    exact lookup. Not every ISRC is in Spotify's catalog, so keep the
+		//    text search as the fallback (see noResultsRe below).
+		query = "isrc:" + isrc
+		fallbackQuery = textQuery
 	} else {
-		query = strings.TrimSpace(req.Artist + " - " + req.Title)
+		query = textQuery
 	}
 	// spotDL's CLI is `spotdl [options] <operation> <query>`. It does NOT accept a
 	// "--" end-of-options separator (it reports it as an unrecognized argument), so
@@ -365,6 +395,13 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 	// index as one combined artist ("A/B/C"). "; " is in Navidrome's default split
 	// set, so each collaborator becomes a real artist.
 	args = append(args, "--id3-separator", "; ")
+	// Reverb never surfaces spotDL's lyrics, but the three default providers cost
+	// ~17s per track (AZLyrics alone spends ~8s scraping its JS at downloader init,
+	// before any track is processed) and routinely fail anyway. --lyrics takes
+	// nargs="*", so passing it bare selects no providers. Keep it immediately before
+	// another option — argparse's greedy nargs="*" would otherwise swallow the
+	// trailing "download" positional.
+	args = append(args, "--lyrics")
 	// spotDL's default log level (INFO) drops the real yt-dlp failure detail
 	// (e.g. "HTTP Error 429", "Sign in to confirm you're not a bot") on the
 	// floor — its own source only logs that detail via logger.debug(exception)
@@ -380,7 +417,7 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 		// re-download a quality upgrade depends on.
 		args = append(args, "--overwrite", "force")
 	}
-	args = append(args, "--simple-tui", "--output", outputTemplate, "download", query)
+	args = append(args, "--simple-tui", "--output", outputTemplate, "download")
 
 	// Pre-create spotDL's shared temp dir to defeat a concurrency race: spotDL does
 	// `if not temp.exists(): os.mkdir(temp)` with no lock, so when two downloads run
@@ -390,9 +427,31 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 	// means spotDL's check always passes and never races on the create.
 	ensureSpotdlTempDir()
 
+	// withQuery copies rather than appending in place: two appends onto the same
+	// `args` would share one backing array, and the retry would silently rewrite
+	// the first invocation's argv.
+	withQuery := func(q string) []string {
+		full := make([]string, len(args), len(args)+1)
+		copy(full, args)
+		return append(full, q)
+	}
+	dir, noResults, err := a.runOnce(ctx, withQuery(query), query, onProgress)
+	if noResults && fallbackQuery != "" {
+		log.Printf("spotdl: %q matched nothing, retrying as %q", query, fallbackQuery)
+		dir, _, err = a.runOnce(ctx, withQuery(fallbackQuery), fallbackQuery, onProgress)
+	}
+	return dir, err
+}
+
+// runOnce executes one spotDL invocation and streams its progress. The second
+// return value reports a lookup miss — spotDL found no track for the query at
+// all — which is the only failure worth retrying under a different query. Every
+// other failure (rate limits, bot checks, yt-dlp errors) would just fail again.
+func (a *Adapter) runOnce(ctx context.Context, args []string, query string, onProgress func(int)) (string, bool, error) {
 	log.Printf("spotdl: exec %s %s", a.binary, redactArgs(args))
 
 	sawProgress := false
+	noResults := false
 	// failureBuf accumulates the classifiable context around a fatal-marker line
 	// (bounded). Critically, spotDL logs the real yt-dlp detail (via --log-level
 	// DEBUG above) BEFORE it raises the terse "AudioProviderError: YT-DLP
@@ -409,6 +468,9 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 		// download is diagnosable from the Reverb logs.
 		if s := strings.TrimSpace(line); s != "" {
 			log.Printf("spotdl> %s", s)
+		}
+		if noResultsRe.MatchString(line) {
+			noResults = true
 		}
 		// spotDL exits 0 even when a song fails to download (it just logs the
 		// error and moves on), so the exit code alone would report a non-existent
@@ -446,7 +508,7 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 	})
 	if rerr != nil {
 		log.Printf("spotdl: %q failed: %v", query, rerr)
-		return "", fmt.Errorf("spotdl download %q: %w", query, rerr)
+		return "", noResults, fmt.Errorf("spotdl download %q: %w", query, rerr)
 	}
 	if len(failureBuf) > 0 {
 		class, reason, hint := classifyFailure(strings.Join(failureBuf, "\n"))
@@ -454,11 +516,11 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 		if hint != "" {
 			log.Printf("spotdl: hint — %s", hint)
 		}
-		return "", download.ClassifiedError{Class: class, Err: fmt.Errorf("spotdl download %q: %s", query, reason)}
+		return "", noResults, download.ClassifiedError{Class: class, Err: fmt.Errorf("spotdl download %q: %s", query, reason)}
 	}
 	if !sawProgress {
 		onProgress(-1) // indeterminate: spotDL gave no parseable percentage
 	}
 	log.Printf("spotdl: %q finished (output_dir=%s)", query, a.outputDir)
-	return a.outputDir, nil
+	return a.outputDir, false, nil
 }
