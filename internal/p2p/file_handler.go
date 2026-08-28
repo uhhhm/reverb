@@ -34,9 +34,8 @@ func RegisterFileHandler(h host.Host, musicDir string) {
 		}
 		var path string
 		if req.RelPath != "" {
-			// Clean relPath and reject absolute or traversal.
-			cleanRel := filepath.Clean(filepath.FromSlash(req.RelPath))
-			if cleanRel == "." || cleanRel == "" || filepath.IsAbs(cleanRel) || strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) || cleanRel == ".." {
+			cleanRel, err := validateRelPath(req.RelPath)
+			if err != nil {
 				_ = s.Reset()
 				return
 			}

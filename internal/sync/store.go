@@ -417,30 +417,20 @@ func (s *SyncStore) ListSinceHLC(ctx context.Context, since int64, limit int64) 
 
 // ListSinceVector returns changes not yet seen by peer vector (seq > peerSeq per device).
 // It pages through the global log so that filtering does not truncate when the
-// log exceeds the outbound cap.
+// log exceeds the outbound cap. Empty vector means no filter (send all).
 func (s *SyncStore) ListSinceVector(ctx context.Context, vector map[string]int64, limit int64) ([]SyncChange, error) {
 	if limit <= 0 {
 		limit = 10000
-	}
-	if len(vector) == 0 {
-		return s.ListSince(ctx, 0, limit)
 	}
 	const batch = 1000
 	var out []SyncChange
 	var cursor int64
 	for int64(len(out)) < limit {
-		need := limit - int64(len(out))
-		fetch := batch
-		if need < int64(batch) {
-			fetch = int(need)
-			if fetch < 1 {
-				fetch = 1
-			}
-		}
+		fetch := int64(batch)
 		if fetch > 10000 {
 			fetch = 10000
 		}
-		rows, err := s.ListSince(ctx, cursor, int64(fetch))
+		rows, err := s.ListSince(ctx, cursor, fetch)
 		if err != nil {
 			return nil, err
 		}
@@ -467,7 +457,7 @@ func (s *SyncStore) ListSinceVector(ctx context.Context, vector map[string]int64
 				break
 			}
 		}
-		if len(rows) < fetch {
+		if int64(len(rows)) < fetch {
 			break
 		}
 		cursor = rows[len(rows)-1].Revision
@@ -660,6 +650,13 @@ func (s *SyncStore) prepareHLCVector(ctx context.Context, deviceID string, ch Sy
 		if vectorHLC < rowHLC {
 			vectorHLC = rowHLC
 		}
+		// Ensure row HLC is monotonic with vector to keep GetMaxHLC and
+		// PickWinner consistent. Without this, a stale peer HLC would be stored
+		// verbatim while vector advances, breaking HLC monotonicity and LWW.
+		if rowHLC < vectorHLC {
+			rowHLC = vectorHLC
+			s.hlc.Observe(rowHLC)
+		}
 		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: vectorSeq, Hlc: vectorHLC}); err != nil {
 			return 0, 0, err
 		}
@@ -700,6 +697,8 @@ func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int
 	if len(inbound) > 5000 {
 		return nil, 0, nil, fmt.Errorf("too many changes: %d > 5000", len(inbound))
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	policy := s.effectivePolicy(ctx)
 	// Ensure HLC seeded from DB max before transactional path.
 	s.ensureHLC(ctx)
@@ -723,8 +722,6 @@ func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int
 			}
 		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	return s.reconcileInternal(ctx, deviceID, sinceRev, inbound, policy)
 }
 

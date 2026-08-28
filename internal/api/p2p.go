@@ -107,8 +107,9 @@ func (s *Server) handleP2PManifests(w http.ResponseWriter, r *http.Request) {
 }
 
 type p2pFetchRequest struct {
-	PeerID  string `json:"peerId"`
-	RelPath string `json:"relPath"`
+	PeerID      string `json:"peerId"`
+	RelPath     string `json:"relPath"`
+	ContentHash string `json:"contentHash"`
 }
 
 func (s *Server) handleP2PFetch(w http.ResponseWriter, r *http.Request) {
@@ -136,10 +137,11 @@ func (s *Server) handleP2PFetch(w http.ResponseWriter, r *http.Request) {
 		if id, err := s.deps.SyncStore.LocalDeviceID(r.Context()); err == nil && id != "" {
 			deviceID = id
 		} else if seqMap, _, err := s.deps.SyncStore.GetVectorMap(r.Context()); err == nil && len(seqMap) > 0 {
-			// Legacy fallback: pick any device from vector (covers fresh DB where settings not yet migrated).
+			// Legacy fallback: deterministic smallest lex deviceId (covers fresh DB where settings not yet migrated).
 			for k := range seqMap {
-				deviceID = k
-				break
+				if deviceID == "" || k < deviceID {
+					deviceID = k
+				}
 			}
 		}
 	}
@@ -159,7 +161,7 @@ func (s *Server) handleP2PFetch(w http.ResponseWriter, r *http.Request) {
 	}
 	if musicDir != "" {
 		fs := p2p.NewFileSyncer(store, deviceID, musicDir)
-		if err := fs.FetchFileViaPeer(r.Context(), h.LibHost(), body.PeerID, body.RelPath); err != nil {
+		if err := fs.FetchFileViaPeer(r.Context(), h.LibHost(), body.PeerID, body.RelPath, body.ContentHash); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}

@@ -3,6 +3,7 @@ package p2p
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync/atomic"
 	"time"
 
@@ -71,11 +72,12 @@ func NewHost(ctx context.Context) (*Host, error) {
 		_ = d.Bootstrap(ctx2)
 	}()
 
-	// mDNS for LAN discovery.
+	// mDNS for LAN discovery. TXT advertisement of id/hlc/lanPort is not yet
+	// implemented (plan 305) — discovery is peerId-only for now.
 	ser := mdns.NewMdnsService(h, mdnsTag, &discoveryNotifee{h: h})
 	if err := ser.Start(); err != nil {
 		// mDNS may fail on some hosts (no multicast route) — log but don't fail.
-		_ = err
+		log.Printf("WARNING: p2p mdns start failed: %v", err)
 	}
 
 	// Set stream handler for /reverb/sync/1.0.0 and /reverb/file/1.0.0 — no-ops for now,

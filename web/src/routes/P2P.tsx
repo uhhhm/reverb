@@ -131,7 +131,7 @@ export default function P2P() {
                 type="button"
                 onClick={() => {
                   const firstPeer = peersQ.data?.[0]?.peerId
-                  if (firstPeer) fetchFileFromPeer(firstPeer, m.relPath)
+                  if (firstPeer) fetchFileFromPeer(firstPeer, m.relPath, m.contentHash)
                 }}
                 className="underline"
               >

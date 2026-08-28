@@ -63,11 +63,13 @@ func RegisterSyncHandler(h host.Host, store *sync.SyncStore) {
 		}
 		newHLC, err := store.GetMaxHLC(ctx)
 		if err != nil {
-			newHLC = 0
+			_ = json.NewEncoder(s).Encode(map[string]string{"error": err.Error()})
+			return
 		}
 		seqMap, _, err := store.GetVectorMap(ctx)
 		if err != nil {
-			seqMap = nil
+			_ = json.NewEncoder(s).Encode(map[string]string{"error": err.Error()})
+			return
 		}
 		resp := sync.SyncResponse{
 			Changes:     outbound,

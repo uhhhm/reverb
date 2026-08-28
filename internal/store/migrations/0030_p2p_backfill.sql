@@ -8,16 +8,17 @@
 -- Backfill hlc from wall time where 0 (legacy rows)
 UPDATE sync_change SET hlc = updated_at WHERE hlc = 0 AND updated_at != 0;
 
--- Backfill seq per device for legacy rows. Use ROW_NUMBER ordered by revision.
--- Reassign all rows per device ordered by revision to ensure a clean contiguous
--- per-device sequence (idempotent for already-correct DBs). This avoids duplicates
--- when a DB has mixed legacy (seq==0) and post-0029 (seq>0) rows.
+-- Backfill seq per device for legacy rows only. Only rows with seq=0 are legacy;
+-- re-numbering all rows would resequence already-correct post-0029 seq values and
+-- invalidate sync vectors already synced to peers. Compute ROW_NUMBER over all
+-- revisions per device, but only apply to legacy rows so existing seq values keep
+-- their correct positions (ROW_NUMBER gives same seq for already-correct rows).
 UPDATE sync_change SET seq = (
   SELECT rn FROM (
     SELECT revision, ROW_NUMBER() OVER (PARTITION BY device_id ORDER BY revision) AS rn
     FROM sync_change
   ) AS sub WHERE sub.revision = sync_change.revision
-) WHERE EXISTS (SELECT 1 FROM sync_change AS c WHERE c.seq = 0);
+) WHERE seq = 0;
 
 -- Seed sync_vector from the (now backfilled) sync_change max per device.
 -- Use INSERT OR REPLACE to ensure vector exists; existing larger values are

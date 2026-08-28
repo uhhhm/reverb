@@ -84,19 +84,10 @@ func (s *Syncer) syncPeer(ctx context.Context, pid peer.ID) error {
 	s.mu.Lock()
 	peerVec := s.peerVectors[pid]
 	s.mu.Unlock()
-	var changes []reverbsync.SyncChange
-	if len(peerVec) > 0 {
-		changes, err = s.store.ListSinceVector(ctx, peerVec, 10000)
-		if err != nil {
-			log.Printf("p2p syncer: ListSinceVector failed for %s: %v", pid, err)
-			return err
-		}
-	} else {
-		changes, err = s.store.ListSince(ctx, 0, 10000)
-		if err != nil {
-			log.Printf("p2p syncer: ListSince failed for %s: %v", pid, err)
-			return err
-		}
+	changes, err := s.store.ListSinceVector(ctx, peerVec, 10000)
+	if err != nil {
+		log.Printf("p2p syncer: ListSinceVector failed for %s: %v", pid, err)
+		return err
 	}
 	req := reverbsync.SyncRequest{
 		DeviceID: s.localDeviceID,

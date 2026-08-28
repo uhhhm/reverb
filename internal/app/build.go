@@ -334,7 +334,16 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 			if h.LibHost() != nil {
 				p2p.RegisterFileHandler(h.LibHost(), musicDir)
 			}
-			if localID, err := reverbsync.LocalDeviceID(ctx, r.Store.Q()); err == nil && localID != "" {
+			localID, lerr := reverbsync.LocalDeviceID(ctx, r.Store.Q())
+			if lerr != nil || localID == "" {
+				if id2, err2 := reverbsync.EnsureLocalDevice(ctx, r.Store.Q()); err2 == nil && id2 != "" {
+					localID = id2
+					lerr = nil
+				} else {
+					logf("WARNING: p2p file sync: local device not ready: %v", lerr)
+				}
+			}
+			if localID != "" {
 				fs := p2p.NewFileSyncer(r.Store.Q(), localID, musicDir)
 				go fs.Run(ctx)
 				// P2P anti-entropy for sync changes over libp2p.

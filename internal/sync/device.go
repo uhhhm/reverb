@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"sort"
 
 	"github.com/google/uuid"
 	"github.com/uhhhm/reverb/internal/store/db"
@@ -112,6 +113,12 @@ func EnsureLocalDevice(ctx context.Context, q Querier) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	sort.Slice(devices, func(i, j int) bool {
+		if devices[i].CreatedAt == devices[j].CreatedAt {
+			return devices[i].ID < devices[j].ID
+		}
+		return devices[i].CreatedAt < devices[j].CreatedAt
+	})
 	// Prefer an existing non-server device whose token we can use; otherwise create.
 	for _, d := range devices {
 		if d.IsServer == 0 {
@@ -137,6 +144,12 @@ func EnsureLocalDevice(ctx context.Context, q Querier) (string, error) {
 		// Race: another caller created a peer device concurrently — re-list.
 		devices2, lerr := q.ListDevices(ctx)
 		if lerr == nil {
+			sort.Slice(devices2, func(i, j int) bool {
+				if devices2[i].CreatedAt == devices2[j].CreatedAt {
+					return devices2[i].ID < devices2[j].ID
+				}
+				return devices2[i].CreatedAt < devices2[j].CreatedAt
+			})
 			for _, d := range devices2 {
 				if d.IsServer == 0 {
 					_ = q.UpsertSetting(ctx, db.UpsertSettingParams{Key: localDeviceIDKey, Value: d.ID})
@@ -164,6 +177,12 @@ func LocalDeviceID(ctx context.Context, q ServerDeviceQuerier) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	sort.Slice(devices, func(i, j int) bool {
+		if devices[i].CreatedAt == devices[j].CreatedAt {
+			return devices[i].ID < devices[j].ID
+		}
+		return devices[i].CreatedAt < devices[j].CreatedAt
+	})
 	for _, d := range devices {
 		if d.IsServer == 0 {
 			return d.ID, nil

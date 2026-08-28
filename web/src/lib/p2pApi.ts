@@ -40,6 +40,6 @@ export function getFileManifests(): Promise<FileManifest[]> {
   return api.get<FileManifest[]>('/p2p/manifests')
 }
 
-export function fetchFileFromPeer(peerId: string, relPath: string): Promise<{ ok: boolean }> {
-  return api.post<{ ok: boolean }>('/p2p/fetch', { peerId, relPath })
+export function fetchFileFromPeer(peerId: string, relPath: string, contentHash?: string): Promise<{ ok: boolean }> {
+  return api.post<{ ok: boolean }>('/p2p/fetch', { peerId, relPath, contentHash })
 }
