@@ -153,6 +153,14 @@ type OfflineSet struct {
 	UpdatedAt  int64  `json:"updated_at"`
 }
 
+type P2pPeer struct {
+	PeerID   string         `json:"peer_id"`
+	DeviceID sql.NullString `json:"device_id"`
+	Name     string         `json:"name"`
+	AddedAt  int64          `json:"added_at"`
+	LastSeen int64          `json:"last_seen"`
+}
+
 type PairingCode struct {
 	Code           string         `json:"code"`
 	ExpiresAt      int64          `json:"expires_at"`

@@ -187,6 +187,8 @@ type Deps struct {
 	LinkStore LinkStore
 	LinkAdd   LinkAddService
 	P2P       func() *p2p.Host
+	// P2PGuard provides the libp2p peer trust set for pairing binds.
+	P2PGuard  func() *p2p.Guard
 	FileStore FileManifestStore
 	MusicDir  string
 }

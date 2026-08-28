@@ -254,10 +254,14 @@ func (f *FileSyncer) Run(ctx context.Context) {
 	}
 }
 
-// FetchFileViaPeer fetches a file by relPath from a peer via /reverb/file/1.0.0 and writes it to musicDir.
-// If expectedHash is non-empty, the downloaded file's sha256 is verified before
-// upserting the manifest — a mismatch deletes the file and returns an error to
-// prevent poisoned writes (P1-3).
+// FetchFileViaPeer fetches a file by relPath from a peer via /reverb/file/1.0.0
+// and writes it into musicDir.
+//
+// expectedHash is mandatory: the serving peer chooses the bytes it returns, so
+// without a hash to check them against there is nothing to distinguish a real
+// file from a substituted one. The transfer lands in a temp file alongside the
+// destination and is renamed into place only after the digest matches, so a
+// failed or rejected fetch can never truncate or replace a good local file.
 func (f *FileSyncer) FetchFileViaPeer(ctx context.Context, h host.Host, peerIDStr, relPath string, expectedHash ...string) error {
 	if f == nil || h == nil {
 		return fmt.Errorf("nil syncer or host")
@@ -270,15 +274,18 @@ func (f *FileSyncer) FetchFileViaPeer(ctx context.Context, h host.Host, peerIDSt
 	if f.musicDir == "" {
 		return fmt.Errorf("musicDir not configured")
 	}
+	expHash := ""
+	if len(expectedHash) > 0 {
+		expHash = expectedHash[0]
+	}
+	if expHash == "" {
+		return fmt.Errorf("contentHash is required to fetch %q", relPath)
+	}
 	dstPath := filepath.Join(f.musicDir, cleanRel)
 	// Defense in depth: ensure dstPath is within musicDir.
 	rel, err := filepath.Rel(f.musicDir, dstPath)
 	if err != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return fmt.Errorf("invalid relPath: %q", relPath)
-	}
-	expHash := ""
-	if len(expectedHash) > 0 {
-		expHash = expectedHash[0]
 	}
 	pid, err := peer.Decode(peerIDStr)
 	if err != nil {
@@ -290,50 +297,49 @@ func (f *FileSyncer) FetchFileViaPeer(ctx context.Context, h host.Host, peerIDSt
 	}
 	defer s.Close()
 	_ = s.SetDeadline(time.Now().Add(60 * time.Second))
-	req := fileRequest{RelPath: relPath}
-	if expHash != "" {
-		req.ContentHash = expHash
-	}
-	if err := json.NewEncoder(s).Encode(req); err != nil {
+	if err := json.NewEncoder(s).Encode(fileRequest{RelPath: relPath, ContentHash: expHash}); err != nil {
 		return err
 	}
 	_ = s.CloseWrite()
+
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 		return err
 	}
-	out, err := os.Create(dstPath)
+	tmp, err := os.CreateTemp(filepath.Dir(dstPath), ".reverb-fetch-*")
 	if err != nil {
 		return err
 	}
-	n, copyErr := io.Copy(out, s)
-	_ = out.Close()
+	tmpPath := tmp.Name()
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}
+	// Hash while copying so the file is read once.
+	digest := sha256.New()
+	n, copyErr := io.Copy(io.MultiWriter(tmp, digest), io.LimitReader(s, maxFileBytes))
 	if copyErr != nil {
-		_ = os.Remove(dstPath)
+		cleanup()
 		return copyErr
 	}
-	if n == 0 {
-		// Allow 0-byte files but ensure we don't advertise a corrupt empty fetch
-		// when the stream was Reset at EOF — copyErr would have been non-nil.
+	if n >= maxFileBytes {
+		cleanup()
+		return fmt.Errorf("file %q exceeds %d byte limit", relPath, int64(maxFileBytes))
 	}
-	// Verify content hash if expected is known to prevent peer poisoning.
-	if expHash != "" {
-		fh, err := os.Open(dstPath)
-		if err != nil {
-			_ = os.Remove(dstPath)
-			return err
-		}
-		h := sha256.New()
-		if _, err := io.Copy(h, fh); err != nil {
-			_ = fh.Close()
-			_ = os.Remove(dstPath)
-			return err
-		}
-		_ = fh.Close()
-		got := hex.EncodeToString(h.Sum(nil))
-		if got != expHash {
-			_ = os.Remove(dstPath)
-			return fmt.Errorf("hash mismatch for %q: expected %s got %s", relPath, expHash, got)
-		}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if got := hex.EncodeToString(digest.Sum(nil)); got != expHash {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("hash mismatch for %q: expected %s got %s", relPath, expHash, got)
+	}
+	if err := os.Chmod(tmpPath, 0o644); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, dstPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
 	}
 	// After fetch, re-hash and upsert manifest.
 	return f.ScanAndSync(ctx)

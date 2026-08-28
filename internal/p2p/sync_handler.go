@@ -2,9 +2,7 @@ package p2p
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/host"
@@ -12,40 +10,64 @@ import (
 	"github.com/uhhhm/reverb/internal/sync"
 )
 
-// RegisterSyncHandler mounts /reverb/sync/1.0.0 on the host. It decodes a
-// SyncRequest, validates the sender's DeviceID (Reverb dev_*), calls
-// store.Reconcile, and encodes a SyncResponse. DeviceID is required; we do
-// not fall back to the libp2p peer ID (which is unrelated to sync_change.device_id FK).
-func RegisterSyncHandler(h host.Host, store *sync.SyncStore) {
+// RegisterSyncHandler mounts /reverb/sync/1.0.0 on the host.
+//
+// Identity comes from the libp2p connection, not from the message body. The
+// device ID a peer claims in SyncRequest is only honoured when it matches the
+// device bound to that peer at pairing time; a device ID is not a secret (it
+// travels in the author field of every change) and cannot authenticate anyone.
+func RegisterSyncHandler(h host.Host, store *sync.SyncStore, guard *Guard) {
 	h.SetStreamHandler("/reverb/sync/1.0.0", func(s network.Stream) {
 		defer s.Close()
 		_ = s.SetDeadline(time.Now().Add(30 * time.Second))
-		var req sync.SyncRequest
-		if err := json.NewDecoder(s).Decode(&req); err != nil {
-			_ = json.NewEncoder(s).Encode(map[string]string{"error": err.Error()})
-			return
-		}
-		deviceID := req.DeviceID
-		if deviceID == "" {
-			_ = json.NewEncoder(s).Encode(map[string]string{"error": "missing deviceId: pairing required"})
+		if guard == nil {
+			_ = s.Reset()
 			return
 		}
 		ctx := context.Background()
-		if err := store.ValidateDevice(ctx, deviceID); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				_ = json.NewEncoder(s).Encode(map[string]string{"error": "unknown deviceId: pairing required"})
-			} else {
-				_ = json.NewEncoder(s).Encode(map[string]string{"error": err.Error()})
-			}
+		boundDevice, rejected := guard.rejectUntrusted(ctx, s)
+		if rejected {
 			return
 		}
+		if boundDevice == "" {
+			_ = json.NewEncoder(s).Encode(map[string]string{"error": "peer has no device binding: re-pair required"})
+			return
+		}
+		var req sync.SyncRequest
+		if err := decodeLimited(s, maxSyncMessageBytes, &req); err != nil {
+			_ = json.NewEncoder(s).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		// The connection decides who this is. A mismatched claim is a forgery
+		// attempt, not a recoverable error.
+		if req.DeviceID != "" && req.DeviceID != boundDevice {
+			_ = json.NewEncoder(s).Encode(map[string]string{"error": "deviceId does not match paired identity"})
+			return
+		}
+		deviceID := boundDevice
+		if err := store.ValidateDevice(ctx, deviceID); err != nil {
+			_ = json.NewEncoder(s).Encode(map[string]string{"error": "unknown deviceId: pairing required"})
+			return
+		}
+		// Inbound changes may only be authored by the peer we authenticated.
+		// Accepting a third party's device ID here would let any paired peer
+		// forge changes as any other device.
+		for i := range req.Changes {
+			if req.Changes[i].DeviceID != "" && req.Changes[i].DeviceID != deviceID {
+				_ = json.NewEncoder(s).Encode(map[string]string{"error": "change author does not match paired identity"})
+				return
+			}
+			req.Changes[i].DeviceID = deviceID
+		}
+		_ = guard.store.TouchTrustedPeer(ctx, s.Conn().RemotePeer().String())
+
 		sinceRev := req.SinceRevision
 		// Vector-based filtering: if peer supplied vector, we filter outbound to only
 		// changes the peer hasn't seen (seq > peerVector[deviceID]).
 		peerVector := req.Vector
 		_ = req.SinceHLC
 
-		outbound, newRev, rejected, err := store.Reconcile(ctx, deviceID, sinceRev, req.Changes)
+		outbound, newRev, rejectedChanges, err := store.Reconcile(ctx, deviceID, sinceRev, req.Changes)
 		if err != nil {
 			_ = json.NewEncoder(s).Encode(map[string]string{"error": err.Error()})
 			return
@@ -76,8 +98,8 @@ func RegisterSyncHandler(h host.Host, store *sync.SyncStore) {
 			NewRevision: newRev,
 			NewHLC:      newHLC,
 			Vector:      seqMap,
-			Accepted:    len(req.Changes) - len(rejected),
-			Rejected:    rejected,
+			Accepted:    len(req.Changes) - len(rejectedChanges),
+			Rejected:    rejectedChanges,
 		}
 		_ = json.NewEncoder(s).Encode(resp)
 	})

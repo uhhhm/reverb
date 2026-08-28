@@ -69,6 +69,8 @@ type Runtime struct {
 	Reloader *ServiceReloader
 	Scrobble *scrobble.Service
 	P2P      *p2p.Host
+	// P2PGuard is the libp2p peer trust set, set once the host starts.
+	P2PGuard *p2p.Guard
 	Getenv   func(string) string
 }
 
@@ -303,6 +305,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		Getenv:   opts.Getenv,
 	}
 	rt.Deps.P2P = func() *p2p.Host { return rt.P2P }
+	rt.Deps.P2PGuard = func() *p2p.Guard { return rt.P2PGuard }
 	return rt, nil
 }
 
@@ -319,11 +322,18 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 		} else {
 			r.P2P = h
 			logf("p2p host %s ready addrs=%v", h.ID(), h.Addrs())
+			// Peer trust set. Every handler except pairing is gated on it:
+			// mDNS and DHT connect us to strangers, so a live connection means
+			// nothing until a pairing code has been exchanged.
+			guard := p2p.NewGuard(r.Store.Q())
+			r.P2PGuard = guard
 			if r.Deps.Pairing != nil && h.LibHost() != nil {
-				p2p.RegisterPairingHandler(h.LibHost(), r.Deps.Pairing)
+				p2p.RegisterPairingHandler(h.LibHost(), r.Deps.Pairing, guard, func(c context.Context) (string, error) {
+					return reverbsync.LocalDeviceID(c, r.Store.Q())
+				})
 			}
 			if r.Deps.SyncStore != nil && h.LibHost() != nil {
-				p2p.RegisterSyncHandler(h.LibHost(), r.Deps.SyncStore)
+				p2p.RegisterSyncHandler(h.LibHost(), r.Deps.SyncStore, guard)
 			}
 			// File sync: hash local music dir and keep file_manifest up to date.
 			getenv := r.Getenv
@@ -332,7 +342,7 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 			}
 			musicDir := embedded.MusicDir(getenv)
 			if h.LibHost() != nil {
-				p2p.RegisterFileHandler(h.LibHost(), musicDir)
+				p2p.RegisterFileHandler(h.LibHost(), musicDir, guard)
 			}
 			localID, lerr := reverbsync.LocalDeviceID(ctx, r.Store.Q())
 			if lerr != nil || localID == "" {
@@ -348,7 +358,7 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 				go fs.Run(ctx)
 				// P2P anti-entropy for sync changes over libp2p.
 				if r.Deps.SyncStore != nil && h.LibHost() != nil {
-					syncer := p2p.NewSyncer(h.LibHost(), r.Deps.SyncStore, localID)
+					syncer := p2p.NewSyncer(h.LibHost(), r.Deps.SyncStore, guard, localID)
 					go syncer.Run(ctx)
 				}
 			}

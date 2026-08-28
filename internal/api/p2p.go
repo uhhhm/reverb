@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net"
 	"net/http"
 
 	"github.com/uhhhm/reverb/internal/p2p"
@@ -85,7 +86,15 @@ func (s *Server) handleP2PRedeem(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "peerId, code and deviceName are required"})
 		return
 	}
-	deviceID, token, err := p2p.RedeemViaPeer(r.Context(), h.LibHost(), body.PeerID, body.Code, body.DeviceName)
+	var guard *p2p.Guard
+	if s.deps.P2PGuard != nil {
+		guard = s.deps.P2PGuard()
+	}
+	if guard == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "peer trust store unavailable"})
+		return
+	}
+	deviceID, token, err := p2p.RedeemViaPeer(r.Context(), h.LibHost(), guard, body.PeerID, body.Code, body.DeviceName)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -119,8 +128,8 @@ func (s *Server) handleP2PFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body p2pFetchRequest
-	if err := decode(r, &body); err != nil || body.PeerID == "" || body.RelPath == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "peerId and relPath are required"})
+	if err := decode(r, &body); err != nil || body.PeerID == "" || body.RelPath == "" || body.ContentHash == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "peerId, relPath and contentHash are required"})
 		return
 	}
 	musicDir := s.deps.MusicDir
@@ -169,4 +178,27 @@ func (s *Server) handleP2PFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// invalidateP2PTrust drops the cached peer trust set. Called after a device is
+// deleted so its peer loses access without waiting for the cache TTL.
+func (s *Server) invalidateP2PTrust() {
+	if s.deps.P2PGuard == nil {
+		return
+	}
+	if g := s.deps.P2PGuard(); g != nil {
+		g.Invalidate()
+	}
+}
+
+// pairingClientKey identifies the caller of the unauthenticated pairing redeem
+// endpoint for rate-limiting purposes. It uses the transport peer address only:
+// X-Forwarded-For is attacker-controlled and would let one client masquerade as
+// an unlimited number of distinct keys.
+func pairingClientKey(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }

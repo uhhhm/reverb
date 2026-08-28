@@ -1,11 +1,9 @@
 package p2p
 
 import (
-	"encoding/json"
+	"context"
 	"io"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/host"
@@ -18,44 +16,57 @@ type fileRequest struct {
 	ContentHash string `json:"contentHash,omitempty"`
 }
 
-// RegisterFileHandler serves files from musicDir on /reverb/file/1.0.0.
-func RegisterFileHandler(h host.Host, musicDir string) {
+// RegisterFileHandler serves files from musicDir on /reverb/file/1.0.0 to
+// paired peers only. guard is required: without it the handler would hand any
+// file under musicDir to any dialer on the LAN or via DHT/relay.
+func RegisterFileHandler(h host.Host, musicDir string, guard *Guard) {
 	h.SetStreamHandler("/reverb/file/1.0.0", func(s network.Stream) {
 		defer s.Close()
 		_ = s.SetDeadline(time.Now().Add(60 * time.Second))
-		if musicDir == "" {
+		if musicDir == "" || guard == nil {
 			_ = s.Reset()
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, rejected := guard.rejectUntrusted(ctx, s); rejected {
 			return
 		}
 		var req fileRequest
-		if err := json.NewDecoder(s).Decode(&req); err != nil {
+		if err := decodeLimited(s, maxFileRequestBytes, &req); err != nil {
 			_ = s.Reset()
 			return
 		}
-		var path string
-		if req.RelPath != "" {
-			cleanRel, err := validateRelPath(req.RelPath)
-			if err != nil {
-				_ = s.Reset()
-				return
-			}
-			path = filepath.Join(musicDir, cleanRel)
-		} else {
+		if req.RelPath == "" {
 			_ = s.Reset()
 			return
 		}
-		// Ensure path is within musicDir (defense in depth).
-		rel, err := filepath.Rel(musicDir, path)
-		if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." || filepath.IsAbs(rel) {
+		cleanRel, err := validateRelPath(req.RelPath)
+		if err != nil {
 			_ = s.Reset()
 			return
 		}
-		f, err := os.Open(path)
+		// os.OpenRoot confines resolution to musicDir: unlike a lexical
+		// filepath.Rel check it will not follow a symlink out of the tree.
+		root, err := os.OpenRoot(musicDir)
+		if err != nil {
+			_ = s.Reset()
+			return
+		}
+		defer root.Close()
+		f, err := root.Open(cleanRel)
 		if err != nil {
 			_ = s.Reset()
 			return
 		}
 		defer f.Close()
+		// Refuse anything that is not a regular file: a FIFO or device node
+		// under musicDir would otherwise block or stream indefinitely.
+		st, err := f.Stat()
+		if err != nil || !st.Mode().IsRegular() {
+			_ = s.Reset()
+			return
+		}
 		if _, err := io.Copy(s, f); err != nil {
 			_ = s.Reset()
 			return

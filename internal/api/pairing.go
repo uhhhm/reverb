@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/uhhhm/reverb/internal/p2p"
 	"github.com/uhhhm/reverb/internal/store/db"
 	"github.com/uhhhm/reverb/internal/sync"
 )
@@ -63,6 +64,13 @@ func (s *Server) handlePairingRedeem(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "code and deviceName are required"})
 		return
 	}
+	// This endpoint is unauthenticated by necessity — the device redeeming a
+	// code has no credentials yet — so it needs its own brute-force bound.
+	limiterKey := pairingClientKey(r)
+	if !p2p.AllowPairAttempt(limiterKey) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many pairing attempts; try again later"})
+		return
+	}
 	deviceID, token, err := s.deps.Pairing.Redeem(r.Context(), body.Code, body.DeviceName)
 	if err != nil {
 		switch {
@@ -77,6 +85,7 @@ func (s *Server) handlePairingRedeem(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	p2p.ResetPairAttempts(limiterKey)
 	serverID, _ := s.syncServerDeviceID(r.Context())
 	writeJSON(w, http.StatusOK, redeemResponse{
 		DeviceID:       deviceID,
@@ -167,6 +176,10 @@ func (s *Server) handlePairingDeviceDelete(w http.ResponseWriter, r *http.Reques
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM p2p_peer WHERE device_id = ?`, id); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 		if _, err := tx.ExecContext(r.Context(), `DELETE FROM device WHERE id = ?`, id); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -175,6 +188,7 @@ func (s *Server) handlePairingDeviceDelete(w http.ResponseWriter, r *http.Reques
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		s.invalidateP2PTrust()
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 		return
 	}
@@ -215,6 +229,10 @@ func (s *Server) handlePairingDeviceDelete(w http.ResponseWriter, r *http.Reques
 					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 					return
 				}
+				if _, err := tx.ExecContext(r.Context(), `DELETE FROM p2p_peer WHERE device_id = ?`, id); err != nil {
+					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+					return
+				}
 				if _, err := tx.ExecContext(r.Context(), `DELETE FROM device WHERE id = ?`, id); err != nil {
 					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 					return
@@ -223,6 +241,7 @@ func (s *Server) handlePairingDeviceDelete(w http.ResponseWriter, r *http.Reques
 					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 					return
 				}
+				s.invalidateP2PTrust()
 				writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 				return
 			}
@@ -253,10 +272,15 @@ func (s *Server) handlePairingDeviceDelete(w http.ResponseWriter, r *http.Reques
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		if _, err := execHandle.ExecContext(r.Context(), `DELETE FROM p2p_peer WHERE device_id = ?`, id); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 	if err := s.deps.PairingStore.DeleteDevice(r.Context(), id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.invalidateP2PTrust()
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

@@ -185,3 +185,33 @@ Rate-limit + 10m TTL + single-use `TryMark` keeps `ABCDEFGHJKLMNPQRSTUVWXYZ23456
 | `127.0.0.1:0` firewall | LAN `0.0.0.0:0` prompts once; document `REVERB_LISTEN_ADDRESS`. |
 | Clock HLC downgrade on restore from backup | `hlc` persisted + `max(wall,last)` handles backup replay. |
 
+
+---
+
+## 14. Peer trust model
+
+Discovery is not trust. mDNS auto-connects to anything advertising `_reverb._tcp`,
+and DHT/relay extends that to the internet, so an open connection says nothing
+about who is on the other end. The `p2p_peer` table (migration `0031`) is the
+trust set: a row is created only by completing a pairing-code exchange, and it
+binds a libp2p peer ID to a `device` row.
+
+- `/reverb/pair/1.0.0` is the one handler open to unpaired peers — it is how
+  trust is bootstrapped. It is rate limited (5 attempts per peer, 30 global, per
+  15 minutes) against brute force of the 2^40 code keyspace. Both sides record
+  the other in `p2p_peer` on success.
+- `/reverb/sync/1.0.0` and `/reverb/file/1.0.0` require a `p2p_peer` row for the
+  connecting peer ID.
+- Identity comes from the libp2p connection, never from the message body. A
+  device ID travels in the author field of every change, so it is not a secret
+  and cannot authenticate anyone. `SyncRequest.DeviceID` is honoured only when it
+  matches the peer's bound device.
+- **Changes are accepted only from their author.** Because changes carry no
+  signature, a relayed third-party change is indistinguishable from one the
+  sending peer invented, so forwarding is refused. Convergence therefore requires
+  a fully paired mesh: every pair of devices that must agree has to pair
+  directly. Transitive propagation needs per-device change signing — the natural
+  follow-up if the mesh becomes inconvenient.
+- Every stream decoder reads through a byte cap (`internal/p2p/limits.go`), and
+  peer file fetches require a content hash, land in a temp file, and are renamed
+  into place only after the digest matches.
