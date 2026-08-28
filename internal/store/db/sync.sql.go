@@ -36,6 +36,37 @@ func (q *Queries) AppendSyncChange(ctx context.Context, arg AppendSyncChangePara
 	return revision, err
 }
 
+const appendSyncChangeWithHLC = `-- name: AppendSyncChangeWithHLC :one
+INSERT INTO sync_change (device_id, entity_type, entity_id, field, value_json, updated_at, hlc, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING revision
+`
+
+type AppendSyncChangeWithHLCParams struct {
+	DeviceID   string `json:"device_id"`
+	EntityType string `json:"entity_type"`
+	EntityID   string `json:"entity_id"`
+	Field      string `json:"field"`
+	ValueJson  string `json:"value_json"`
+	UpdatedAt  int64  `json:"updated_at"`
+	Hlc        int64  `json:"hlc"`
+	Seq        int64  `json:"seq"`
+}
+
+func (q *Queries) AppendSyncChangeWithHLC(ctx context.Context, arg AppendSyncChangeWithHLCParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, appendSyncChangeWithHLC,
+		arg.DeviceID,
+		arg.EntityType,
+		arg.EntityID,
+		arg.Field,
+		arg.ValueJson,
+		arg.UpdatedAt,
+		arg.Hlc,
+		arg.Seq,
+	)
+	var revision int64
+	err := row.Scan(&revision)
+	return revision, err
+}
+
 const countSyncChanges = `-- name: CountSyncChanges :one
 SELECT COUNT(*) FROM sync_change
 `
@@ -56,8 +87,17 @@ func (q *Queries) DeleteSyncCursor(ctx context.Context, deviceID string) error {
 	return err
 }
 
+const deleteSyncVector = `-- name: DeleteSyncVector :exec
+DELETE FROM sync_vector WHERE device_id = ?
+`
+
+func (q *Queries) DeleteSyncVector(ctx context.Context, deviceID string) error {
+	_, err := q.db.ExecContext(ctx, deleteSyncVector, deviceID)
+	return err
+}
+
 const getLatestSyncChangeForField = `-- name: GetLatestSyncChangeForField :one
-SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at FROM sync_change WHERE entity_type = ? AND entity_id = ? AND field = ? ORDER BY revision DESC LIMIT 1
+SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq FROM sync_change WHERE entity_type = ? AND entity_id = ? AND field = ? ORDER BY revision DESC LIMIT 1
 `
 
 type GetLatestSyncChangeForFieldParams struct {
@@ -78,8 +118,49 @@ func (q *Queries) GetLatestSyncChangeForField(ctx context.Context, arg GetLatest
 		&i.ValueJson,
 		&i.UpdatedAt,
 		&i.CreatedAt,
+		&i.Hlc,
+		&i.Seq,
 	)
 	return i, err
+}
+
+const getLatestSyncChangeForFieldByHLC = `-- name: GetLatestSyncChangeForFieldByHLC :one
+SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq FROM sync_change WHERE entity_type = ? AND entity_id = ? AND field = ? ORDER BY hlc DESC, revision DESC LIMIT 1
+`
+
+type GetLatestSyncChangeForFieldByHLCParams struct {
+	EntityType string `json:"entity_type"`
+	EntityID   string `json:"entity_id"`
+	Field      string `json:"field"`
+}
+
+func (q *Queries) GetLatestSyncChangeForFieldByHLC(ctx context.Context, arg GetLatestSyncChangeForFieldByHLCParams) (SyncChange, error) {
+	row := q.db.QueryRowContext(ctx, getLatestSyncChangeForFieldByHLC, arg.EntityType, arg.EntityID, arg.Field)
+	var i SyncChange
+	err := row.Scan(
+		&i.Revision,
+		&i.DeviceID,
+		&i.EntityType,
+		&i.EntityID,
+		&i.Field,
+		&i.ValueJson,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+		&i.Hlc,
+		&i.Seq,
+	)
+	return i, err
+}
+
+const getMaxHLC = `-- name: GetMaxHLC :one
+SELECT COALESCE(MAX(hlc), 0) AS max_hlc FROM sync_change
+`
+
+func (q *Queries) GetMaxHLC(ctx context.Context) (interface{}, error) {
+	row := q.db.QueryRowContext(ctx, getMaxHLC)
+	var max_hlc interface{}
+	err := row.Scan(&max_hlc)
+	return max_hlc, err
 }
 
 const getMaxSyncRevision = `-- name: GetMaxSyncRevision :one
@@ -104,8 +185,24 @@ func (q *Queries) GetSyncCursor(ctx context.Context, deviceID string) (SyncCurso
 	return i, err
 }
 
+const getSyncVector = `-- name: GetSyncVector :one
+SELECT device_id, seq, hlc, updated_at FROM sync_vector WHERE device_id = ?
+`
+
+func (q *Queries) GetSyncVector(ctx context.Context, deviceID string) (SyncVector, error) {
+	row := q.db.QueryRowContext(ctx, getSyncVector, deviceID)
+	var i SyncVector
+	err := row.Scan(
+		&i.DeviceID,
+		&i.Seq,
+		&i.Hlc,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listSyncChangesSince = `-- name: ListSyncChangesSince :many
-SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at FROM sync_change WHERE revision > ? ORDER BY revision ASC LIMIT ?
+SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq FROM sync_change WHERE revision > ? ORDER BY revision ASC LIMIT ?
 `
 
 type ListSyncChangesSinceParams struct {
@@ -131,6 +228,83 @@ func (q *Queries) ListSyncChangesSince(ctx context.Context, arg ListSyncChangesS
 			&i.ValueJson,
 			&i.UpdatedAt,
 			&i.CreatedAt,
+			&i.Hlc,
+			&i.Seq,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSyncChangesSinceHLC = `-- name: ListSyncChangesSinceHLC :many
+SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq FROM sync_change WHERE hlc > ? ORDER BY hlc ASC, revision ASC LIMIT ?
+`
+
+type ListSyncChangesSinceHLCParams struct {
+	Hlc   int64 `json:"hlc"`
+	Limit int64 `json:"limit"`
+}
+
+func (q *Queries) ListSyncChangesSinceHLC(ctx context.Context, arg ListSyncChangesSinceHLCParams) ([]SyncChange, error) {
+	rows, err := q.db.QueryContext(ctx, listSyncChangesSinceHLC, arg.Hlc, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SyncChange
+	for rows.Next() {
+		var i SyncChange
+		if err := rows.Scan(
+			&i.Revision,
+			&i.DeviceID,
+			&i.EntityType,
+			&i.EntityID,
+			&i.Field,
+			&i.ValueJson,
+			&i.UpdatedAt,
+			&i.CreatedAt,
+			&i.Hlc,
+			&i.Seq,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSyncVectors = `-- name: ListSyncVectors :many
+SELECT device_id, seq, hlc, updated_at FROM sync_vector
+`
+
+func (q *Queries) ListSyncVectors(ctx context.Context) ([]SyncVector, error) {
+	rows, err := q.db.QueryContext(ctx, listSyncVectors)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SyncVector
+	for rows.Next() {
+		var i SyncVector
+		if err := rows.Scan(
+			&i.DeviceID,
+			&i.Seq,
+			&i.Hlc,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -156,5 +330,20 @@ type UpsertSyncCursorParams struct {
 
 func (q *Queries) UpsertSyncCursor(ctx context.Context, arg UpsertSyncCursorParams) error {
 	_, err := q.db.ExecContext(ctx, upsertSyncCursor, arg.DeviceID, arg.Revision)
+	return err
+}
+
+const upsertSyncVector = `-- name: UpsertSyncVector :exec
+INSERT INTO sync_vector (device_id, seq, hlc, updated_at) VALUES (?, ?, ?, unixepoch()) ON CONFLICT(device_id) DO UPDATE SET seq = excluded.seq, hlc = excluded.hlc, updated_at = unixepoch()
+`
+
+type UpsertSyncVectorParams struct {
+	DeviceID string `json:"device_id"`
+	Seq      int64  `json:"seq"`
+	Hlc      int64  `json:"hlc"`
+}
+
+func (q *Queries) UpsertSyncVector(ctx context.Context, arg UpsertSyncVectorParams) error {
+	_, err := q.db.ExecContext(ctx, upsertSyncVector, arg.DeviceID, arg.Seq, arg.Hlc)
 	return err
 }

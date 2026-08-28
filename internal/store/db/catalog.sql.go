@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"strings"
 )
 
 const deleteBindingsForCatalog = `-- name: DeleteBindingsForCatalog :exec
@@ -90,6 +91,17 @@ func (q *Queries) GetCatalogEntity(ctx context.Context, id string) (CatalogEntit
 	return i, err
 }
 
+const getCatalogIDByBackendID = `-- name: GetCatalogIDByBackendID :one
+SELECT catalog_id FROM backend_binding WHERE backend_id = ? LIMIT 1
+`
+
+func (q *Queries) GetCatalogIDByBackendID(ctx context.Context, backendID string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getCatalogIDByBackendID, backendID)
+	var catalog_id string
+	err := row.Scan(&catalog_id)
+	return catalog_id, err
+}
+
 const insertCatalogAlias = `-- name: InsertCatalogAlias :exec
 INSERT INTO catalog_alias (alias_kind, alias_value, catalog_id, created_at)
 VALUES (?,?,?,?) ON CONFLICT(alias_kind, alias_value) DO NOTHING
@@ -167,6 +179,48 @@ func (q *Queries) ListAliasesForCatalog(ctx context.Context, catalogID string) (
 	for rows.Next() {
 		var i ListAliasesForCatalogRow
 		if err := rows.Scan(&i.AliasKind, &i.AliasValue); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCatalogIDsByBackendIDs = `-- name: ListCatalogIDsByBackendIDs :many
+SELECT backend_id, catalog_id FROM backend_binding WHERE backend_id IN (/*SLICE:backend_ids*/?)
+`
+
+type ListCatalogIDsByBackendIDsRow struct {
+	BackendID string `json:"backend_id"`
+	CatalogID string `json:"catalog_id"`
+}
+
+func (q *Queries) ListCatalogIDsByBackendIDs(ctx context.Context, backendIds []string) ([]ListCatalogIDsByBackendIDsRow, error) {
+	query := listCatalogIDsByBackendIDs
+	var queryParams []interface{}
+	if len(backendIds) > 0 {
+		for _, v := range backendIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:backend_ids*/?", strings.Repeat(",?", len(backendIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:backend_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCatalogIDsByBackendIDsRow
+	for rows.Next() {
+		var i ListCatalogIDsByBackendIDsRow
+		if err := rows.Scan(&i.BackendID, &i.CatalogID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

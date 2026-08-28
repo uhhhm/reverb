@@ -22,6 +22,7 @@ const Pairing = lazy(() => import('./routes/Pairing'))
 const OfflineSet = lazy(() => import('./routes/OfflineSet'))
 const AddFromLink = lazy(() => import('./routes/AddFromLink'))
 const UpgradeQuality = lazy(() => import('./routes/UpgradeQuality'))
+const P2P = lazy(() => import('./routes/P2P'))
 
 /** Redirect bare `/album/:id` or `/artist/:id` URLs to the source-qualified form
  *  `/album/library/:id` / `/artist/library/:id`. These old URLs may exist in
@@ -85,6 +86,7 @@ function Routed() {
         <Route path="/offline-set" element={<OfflineSet />} />
         <Route path="/add-from-link" element={<AddFromLink />} />
         <Route path="/upgrade-quality" element={<UpgradeQuality />} />
+        <Route path="/p2p" element={<P2P />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

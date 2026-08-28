@@ -36,3 +36,9 @@ DELETE FROM backend_binding WHERE catalog_id = ?;
 
 -- name: RepointBindings :exec
 UPDATE backend_binding SET catalog_id = ? WHERE catalog_id = ?;
+
+-- name: GetCatalogIDByBackendID :one
+SELECT catalog_id FROM backend_binding WHERE backend_id = ? LIMIT 1;
+
+-- name: ListCatalogIDsByBackendIDs :many
+SELECT backend_id, catalog_id FROM backend_binding WHERE backend_id IN (sqlc.slice('backend_ids'));

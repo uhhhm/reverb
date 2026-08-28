@@ -90,6 +90,20 @@ func ensureDeviceSyncTables(ctx context.Context, tx *sql.Tx) error {
   updated_at  INTEGER NOT NULL,
   PRIMARY KEY (device_id, playlist_id)
 )`,
+		`CREATE TABLE IF NOT EXISTS file_manifest (
+  canonical_id TEXT PRIMARY KEY,
+  content_hash TEXT NOT NULL,
+  size         INTEGER NOT NULL,
+  rel_path     TEXT NOT NULL,
+  mtime        INTEGER NOT NULL,
+  device_id    TEXT NOT NULL REFERENCES device(id)
+)`,
+		`CREATE TABLE IF NOT EXISTS sync_vector (
+  device_id  TEXT PRIMARY KEY REFERENCES device(id),
+  seq        INTEGER NOT NULL DEFAULT 0,
+  hlc        INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+)`,
 	}
 	for _, s := range stmts {
 		if _, err := tx.ExecContext(ctx, s); err != nil {
@@ -121,6 +135,12 @@ func ensureDeviceSyncTables(ctx context.Context, tx *sql.Tx) error {
 	}
 	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS idx_sync_change_entity`); err != nil {
 		return fmt.Errorf("drop idx_sync_change_entity: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_file_manifest_hash ON file_manifest(content_hash)`); err != nil {
+		return fmt.Errorf("create idx_file_manifest_hash: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_file_manifest_device ON file_manifest(device_id)`); err != nil {
+		return fmt.Errorf("create idx_file_manifest_device: %w", err)
 	}
 	return nil
 }

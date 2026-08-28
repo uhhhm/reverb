@@ -14,6 +14,8 @@ import (
 type SyncStoreInterface interface {
 	Reconcile(ctx context.Context, deviceID string, sinceRev int64, inbound []sync.SyncChange) (outbound []sync.SyncChange, newRev int64, rejected []sync.SyncChange, err error)
 	GetMaxRevision(ctx context.Context) (int64, error)
+	GetMaxHLC(ctx context.Context) (int64, error)
+	GetVectorMap(ctx context.Context) (map[string]int64, map[string]int64, error)
 }
 
 // ensure SyncStore implements it.
@@ -57,9 +59,20 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	if accepted < 0 {
 		accepted = 0
 	}
+	// P2P vector/hlc for new clients (best-effort).
+	var newHLC int64
+	var vector map[string]int64
+	if h, err := s.deps.SyncStore.GetMaxHLC(r.Context()); err == nil {
+		newHLC = h
+	}
+	if seqMap, _, err := s.deps.SyncStore.GetVectorMap(r.Context()); err == nil {
+		vector = seqMap
+	}
 	resp := sync.SyncResponse{
 		Changes:     outbound,
 		NewRevision: newRev,
+		NewHLC:      newHLC,
+		Vector:      vector,
 		Accepted:    accepted,
 		Rejected:    rejected,
 	}
@@ -84,6 +97,8 @@ func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	newHLC, _ := s.deps.SyncStore.GetMaxHLC(r.Context())
+	seqMap, hlcMap, _ := s.deps.SyncStore.GetVectorMap(r.Context())
 	var count int
 	if s.deps.PairingStore != nil {
 		if devices, err := s.deps.PairingStore.ListDevices(r.Context()); err == nil {
@@ -103,5 +118,5 @@ func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"revision": rev, "deviceCount": count})
+	writeJSON(w, http.StatusOK, map[string]any{"revision": rev, "hlc": newHLC, "vector": seqMap, "hlcVector": hlcMap, "deviceCount": count})
 }

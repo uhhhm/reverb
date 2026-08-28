@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/uhhhm/reverb/internal/store/db"
 )
@@ -20,11 +21,12 @@ type SyncStore struct {
 	q      Querier
 	policy MergePolicy
 	mu     sync.Mutex
+	hlc    *HLC
 }
 
 // NewSyncStore creates a store with default LWWPolicy.
 func NewSyncStore(q Querier) *SyncStore {
-	return &SyncStore{q: q, policy: LWWPolicy{}}
+	return &SyncStore{q: q, policy: LWWPolicy{}, hlc: NewHLC()}
 }
 
 // NewSyncStoreWithPolicy creates a store with a custom merge policy (for tests).
@@ -32,7 +34,7 @@ func NewSyncStoreWithPolicy(q Querier, p MergePolicy) *SyncStore {
 	if p == nil {
 		p = LWWPolicy{}
 	}
-	return &SyncStore{q: q, policy: p}
+	return &SyncStore{q: q, policy: p, hlc: NewHLC()}
 }
 
 func marshalValue(ch SyncChange) (string, error) {
@@ -72,6 +74,8 @@ func dbToSyncChange(row db.SyncChange) SyncChange {
 		UpdatedAt:  row.UpdatedAt,
 		DeviceID:   row.DeviceID,
 		Revision:   row.Revision,
+		HLC:        row.Hlc,
+		Seq:        row.Seq,
 	}
 }
 
@@ -87,6 +91,26 @@ func (s *SyncStore) appendSyncChange(ctx context.Context, arg db.AppendSyncChang
 		return dbq.AppendSyncChange(ctx, arg)
 	}
 	return 0, fmt.Errorf("querier does not support AppendSyncChange")
+}
+
+func (s *SyncStore) appendSyncChangeWithHLC(ctx context.Context, arg db.AppendSyncChangeWithHLCParams) (int64, error) {
+	if qq, ok := any(s.q).(interface {
+		AppendSyncChangeWithHLC(context.Context, db.AppendSyncChangeWithHLCParams) (int64, error)
+	}); ok {
+		return qq.AppendSyncChangeWithHLC(ctx, arg)
+	}
+	if dbq, ok := any(s.q).(*db.Queries); ok {
+		return dbq.AppendSyncChangeWithHLC(ctx, arg)
+	}
+	// Fallback to legacy without HLC (for mocks that only implement old).
+	return s.appendSyncChange(ctx, db.AppendSyncChangeParams{
+		DeviceID:   arg.DeviceID,
+		EntityType: arg.EntityType,
+		EntityID:   arg.EntityID,
+		Field:      arg.Field,
+		ValueJson:  arg.ValueJson,
+		UpdatedAt:  arg.UpdatedAt,
+	})
 }
 
 func (s *SyncStore) listSyncChangesSince(ctx context.Context, arg db.ListSyncChangesSinceParams) ([]db.SyncChange, error) {
@@ -152,6 +176,56 @@ func (s *SyncStore) getMaxSyncRevision(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("querier does not support GetMaxSyncRevision")
 }
 
+func (s *SyncStore) getMaxHLC(ctx context.Context) (int64, error) {
+	if qq, ok := any(s.q).(interface {
+		GetMaxHLC(context.Context) (int64, error)
+	}); ok {
+		return qq.GetMaxHLC(ctx)
+	}
+	if qq, ok := any(s.q).(interface {
+		GetMaxHLC(context.Context) (interface{}, error)
+	}); ok {
+		v, err := qq.GetMaxHLC(ctx)
+		if err != nil {
+			return 0, err
+		}
+		switch vv := v.(type) {
+		case int64:
+			return vv, nil
+		case int:
+			return int64(vv), nil
+		case int32:
+			return int64(vv), nil
+		case float64:
+			return int64(vv), nil
+		case nil:
+			return 0, nil
+		case string:
+			return 0, nil
+		default:
+			return 0, fmt.Errorf("unexpected GetMaxHLC type %T", v)
+		}
+	}
+	if dbq, ok := any(s.q).(*db.Queries); ok {
+		v, err := dbq.GetMaxHLC(ctx)
+		if err != nil {
+			return 0, err
+		}
+		switch vv := v.(type) {
+		case int64:
+			return vv, nil
+		case int:
+			return int64(vv), nil
+		case nil:
+			return 0, nil
+		default:
+			return 0, fmt.Errorf("unexpected GetMaxHLC type %T", v)
+		}
+	}
+	// No HLC column on old mocks — treat as 0.
+	return 0, nil
+}
+
 func (s *SyncStore) getLatestSyncChangeForField(ctx context.Context, arg db.GetLatestSyncChangeForFieldParams) (db.SyncChange, error) {
 	if qq, ok := any(s.q).(interface {
 		GetLatestSyncChangeForField(context.Context, db.GetLatestSyncChangeForFieldParams) (db.SyncChange, error)
@@ -188,21 +262,114 @@ func (s *SyncStore) upsertSyncCursor(ctx context.Context, arg db.UpsertSyncCurso
 	return fmt.Errorf("querier does not support UpsertSyncCursor")
 }
 
+func (s *SyncStore) getSyncVector(ctx context.Context, deviceID string) (db.SyncVector, error) {
+	if qq, ok := any(s.q).(interface {
+		GetSyncVector(context.Context, string) (db.SyncVector, error)
+	}); ok {
+		return qq.GetSyncVector(ctx, deviceID)
+	}
+	if dbq, ok := any(s.q).(*db.Queries); ok {
+		return dbq.GetSyncVector(ctx, deviceID)
+	}
+	return db.SyncVector{}, fmt.Errorf("querier does not support GetSyncVector")
+}
+
+func (s *SyncStore) upsertSyncVector(ctx context.Context, arg db.UpsertSyncVectorParams) error {
+	if qq, ok := any(s.q).(interface {
+		UpsertSyncVector(context.Context, db.UpsertSyncVectorParams) error
+	}); ok {
+		return qq.UpsertSyncVector(ctx, arg)
+	}
+	if dbq, ok := any(s.q).(*db.Queries); ok {
+		return dbq.UpsertSyncVector(ctx, arg)
+	}
+	return fmt.Errorf("querier does not support UpsertSyncVector")
+}
+
+func (s *SyncStore) ensureHLC(ctx context.Context) {
+	if s.hlc == nil {
+		s.hlc = NewHLC()
+	}
+	if s.hlc.Current() != 0 {
+		return
+	}
+	if h, err := s.getMaxHLC(ctx); err == nil && h > 0 {
+		s.hlc.Observe(h)
+	}
+}
+
+// nextSeqLocked returns the next seq for deviceID without writing.
+// Caller is responsible for upserting the vector with the final HLC in the same critical section.
+// Caller must hold s.mu or be inside a transaction's txStore.mu.
+func (s *SyncStore) nextSeqLocked(ctx context.Context, deviceID string) (int64, int64, error) {
+	s.ensureHLC(ctx)
+	vec, err := s.getSyncVector(ctx, deviceID)
+	var curSeq, curHLC int64
+	if err == nil {
+		curSeq = vec.Seq
+		curHLC = vec.Hlc
+		if curHLC > s.hlc.Current() {
+			s.hlc.Observe(curHLC)
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, err
+	}
+	newSeq := curSeq + 1
+	newHLC := s.hlc.Current()
+	return newSeq, newHLC, nil
+}
+
 // AppendChange appends a single change for deviceID. Value is marshaled to value_json.
 func (s *SyncStore) AppendChange(ctx context.Context, deviceID string, ch SyncChange) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.ensureHLC(ctx)
 	valueJSON, err := marshalValue(ch)
 	if err != nil {
 		return 0, err
 	}
-	return s.appendSyncChange(ctx, db.AppendSyncChangeParams{
+	// If inbound HLC is supplied (replayed remote), observe it; otherwise tick wall time.
+	var hlc int64
+	if ch.HLC != 0 {
+		s.hlc.Observe(ch.HLC)
+		hlc = ch.HLC
+	} else {
+		wall := ch.UpdatedAt
+		if wall == 0 {
+			wall = time.Now().UnixMilli()
+		}
+		hlc = s.hlc.Tick(wall)
+	}
+	seq := ch.Seq
+	if seq == 0 {
+		ns, _, err := s.nextSeqLocked(ctx, deviceID)
+		if err != nil {
+			return 0, err
+		}
+		seq = ns
+		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: seq, Hlc: hlc}); err != nil {
+			return 0, err
+		}
+	} else {
+		// Provided seq (during reconcile of remote) — ensure vector is monotonic (max).
+		if cur, _, err := s.GetVector(ctx, deviceID); err == nil {
+			if seq < cur {
+				seq = cur
+			}
+		}
+		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: seq, Hlc: hlc}); err != nil {
+			return 0, err
+		}
+	}
+	return s.appendSyncChangeWithHLC(ctx, db.AppendSyncChangeWithHLCParams{
 		DeviceID:   deviceID,
 		EntityType: ch.EntityType,
 		EntityID:   ch.EntityID,
 		Field:      ch.Field,
 		ValueJson:  valueJSON,
 		UpdatedAt:  ch.UpdatedAt,
+		Hlc:        hlc,
+		Seq:        seq,
 	})
 }
 
@@ -211,13 +378,45 @@ func (s *SyncStore) appendChangeLocked(ctx context.Context, deviceID string, ch 
 	if err != nil {
 		return 0, err
 	}
-	return s.appendSyncChange(ctx, db.AppendSyncChangeParams{
+	s.ensureHLC(ctx)
+	var hlc int64
+	if ch.HLC != 0 {
+		s.hlc.Observe(ch.HLC)
+		hlc = ch.HLC
+	} else {
+		wall := ch.UpdatedAt
+		if wall == 0 {
+			wall = time.Now().UnixMilli()
+		}
+		hlc = s.hlc.Tick(wall)
+	}
+	seq := ch.Seq
+	if seq == 0 {
+		ns, _, err := s.nextSeqLocked(ctx, deviceID)
+		if err != nil {
+			return 0, err
+		}
+		seq = ns
+		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: seq, Hlc: hlc}); err != nil {
+			return 0, err
+		}
+	} else {
+		if cur, _, err := s.GetVector(ctx, deviceID); err == nil && seq < cur {
+			seq = cur
+		}
+		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: seq, Hlc: hlc}); err != nil {
+			return 0, err
+		}
+	}
+	return s.appendSyncChangeWithHLC(ctx, db.AppendSyncChangeWithHLCParams{
 		DeviceID:   deviceID,
 		EntityType: ch.EntityType,
 		EntityID:   ch.EntityID,
 		Field:      ch.Field,
 		ValueJson:  valueJSON,
 		UpdatedAt:  ch.UpdatedAt,
+		Hlc:        hlc,
+		Seq:        seq,
 	})
 }
 
@@ -243,9 +442,103 @@ func (s *SyncStore) ListSince(ctx context.Context, since int64, limit int64) ([]
 	return out, nil
 }
 
+// ListSinceHLC returns changes with hlc > since, ordered by hlc ASC (P2P).
+func (s *SyncStore) ListSinceHLC(ctx context.Context, since int64, limit int64) ([]SyncChange, error) {
+	if limit <= 0 {
+		limit = 10000
+	}
+	q, ok := any(s.q).(interface {
+		ListSyncChangesSinceHLC(context.Context, db.ListSyncChangesSinceHLCParams) ([]db.SyncChange, error)
+	})
+	if !ok {
+		if dbq, ok := any(s.q).(*db.Queries); ok {
+			q = dbq
+		} else {
+			return nil, fmt.Errorf("querier does not support ListSyncChangesSinceHLC")
+		}
+	}
+	rows, err := q.ListSyncChangesSinceHLC(ctx, db.ListSyncChangesSinceHLCParams{Hlc: since, Limit: limit})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SyncChange, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, dbToSyncChange(r))
+	}
+	if out == nil {
+		out = []SyncChange{}
+	}
+	return out, nil
+}
+
+// ListSinceVector returns changes not yet seen by peer vector (seq > peerSeq per device).
+// It pages through the global log so that filtering does not truncate when the
+// log exceeds the outbound cap.
+func (s *SyncStore) ListSinceVector(ctx context.Context, vector map[string]int64, limit int64) ([]SyncChange, error) {
+	if limit <= 0 {
+		limit = 10000
+	}
+	if len(vector) == 0 {
+		return s.ListSince(ctx, 0, limit)
+	}
+	const batch = 1000
+	var out []SyncChange
+	var cursor int64
+	for int64(len(out)) < limit {
+		need := limit - int64(len(out))
+		fetch := batch
+		if need < int64(batch) && need > 0 {
+			// Still fetch at least batch to amortize, but cap final batch if we overshoot heavily.
+			fetch = int(need + 100)
+			if fetch < batch {
+				fetch = batch
+			}
+		}
+		if fetch > 10000 {
+			fetch = 10000
+		}
+		rows, err := s.ListSince(ctx, cursor, int64(fetch))
+		if err != nil {
+			return nil, err
+		}
+		if len(rows) == 0 {
+			break
+		}
+		for _, ch := range rows {
+			if seen, ok := vector[ch.DeviceID]; ok && ch.Seq != 0 && ch.Seq <= seen {
+				continue
+			}
+			out = append(out, ch)
+			if int64(len(out)) >= limit {
+				break
+			}
+		}
+		if len(rows) < fetch {
+			break
+		}
+		cursor = rows[len(rows)-1].Revision
+		// Safety: avoid infinite loop if cursor doesn't advance (shouldn't happen).
+		if cursor == 0 {
+			break
+		}
+	}
+	if out == nil {
+		out = []SyncChange{}
+	}
+	if int64(len(out)) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 // GetMaxRevision returns the current global revision (0 if none).
 func (s *SyncStore) GetMaxRevision(ctx context.Context) (int64, error) {
 	return s.getMaxSyncRevision(ctx)
+}
+
+// GetMaxHLC returns the max HLC (0 if none).
+func (s *SyncStore) GetMaxHLC(ctx context.Context) (int64, error) {
+	return s.getMaxHLC(ctx)
 }
 
 // GetLatestForField returns the latest change for entityType+entityId+field, or nil if none.
@@ -283,6 +576,48 @@ func (s *SyncStore) SetCursor(ctx context.Context, deviceID string, rev int64) e
 		DeviceID: deviceID,
 		Revision: rev,
 	})
+}
+
+// GetVector returns the stored sync vector for deviceID (0,0 if none).
+func (s *SyncStore) GetVector(ctx context.Context, deviceID string) (seq, hlc int64, err error) {
+	vec, err := s.getSyncVector(ctx, deviceID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, 0, nil
+		}
+		return 0, 0, err
+	}
+	return vec.Seq, vec.Hlc, nil
+}
+
+// SetVector upserts the vector for deviceID.
+func (s *SyncStore) SetVector(ctx context.Context, deviceID string, seq, hlc int64) error {
+	return s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: seq, Hlc: hlc})
+}
+
+// GetVectorMap returns all sync vectors as map[deviceID]{seq,hlc}.
+func (s *SyncStore) GetVectorMap(ctx context.Context) (map[string]int64, map[string]int64, error) {
+	q, ok := any(s.q).(interface {
+		ListSyncVectors(context.Context) ([]db.SyncVector, error)
+	})
+	if !ok {
+		if dbq, ok := any(s.q).(*db.Queries); ok {
+			q = dbq
+		} else {
+			return nil, nil, fmt.Errorf("querier does not support ListSyncVectors")
+		}
+	}
+	rows, err := q.ListSyncVectors(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	seqMap := make(map[string]int64, len(rows))
+	hlcMap := make(map[string]int64, len(rows))
+	for _, r := range rows {
+		seqMap[r.DeviceID] = r.Seq
+		hlcMap[r.DeviceID] = r.Hlc
+	}
+	return seqMap, hlcMap, nil
 }
 
 // isServer checks if deviceID belongs to a server device; lookup failure => false.
@@ -324,20 +659,22 @@ func (s *SyncStore) effectivePolicy(ctx context.Context) MergePolicy {
 // then returns outbound changes (revision > sinceRev) and new revision.
 // Delete-wins: a __deleted tombstone always wins over a concurrent field edit, irrespective of UpdatedAt.
 // When both sides are __deleted, LWW decides. Otherwise LWW via MergePolicy.
-// Tie on UpdatedAt -> server wins, then deviceId lex order.
+// Tie on HLC/UpdatedAt -> server wins (deprecated), then deviceId lex order.
 // It is atomic when backed by *sql.DB: the inbound loop and cursor advance run in a single transaction.
 func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange) (outbound []SyncChange, newRev int64, rejected []SyncChange, err error) {
 	if len(inbound) > 5000 {
 		return nil, 0, nil, fmt.Errorf("too many changes: %d > 5000", len(inbound))
 	}
 	policy := s.effectivePolicy(ctx)
+	// Ensure HLC seeded from DB max before transactional path.
+	s.ensureHLC(ctx)
 	// Attempt transactional path when we have a *sql.DB.
 	if dbq, ok := any(s.q).(*db.Queries); ok {
 		if sqlDB, ok := dbq.UnderlyingDB().(*sql.DB); ok {
 			tx, err := sqlDB.BeginTx(ctx, nil)
 			if err == nil {
 				txQ := dbq.WithTx(tx)
-				txStore := &SyncStore{q: txQ, policy: s.policy}
+				txStore := &SyncStore{q: txQ, policy: s.policy, hlc: s.hlc}
 				txPolicy := txStore.effectivePolicy(ctx)
 				outbound, newRev, rejected, err = txStore.reconcileInternal(ctx, deviceID, sinceRev, inbound, txPolicy)
 				if err != nil {
@@ -357,8 +694,16 @@ func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int
 }
 
 func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange, policy MergePolicy) (outbound []SyncChange, newRev int64, rejected []SyncChange, err error) {
+	// Observe inbound HLCs to advance clock (P2P). Single pass before processing.
 	for _, inc := range inbound {
-		inc.DeviceID = deviceID
+		if inc.HLC != 0 {
+			s.hlc.Observe(inc.HLC)
+		}
+	}
+	for _, inc := range inbound {
+		if inc.DeviceID == "" {
+			inc.DeviceID = deviceID
+		}
 
 		if inc.Field != "__deleted" {
 			tomb, terr := s.GetLatestForField(ctx, inc.EntityType, inc.EntityID, "__deleted")
@@ -412,6 +757,7 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 	if err != nil {
 		return nil, 0, nil, err
 	}
+	// Vector is maintained per-change via appendChangeLocked/nextSeqLocked; no global overwriting.
 	if cerr := s.SetCursor(ctx, deviceID, newRev); cerr != nil {
 		return nil, 0, nil, cerr
 	}

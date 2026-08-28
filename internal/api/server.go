@@ -17,6 +17,7 @@ import (
 	"github.com/uhhhm/reverb/internal/linkadd"
 	"github.com/uhhhm/reverb/internal/linkresolve"
 	"github.com/uhhhm/reverb/internal/override"
+	"github.com/uhhhm/reverb/internal/p2p"
 	"github.com/uhhhm/reverb/internal/play"
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/resolver"
@@ -185,6 +186,17 @@ type Deps struct {
 	}
 	LinkStore LinkStore
 	LinkAdd   LinkAddService
+	P2P       func() *p2p.Host
+	FileStore FileManifestStore
+	MusicDir  string
+}
+
+// FileManifestStore backs p2p file manifest listing. *db.Queries satisfies it.
+type FileManifestStore interface {
+	ListFileManifests(ctx context.Context) ([]db.FileManifest, error)
+	GetFileManifest(ctx context.Context, canonicalID string) (db.FileManifest, error)
+	UpsertFileManifest(ctx context.Context, arg db.UpsertFileManifestParams) error
+	DeleteFileManifest(ctx context.Context, canonicalID string) error
 }
 
 type Server struct {
@@ -363,6 +375,16 @@ func (s *Server) routes() {
 				pr2.Post("/pairing/code", s.handlePairingCode)
 				pr2.Get("/pairing/devices", s.handlePairingDevices)
 				pr2.Delete("/pairing/devices/{id}", s.handlePairingDeviceDelete)
+			})
+
+			// p2p (Phase 2) — peer discovery, pairing over libp2p, file sync.
+			pr.Group(func(pr2 chi.Router) {
+				pr2.Use(s.requireCapability(auth.CapManageLibrary))
+				pr2.Get("/p2p/status", s.handleP2PStatus)
+				pr2.Get("/p2p/peers", s.handleP2PPeers)
+				pr2.Post("/p2p/pair/redeem", s.handleP2PRedeem)
+				pr2.Get("/p2p/manifests", s.handleP2PManifests)
+				pr2.Post("/p2p/fetch", s.handleP2PFetch)
 			})
 
 			// manage library & integrations: adapter CRUD + server settings.

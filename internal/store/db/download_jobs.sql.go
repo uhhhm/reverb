@@ -114,6 +114,60 @@ func (q *Queries) GetActiveDownloadJobByDedup(ctx context.Context, dedupKey stri
 	return i, err
 }
 
+const getDownloadJob = `-- name: GetDownloadJob :one
+SELECT id, dedup_key, request_json, downloader_name, status, progress, error,
+       output_path, library_track_id, cover_art_id, canonical_id, priority, requested_by, attempts,
+       downloader_ref, created_at, started_at, finished_at
+FROM download_jobs WHERE id = ?
+`
+
+type GetDownloadJobRow struct {
+	ID             string         `json:"id"`
+	DedupKey       string         `json:"dedup_key"`
+	RequestJson    string         `json:"request_json"`
+	DownloaderName string         `json:"downloader_name"`
+	Status         string         `json:"status"`
+	Progress       int64          `json:"progress"`
+	Error          string         `json:"error"`
+	OutputPath     string         `json:"output_path"`
+	LibraryTrackID sql.NullString `json:"library_track_id"`
+	CoverArtID     sql.NullString `json:"cover_art_id"`
+	CanonicalID    string         `json:"canonical_id"`
+	Priority       int64          `json:"priority"`
+	RequestedBy    sql.NullString `json:"requested_by"`
+	Attempts       int64          `json:"attempts"`
+	DownloaderRef  string         `json:"downloader_ref"`
+	CreatedAt      int64          `json:"created_at"`
+	StartedAt      sql.NullInt64  `json:"started_at"`
+	FinishedAt     sql.NullInt64  `json:"finished_at"`
+}
+
+func (q *Queries) GetDownloadJob(ctx context.Context, id string) (GetDownloadJobRow, error) {
+	row := q.db.QueryRowContext(ctx, getDownloadJob, id)
+	var i GetDownloadJobRow
+	err := row.Scan(
+		&i.ID,
+		&i.DedupKey,
+		&i.RequestJson,
+		&i.DownloaderName,
+		&i.Status,
+		&i.Progress,
+		&i.Error,
+		&i.OutputPath,
+		&i.LibraryTrackID,
+		&i.CoverArtID,
+		&i.CanonicalID,
+		&i.Priority,
+		&i.RequestedBy,
+		&i.Attempts,
+		&i.DownloaderRef,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
 const getDownloadJobByDedup = `-- name: GetDownloadJobByDedup :one
 SELECT id, dedup_key, request_json, downloader_name, status, progress, error,
        output_path, library_track_id, cover_art_id, canonical_id, priority, requested_by, attempts,
@@ -148,60 +202,6 @@ type GetDownloadJobByDedupRow struct {
 func (q *Queries) GetDownloadJobByDedup(ctx context.Context, dedupKey string) (GetDownloadJobByDedupRow, error) {
 	row := q.db.QueryRowContext(ctx, getDownloadJobByDedup, dedupKey)
 	var i GetDownloadJobByDedupRow
-	err := row.Scan(
-		&i.ID,
-		&i.DedupKey,
-		&i.RequestJson,
-		&i.DownloaderName,
-		&i.Status,
-		&i.Progress,
-		&i.Error,
-		&i.OutputPath,
-		&i.LibraryTrackID,
-		&i.CoverArtID,
-		&i.CanonicalID,
-		&i.Priority,
-		&i.RequestedBy,
-		&i.Attempts,
-		&i.DownloaderRef,
-		&i.CreatedAt,
-		&i.StartedAt,
-		&i.FinishedAt,
-	)
-	return i, err
-}
-
-const getDownloadJob = `-- name: GetDownloadJob :one
-SELECT id, dedup_key, request_json, downloader_name, status, progress, error,
-       output_path, library_track_id, cover_art_id, canonical_id, priority, requested_by, attempts,
-       downloader_ref, created_at, started_at, finished_at
-FROM download_jobs WHERE id = ?
-`
-
-type GetDownloadJobRow struct {
-	ID             string         `json:"id"`
-	DedupKey       string         `json:"dedup_key"`
-	RequestJson    string         `json:"request_json"`
-	DownloaderName string         `json:"downloader_name"`
-	Status         string         `json:"status"`
-	Progress       int64          `json:"progress"`
-	Error          string         `json:"error"`
-	OutputPath     string         `json:"output_path"`
-	LibraryTrackID sql.NullString `json:"library_track_id"`
-	CoverArtID     sql.NullString `json:"cover_art_id"`
-	CanonicalID    string         `json:"canonical_id"`
-	Priority       int64          `json:"priority"`
-	RequestedBy    sql.NullString `json:"requested_by"`
-	Attempts       int64          `json:"attempts"`
-	DownloaderRef  string         `json:"downloader_ref"`
-	CreatedAt      int64          `json:"created_at"`
-	StartedAt      sql.NullInt64  `json:"started_at"`
-	FinishedAt     sql.NullInt64  `json:"finished_at"`
-}
-
-func (q *Queries) GetDownloadJob(ctx context.Context, id string) (GetDownloadJobRow, error) {
-	row := q.db.QueryRowContext(ctx, getDownloadJob, id)
-	var i GetDownloadJobRow
 	err := row.Scan(
 		&i.ID,
 		&i.DedupKey,

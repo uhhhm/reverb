@@ -14,3 +14,12 @@ ON CONFLICT(track_id) DO UPDATE SET
 
 -- name: DeleteTrackOverride :exec
 DELETE FROM track_override WHERE track_id = ?;
+
+-- name: GetTrackOverrideByCatalogID :one
+SELECT * FROM track_override WHERE catalog_id = ?;
+
+-- name: UpsertTrackOverrideByCatalogID :exec
+INSERT INTO track_override (track_id, title, artist, updated_at, catalog_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT(track_id) DO UPDATE SET title = excluded.title, artist = excluded.artist, updated_at = excluded.updated_at, catalog_id = excluded.catalog_id;
+
+-- name: ListTrackOverridesByCatalogIDs :many
+SELECT * FROM track_override WHERE catalog_id IN (sqlc.slice('catalog_ids'));

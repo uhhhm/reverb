@@ -7,6 +7,8 @@ package db
 
 import (
 	"context"
+	"database/sql"
+	"strings"
 )
 
 const deleteTrackOverride = `-- name: DeleteTrackOverride :exec
@@ -19,7 +21,7 @@ func (q *Queries) DeleteTrackOverride(ctx context.Context, trackID string) error
 }
 
 const getTrackOverride = `-- name: GetTrackOverride :one
-SELECT track_id, title, artist, updated_at FROM track_override WHERE track_id = ?
+SELECT track_id, title, artist, updated_at, catalog_id FROM track_override WHERE track_id = ?
 `
 
 func (q *Queries) GetTrackOverride(ctx context.Context, trackID string) (TrackOverride, error) {
@@ -30,12 +32,30 @@ func (q *Queries) GetTrackOverride(ctx context.Context, trackID string) (TrackOv
 		&i.Title,
 		&i.Artist,
 		&i.UpdatedAt,
+		&i.CatalogID,
+	)
+	return i, err
+}
+
+const getTrackOverrideByCatalogID = `-- name: GetTrackOverrideByCatalogID :one
+SELECT track_id, title, artist, updated_at, catalog_id FROM track_override WHERE catalog_id = ?
+`
+
+func (q *Queries) GetTrackOverrideByCatalogID(ctx context.Context, catalogID sql.NullString) (TrackOverride, error) {
+	row := q.db.QueryRowContext(ctx, getTrackOverrideByCatalogID, catalogID)
+	var i TrackOverride
+	err := row.Scan(
+		&i.TrackID,
+		&i.Title,
+		&i.Artist,
+		&i.UpdatedAt,
+		&i.CatalogID,
 	)
 	return i, err
 }
 
 const listTrackOverrides = `-- name: ListTrackOverrides :many
-SELECT track_id, title, artist, updated_at FROM track_override
+SELECT track_id, title, artist, updated_at, catalog_id FROM track_override
 `
 
 func (q *Queries) ListTrackOverrides(ctx context.Context) ([]TrackOverride, error) {
@@ -52,6 +72,50 @@ func (q *Queries) ListTrackOverrides(ctx context.Context) ([]TrackOverride, erro
 			&i.Title,
 			&i.Artist,
 			&i.UpdatedAt,
+			&i.CatalogID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTrackOverridesByCatalogIDs = `-- name: ListTrackOverridesByCatalogIDs :many
+SELECT track_id, title, artist, updated_at, catalog_id FROM track_override WHERE catalog_id IN (/*SLICE:catalog_ids*/?)
+`
+
+func (q *Queries) ListTrackOverridesByCatalogIDs(ctx context.Context, catalogIds []sql.NullString) ([]TrackOverride, error) {
+	query := listTrackOverridesByCatalogIDs
+	var queryParams []interface{}
+	if len(catalogIds) > 0 {
+		for _, v := range catalogIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:catalog_ids*/?", strings.Repeat(",?", len(catalogIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:catalog_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TrackOverride
+	for rows.Next() {
+		var i TrackOverride
+		if err := rows.Scan(
+			&i.TrackID,
+			&i.Title,
+			&i.Artist,
+			&i.UpdatedAt,
+			&i.CatalogID,
 		); err != nil {
 			return nil, err
 		}
@@ -88,6 +152,29 @@ func (q *Queries) UpsertTrackOverride(ctx context.Context, arg UpsertTrackOverri
 		arg.Title,
 		arg.Artist,
 		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertTrackOverrideByCatalogID = `-- name: UpsertTrackOverrideByCatalogID :exec
+INSERT INTO track_override (track_id, title, artist, updated_at, catalog_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT(track_id) DO UPDATE SET title = excluded.title, artist = excluded.artist, updated_at = excluded.updated_at, catalog_id = excluded.catalog_id
+`
+
+type UpsertTrackOverrideByCatalogIDParams struct {
+	TrackID   string         `json:"track_id"`
+	Title     string         `json:"title"`
+	Artist    string         `json:"artist"`
+	UpdatedAt int64          `json:"updated_at"`
+	CatalogID sql.NullString `json:"catalog_id"`
+}
+
+func (q *Queries) UpsertTrackOverrideByCatalogID(ctx context.Context, arg UpsertTrackOverrideByCatalogIDParams) error {
+	_, err := q.db.ExecContext(ctx, upsertTrackOverrideByCatalogID,
+		arg.TrackID,
+		arg.Title,
+		arg.Artist,
+		arg.UpdatedAt,
+		arg.CatalogID,
 	)
 	return err
 }

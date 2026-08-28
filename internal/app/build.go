@@ -30,6 +30,7 @@ import (
 	"github.com/uhhhm/reverb/internal/library/subsonic"
 	"github.com/uhhhm/reverb/internal/linkadd"
 	"github.com/uhhhm/reverb/internal/override"
+	"github.com/uhhhm/reverb/internal/p2p"
 	"github.com/uhhhm/reverb/internal/play"
 	"github.com/uhhhm/reverb/internal/playlistsync"
 	"github.com/uhhhm/reverb/internal/registry"
@@ -67,6 +68,8 @@ type Runtime struct {
 	Store    *store.Store
 	Reloader *ServiceReloader
 	Scrobble *scrobble.Service
+	P2P      *p2p.Host
+	Getenv   func(string) string
 }
 
 // Build opens the store, runs migrations, constructs every service, and returns
@@ -112,6 +115,11 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		logf("WARNING: ensure server device: %v", err)
 	} else {
 		logf("server device %s ready", serverID)
+	}
+	if localID, err := reverbsync.EnsureLocalDevice(ctx, st.Q()); err != nil {
+		logf("WARNING: ensure local device: %v", err)
+	} else {
+		logf("local device %s ready", localID)
 	}
 
 	// Registries — explicit registration at the composition root, no init()
@@ -197,6 +205,10 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	linkAddSvc := linkadd.New(st.Q(), syncStoreForLink, bundle.Manager,
 		linkadd.WithTrackLookup(ProviderLookup{Get: reloader.TrackLookupProvider()}),
 		linkadd.WithDeviceID(func(ctx context.Context) (string, error) {
+			// Prefer P2P local device, fall back to server device for back-compat.
+			if id, err := reverbsync.LocalDeviceID(ctx, st.Q()); err == nil && id != "" {
+				return id, nil
+			}
 			return reverbsync.ServerDeviceID(ctx, st.Q())
 		}),
 	)
@@ -217,6 +229,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		Version:       opts.Version,
 		UpdateRepo:    opts.UpdateRepo,
 		DataDir:       filepath.Dir(opts.DBPath),
+		MusicDir:      embedded.MusicDir(opts.Getenv),
 		Resolver:      resolverSvc,
 		Deletion:      bundle.Deletion,
 		// Plays a search result that is not in the library by streaming it from
@@ -243,6 +256,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		OfflineSet:   st.Q(),
 		LinkStore:    st.Q(),
 		LinkAdd:      linkAddSvc,
+		FileStore:    st.Q(),
 	}
 	if deps.Pairing == nil {
 		deps.Pairing = reverbsync.NewPairingService(st.Q())
@@ -280,13 +294,16 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		}
 	}
 
-	return &Runtime{
+	rt := &Runtime{
 		Deps:     deps,
 		Bundle:   bundle,
 		Store:    st,
 		Reloader: reloader,
 		Scrobble: scrobbleSvc,
-	}, nil
+		Getenv:   opts.Getenv,
+	}
+	rt.Deps.P2P = func() *p2p.Host { return rt.P2P }
+	return rt, nil
 }
 
 // StartBackground starts the long-running work Build only wired up: the bundled
@@ -294,6 +311,40 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 // library-playlist migration, and the scrobble worker. Kept separate from Build
 // so constructing the root stays side-effect free.
 func (r *Runtime) StartBackground(ctx context.Context) {
+	// P2P host for LAN + WAN discovery (mDNS, DHT, relay). Best-effort; if it
+	// fails we log and continue — sync still works via HTTP.
+	if r.P2P == nil {
+		if h, err := p2p.NewHost(ctx); err != nil {
+			logf("WARNING: p2p host: %v", err)
+		} else {
+			r.P2P = h
+			logf("p2p host %s ready addrs=%v", h.ID(), h.Addrs())
+			if r.Deps.Pairing != nil && h.LibHost() != nil {
+				p2p.RegisterPairingHandler(h.LibHost(), r.Deps.Pairing)
+			}
+			if r.Deps.SyncStore != nil && h.LibHost() != nil {
+				p2p.RegisterSyncHandler(h.LibHost(), r.Deps.SyncStore)
+			}
+			// File sync: hash local music dir and keep file_manifest up to date.
+			getenv := r.Getenv
+			if getenv == nil {
+				getenv = func(string) string { return "" }
+			}
+			musicDir := embedded.MusicDir(getenv)
+			if h.LibHost() != nil {
+				p2p.RegisterFileHandler(h.LibHost(), musicDir)
+			}
+			if localID, err := reverbsync.LocalDeviceID(ctx, r.Store.Q()); err == nil && localID != "" {
+				fs := p2p.NewFileSyncer(r.Store.Q(), localID, musicDir)
+				go fs.Run(ctx)
+				// P2P anti-entropy for sync changes over libp2p.
+				if r.Deps.SyncStore != nil && h.LibHost() != nil {
+					syncer := p2p.NewSyncer(h.LibHost(), r.Deps.SyncStore, localID)
+					go syncer.Run(ctx)
+				}
+			}
+		}
+	}
 	if r.Bundle.Supervisor != nil {
 		r.Bundle.Supervisor.Start()
 	}
@@ -324,6 +375,9 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 // library supervisor are shut down by the entry point, which owns their
 // lifecycles.
 func (r *Runtime) Close() {
+	if r.P2P != nil {
+		_ = r.P2P.Close()
+	}
 	if r.Bundle.Manager != nil {
 		r.Bundle.Manager.Stop()
 	}

@@ -48,6 +48,8 @@ type Querier interface {
 
 const serverDeviceIDKey = "server_device_id"
 
+const localDeviceIDKey = "local_device_id"
+
 // ServerDeviceQuerier is the minimal store seam for server-device resolution.
 // *db.Queries satisfies it, as do the api OfflineSetStore/PairingStore aliases.
 type ServerDeviceQuerier interface {
@@ -94,6 +96,86 @@ func generateToken() (string, string, error) {
 func tokenHash(plain string) string {
 	h := sha256.Sum256([]byte(plain))
 	return hex.EncodeToString(h[:])
+}
+
+// EnsureLocalDevice ensures this installation has a stable local device identity
+// (local_device_id in settings + device row). It is the P2P replacement for
+// EnsureServerDevice: every node is a peer, is_server is ignored. It creates
+// dev_<uuid> with IsServer=0 if none exists.
+func EnsureLocalDevice(ctx context.Context, q Querier) (string, error) {
+	if id, err := q.GetSetting(ctx, localDeviceIDKey); err == nil && id != "" {
+		if _, err := q.GetDeviceByID(ctx, id); err == nil {
+			return id, nil
+		}
+	}
+	devices, err := q.ListDevices(ctx)
+	if err != nil {
+		return "", err
+	}
+	// Prefer an existing non-server device whose token we can use; otherwise create.
+	for _, d := range devices {
+		if d.IsServer == 0 {
+			_ = q.UpsertSetting(ctx, db.UpsertSettingParams{Key: localDeviceIDKey, Value: d.ID})
+			return d.ID, nil
+		}
+	}
+	// No peer device yet — create one. Reuse EnsureServerDevice's race handling
+	// but with is_server=0 so the partial unique index does not fire.
+	plain, hash, err := generateToken()
+	if err != nil {
+		return "", err
+	}
+	_ = plain
+	id := "dev_" + uuid.NewString()
+	hostname := "local"
+	if err := q.CreateDevice(ctx, db.CreateDeviceParams{
+		ID:        id,
+		Name:      hostname,
+		TokenHash: hash,
+		IsServer:  0,
+	}); err != nil {
+		// Race: another caller created a peer device concurrently — re-list.
+		devices2, lerr := q.ListDevices(ctx)
+		if lerr == nil {
+			for _, d := range devices2 {
+				if d.IsServer == 0 {
+					_ = q.UpsertSetting(ctx, db.UpsertSettingParams{Key: localDeviceIDKey, Value: d.ID})
+					return d.ID, nil
+				}
+			}
+		}
+		return "", err
+	}
+	_ = q.UpsertSetting(ctx, db.UpsertSettingParams{Key: localDeviceIDKey, Value: id})
+	return id, nil
+}
+
+// LocalDeviceID returns the local device id (settings local_device_id with fallback to any peer device).
+func LocalDeviceID(ctx context.Context, q ServerDeviceQuerier) (string, error) {
+	if q == nil {
+		return "", ErrNoServerDevice
+	}
+	if id, err := q.GetSetting(ctx, localDeviceIDKey); err == nil && id != "" {
+		if dev, err := q.GetDeviceByID(ctx, id); err == nil {
+			return dev.ID, nil
+		}
+	}
+	devices, err := q.ListDevices(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, d := range devices {
+		if d.IsServer == 0 {
+			return d.ID, nil
+		}
+	}
+	// Back-compat: fall back to server device if no peer exists yet.
+	for _, d := range devices {
+		if d.IsServer == 1 {
+			return d.ID, nil
+		}
+	}
+	return "", ErrNoServerDevice
 }
 
 // EnsureServerDevice ensures one device row with is_server=1 exists.

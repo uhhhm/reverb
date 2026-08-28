@@ -13,14 +13,30 @@ func SetDeviceIsServerLookup(fn func(string) bool) {
 }
 
 // PickWinner returns true if incoming wins over existing.
-// Rules: incoming.UpdatedAt > existing.UpdatedAt wins; tie -> server wins, then lex.
-// If the receiver's IsServer is set, it is used; otherwise the package global is
-// consulted for backward compatibility with tests that set it directly.
+// Rules (P2P HLC):
+//  1. HLC (if non-zero) wins; legacy rows with HLC=0 fall back to UpdatedAt.
+//  2. Tie on chosen clock -> UpdatedAt (if HLC tie) or lex if both tie.
+//  3. Server-wins tie-break is deprecated but honored only if both HLC and
+//     UpdatedAt tie and IsServer is configured (for back-compat with star tests).
 func (p LWWPolicy) PickWinner(existing, incoming SyncChange) bool {
-	if incoming.UpdatedAt != existing.UpdatedAt {
-		return incoming.UpdatedAt > existing.UpdatedAt
+	// Prefer HLC only when both sides have it (P2P rows). Legacy rows with HLC=0
+	// use wall time so that a legacy inbound (HLC=0, UpdatedAt=2000) can still
+	// win over a P2P row (HLC=1000) when its wall is newer — the tick for the
+	// legacy inbound will be assigned on append, not on comparison.
+	if incoming.HLC != 0 && existing.HLC != 0 {
+		if incoming.HLC != existing.HLC {
+			return incoming.HLC > existing.HLC
+		}
+		// HLC tie -> fall through to UpdatedAt then lex/server.
+		if incoming.UpdatedAt != existing.UpdatedAt {
+			return incoming.UpdatedAt > existing.UpdatedAt
+		}
+	} else {
+		if incoming.UpdatedAt != existing.UpdatedAt {
+			return incoming.UpdatedAt > existing.UpdatedAt
+		}
 	}
-	// tie on wall clock: server wins
+	// tie on clock: server wins (deprecated) then lex
 	lookup := p.IsServer
 	if lookup == nil {
 		lookup = deviceIsServerLookup

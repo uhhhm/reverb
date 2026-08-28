@@ -113,6 +113,15 @@ type DownloadJob struct {
 	CanonicalID    string         `json:"canonical_id"`
 }
 
+type FileManifest struct {
+	CanonicalID string `json:"canonical_id"`
+	ContentHash string `json:"content_hash"`
+	Size        int64  `json:"size"`
+	RelPath     string `json:"rel_path"`
+	Mtime       int64  `json:"mtime"`
+	DeviceID    string `json:"device_id"`
+}
+
 type Lyric struct {
 	TrackKey  string `json:"track_key"`
 	Synced    int64  `json:"synced"`
@@ -209,11 +218,20 @@ type SyncChange struct {
 	ValueJson  string `json:"value_json"`
 	UpdatedAt  int64  `json:"updated_at"`
 	CreatedAt  int64  `json:"created_at"`
+	Hlc        int64  `json:"hlc"`
+	Seq        int64  `json:"seq"`
 }
 
 type SyncCursor struct {
 	DeviceID  string `json:"device_id"`
 	Revision  int64  `json:"revision"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
+type SyncVector struct {
+	DeviceID  string `json:"device_id"`
+	Seq       int64  `json:"seq"`
+	Hlc       int64  `json:"hlc"`
 	UpdatedAt int64  `json:"updated_at"`
 }
 
@@ -234,10 +252,11 @@ type SyncedPlaylist struct {
 }
 
 type TrackOverride struct {
-	TrackID   string `json:"track_id"`
-	Title     string `json:"title"`
-	Artist    string `json:"artist"`
-	UpdatedAt int64  `json:"updated_at"`
+	TrackID   string         `json:"track_id"`
+	Title     string         `json:"title"`
+	Artist    string         `json:"artist"`
+	UpdatedAt int64          `json:"updated_at"`
+	CatalogID sql.NullString `json:"catalog_id"`
 }
 
 type User struct {
