@@ -40,16 +40,16 @@ func RegisterSyncHandler(h host.Host, store *sync.SyncStore) {
 			_ = json.NewEncoder(s).Encode(map[string]string{"error": err.Error()})
 			return
 		}
-		// Filter outbound by peer vector for efficiency (P2P).
-		if len(peerVector) > 0 && len(outbound) > 0 {
-			filtered := outbound[:0]
-			for _, ch := range outbound {
-				if seen, ok := peerVector[ch.DeviceID]; ok && ch.Seq != 0 && ch.Seq <= seen {
-					continue
-				}
-				filtered = append(filtered, ch)
+		// Vector-based outbound: page via ListSinceVector so filtering does not
+		// truncate when the log exceeds the 10k cap (Reconcile's ListSince uses
+		// sinceRev+limit and filtering afterwards would drop the tail).
+		if len(peerVector) > 0 {
+			vecOutbound, vecErr := store.ListSinceVector(ctx, peerVector, 10000)
+			if vecErr != nil {
+				_ = json.NewEncoder(s).Encode(map[string]string{"error": vecErr.Error()})
+				return
 			}
-			outbound = filtered
+			outbound = vecOutbound
 		}
 		newHLC, _ := store.GetMaxHLC(ctx)
 		seqMap, _, _ := store.GetVectorMap(ctx)

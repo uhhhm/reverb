@@ -220,7 +220,17 @@ func (f *FileSyncer) FetchFileViaPeer(ctx context.Context, h host.Host, peerIDSt
 		return err
 	}
 	_ = s.CloseWrite()
-	dstPath := filepath.Join(f.musicDir, filepath.FromSlash(relPath))
+	// Validate relPath before any FS mutation (mirror file_handler.go defenses on fetch side).
+	cleanRel := filepath.Clean(filepath.FromSlash(relPath))
+	if cleanRel == "." || cleanRel == "" || filepath.IsAbs(cleanRel) || cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("invalid relPath: %q", relPath)
+	}
+	dstPath := filepath.Join(f.musicDir, cleanRel)
+	// Defense in depth: ensure dstPath is within musicDir.
+	rel, err := filepath.Rel(f.musicDir, dstPath)
+	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("invalid relPath: %q", relPath)
+	}
 	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
 		return err
 	}

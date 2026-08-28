@@ -361,7 +361,10 @@ func (s *SyncStore) AppendChange(ctx context.Context, deviceID string, ch SyncCh
 			return 0, err
 		}
 	} else {
-		curSeq, curHLC, _ := s.GetVector(ctx, deviceID)
+		curSeq, curHLC, err := s.GetVector(ctx, deviceID)
+		if err != nil {
+			return 0, err
+		}
 		if curHLC > s.hlc.Current() {
 			s.hlc.Observe(curHLC)
 		}
@@ -430,7 +433,10 @@ func (s *SyncStore) appendChangeLocked(ctx context.Context, deviceID string, ch 
 			return 0, err
 		}
 	} else {
-		curSeq, curHLC, _ := s.GetVector(ctx, deviceID)
+		curSeq, curHLC, err := s.GetVector(ctx, deviceID)
+		if err != nil {
+			return 0, err
+		}
 		if curHLC > s.hlc.Current() {
 			s.hlc.Observe(curHLC)
 		}
