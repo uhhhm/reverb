@@ -142,7 +142,8 @@ func (s *Server) handleP2PFetch(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if deviceID == "" {
-		deviceID = "local"
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "local device not initialized: pairing required"})
+		return
 	}
 	var store p2p.FileStore
 	if s.deps.FileStore != nil {

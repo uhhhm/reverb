@@ -20,6 +20,7 @@ import (
 type Host struct {
 	h      host.Host
 	d      *dht.IpfsDHT
+	mdns   mdns.Service
 	closed atomic.Bool
 }
 
@@ -83,12 +84,15 @@ func NewHost(ctx context.Context) (*Host, error) {
 	h.SetStreamHandler("/reverb/pair/1.0.0", func(s network.Stream) { s.Close() })
 	h.SetStreamHandler("/reverb/file/1.0.0", func(s network.Stream) { s.Close() })
 
-	return &Host{h: h, d: d}, nil
+	return &Host{h: h, d: d, mdns: ser}, nil
 }
 
 func (h *Host) Close() error {
 	if h.closed.Swap(true) {
 		return nil
+	}
+	if h.mdns != nil {
+		_ = h.mdns.Close()
 	}
 	if h.d != nil {
 		_ = h.d.Close()

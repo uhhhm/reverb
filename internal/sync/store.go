@@ -329,35 +329,54 @@ func (s *SyncStore) AppendChange(ctx context.Context, deviceID string, ch SyncCh
 		return 0, err
 	}
 	// If inbound HLC is supplied (replayed remote), observe it; otherwise tick wall time.
-	var hlc int64
+	var rowHLC int64
 	if ch.HLC != 0 {
 		s.hlc.Observe(ch.HLC)
-		hlc = ch.HLC
+		rowHLC = ch.HLC
 	} else {
 		wall := ch.UpdatedAt
 		if wall == 0 {
 			wall = time.Now().UnixMilli()
 		}
-		hlc = s.hlc.Tick(wall)
+		rowHLC = s.hlc.Tick(wall)
 	}
-	seq := ch.Seq
-	if seq == 0 {
-		ns, _, err := s.nextSeqLocked(ctx, deviceID)
+	rowSeq := ch.Seq
+	var vectorSeq, vectorHLC int64
+	if rowSeq == 0 {
+		ns, curHLC, err := s.nextSeqLocked(ctx, deviceID)
 		if err != nil {
 			return 0, err
 		}
-		seq = ns
-		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: seq, Hlc: hlc}); err != nil {
+		rowSeq = ns
+		vectorSeq = ns
+		vectorHLC = curHLC
+		if vectorHLC < rowHLC {
+			vectorHLC = rowHLC
+		}
+		if vectorHLC < s.hlc.Current() {
+			vectorHLC = s.hlc.Current()
+		}
+		rowHLC = vectorHLC
+		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: vectorSeq, Hlc: vectorHLC}); err != nil {
 			return 0, err
 		}
 	} else {
-		// Provided seq (during reconcile of remote) — ensure vector is monotonic (max).
-		if cur, _, err := s.GetVector(ctx, deviceID); err == nil {
-			if seq < cur {
-				seq = cur
-			}
+		curSeq, curHLC, _ := s.GetVector(ctx, deviceID)
+		if curHLC > s.hlc.Current() {
+			s.hlc.Observe(curHLC)
 		}
-		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: seq, Hlc: hlc}); err != nil {
+		vectorSeq = curSeq
+		if rowSeq > curSeq {
+			vectorSeq = rowSeq
+		}
+		vectorHLC = s.hlc.Current()
+		if vectorHLC < curHLC {
+			vectorHLC = curHLC
+		}
+		if vectorHLC < rowHLC {
+			vectorHLC = rowHLC
+		}
+		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: vectorSeq, Hlc: vectorHLC}); err != nil {
 			return 0, err
 		}
 	}
@@ -368,8 +387,8 @@ func (s *SyncStore) AppendChange(ctx context.Context, deviceID string, ch SyncCh
 		Field:      ch.Field,
 		ValueJson:  valueJSON,
 		UpdatedAt:  ch.UpdatedAt,
-		Hlc:        hlc,
-		Seq:        seq,
+		Hlc:        rowHLC,
+		Seq:        rowSeq,
 	})
 }
 
@@ -379,32 +398,54 @@ func (s *SyncStore) appendChangeLocked(ctx context.Context, deviceID string, ch 
 		return 0, err
 	}
 	s.ensureHLC(ctx)
-	var hlc int64
+	var rowHLC int64
 	if ch.HLC != 0 {
 		s.hlc.Observe(ch.HLC)
-		hlc = ch.HLC
+		rowHLC = ch.HLC
 	} else {
 		wall := ch.UpdatedAt
 		if wall == 0 {
 			wall = time.Now().UnixMilli()
 		}
-		hlc = s.hlc.Tick(wall)
+		rowHLC = s.hlc.Tick(wall)
 	}
-	seq := ch.Seq
-	if seq == 0 {
-		ns, _, err := s.nextSeqLocked(ctx, deviceID)
+	rowSeq := ch.Seq
+	var vectorSeq, vectorHLC int64
+	if rowSeq == 0 {
+		ns, curHLC, err := s.nextSeqLocked(ctx, deviceID)
 		if err != nil {
 			return 0, err
 		}
-		seq = ns
-		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: seq, Hlc: hlc}); err != nil {
+		rowSeq = ns
+		vectorSeq = ns
+		vectorHLC = curHLC
+		if vectorHLC < rowHLC {
+			vectorHLC = rowHLC
+		}
+		if vectorHLC < s.hlc.Current() {
+			vectorHLC = s.hlc.Current()
+		}
+		rowHLC = vectorHLC
+		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: vectorSeq, Hlc: vectorHLC}); err != nil {
 			return 0, err
 		}
 	} else {
-		if cur, _, err := s.GetVector(ctx, deviceID); err == nil && seq < cur {
-			seq = cur
+		curSeq, curHLC, _ := s.GetVector(ctx, deviceID)
+		if curHLC > s.hlc.Current() {
+			s.hlc.Observe(curHLC)
 		}
-		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: seq, Hlc: hlc}); err != nil {
+		vectorSeq = curSeq
+		if rowSeq > curSeq {
+			vectorSeq = rowSeq
+		}
+		vectorHLC = s.hlc.Current()
+		if vectorHLC < curHLC {
+			vectorHLC = curHLC
+		}
+		if vectorHLC < rowHLC {
+			vectorHLC = rowHLC
+		}
+		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: vectorSeq, Hlc: vectorHLC}); err != nil {
 			return 0, err
 		}
 	}
@@ -415,8 +456,8 @@ func (s *SyncStore) appendChangeLocked(ctx context.Context, deviceID string, ch 
 		Field:      ch.Field,
 		ValueJson:  valueJSON,
 		UpdatedAt:  ch.UpdatedAt,
-		Hlc:        hlc,
-		Seq:        seq,
+		Hlc:        rowHLC,
+		Seq:        rowSeq,
 	})
 }
 
@@ -704,6 +745,10 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 		if inc.DeviceID == "" {
 			inc.DeviceID = deviceID
 		}
+		effectiveID := inc.DeviceID
+		if effectiveID == "" {
+			effectiveID = deviceID
+		}
 
 		if inc.Field != "__deleted" {
 			tomb, terr := s.GetLatestForField(ctx, inc.EntityType, inc.EntityID, "__deleted")
@@ -721,7 +766,7 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 			return nil, 0, nil, err
 		}
 		if existing == nil {
-			if _, aerr := s.appendChangeLocked(ctx, deviceID, inc); aerr != nil {
+			if _, aerr := s.appendChangeLocked(ctx, effectiveID, inc); aerr != nil {
 				return nil, 0, nil, aerr
 			}
 			continue
@@ -735,13 +780,13 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 			continue
 		}
 		if !isExistingDeleted && isIncomingDeleted {
-			if _, aerr := s.appendChangeLocked(ctx, deviceID, inc); aerr != nil {
+			if _, aerr := s.appendChangeLocked(ctx, effectiveID, inc); aerr != nil {
 				return nil, 0, nil, aerr
 			}
 			continue
 		}
 		if policy.PickWinner(*existing, inc) {
-			if _, aerr := s.appendChangeLocked(ctx, deviceID, inc); aerr != nil {
+			if _, aerr := s.appendChangeLocked(ctx, effectiveID, inc); aerr != nil {
 				return nil, 0, nil, aerr
 			}
 		} else {
