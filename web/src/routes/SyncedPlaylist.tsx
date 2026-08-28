@@ -20,6 +20,7 @@ import { PortalMenu } from '../components/PortalMenu'
 import type { ExternalResult, ExternalTrackRef, AlbumDetailTrack, Track } from '../lib/types'
 import { usePlayer } from '../lib/playerStore'
 import { RenameTrackDialog } from '../components/RenameTrackDialog'
+import { ManagePlaylistTracksDialog } from '../components/ManagePlaylistTracksDialog'
 import { useToastStore } from '../lib/toastStore'
 import { useAlbumPalette } from '../lib/useAlbumPalette'
 import { rgbToCss } from '../lib/palette'
@@ -94,6 +95,7 @@ export default function SyncedPlaylist() {
   const isPlaying = usePlayer((s) => s.playing)
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
   const [renaming, setRenaming] = useState<Track | null>(null)
+  const [managingTracks, setManagingTracks] = useState(false)
 
   // "…" menu state
   const [menuOpen, setMenuOpen] = useState(false)
@@ -459,6 +461,16 @@ export default function SyncedPlaylist() {
               >
                 Play
               </Button>
+              {detail.mode === 'once' && (
+                <Button
+                  variant="secondary"
+                  size="md"
+                  onClick={() => setManagingTracks(true)}
+                  aria-label="Manage tracks"
+                >
+                  Manage tracks
+                </Button>
+              )}
               {missingCount > 0 && (
                 <Button
                   variant="secondary"
@@ -706,11 +718,29 @@ export default function SyncedPlaylist() {
           )
         })}
         {tracks.length === 0 && (
-          <EmptyState icon="browse" title="No tracks in this playlist" />
+          <EmptyState
+            icon="browse"
+            title="No tracks in this playlist"
+            action={
+              detail.mode === 'once' ? (
+                <Button variant="primary" onClick={() => setManagingTracks(true)}>
+                  Add tracks
+                </Button>
+              ) : undefined
+            }
+          />
         )}
       </div>
 
       <RenameTrackDialog track={renaming} onClose={() => setRenaming(null)} />
+
+      {managingTracks && (
+        <ManagePlaylistTracksDialog
+          playlistId={id}
+          tracks={tracks}
+          onClose={() => setManagingTracks(false)}
+        />
+      )}
     </div>
   )
 }
