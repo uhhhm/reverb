@@ -3,6 +3,7 @@ package p2p
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"time"
 
@@ -124,8 +125,14 @@ func filterAuthorizedChanges(ctx context.Context, store *sync.SyncStore, peerDev
 			ch.DeviceID = peerDevice
 			if ch.Sig != "" {
 				if err := store.VerifyChangeAuthorship(ctx, ch); err != nil {
-					refused++
-					continue
+					if errors.Is(err, sync.ErrNoAuthorKey) {
+						// No verification key yet (e.g. pre-0032 DB or first
+						// sync before DeviceAnnounce propagated). The
+						// connection itself is trusted via Guard, so accept.
+					} else {
+						refused++
+						continue
+					}
 				}
 			}
 			out = append(out, ch)
