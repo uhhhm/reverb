@@ -325,6 +325,59 @@ func (q *Queries) ListSyncVectors(ctx context.Context) ([]SyncVector, error) {
 	return items, nil
 }
 
+const listUnsignedSyncChangesForDevice = `-- name: ListUnsignedSyncChangesForDevice :many
+SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq, sig FROM sync_change WHERE device_id = ? AND sig = '' ORDER BY revision ASC
+`
+
+func (q *Queries) ListUnsignedSyncChangesForDevice(ctx context.Context, deviceID string) ([]SyncChange, error) {
+	rows, err := q.db.QueryContext(ctx, listUnsignedSyncChangesForDevice, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SyncChange
+	for rows.Next() {
+		var i SyncChange
+		if err := rows.Scan(
+			&i.Revision,
+			&i.DeviceID,
+			&i.EntityType,
+			&i.EntityID,
+			&i.Field,
+			&i.ValueJson,
+			&i.UpdatedAt,
+			&i.CreatedAt,
+			&i.Hlc,
+			&i.Seq,
+			&i.Sig,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateSyncChangeSig = `-- name: UpdateSyncChangeSig :exec
+UPDATE sync_change SET sig = ?2 WHERE revision = ?1
+`
+
+type UpdateSyncChangeSigParams struct {
+	Revision int64  `json:"revision"`
+	Sig      string `json:"sig"`
+}
+
+func (q *Queries) UpdateSyncChangeSig(ctx context.Context, arg UpdateSyncChangeSigParams) error {
+	_, err := q.db.ExecContext(ctx, updateSyncChangeSig, arg.Revision, arg.Sig)
+	return err
+}
+
 const upsertSyncCursor = `-- name: UpsertSyncCursor :exec
 INSERT INTO sync_cursor (device_id, revision, updated_at) VALUES (?, ?, unixepoch()) ON CONFLICT(device_id) DO UPDATE SET revision = excluded.revision, updated_at = unixepoch()
 `

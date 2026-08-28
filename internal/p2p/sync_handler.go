@@ -112,12 +112,22 @@ func RegisterSyncHandler(h host.Host, store *sync.SyncStore, guard *Guard, keys 
 // authenticated connection. A change authored by anyone else is accepted only
 // if it carries a valid signature from that author, which is what makes relayed
 // sync safe: the relaying peer never has to be trusted to speak for the author.
+//
+// If a peer-authored change carries a signature, it is verified. A corrupt
+// signature would be stored as-is and become an unrelayable row that fails
+// VerifyChangeAuthorship on the next hop, so it is rejected here.
 func filterAuthorizedChanges(ctx context.Context, store *sync.SyncStore, peerDevice string, in []sync.SyncChange) ([]sync.SyncChange, int) {
 	out := make([]sync.SyncChange, 0, len(in))
 	refused := 0
 	for _, ch := range in {
 		if ch.DeviceID == "" || ch.DeviceID == peerDevice {
 			ch.DeviceID = peerDevice
+			if ch.Sig != "" {
+				if err := store.VerifyChangeAuthorship(ctx, ch); err != nil {
+					refused++
+					continue
+				}
+			}
 			out = append(out, ch)
 			continue
 		}

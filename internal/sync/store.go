@@ -319,6 +319,30 @@ func (s *SyncStore) upsertSyncVector(ctx context.Context, arg db.UpsertSyncVecto
 	return fmt.Errorf("querier does not support UpsertSyncVector")
 }
 
+func (s *SyncStore) listUnsignedForDevice(ctx context.Context, deviceID string) ([]db.SyncChange, error) {
+	if qq, ok := any(s.q).(interface {
+		ListUnsignedSyncChangesForDevice(context.Context, string) ([]db.SyncChange, error)
+	}); ok {
+		return qq.ListUnsignedSyncChangesForDevice(ctx, deviceID)
+	}
+	if dbq, ok := any(s.q).(*db.Queries); ok {
+		return dbq.ListUnsignedSyncChangesForDevice(ctx, deviceID)
+	}
+	return nil, fmt.Errorf("querier does not support ListUnsignedSyncChangesForDevice")
+}
+
+func (s *SyncStore) updateSig(ctx context.Context, rev int64, sig string) error {
+	if qq, ok := any(s.q).(interface {
+		UpdateSyncChangeSig(context.Context, db.UpdateSyncChangeSigParams) error
+	}); ok {
+		return qq.UpdateSyncChangeSig(ctx, db.UpdateSyncChangeSigParams{Revision: rev, Sig: sig})
+	}
+	if dbq, ok := any(s.q).(*db.Queries); ok {
+		return dbq.UpdateSyncChangeSig(ctx, db.UpdateSyncChangeSigParams{Revision: rev, Sig: sig})
+	}
+	return fmt.Errorf("querier does not support UpdateSyncChangeSig")
+}
+
 func (s *SyncStore) ensureHLC(ctx context.Context) {
 	if s.hlc == nil {
 		s.hlc = NewHLC()
@@ -329,6 +353,38 @@ func (s *SyncStore) ensureHLC(ctx context.Context) {
 	if h, err := s.getMaxHLC(ctx); err == nil && h > 0 {
 		s.hlc.Observe(h)
 	}
+}
+
+// BackfillLocalSignatures signs any locally-authored rows that were stored
+// with an empty signature (pre-migration or while the signer was unavailable
+// due to identity failure). Without this, those rows are unrelayable: a third
+// peer treats sig=="" as ErrBadSignature and drops them, causing silent
+// convergence failure. The backfill is idempotent and safe to run on every
+// boot after SetSigner.
+func (s *SyncStore) BackfillLocalSignatures(ctx context.Context) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	priv := s.signer
+	deviceID := s.localDeviceID
+	if priv == nil || deviceID == "" {
+		return 0, nil
+	}
+	rows, err := s.listUnsignedForDevice(ctx, deviceID)
+	if err != nil {
+		return 0, err
+	}
+	var n int64
+	for _, r := range rows {
+		sig := SignChange(priv, r.DeviceID, r.EntityType, r.EntityID, r.Field, r.ValueJson, r.UpdatedAt, r.Hlc, r.Seq)
+		if sig == "" {
+			continue
+		}
+		if err := s.updateSig(ctx, r.Revision, sig); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
 }
 
 // nextSeqLocked returns the next seq for deviceID without writing.

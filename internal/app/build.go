@@ -322,8 +322,7 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 		priv, kerr := p2p.LoadOrCreateIdentity(ctx, r.Store.Q())
 		if kerr != nil {
 			logf("WARNING: p2p identity: %v", kerr)
-		}
-		if h, err := p2p.NewHost(ctx, priv); err != nil {
+		} else if h, err := p2p.NewHost(ctx, priv); err != nil {
 			logf("WARNING: p2p host: %v", err)
 		} else {
 			r.P2P = h
@@ -370,6 +369,11 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 							if err := r.Deps.SyncStore.RecordDeviceKey(ctx, localID, pubB64); err != nil {
 								logf("WARNING: p2p: record local device key: %v", err)
 							}
+						}
+						if n, err := r.Deps.SyncStore.BackfillLocalSignatures(ctx); err != nil {
+							logf("WARNING: p2p: backfill local signatures: %v", err)
+						} else if n > 0 {
+							logf("p2p: backfilled %d local signature(s)", n)
 						}
 					}
 				}

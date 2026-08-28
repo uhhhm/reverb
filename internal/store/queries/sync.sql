@@ -45,3 +45,9 @@ SELECT * FROM sync_vector;
 
 -- name: DeleteSyncVector :exec
 DELETE FROM sync_vector WHERE device_id = ?;
+
+-- name: ListUnsignedSyncChangesForDevice :many
+SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq, sig FROM sync_change WHERE device_id = ? AND sig = '' ORDER BY revision ASC;
+
+-- name: UpdateSyncChangeSig :exec
+UPDATE sync_change SET sig = ?2 WHERE revision = ?1;

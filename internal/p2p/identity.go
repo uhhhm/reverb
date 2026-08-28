@@ -2,7 +2,9 @@ package p2p
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
+	"errors"
 	"fmt"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -32,7 +34,12 @@ func LoadOrCreateIdentity(ctx context.Context, store IdentityStore) (crypto.Priv
 	if store == nil {
 		return nil, fmt.Errorf("no identity store")
 	}
-	if raw, err := store.GetSetting(ctx, hostKeySetting); err == nil && raw != "" {
+	raw, err := store.GetSetting(ctx, hostKeySetting)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("load p2p host key: %w", err)
+		}
+	} else if raw != "" {
 		b, err := base64.StdEncoding.DecodeString(raw)
 		if err == nil {
 			if priv, err := crypto.UnmarshalPrivateKey(b); err == nil {
