@@ -35,6 +35,7 @@ function baseState(): PlayerState {
     currentTimeMs: 0,
     durationMs: 0,
     bufferedMs: 0,
+    loading: false,
     volume: 1,
     shuffle: false,
     repeat: 'off',
