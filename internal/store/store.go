@@ -47,23 +47,50 @@ func Open(path string) (*Store, error) {
 func (s *Store) Migrate() error {
 	migrateMu.Lock()
 	defer migrateMu.Unlock()
+	if err := s.prepareGoose(); err != nil {
+		return err
+	}
+	s.backupBeforePendingMigrations()
+	// Heal databases stamped with migrations their schema does not reflect,
+	// so pending migrations do not fail against objects that should already
+	// exist. See schema_reconcile.go.
+	reconcileErrStr := ""
+	if n, err := s.reconcileSchema(); err != nil {
+		reconcileErrStr = err.Error()
+		log.Printf("WARNING: schema reconcile failed: %v (continuing)", err)
+	} else if n > 0 {
+		log.Printf("schema reconcile: restored %d missing schema object(s)", n)
+	}
+	if err := goose.Up(s.sql, "migrations"); err != nil {
+		if reconcileErrStr != "" {
+			return fmt.Errorf("migrate: %w (prior schema reconcile failed: %s)", err, reconcileErrStr)
+		}
+		return err
+	}
+	return nil
+}
+
+// prepareGoose points goose at the embedded migrations and registers the Go
+// migration.
+//
+// 0025 is a Go migration: it branches on the live schema (slim vs legacy
+// multi-user), which pure SQL cannot express. It lives in package store and is
+// registered here with its version-bearing source name; the embedded migration
+// FS holds only .sql files, so goose picks it up from the registry. Registered
+// once — goose panics on a duplicate version, and tests call Migrate()
+// repeatedly.
+//
+// Note: 0024 is the devices/sync/offline SQL migration. The Go migration was
+// bumped from 0024 to 0025 to avoid a duplicate version error.
+func (s *Store) prepareGoose() error {
 	goose.SetBaseFS(migrationFS)
 	if err := goose.SetDialect("sqlite"); err != nil {
 		return err
 	}
-	// 0025 is a Go migration: it branches on the live schema (slim vs legacy
-	// multi-user), which pure SQL cannot express. It lives in package store and
-	// is registered here with its version-bearing source name; the embedded
-	// migration FS holds only .sql files, so goose picks it up from the
-	// registry. Registered once — goose panics on a duplicate version, and
-	// tests call Migrate() repeatedly.
-	// Note: 0024 is the devices/sync/offline SQL migration. Go migration was
-	// bumped from 0024 to 0025 to avoid duplicate version error.
 	registerGoOnce.Do(func() {
 		goose.AddNamedMigrationContext("0025_single_user.go", upSingleUser, nil)
 	})
-	s.backupBeforePendingMigrations()
-	return goose.Up(s.sql, "migrations")
+	return nil
 }
 
 // backupBeforePendingMigrations snapshots the database to a sibling
@@ -95,8 +122,8 @@ func (s *Store) backupBeforePendingMigrations() {
 
 // latestMigrationVersion returns the highest numeric prefix among the embedded
 // migration files (e.g. 22 for `0022_download_job_canonical.sql`), or 0 if none.
-// It also accounts for the registered Go migration at 0025 so backup logic
-// correctly detects pending Go migrations even when SQL max is 0024.
+// It also accounts for registered Go migrations in goMigrationDDL so backup
+// logic correctly detects pending Go migrations even when SQL max is lower.
 func latestMigrationVersion() int64 {
 	entries, err := migrationFS.ReadDir("migrations")
 	if err != nil {
@@ -117,8 +144,10 @@ func latestMigrationVersion() int64 {
 			max = v
 		}
 	}
-	if max < 25 {
-		max = 25
+	for v := range goMigrationDDL {
+		if v > max {
+			max = v
+		}
 	}
 	return max
 }
