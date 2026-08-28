@@ -155,10 +155,9 @@ func main() {
 	// survives adapter hot-reloads, and shares yt-dlp's binary path and cookies
 	// with the downloader — cookies are what get the resolve past YouTube's bot
 	// checks.
-	extStream := extstream.New(
+	extStream := extstream.NewFromEnv(
 		providerLookup{get: reloader.trackLookupProvider()},
-		extstream.WithBinary(os.Getenv("REVERB_YTDLP_PATH")),
-		extstream.WithCookiesFile(existingPath(ytdlpCookiesPath())),
+		os.Getenv,
 	)
 
 	// Start the bundled-library supervisor (no-op in external mode).

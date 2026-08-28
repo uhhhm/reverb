@@ -23,6 +23,7 @@ import (
 	"github.com/uhhhm/reverb/internal/download/spotdl"
 	"github.com/uhhhm/reverb/internal/download/ytdlp"
 	"github.com/uhhhm/reverb/internal/events"
+	"github.com/uhhhm/reverb/internal/extstream"
 	"github.com/uhhhm/reverb/internal/library/embedded"
 	"github.com/uhhhm/reverb/internal/library/lyrics"
 	"github.com/uhhhm/reverb/internal/library/subsonic"
@@ -205,6 +206,10 @@ func boot(args []string) (*App, error) {
 	}
 	if bundle.Aggregator != nil {
 		deps.SearchAggregator = bundle.Aggregator
+		// Playing a search result that isn't in the library streams it from the
+		// source instead of downloading it; without this the endpoint reports
+		// unavailable and the play button does nothing.
+		deps.ExternalStream = extstream.NewFromEnv(bundle.Aggregator, os.Getenv)
 	}
 	if bundle.Coverage != nil {
 		deps.Coverage = bundle.Coverage

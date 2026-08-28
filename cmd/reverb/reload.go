@@ -5,9 +5,6 @@ import (
 	"sync/atomic"
 
 	"fmt"
-	"os"
-	"path/filepath"
-
 	"github.com/uhhhm/reverb/internal/api"
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/extstream"
@@ -167,27 +164,4 @@ func (p providerLookup) GetTrack(ctx context.Context, source, externalID string)
 		return core.ExternalResult{}, fmt.Errorf("no search source configured")
 	}
 	return l.GetTrack(ctx, source, externalID)
-}
-
-// ytdlpCookiesPath is where the yt-dlp adapter writes the operator's cookies.txt.
-// The stream resolver reuses that same file rather than asking for it twice.
-func ytdlpCookiesPath() string {
-	cfg, err := os.UserConfigDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(cfg, "yt-dlp", "cookies.txt")
-}
-
-// existingPath returns path if it exists, else "" — the stream resolver treats an
-// absent cookies file as "no cookies configured" rather than passing yt-dlp a
-// path it will reject.
-func existingPath(path string) string {
-	if path == "" {
-		return ""
-	}
-	if _, err := os.Stat(path); err != nil {
-		return ""
-	}
-	return path
 }

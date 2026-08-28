@@ -13,6 +13,8 @@ package extstream
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -94,6 +96,41 @@ func WithTTL(d time.Duration) Option {
 
 // WithClock injects a time source (test seam).
 func WithClock(now func() time.Time) Option { return func(s *Service) { s.now = now } }
+
+// NewFromEnv builds the Service the way both composition roots want it: yt-dlp's
+// binary from REVERB_YTDLP_PATH (the desktop bundle sets this to its vendored
+// copy) and the downloader's own cookies.txt when one has been written. Cookies
+// are what get a resolve past YouTube's bot checks, so sharing the file means an
+// operator configures them once.
+func NewFromEnv(lookup TrackLookup, getenv func(string) string, opts ...Option) *Service {
+	base := []Option{
+		WithBinary(getenv("REVERB_YTDLP_PATH")),
+		WithCookiesFile(existingPath(ytdlpCookiesPath())),
+	}
+	return New(lookup, append(base, opts...)...)
+}
+
+// ytdlpCookiesPath is where the yt-dlp downloader adapter writes the operator's
+// cookies.txt.
+func ytdlpCookiesPath() string {
+	cfg, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(cfg, "yt-dlp", "cookies.txt")
+}
+
+// existingPath returns path if it exists, else "" — an absent cookies file means
+// "no cookies configured", not a path to hand yt-dlp so it can reject it.
+func existingPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	if _, err := os.Stat(path); err != nil {
+		return ""
+	}
+	return path
+}
 
 func New(lookup TrackLookup, opts ...Option) *Service {
 	s := &Service{
