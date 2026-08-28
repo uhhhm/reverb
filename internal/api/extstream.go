@@ -4,9 +4,9 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/uhhhm/reverb/internal/trackref"
 )
 
 // ExternalStreamResolver turns a source+external id into a direct audio URL.
@@ -18,9 +18,10 @@ type ExternalStreamResolver interface {
 
 // isExternalTrackID reports whether id names a track that is not in the library.
 // The SPA synthesises "<source>:<externalId>" for such rows; real backend track
-// ids never contain a colon.
+// ids never contain a colon. Delegates to trackref so the heuristic is owned in
+// one place.
 func isExternalTrackID(id string) bool {
-	return strings.Contains(id, ":")
+	return trackref.IsExternalID(id)
 }
 
 // extStreamClient has no timeout: the response body is a whole audio stream that

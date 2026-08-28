@@ -14,6 +14,8 @@ import (
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/events"
 	"github.com/uhhhm/reverb/internal/library"
+	"github.com/uhhhm/reverb/internal/linkadd"
+	"github.com/uhhhm/reverb/internal/linkresolve"
 	"github.com/uhhhm/reverb/internal/override"
 	"github.com/uhhhm/reverb/internal/play"
 	"github.com/uhhhm/reverb/internal/registry"
@@ -97,6 +99,14 @@ type Resolver interface {
 	Resolve(ctx context.Context, catalogID string) (resolver.Addressing, error)
 }
 
+// LinkAddService is the add-from-link planner. *linkadd.Service satisfies it.
+type LinkAddService interface {
+	Resolve(ctx context.Context, rawURL string) (*linkresolve.ResolveResult, error)
+	Add(ctx context.Context, opts linkadd.AddOptions) (*linkadd.AddResult, error)
+	AddBatch(ctx context.Context, optsList []linkadd.AddOptions) []linkadd.BatchItemResult
+	SetDownloader(dl linkadd.Downloader)
+}
+
 type Deps struct {
 	Auth             *auth.Service
 	Library          library.LibraryAdapter
@@ -174,6 +184,7 @@ type Deps struct {
 		ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
 	}
 	LinkStore LinkStore
+	LinkAdd   LinkAddService
 }
 
 type Server struct {
@@ -343,6 +354,7 @@ func (s *Server) routes() {
 				lr.Post("/links/resolve", s.handleLinkResolve)
 				lr.Post("/links/chapters", s.handleLinkChapters)
 				lr.Post("/links/add", s.handleLinkAdd)
+				lr.Post("/links/add-batch", s.handleLinkAddBatch)
 			})
 
 			// pairing (T4) — code + devices are manage-library gated; redeem is public above.

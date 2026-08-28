@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/linkadd"
 	"github.com/uhhhm/reverb/internal/linkresolve"
 	"github.com/uhhhm/reverb/internal/store/db"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
@@ -78,7 +79,12 @@ func (s *Server) handleLinkResolve(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url is required"})
 		return
 	}
-	res, err := linkresolve.ResolveURL(r.Context(), body.URL)
+	var res *linkresolve.ResolveResult
+	if s.deps.LinkAdd != nil {
+		res, err = s.deps.LinkAdd.Resolve(r.Context(), body.URL)
+	} else {
+		res, err = linkresolve.ResolveURL(r.Context(), body.URL)
+	}
 	if err != nil {
 		if errors.Is(err, linkresolve.ErrUnsupportedURL) {
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "unsupported URL"})
@@ -125,6 +131,70 @@ func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url is required"})
 		return
 	}
+	// If planner is wired, delegate — handler stays HTTP-only.
+	if s.deps.LinkAdd != nil {
+		// Ownership check before planner (planner validates existence, handler gates access).
+		if body.PlaylistID != nil {
+			pid := strings.TrimSpace(*body.PlaylistID)
+			if pid != "" && !s.playlistAccessAllowed(r, pid) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "playlist not found"})
+				return
+			}
+		}
+		s.deps.LinkAdd.SetDownloader(s.downloads())
+		opts := linkadd.AddOptions{
+			URL:           body.URL,
+			PlaylistID:    body.PlaylistID,
+			Download:      body.Download,
+			Quality:       body.Quality,
+			StartTime:     body.StartTime,
+			EndTime:       body.EndTime,
+			SplitChapters: body.SplitChapters,
+		}
+		if cu, ok := currentUser(r); ok {
+			opts.InitiatedBy = cu.ID
+		}
+		result, err := s.deps.LinkAdd.Add(r.Context(), opts)
+		if err != nil {
+			if errors.Is(err, linkresolve.ErrUnsupportedURL) {
+				writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "unsupported URL"})
+				return
+			}
+			if errors.Is(err, linkadd.ErrNotFound) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "playlist not found"})
+				return
+			}
+			if errors.Is(err, linkadd.ErrNoDownloader) {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no downloader configured"})
+				return
+			}
+			if errors.Is(err, linkadd.ErrRangeChapterConflict) || errors.Is(err, linkadd.ErrRangeNonYouTube) || errors.Is(err, linkadd.ErrNoChapterSupport) || errors.Is(err, linkadd.ErrNoChapters) || errors.Is(err, linkadd.ErrChaptersRead) {
+				writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+				return
+			}
+			if errors.Is(err, linkadd.ErrCatalogRead) || errors.Is(err, linkadd.ErrCatalogCreate) || errors.Is(err, linkadd.ErrPlaylistValidate) {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+			return
+		}
+		resp := make(map[string]any)
+		resp["resolve"] = result.Resolve
+		resp["catalogId"] = result.CatalogID
+		if result.PlaylistID != "" {
+			resp["playlistId"] = result.PlaylistID
+		}
+		if result.Job != nil {
+			resp["job"] = result.Job
+		}
+		if len(result.Jobs) > 1 {
+			resp["jobs"] = result.Jobs
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+	// Fallback for tests without planner (legacy).
 	shouldDownload := true
 	if body.Download != nil {
 		shouldDownload = *body.Download
@@ -147,16 +217,7 @@ func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
 	if kind == "" {
 		kind = "track"
 	}
-	var catalogPrefix string
-	switch kind {
-	case "playlist":
-		catalogPrefix = "pl_link_"
-	case "album":
-		catalogPrefix = "alb_link_"
-	default:
-		catalogPrefix = "trk_link_"
-	}
-	catalogID := catalogPrefix + res.Source + "_" + res.ExternalID
+	catalogID := linkadd.CatalogID(res.Source, kind, res.ExternalID)
 	createdNew := false
 	if ls := s.linkStore(); ls != nil {
 		// Check existing.
@@ -335,6 +396,136 @@ func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// linkAddBatchBody is the batch counterpart to linkAddBody: one request per batch
+// instead of one request per link. The handler fans the items out through the
+// planner and returns per-link outcomes.
+type linkAddBatchBody struct {
+	Items []linkAddBody `json:"items"`
+}
+
+func (s *Server) handleLinkAddBatch(w http.ResponseWriter, r *http.Request) {
+	if s.deps.LinkAdd == nil {
+		// Fallback: emulate batch by looping the single-item handler logic per item.
+		// This keeps the endpoint usable in tests that haven't wired a planner.
+		var body linkAddBatchBody
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+			return
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+			return
+		}
+		if len(body.Items) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "items is required"})
+			return
+		}
+		if len(body.Items) > 500 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "too many items"})
+			return
+		}
+		results := []map[string]any{}
+		for _, item := range body.Items {
+			if strings.TrimSpace(item.URL) == "" {
+				results = append(results, map[string]any{"url": item.URL, "error": "url is required"})
+				continue
+			}
+			if item.PlaylistID != nil {
+				pid := strings.TrimSpace(*item.PlaylistID)
+				if pid != "" {
+					if ls := s.linkStore(); ls != nil {
+						if _, err := ls.GetSyncedPlaylist(r.Context(), pid); err != nil {
+							if errors.Is(err, sql.ErrNoRows) {
+								results = append(results, map[string]any{"url": item.URL, "error": "playlist not found"})
+								continue
+							}
+							results = append(results, map[string]any{"url": item.URL, "error": "could not validate playlist"})
+							continue
+						}
+					}
+					if !s.playlistAccessAllowed(r, pid) {
+						results = append(results, map[string]any{"url": item.URL, "error": "playlist not found"})
+						continue
+					}
+				}
+			}
+			res, err := linkresolve.ResolveURL(r.Context(), item.URL)
+			if err != nil {
+				results = append(results, map[string]any{"url": item.URL, "error": err.Error()})
+				continue
+			}
+			kind := res.Kind
+			if kind == "" {
+				kind = "track"
+			}
+			catalogID := linkadd.CatalogID(res.Source, kind, res.ExternalID)
+			entry := map[string]any{"url": item.URL, "resolve": res, "catalogId": catalogID}
+			if item.PlaylistID != nil && strings.TrimSpace(*item.PlaylistID) != "" {
+				entry["playlistId"] = strings.TrimSpace(*item.PlaylistID)
+			}
+			results = append(results, entry)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"results": results})
+		return
+	}
+	var body linkAddBatchBody
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	if len(body.Items) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "items is required"})
+		return
+	}
+	if len(body.Items) > 500 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "too many items"})
+		return
+	}
+	cu, _ := currentUser(r)
+	s.deps.LinkAdd.SetDownloader(s.downloads())
+	results := make([]linkadd.BatchItemResult, len(body.Items))
+	var validOpts []linkadd.AddOptions
+	var validIdx []int
+	for i, item := range body.Items {
+		if strings.TrimSpace(item.URL) == "" {
+			results[i] = linkadd.BatchItemResult{URL: item.URL, Error: "url is required"}
+			continue
+		}
+		if item.PlaylistID != nil {
+			pid := strings.TrimSpace(*item.PlaylistID)
+			if pid != "" && !s.playlistAccessAllowed(r, pid) {
+				results[i] = linkadd.BatchItemResult{URL: item.URL, Error: "playlist not found"}
+				continue
+			}
+		}
+		opts := linkadd.AddOptions{
+			URL:           item.URL,
+			PlaylistID:    item.PlaylistID,
+			Download:      item.Download,
+			Quality:       item.Quality,
+			StartTime:     item.StartTime,
+			EndTime:       item.EndTime,
+			SplitChapters: item.SplitChapters,
+			InitiatedBy:   cu.ID,
+		}
+		validOpts = append(validOpts, opts)
+		validIdx = append(validIdx, i)
+	}
+	if len(validOpts) > 0 {
+		batchResults := s.deps.LinkAdd.AddBatch(r.Context(), validOpts)
+		for j, br := range batchResults {
+			results[validIdx[j]] = br
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+}
+
 // chapterLister is the manager capability the chapter endpoints need. The
 // Manager satisfies it; test doubles need not.
 type chapterLister interface {
@@ -347,6 +538,8 @@ type chapterLister interface {
 // way (rather than letting yt-dlp write many files from a single job) keeps
 // every chapter on the ordinary one-job-per-track path, so library matching,
 // playlist adds, progress and retry all work per chapter without special cases.
+// This duplicates linkadd.planDownloadRequests so both paths share sentinel
+// errors for HTTP status mapping.
 func (s *Server) linkDownloadRequests(
 	ctx context.Context, base core.DownloadRequest, res *linkresolve.ResolveResult, body linkAddBody,
 ) ([]core.DownloadRequest, error) {
@@ -354,10 +547,10 @@ func (s *Server) linkDownloadRequests(
 	trimmed := start != "" || end != ""
 
 	if body.SplitChapters && trimmed {
-		return nil, errors.New("choose either a time range or chapter splitting, not both")
+		return nil, linkadd.ErrRangeChapterConflict
 	}
 	if (body.SplitChapters || trimmed) && res.Source != "youtube" {
-		return nil, errors.New("time ranges and chapter splitting only apply to YouTube links")
+		return nil, linkadd.ErrRangeNonYouTube
 	}
 
 	if !body.SplitChapters {
@@ -367,14 +560,14 @@ func (s *Server) linkDownloadRequests(
 
 	cl, ok := s.downloads().(chapterLister)
 	if !ok {
-		return nil, errors.New("the configured downloader cannot read chapters")
+		return nil, linkadd.ErrNoChapterSupport
 	}
 	chapters, err := cl.ListChapters(ctx, res.URL)
 	if err != nil {
-		return nil, fmt.Errorf("could not read chapters: %w", err)
+		return nil, fmt.Errorf("%w: %v", linkadd.ErrChaptersRead, err)
 	}
 	if len(chapters) == 0 {
-		return nil, errors.New("this video has no chapters to split on")
+		return nil, linkadd.ErrNoChapters
 	}
 
 	out := make([]core.DownloadRequest, 0, len(chapters))

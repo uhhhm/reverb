@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError } from '../lib/api'
-import { resolveLink, addFromLink, type ResolveResult, type LinkOptions } from '../lib/linkApi'
+import { resolveLink, addFromLinksBatch, type ResolveResult, type LinkOptions } from '../lib/linkApi'
 import { useSyncedPlaylists } from '../lib/syncedPlaylistApi'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
 import { parseLinks } from '../lib/parseLinks'
@@ -105,32 +105,47 @@ export default function AddFromLink() {
     setAddSuccess(null)
     setAddResults([])
 
-    // Added one at a time: each add can enqueue a download, and firing a whole
-    // paste-list at the server at once would stampede the download queue.
+    // One POST per batch — planner fans out per-link work server-side so the
+    // client avoids N round-trips and the server can batch catalog/sync work.
+    const items = links.map((link) => ({
+      url: link,
+      playlistId: selectedPlaylist || undefined,
+      download: downloadNow,
+      quality: effectiveQuality,
+      ...(linkOptions[link] ?? {}),
+    }))
+    let batchResults: Awaited<ReturnType<typeof addFromLinksBatch>> | null = null
+    let batchError: unknown = null
+    try {
+      batchResults = await addFromLinksBatch(items)
+    } catch (e) {
+      batchError = e
+    }
     const outcomes: LinkOutcome[] = []
     let lastPlaylistId = ''
-    for (const link of links) {
-      try {
-        const res = await addFromLink(link, {
-          playlistId: selectedPlaylist || undefined,
-          download: downloadNow,
-          quality: effectiveQuality,
-          ...(linkOptions[link] ?? {}),
-        })
-        const target = res.playlistId || selectedPlaylist
-        if (target) lastPlaylistId = target
-        const chapterCount = Array.isArray(res.jobs) ? res.jobs.length : 0
-        const where = target ? 'Added to playlist' : 'Added to library'
-        outcomes.push({
-          url: link,
-          ok: true,
-          message: chapterCount > 1 ? `${where} as ${chapterCount} chapters` : where,
-        })
-      } catch (e) {
-        outcomes.push({ url: link, ok: false, message: describeError(e, 'Could not add from link') })
+    if (batchResults) {
+      for (const r of batchResults.results) {
+        if (r.error) {
+          outcomes.push({ url: r.url, ok: false, message: r.error })
+        } else {
+          const target = r.playlistId || selectedPlaylist
+          if (target) lastPlaylistId = target
+          const chapterCount = Array.isArray(r.jobs) ? r.jobs.length : 0
+          const where = target ? 'Added to playlist' : 'Added to library'
+          outcomes.push({
+            url: r.url,
+            ok: true,
+            message: chapterCount > 1 ? `${where} as ${chapterCount} chapters` : where,
+          })
+        }
       }
-      setAddResults([...outcomes])
+    } else {
+      // Batch request itself failed — mark every link as failed.
+      for (const link of links) {
+        outcomes.push({ url: link, ok: false, message: describeError(batchError, 'Could not add from link') })
+      }
     }
+    setAddResults(outcomes)
     setAddLoading(false)
 
     const added = outcomes.filter((o) => o.ok).length

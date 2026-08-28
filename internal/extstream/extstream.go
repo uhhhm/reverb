@@ -22,6 +22,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/trackref"
 )
 
 // DefaultTTL is how long a resolved URL is reused. yt-dlp's URLs carry their own
@@ -157,7 +158,7 @@ func (s *Service) Resolve(ctx context.Context, source, externalID string) (strin
 	if source == "" || externalID == "" {
 		return "", fmt.Errorf("extstream: source and id are required")
 	}
-	key := source + ":" + externalID
+	key := trackref.ExternalCacheKey(source, externalID)
 
 	s.mu.Lock()
 	e, ok := s.cache[key]
@@ -191,7 +192,7 @@ func (s *Service) Resolve(ctx context.Context, source, externalID string) (strin
 // that has expired early.
 func (s *Service) Invalidate(source, externalID string) {
 	s.mu.Lock()
-	delete(s.cache, strings.TrimSpace(source)+":"+strings.TrimSpace(externalID))
+	delete(s.cache, trackref.ExternalCacheKey(source, externalID))
 	s.mu.Unlock()
 }
 

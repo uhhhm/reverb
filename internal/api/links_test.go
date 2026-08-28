@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/linkadd"
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/store"
 	"github.com/uhhhm/reverb/internal/store/db"
@@ -42,6 +43,9 @@ func linkTestServer(t *testing.T, mgr DownloadManager) (*Server, *store.Store, *
 		// if mgr was not fake, keep original but fake stays separate for assertions
 		// In tests where mgr is fake, this is the same.
 	}
+	linkAddSvc := linkadd.New(st.Q(), syncStore, mgr, linkadd.WithDeviceID(func(ctx context.Context) (string, error) {
+		return reverbsync.ServerDeviceID(ctx, st.Q())
+	}))
 	srv := NewServer(Deps{
 		Auth:          authSvc,
 		Downloads:     mgr,
@@ -52,6 +56,7 @@ func linkTestServer(t *testing.T, mgr DownloadManager) (*Server, *store.Store, *
 		OfflineSet:    st.Q(),
 		PairingStore:  st.Q(),
 		PlaylistOwner: st.Q(),
+		LinkAdd:       linkAddSvc,
 	})
 	cookie := &http.Cookie{Name: sessionCookie, Value: tok}
 	_ = authSvc
@@ -495,5 +500,84 @@ func TestLinkChaptersEndpoint(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].Title != "Intro" {
 		t.Fatalf("chapters: %+v", got)
+	}
+}
+
+func TestLinkAddBatch(t *testing.T) {
+	mgr := newFakeManager()
+	srv, st, cookie, fake := linkTestServer(t, mgr)
+	seedPlaylist(t, st, "pl-batch")
+	// Batch of 3: two valid spotify, one unsupported (will be per-item error).
+	body := `{"items":[
+		{"url":"https://open.spotify.com/track/spB1","playlistId":"pl-batch"},
+		{"url":"https://example.com/bad"},
+		{"url":"https://open.spotify.com/track/spB2"}
+	]}`
+	rec := doLink(t, srv, cookie, http.MethodPost, "/api/v1/links/add-batch", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("batch status %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Results []struct {
+			URL       string            `json:"url"`
+			CatalogID string            `json:"catalogId"`
+			Error     string            `json:"error"`
+			Job       *core.DownloadJob `json:"job"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Results) != 3 {
+		t.Fatalf("results len %d want 3", len(resp.Results))
+	}
+	if resp.Results[0].Error != "" || resp.Results[0].CatalogID == "" {
+		t.Fatalf("first should succeed: %+v", resp.Results[0])
+	}
+	if resp.Results[1].Error == "" {
+		t.Fatalf("second should be error for unsupported URL, got %+v", resp.Results[1])
+	}
+	if resp.Results[2].Error != "" {
+		t.Fatalf("third should succeed: %+v", resp.Results[2])
+	}
+	if fake.enqueueCalls != 2 {
+		t.Fatalf("enqueueCalls %d want 2 (two valid links)", fake.enqueueCalls)
+	}
+	// Verify playlist membership sync for first item (second and third: only first had playlistId)
+	// At least one playlist sync_change should exist.
+	count, _ := st.Q().CountSyncChanges(context.Background())
+	if count == 0 {
+		t.Fatalf("expected sync_change for batch")
+	}
+}
+
+func TestLinkAddBatchChapterSplit(t *testing.T) {
+	mgr := newFakeManager()
+	mgr.chapters = []core.Chapter{{Title: "Intro", StartSec: 0, EndSec: 10}, {Title: "Verse", StartSec: 10, EndSec: 20}}
+	srv, _, cookie, fake := linkTestServer(t, mgr)
+	body := `{"items":[{"url":"https://www.youtube.com/watch?v=chapBatch","splitChapters":true}]}`
+	rec := doLink(t, srv, cookie, http.MethodPost, "/api/v1/links/add-batch", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("batch status %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Results []struct {
+			Jobs  []core.DownloadJob `json:"jobs"`
+			Job   *core.DownloadJob  `json:"job"`
+			Error string             `json:"error"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Results) != 1 || resp.Results[0].Error != "" {
+		t.Fatalf("batch chapter split: %+v", resp.Results)
+	}
+	// Chapter split fans out to 2 jobs in the single result's Jobs array.
+	if len(resp.Results[0].Jobs) != 2 {
+		t.Fatalf("jobs len %d want 2", len(resp.Results[0].Jobs))
+	}
+	if fake.enqueueCalls != 2 {
+		t.Fatalf("enqueueCalls %d want 2", fake.enqueueCalls)
 	}
 }

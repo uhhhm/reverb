@@ -6,6 +6,7 @@ import AddFromLink from './AddFromLink'
 
 const mockResolveLink = vi.fn()
 const mockAddFromLink = vi.fn()
+const mockAddFromLinksBatch = vi.fn()
 const mockUseSyncedPlaylists = vi.fn()
 const mockPush = vi.fn()
 const mockNavigate = vi.fn()
@@ -13,6 +14,7 @@ const mockNavigate = vi.fn()
 vi.mock('../lib/linkApi', () => ({
   resolveLink: (...args: unknown[]) => mockResolveLink(...args),
   addFromLink: (...args: unknown[]) => mockAddFromLink(...args),
+  addFromLinksBatch: (...args: unknown[]) => mockAddFromLinksBatch(...args),
 }))
 
 vi.mock('../lib/syncedPlaylistApi', () => ({
@@ -74,6 +76,9 @@ describe('AddFromLink route', () => {
       catalogId: 'trk_link_sp123',
       job: { id: 'j1' },
     })
+    mockAddFromLinksBatch.mockResolvedValue({
+      results: [{ url: 'https://open.spotify.com/track/sp123', resolve: { kind: 'track', source: 'spotify', externalId: 'sp123', title: 'Spotify track sp123', artist: 'Test Artist', album: 'Test Album', url: 'https://open.spotify.com/track/sp123' }, catalogId: 'trk_link_sp123', job: { id: 'j1' } }],
+    })
   })
 
   afterEach(() => {
@@ -99,7 +104,6 @@ describe('AddFromLink route', () => {
 
   it('shows error for unsupported URL (422) on resolve', async () => {
     const err = Object.assign(new Error('unsupported URL'), { status: 422, name: 'ApiError' })
-    // Make it instanceof ApiError by constructing ApiError
     const { ApiError } = await import('../lib/api')
     mockResolveLink.mockRejectedValue(new ApiError('POST', '/links/resolve', 422))
     wrap()
@@ -140,22 +144,18 @@ describe('AddFromLink route', () => {
     expect(screen.getAllByText(/source-native/i).length).toBeGreaterThan(0)
   })
 
-  it('Add from link calls addFromLink and toasts success', async () => {
+  it('Add from link calls batch and toasts success', async () => {
     wrap()
     const input = screen.getByLabelText(/spotify or youtube urls/i)
     fireEvent.change(input, { target: { value: 'https://open.spotify.com/track/sp123' } })
-    // need preview first? not required but set url
     fireEvent.click(screen.getByRole('button', { name: /^add from link$/i }))
-    await waitFor(() => expect(mockAddFromLink).toHaveBeenCalledWith('https://open.spotify.com/track/sp123', { playlistId: undefined, download: true, quality: 'high' }))
+    await waitFor(() => expect(mockAddFromLinksBatch).toHaveBeenCalledWith([{ url: 'https://open.spotify.com/track/sp123', playlistId: undefined, download: true, quality: 'high' }]))
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('Added 1 link', 'success'))
   })
 
   it('Add from link with playlist selected passes playlistId', async () => {
-    mockAddFromLink.mockResolvedValue({
-      resolve: { kind: 'track', source: 'spotify', externalId: 'sp123', title: 't', artist: 'a', album: '', url: 'https://open.spotify.com/track/sp123' },
-      catalogId: 'trk_link_sp123',
-      playlistId: 'pl1',
-      job: { id: 'j1' },
+    mockAddFromLinksBatch.mockResolvedValue({
+      results: [{ url: 'https://open.spotify.com/track/sp123', resolve: { kind: 'track', source: 'spotify', externalId: 'sp123', title: 't', artist: 'a', album: '', url: 'https://open.spotify.com/track/sp123' }, catalogId: 'trk_link_sp123', playlistId: 'pl1', job: { id: 'j1' } }],
     })
     wrap()
     const input = screen.getByLabelText(/spotify or youtube urls/i)
@@ -163,7 +163,7 @@ describe('AddFromLink route', () => {
     const sel = screen.getByLabelText(/add to playlist/i) as HTMLSelectElement
     fireEvent.change(sel, { target: { value: 'pl1' } })
     fireEvent.click(screen.getByRole('button', { name: /^add from link$/i }))
-    await waitFor(() => expect(mockAddFromLink).toHaveBeenCalledWith('https://open.spotify.com/track/sp123', { playlistId: 'pl1', download: true, quality: 'high' }))
+    await waitFor(() => expect(mockAddFromLinksBatch).toHaveBeenCalledWith([{ url: 'https://open.spotify.com/track/sp123', playlistId: 'pl1', download: true, quality: 'high' }]))
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/playlist/pl1'))
   })
 
@@ -174,12 +174,13 @@ describe('AddFromLink route', () => {
     const cb = screen.getByLabelText(/download now/i)
     fireEvent.click(cb)
     fireEvent.click(screen.getByRole('button', { name: /^add from link$/i }))
-    await waitFor(() => expect(mockAddFromLink).toHaveBeenCalledWith('https://open.spotify.com/track/sp123', { playlistId: undefined, download: false, quality: 'high' }))
+    await waitFor(() => expect(mockAddFromLinksBatch).toHaveBeenCalledWith([{ url: 'https://open.spotify.com/track/sp123', playlistId: undefined, download: false, quality: 'high' }]))
   })
 
   it('handles 404 playlist not found', async () => {
-    const { ApiError } = await import('../lib/api')
-    mockAddFromLink.mockRejectedValue(new ApiError('POST', '/links/add', 404))
+    mockAddFromLinksBatch.mockResolvedValue({
+      results: [{ url: 'https://open.spotify.com/track/sp123', error: 'playlist not found' }],
+    })
     wrap()
     const input = screen.getByLabelText(/spotify or youtube urls/i)
     fireEvent.change(input, { target: { value: 'https://open.spotify.com/track/sp123' } })
@@ -188,8 +189,9 @@ describe('AddFromLink route', () => {
   })
 
   it('handles 422 unsupported on add', async () => {
-    const { ApiError } = await import('../lib/api')
-    mockAddFromLink.mockRejectedValue(new ApiError('POST', '/links/add', 422))
+    mockAddFromLinksBatch.mockResolvedValue({
+      results: [{ url: 'https://example.com/foo', error: 'unsupported URL' }],
+    })
     wrap()
     const input = screen.getByLabelText(/spotify or youtube urls/i)
     fireEvent.change(input, { target: { value: 'https://example.com/foo' } })
@@ -203,9 +205,8 @@ describe('AddFromLink route', () => {
   })
 
   it('shows success status when added to canonical library without playlist', async () => {
-    mockAddFromLink.mockResolvedValue({
-      resolve: { kind: 'track', source: 'spotify', externalId: 'sp123', title: 't', artist: 'a', album: '', url: 'https://open.spotify.com/track/sp123' },
-      catalogId: 'trk_link_sp123',
+    mockAddFromLinksBatch.mockResolvedValue({
+      results: [{ url: 'https://open.spotify.com/track/sp123', resolve: { kind: 'track', source: 'spotify', externalId: 'sp123', title: 't', artist: 'a', album: '', url: 'https://open.spotify.com/track/sp123' }, catalogId: 'trk_link_sp123' }],
     })
     wrap()
     const input = screen.getByLabelText(/spotify or youtube urls/i)
@@ -222,10 +223,7 @@ describe('AddFromLink route', () => {
     expect(text).not.toContain('client')
     expect(text).not.toContain('peer')
     expect(text).not.toContain('mirror')
-    // fetch as word boundary may appear in code but not in rendered text; check lower
-    // Do not check cache/node overly strict due to containing substrings; check spaced
     expect(text).not.toMatch(/\bcache\b/)
-    // Allow "canonical" which contains "can" but not cache
   })
 
   it('uses context vocab: contains required terms', () => {
@@ -250,13 +248,14 @@ describe('AddFromLink route', () => {
     expect(await screen.findByText(/resolving/i)).toBeInTheDocument()
     resolve!()
   })
-  it('adds every pasted link and reports each outcome', async () => {
-    const { ApiError } = await import('../lib/api')
-    mockAddFromLink.mockReset()
-    mockAddFromLink
-      .mockResolvedValueOnce({ resolve: {}, catalogId: 'trk_a' })
-      .mockRejectedValueOnce(new ApiError('POST', '/links/add', 422))
-      .mockResolvedValueOnce({ resolve: {}, catalogId: 'trk_c' })
+  it('adds every pasted link and reports each outcome via batch', async () => {
+    mockAddFromLinksBatch.mockResolvedValue({
+      results: [
+        { url: 'https://a', catalogId: 'trk_a' },
+        { url: 'https://bad', error: 'unsupported URL' },
+        { url: 'https://c', catalogId: 'trk_c' },
+      ],
+    })
 
     wrap()
     fireEvent.change(screen.getByLabelText(/spotify or youtube urls/i), {
@@ -265,7 +264,12 @@ describe('AddFromLink route', () => {
     expect(screen.getByRole('button', { name: /add 3 links/i })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /add 3 links/i }))
 
-    await waitFor(() => expect(mockAddFromLink).toHaveBeenCalledTimes(3))
+    await waitFor(() => expect(mockAddFromLinksBatch).toHaveBeenCalledTimes(1))
+    expect(mockAddFromLinksBatch).toHaveBeenCalledWith([
+      { url: 'https://a', playlistId: undefined, download: true, quality: 'high' },
+      { url: 'https://bad', playlistId: undefined, download: true, quality: 'high' },
+      { url: 'https://c', playlistId: undefined, download: true, quality: 'high' },
+    ])
     const results = await screen.findByTestId('add-results')
     expect(results).toHaveTextContent('https://a')
     expect(results).toHaveTextContent(/unsupported url/i)
@@ -291,16 +295,14 @@ describe('AddFromLink route', () => {
     expect(cards[1]).toHaveTextContent('Second')
   })
 
-  it('sends each link its own trim range', async () => {
-    mockAddFromLink.mockReset()
-    mockAddFromLink.mockResolvedValue({ resolve: {}, catalogId: 'trk_a' })
+  it('sends each link its own trim range via batch', async () => {
+    mockAddFromLinksBatch.mockResolvedValue({ results: [{ url: 'https://www.youtube.com/watch?v=one', catalogId: 'trk_a' }, { url: 'https://www.youtube.com/watch?v=two', catalogId: 'trk_b' }] })
 
     wrap()
     fireEvent.change(screen.getByLabelText(/spotify or youtube urls/i), {
       target: { value: 'https://www.youtube.com/watch?v=one\nhttps://www.youtube.com/watch?v=two' },
     })
 
-    // Open the first link's advanced panel and trim only that one.
     fireEvent.click(
       screen.getByRole('button', { name: /advanced options for https:\/\/www\.youtube\.com\/watch\?v=one/i }),
     )
@@ -310,27 +312,17 @@ describe('AddFromLink route', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: /add 2 links/i }))
-    await waitFor(() => expect(mockAddFromLink).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(mockAddFromLinksBatch).toHaveBeenCalledTimes(1))
 
-    expect(mockAddFromLink).toHaveBeenNthCalledWith(
-      1,
-      'https://www.youtube.com/watch?v=one',
-      expect.objectContaining({ startTime: '1:30' }),
-    )
-    // The second link must be untouched by the first link's settings.
-    expect(mockAddFromLink).toHaveBeenNthCalledWith(
-      2,
-      'https://www.youtube.com/watch?v=two',
-      expect.not.objectContaining({ startTime: '1:30' }),
-    )
+    expect(mockAddFromLinksBatch).toHaveBeenCalledWith([
+      { url: 'https://www.youtube.com/watch?v=one', playlistId: undefined, download: true, quality: 'high', startTime: '1:30' },
+      { url: 'https://www.youtube.com/watch?v=two', playlistId: undefined, download: true, quality: 'high' },
+    ])
   })
 
   it('reports how many chapters a split produced', async () => {
-    mockAddFromLink.mockReset()
-    mockAddFromLink.mockResolvedValue({
-      resolve: {},
-      catalogId: 'trk_a',
-      jobs: [{ id: 'j1' }, { id: 'j2' }, { id: 'j3' }],
+    mockAddFromLinksBatch.mockResolvedValue({
+      results: [{ url: 'https://www.youtube.com/watch?v=chap', catalogId: 'trk_a', jobs: [{ id: 'j1' }, { id: 'j2' }, { id: 'j3' }] }],
     })
 
     wrap()
@@ -360,20 +352,16 @@ describe('AddFromLink audio quality', () => {
     expect(screen.getByText(/capped by what the source serves/i)).toBeInTheDocument()
   })
 
-  it('passes a per-download quality override to addFromLink', async () => {
-    mockAddFromLink.mockResolvedValue({ resolve: {}, catalogId: 'trk_1' })
+  it('passes a per-download quality override to batch', async () => {
+    mockAddFromLinksBatch.mockResolvedValue({ results: [{ url: 'https://open.spotify.com/track/sp123', catalogId: 'trk_1' }] })
     wrap()
     fireEvent.change(screen.getByLabelText(/spotify or youtube url/i), {
       target: { value: 'https://open.spotify.com/track/sp123' },
     })
     fireEvent.change(screen.getByLabelText(/audio quality/i), { target: { value: 'best' } })
     fireEvent.click(screen.getByRole('button', { name: /add from link/i }))
-    await waitFor(() => expect(mockAddFromLink).toHaveBeenCalled())
-    expect(mockAddFromLink).toHaveBeenCalledWith('https://open.spotify.com/track/sp123', {
-      playlistId: undefined,
-      download: true,
-      quality: 'best',
-    })
+    await waitFor(() => expect(mockAddFromLinksBatch).toHaveBeenCalled())
+    expect(mockAddFromLinksBatch).toHaveBeenCalledWith([{ url: 'https://open.spotify.com/track/sp123', playlistId: undefined, download: true, quality: 'best' }])
   })
 
   it('hides the quality select when the download is not going to run', () => {

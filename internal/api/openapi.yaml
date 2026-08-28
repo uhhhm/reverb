@@ -510,6 +510,35 @@ paths:
         "404": { description: playlist not found }
         "422": { description: unsupported URL, bad time range, or chapter split not possible }
         "503": { description: no downloader configured }
+  /links/add-batch:
+    post:
+      summary: Add many links at once (one POST per batch)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      url: { type: string }
+                      playlistId: { type: string }
+                      download: { type: boolean }
+                      quality:
+                        type: string
+                        enum: [low, medium, high, best]
+                      startTime: { type: string }
+                      endTime: { type: string }
+                      splitChapters: { type: boolean }
+                    required: [url]
+              required: [items]
+      responses:
+        "200": { description: "{ results: [{ url, resolve?, catalogId?, playlistId?, job?, jobs?, error? }] }" }
+        "400": { description: items is required or too many items }
   /downloads/batch:
     post:
       summary: Enqueue multiple downloads in one request

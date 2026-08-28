@@ -14,7 +14,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePlayer } from '../../lib/playerStore'
 import { useUI } from '../../lib/uiStore'
-import { coverUrl, trackCoverUrl } from '../../lib/libraryApi'
+import { trackCoverUrl } from '../../lib/libraryApi'
 import { formatDuration } from '../../lib/types'
 import { useAlbumPalette } from '../../lib/useAlbumPalette'
 import { rgbToCss } from '../../lib/palette'
@@ -25,6 +25,7 @@ import { AddToPlaylistMenu } from '../AddToPlaylistMenu'
 import { ProgressRing } from '../ui/ProgressRing'
 import { usePeaks } from '../../lib/peaksApi'
 import { useLyrics } from '../../lib/lyricsApi'
+import { isExternalTrack } from '../../lib/trackRef'
 
 /**
  * Gates a transient flag behind a delay. A library track is playable in well
@@ -57,7 +58,7 @@ function SeekBar() {
   const durationMs = usePlayer((s) => s.durationMs)
   const bufferedMs = usePlayer((s) => s.bufferedMs)
   const seekMs = usePlayer((s) => s.seekMs)
-  const isExternal = usePlayer((s) => !!s.current?.externalStream)
+  const isExternal = usePlayer((s) => (s.current ? isExternalTrack(s.current) : false))
   const peaks = usePeaks(trackId, isExternal).data
 
   const pct = durationMs > 0 ? (currentTimeMs / durationMs) * 100 : 0

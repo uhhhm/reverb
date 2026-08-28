@@ -56,3 +56,29 @@ export function addFromLink(
   if (opts?.splitChapters) body.splitChapters = opts.splitChapters
   return api.post<AddResult>('/links/add', body)
 }
+
+export interface BatchAddItem {
+  url: string
+  playlistId?: string
+  download?: boolean
+  quality?: AudioQuality
+  startTime?: string
+  endTime?: string
+  splitChapters?: boolean
+}
+
+export interface BatchAddResult {
+  results: Array<{
+    url: string
+    resolve?: ResolveResult
+    catalogId?: string
+    playlistId?: string
+    job?: unknown
+    jobs?: unknown[]
+    error?: string
+  }>
+}
+
+export function addFromLinksBatch(items: BatchAddItem[]): Promise<BatchAddResult> {
+  return api.post<BatchAddResult>('/links/add-batch', { items })
+}

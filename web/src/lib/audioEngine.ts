@@ -1,5 +1,5 @@
 import type { Track } from './types'
-import { streamUrl, externalStreamUrl } from './libraryApi'
+import { streamUrlFor } from './trackRef'
 
 export type RepeatMode = 'off' | 'all' | 'one'
 
@@ -69,10 +69,7 @@ export class AudioEngine {
 
   constructor(
     factory: () => AudioElement = realAudioFactory,
-    resolveSrc: (t: Track) => string = (t) =>
-      t.externalStream
-        ? externalStreamUrl(t.externalStream.source, t.externalStream.externalId)
-        : streamUrl(t.id),
+    resolveSrc: (t: Track) => string = (t) => streamUrlFor(t),
   ) {
     this.factory = factory
     this.resolveSrc = resolveSrc

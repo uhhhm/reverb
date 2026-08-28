@@ -8,6 +8,7 @@ import { useUI } from '../lib/uiStore'
 import { useActiveLyricLine } from '../lib/useActiveLyricLine'
 import { useAlbumPalette } from '../lib/useAlbumPalette'
 import { usePeaks } from '../lib/peaksApi'
+import { isExternalTrack } from '../lib/trackRef'
 import { Cover } from './ui/Cover'
 import { Icon } from './ui/Icon'
 import { LyricsLines } from './lyrics/LyricsLines'
@@ -27,7 +28,7 @@ export function CinemaView() {
   const currentTimeMs = usePlayer((s) => s.currentTimeMs)
   const durationMs = usePlayer((s) => s.durationMs)
   const palette = useAlbumPalette(current ? trackCoverUrl(current, 80) : undefined)
-  const peaks = usePeaks(current?.id, !!current?.externalStream).data
+  const peaks = usePeaks(current?.id, current ? isExternalTrack(current) : false).data
   const [sideView, setSideView] = useState<'queue' | 'lyrics'>('queue')
   const { data: lyrics } = useLyrics(open ? current : null)
   const activeIndex = useActiveLyricLine(lyrics?.synced ? lyrics.lines : undefined)

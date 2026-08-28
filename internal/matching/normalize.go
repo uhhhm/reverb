@@ -48,8 +48,8 @@ var wsRe = regexp.MustCompile(`\s+`)
 // version qualifiers like "(remaster 2011)" survive), and collapses whitespace.
 // It is pure and deterministic. It does NOT strip version qualifiers.
 func Normalize(s string) string {
-	s = foldDiacritics(s)
 	s = strings.ToLower(s)
+	s = foldDiacritics(s)
 	s = featRe.ReplaceAllString(s, "")
 	s = strings.ReplaceAll(s, "&", " and ")
 	s = ptRe.ReplaceAllString(s, "part")

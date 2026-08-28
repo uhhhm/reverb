@@ -1,6 +1,9 @@
 import { useEffect, useReducer } from 'react'
 import type { EnvelopeStatus, ExternalResult, SearchEnvelope } from './types'
 import { SearchStream } from './searchStream'
+import { dedupKey } from './trackRef'
+
+export { dedupKey } from './trackRef'
 
 export interface SourceStatus {
   source: string
@@ -19,23 +22,6 @@ export interface EverywhereState {
 }
 
 export const emptyEverywhere: EverywhereState = { tracks: [], albums: [], artists: [], playlists: [], sources: [], status: 'idle' }
-
-// normalize mirrors the backend matching.Normalize closely enough for client-side
-// dedup: lowercase, strip feat groups, &→and, drop non-alphanumerics, collapse ws.
-function normalize(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/\s*[([]?\s*\b(feat\.?|featuring|ft\.?)\b.*$/i, '')
-    .replace(/&/g, ' and ')
-    .replace(/[^\p{L}\p{N}\s]+/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-export function dedupKey(r: ExternalResult): string {
-  if (r.isrc) return `isrc:${r.isrc.toLowerCase()}`
-  return `nf:${normalize(r.artist)}␟${normalize(r.title)}`
-}
 
 function appendSection(existing: ExternalResult[], incoming: ExternalResult[]): ExternalResult[] {
   const seen = new Set(existing.map(dedupKey))

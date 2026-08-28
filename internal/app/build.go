@@ -28,6 +28,7 @@ import (
 	"github.com/uhhhm/reverb/internal/library/embedded"
 	"github.com/uhhhm/reverb/internal/library/lyrics"
 	"github.com/uhhhm/reverb/internal/library/subsonic"
+	"github.com/uhhhm/reverb/internal/linkadd"
 	"github.com/uhhhm/reverb/internal/override"
 	"github.com/uhhhm/reverb/internal/play"
 	"github.com/uhhhm/reverb/internal/playlistsync"
@@ -187,6 +188,19 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	}
 	scrobbleSvc := scrobble.NewService(st.Q(), lastfm.New(), scrobbleCfg, time.Now, uuid.NewString)
 
+	// LinkAdd planner owns the add-from-link flow (resolve, catalog, sync,
+	// chapter planning). It reads the LIVE aggregator for Spotify enrichment.
+	syncStoreForLink := bundle.SyncStore
+	if syncStoreForLink == nil {
+		syncStoreForLink = reverbsync.NewSyncStore(st.Q())
+	}
+	linkAddSvc := linkadd.New(st.Q(), syncStoreForLink, bundle.Manager,
+		linkadd.WithTrackLookup(ProviderLookup{Get: reloader.TrackLookupProvider()}),
+		linkadd.WithDeviceID(func(ctx context.Context) (string, error) {
+			return reverbsync.ServerDeviceID(ctx, st.Q())
+		}),
+	)
+
 	deps := api.Deps{
 		Auth:          authSvc,
 		Library:       bundle.Library,
@@ -228,6 +242,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		PairingDB:    st.DB(),
 		OfflineSet:   st.Q(),
 		LinkStore:    st.Q(),
+		LinkAdd:      linkAddSvc,
 	}
 	if deps.Pairing == nil {
 		deps.Pairing = reverbsync.NewPairingService(st.Q())

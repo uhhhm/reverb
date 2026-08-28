@@ -1,6 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useLibrarySearch } from '../lib/libraryApi'
-import { dedupKey, useEverywhere } from '../lib/everywhereStore'
+import { useEverywhere } from '../lib/everywhereStore'
+import { dedupKey, dedupKeyForTrack, encodeExternalId } from '../lib/trackRef'
 import { usePlayer } from '../lib/playerStore'
 import { useSearch } from '../lib/searchStore'
 import { postDownload } from '../lib/downloadApi'
@@ -160,7 +161,7 @@ export default function Search() {
   const albums = everywhere.albums.filter((result) => isVisibleSource(result.source))
   const artists = everywhere.artists.filter((result) => isVisibleSource(result.source))
   const playlists = everywhere.playlists.filter((result) => isVisibleSource(result.source))
-  const libraryTrackKeys = new Set(libTracks.map((track) => dedupKey({ isrc: track.isrc, artist: track.artist, title: track.title } as ExternalResult)))
+  const libraryTrackKeys = new Set(libTracks.map((track) => dedupKeyForTrack(track)))
   const externalTracks = tracks.filter((result) => result.match?.status !== 'in_library' && !libraryTrackKeys.has(dedupKey(result)))
 
   function toggleSource(source: string) {
@@ -245,15 +246,16 @@ export default function Search() {
                   onPlay={() => playTrackList(libTracks, i)}
                 />
               ))}
-              {externalTracks.map((r) => {
+              {externalTracks.map((r, idx) => {
                 const matchedId =
                   (r.match?.status === 'in_library' && r.match.libraryTrackId) || ''
                 const syntheticTrack = matchedId ? trackFromMatch(r, matchedId) : null
+                const extId = encodeExternalId(r.source, r.externalId) || `ext:invalid:${r.source}:${r.externalId}:${idx}`
 
                 // For display in TrackRow we need a Track shape. We always render
                 // a synthetic Track — the right slot carries the DownloadAction.
                 const displayTrack: Track = syntheticTrack ?? {
-                  id: `${r.source}:${r.externalId}`,
+                  id: extId,
                   title: r.title,
                   albumId: '',
                   album: r.album,
@@ -296,7 +298,7 @@ export default function Search() {
 
                 return (
                   <TrackRow
-                    key={`${r.source}:${r.externalId}`}
+                    key={extId}
                     track={displayTrack}
                     coverSrc={r.coverUrl || undefined}
                     rightWidth="8.5rem"
@@ -340,9 +342,9 @@ export default function Search() {
                 onClick={() => navigate(`/album/library/${al.id}`)}
               />
             ))}
-            {albums.map((a) => (
+            {albums.map((a, idx) => (
               <MediaCard
-                key={`${a.source}:${a.externalId}`}
+                key={encodeExternalId(a.source, a.externalId) || `ext:invalid:${a.source}:${a.externalId}:${idx}`}
                 title={a.title}
                 subtitle={a.artist}
                 onClick={() => navigate(`/album/${a.source}/${a.externalId}`)}
@@ -392,9 +394,9 @@ export default function Search() {
                 onClick={() => navigate(`/artist/library/${ar.id}`)}
               />
             ))}
-            {artists.map((r) => (
+            {artists.map((r, idx) => (
               <MediaCard
-                key={`${r.source}:${r.externalId}`}
+                key={encodeExternalId(r.source, r.externalId) || `ext:invalid:${r.source}:${r.externalId}:${idx}`}
                 title={r.title}
                 rounded="full"
                 onClick={() => navigate(`/artist/${r.source}/${r.externalId}`)}
@@ -408,9 +410,9 @@ export default function Search() {
         <section aria-label="Playlists">
           <SectionHeading>Playlists</SectionHeading>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {playlists.map((playlist) => (
+            {playlists.map((playlist, idx) => (
               <MediaCard
-                key={`${playlist.source}:${playlist.externalId}`}
+                key={encodeExternalId(playlist.source, playlist.externalId) || `ext:invalid:${playlist.source}:${playlist.externalId}:${idx}`}
                 title={playlist.title}
                 subtitle={playlist.artist || 'Spotify playlist'}
                 coverSrc={playlist.coverUrl || undefined}
