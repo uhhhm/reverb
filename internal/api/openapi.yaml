@@ -360,9 +360,25 @@ paths:
       parameters:
         - { name: source, in: path, required: true, schema: { type: string } }
         - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: artist, in: query, required: false, schema: { type: string } }
+        - { name: title, in: query, required: false, schema: { type: string } }
       responses:
         "200": { description: audio bytes }
         "206": { description: partial content }
+        "502": { description: could not resolve a playable source }
+        "503": { description: external streaming unavailable (no search source configured) }
+  /external/stream/{source}/{id}/prewarm:
+    post:
+      summary: >
+        Resolve and cache a playable URL for an external track without fetching
+        audio, so the resolve overlaps the user deciding to play it.
+      parameters:
+        - { name: source, in: path, required: true, schema: { type: string } }
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: artist, in: query, required: false, schema: { type: string } }
+        - { name: title, in: query, required: false, schema: { type: string } }
+      responses:
+        "204": { description: resolved and cached }
         "502": { description: could not resolve a playable source }
         "503": { description: external streaming unavailable (no search source configured) }
   /cover/{id}:

@@ -69,7 +69,12 @@ export function isExternalTrack(track: Track): boolean {
 /** Returns the correct stream URL for any track, library or external. */
 export function streamUrlFor(track: Track): string {
   if (track.externalStream) {
-    return externalStreamUrl(track.externalStream.source, track.externalStream.externalId)
+    return externalStreamUrl(
+      track.externalStream.source,
+      track.externalStream.externalId,
+      track.artist,
+      track.title,
+    )
   }
   return streamUrl(track.id)
 }

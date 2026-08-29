@@ -19,12 +19,15 @@ type fakeExtStream struct {
 	mu          sync.Mutex
 	resolves    int
 	invalidated int
+	lastArtist  string
+	lastTitle   string
 }
 
-func (f *fakeExtStream) Resolve(_ context.Context, _, _ string) (string, error) {
+func (f *fakeExtStream) ResolveHinted(_ context.Context, _, _, artist, title string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.resolves++
+	f.lastArtist, f.lastTitle = artist, title
 	return f.url, f.err
 }
 
@@ -177,5 +180,68 @@ func TestIsExternalTrackID(t *testing.T) {
 		if got := isExternalTrackID(tc.id); got != tc.want {
 			t.Errorf("isExternalTrackID(%q) = %v, want %v", tc.id, got, tc.want)
 		}
+	}
+}
+
+// The upstream throttles a range-less GET to roughly playback speed — measured
+// at ~7 KB/s against ~4 MB/s for the same URL requested as "bytes=0-". A
+// browser's first request carries no Range, so the proxy must supply one; the
+// resulting 206 is then reported to the browser as the 200 it asked for.
+func TestExternalStreamRequestsRangeWhenBrowserSendsNone(t *testing.T) {
+	var gotRange string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRange = r.Header.Get("Range")
+		w.Header().Set("Content-Type", "audio/webm")
+		w.Header().Set("Content-Range", "bytes 0-4/5")
+		w.Header().Set("Content-Length", "5")
+		w.WriteHeader(http.StatusPartialContent)
+		w.Write([]byte("AUDIO"))
+	}))
+	defer upstream.Close()
+
+	srv, cookie := extStreamServer(t, &fakeExtStream{url: upstream.URL})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/external/stream/deezer/123", nil)
+	req.AddCookie(cookie)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if gotRange != "bytes=0-" {
+		t.Errorf("upstream Range = %q, want an open-ended range to dodge throttling", gotRange)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 for a client that sent no Range", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Range"); got != "" {
+		t.Errorf("Content-Range = %q, want none on a 200", got)
+	}
+	if got := rec.Header().Get("Accept-Ranges"); got != "bytes" {
+		t.Errorf("Accept-Ranges = %q, want bytes so the player offers seeking", got)
+	}
+	if rec.Body.String() != "AUDIO" {
+		t.Errorf("body = %q", rec.Body.String())
+	}
+}
+
+// A genuine partial must never be downgraded to 200: only a response covering
+// the whole resource is the substituted range's own doing.
+func TestExternalStreamKeepsRealPartialFromMidFileUpstream(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Range", "bytes 5-9/10")
+		w.WriteHeader(http.StatusPartialContent)
+		w.Write([]byte("AUDIO"))
+	}))
+	defer upstream.Close()
+
+	srv, cookie := extStreamServer(t, &fakeExtStream{url: upstream.URL})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/external/stream/deezer/123", nil)
+	req.AddCookie(cookie)
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusPartialContent {
+		t.Errorf("status = %d, want the upstream's 206 preserved", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Range"); got != "bytes 5-9/10" {
+		t.Errorf("Content-Range = %q, want it preserved", got)
 	}
 }

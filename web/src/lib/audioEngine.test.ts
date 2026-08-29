@@ -309,6 +309,23 @@ describe('AudioEngine loading state', () => {
     expect(engine.getState().loading).toBe(false)
   })
 
+  // Seeking a proxied external stream tears down and re-opens the upstream
+  // connection, which fires 'stalled' even though the buffer keeps feeding the
+  // element. Playback simply continues, so no 'canplay'/'playing' follows and
+  // only the advancing clock can bring the spinner back down.
+  it('clears loading when the clock keeps advancing after a stall', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([track('1')], 0)
+    audios[0].fire('canplay')
+    audios[0].paused = false
+    audios[0].fire('stalled')
+    expect(engine.getState().loading).toBe(true)
+
+    audios[0].currentTime = 42
+    audios[0].fire('timeupdate')
+    expect(engine.getState().loading).toBe(false)
+  })
+
   it('notifies subscribers when loading changes', () => {
     const { engine, audios } = newEngine()
     const seen: boolean[] = []

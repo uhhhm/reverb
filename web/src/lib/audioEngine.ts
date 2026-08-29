@@ -71,6 +71,10 @@ export class AudioEngine {
   private shufflePos = -1
 
   private loading = false
+  // Last raw media position seen by onTime, used to tell real stalling from a
+  // spurious 'stalled'/'waiting': if the clock is still advancing, audio is
+  // playing and the spinner must come down.
+  private lastRawMs = -1
 
   // Playback-time loudness normalization. The file is never re-encoded: the
   // measured per-track gain is applied by a Web Audio GainNode in front of the
@@ -115,6 +119,8 @@ export class AudioEngine {
     this.active.addEventListener('stalled', this.onWaiting)
     this.active.addEventListener('canplay', this.onLoaded)
     this.active.addEventListener('playing', this.onLoaded)
+    this.active.addEventListener('seeked', this.onLoaded)
+    this.active.addEventListener('canplaythrough', this.onLoaded)
     // Note: preload errors are intentionally not handled — a preload error should
     // null/ignore the preload src silently, never advance the queue.
   }
@@ -151,6 +157,15 @@ export class AudioEngine {
     if (end > 0 && rawMs >= end) {
       this.onEnded()
       return
+    }
+
+    // A proxied external stream drops and re-opens its upstream connection on a
+    // seek, which fires 'stalled' even though the buffer keeps feeding the
+    // element. Nothing further fires once playback simply continues, so the
+    // advancing clock is what clears the spinner.
+    if (rawMs !== this.lastRawMs) {
+      this.lastRawMs = rawMs
+      if (!this.active.paused) this.setLoading(false)
     }
 
     this.currentTimeMs = Math.max(0, rawMs - start)
@@ -384,6 +399,7 @@ export class AudioEngine {
     this.active.src = this.resolveSrc(t)
     this.active.load()
     this.loading = true
+    this.lastRawMs = -1
     this.currentTimeMs = 0
     // A crop starts playback inside the file. The assignment may be ignored
     // until metadata arrives, which onTime's forward-clamp then fixes.

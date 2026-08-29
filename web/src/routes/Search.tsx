@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { useLibrarySearch } from '../lib/libraryApi'
+import { useLibrarySearch, prewarmExternalStream } from '../lib/libraryApi'
 import { useEverywhere } from '../lib/everywhereStore'
 import { dedupKey, dedupKeyForTrack, encodeExternalId } from '../lib/trackRef'
 import { usePlayer } from '../lib/playerStore'
@@ -310,6 +310,14 @@ export default function Search() {
                       // (displayTrack carries externalStream). Playing never
                       // downloads — Download is the only thing that adds a track.
                       playTrackList([syntheticTrack ?? displayTrack], 0)
+                    }}
+                    onIntent={() => {
+                      // Resolving an external track to a playable URL takes
+                      // seconds. Start it when the row is pointed at so the wait
+                      // overlaps the click instead of following it.
+                      if (syntheticTrack) {
+                        prewarmExternalStream(r.source, r.externalId, r.artist, r.title)
+                      }
                     }}
                     right={
                       <DownloadAction

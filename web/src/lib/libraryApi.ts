@@ -26,9 +26,44 @@ export function streamUrl(id: string): string {
   return `${mediaBase()}/api/v1/stream/${encodeURIComponent(id)}`
 }
 
-/** Streams a track that is not in the library, without downloading it. */
-export function externalStreamUrl(source: string, externalId: string): string {
-  return `${mediaBase()}/api/v1/external/stream/${encodeURIComponent(source)}/${encodeURIComponent(externalId)}`
+/**
+ * Streams a track that is not in the library, without downloading it.
+ *
+ * The artist/title hints let the backend skip looking the track up at the
+ * search source, which is a network round trip sitting in front of the first
+ * audio byte.
+ */
+export function externalStreamUrl(
+  source: string,
+  externalId: string,
+  artist = '',
+  title = '',
+): string {
+  const base = `${mediaBase()}/api/v1/external/stream/${encodeURIComponent(source)}/${encodeURIComponent(externalId)}`
+  return base + hintQuery(artist, title)
+}
+
+function hintQuery(artist: string, title: string): string {
+  const q = new URLSearchParams()
+  if (artist) q.set('artist', artist)
+  if (title) q.set('title', title)
+  const s = q.toString()
+  return s ? `?${s}` : ''
+}
+
+/**
+ * Resolves an external track's audio URL ahead of playing it, so the
+ * multi-second yt-dlp resolve overlaps the user deciding to press play rather
+ * than following it. Best-effort: failures are the play path's problem.
+ */
+export function prewarmExternalStream(
+  source: string,
+  externalId: string,
+  artist = '',
+  title = '',
+): void {
+  const url = `${mediaBase()}/api/v1/external/stream/${encodeURIComponent(source)}/${encodeURIComponent(externalId)}/prewarm${hintQuery(artist, title)}`
+  void fetch(url, { method: 'POST' }).catch(() => {})
 }
 
 // Task 9 Part A — DEFERRED to SP3:

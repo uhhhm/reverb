@@ -35,9 +35,12 @@ interface TrackRowProps {
   caption?: ReactNode
   /** Show a rename affordance for owned tracks. Omit to hide it. */
   onRename?: (track: Track) => void
+  /** Fired when the row is first pointed at — a chance to start work that play
+   *  would otherwise have to wait for. Must be cheap and idempotent. */
+  onIntent?: () => void
 }
 
-export function TrackRow({ track, index, active = false, playing, onPlay, right, coverSrc, rightWidth = 'auto', artistNode, albumNode, artistTo, albumTo, caption, onRename }: TrackRowProps) {
+export function TrackRow({ track, index, active = false, playing, onPlay, right, coverSrc, rightWidth = 'auto', artistNode, albumNode, artistTo, albumTo, caption, onRename, onIntent }: TrackRowProps) {
   // coverSrc overrides (external Spotify images); otherwise use album cover directly
   // (album art reliably resolves; per-song embedded art is usually absent).
   const src = coverSrc ?? trackCoverUrl(track, 80)
@@ -55,6 +58,8 @@ export function TrackRow({ track, index, active = false, playing, onPlay, right,
       role="button"
       tabIndex={0}
       onDoubleClick={onPlay}
+      onPointerEnter={onIntent}
+      onFocus={onIntent}
       onKeyDown={handleKeyDown}
       className={[
         'group w-full grid items-center gap-3.5 px-2.5 py-2 rounded-md text-left',

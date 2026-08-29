@@ -202,3 +202,26 @@ func TestFailedResolveIsNotCached(t *testing.T) {
 		t.Fatalf("second attempt should re-run: %v", err)
 	}
 }
+
+// A caller that already knows the artist and title must not pay for a
+// search-source lookup before the resolve — that round trip sits directly in
+// front of the first audio byte.
+func TestResolveHintedSkipsLookup(t *testing.T) {
+	lookup := &fakeLookup{err: errors.New("lookup must not be called")}
+	runner := &fakeRunner{lines: []string{"https://audio.example/x"}}
+	s := New(lookup, WithRunner(runner))
+
+	got, err := s.ResolveHinted(context.Background(), "deezer", "1", "Boards of Canada", "Roygbiv")
+	if err != nil {
+		t.Fatalf("ResolveHinted: %v", err)
+	}
+	if got != "https://audio.example/x" {
+		t.Fatalf("url = %q", got)
+	}
+	if lookup.calls != 0 {
+		t.Fatalf("lookup called %d times, want 0", lookup.calls)
+	}
+	if want, got := "ytsearch1:Boards of Canada - Roygbiv", runner.gotArgs[len(runner.gotArgs)-1]; got != want {
+		t.Fatalf("query = %q, want %q", got, want)
+	}
+}

@@ -371,6 +371,7 @@ func (s *Server) routes() {
 			pr.Get("/collection", s.handleCollection)
 			pr.Get("/stream/{id}", s.handleStream)
 			pr.Get("/external/stream/{source}/{id}", s.handleExternalStream)
+			pr.Post("/external/stream/{source}/{id}/prewarm", s.handleExternalStreamPrewarm)
 			pr.Get("/cover/{id}", s.handleCover)
 			pr.Get("/search/everywhere", s.handleEverywhere)
 			pr.Get("/artist/{source}/{id}", s.handleArtistDetail)

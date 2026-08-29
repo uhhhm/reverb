@@ -59,6 +59,7 @@ type Service struct {
 	runner      Runner
 	binary      string
 	cookiesFile string
+	jsRuntime   string
 	ttl         time.Duration
 	now         func() time.Time
 
@@ -81,6 +82,11 @@ func WithBinary(path string) Option {
 		}
 	}
 }
+
+// WithJSRuntime points yt-dlp at a JavaScript runtime (the bundled deno).
+// Without one, YouTube extraction falls back through extra player clients,
+// which is both slower and misses formats.
+func WithJSRuntime(path string) Option { return func(s *Service) { s.jsRuntime = path } }
 
 // WithCookiesFile points yt-dlp at a cookies.txt, which is what gets past
 // YouTube's bot checks on the resolve.
@@ -107,6 +113,7 @@ func NewFromEnv(lookup TrackLookup, getenv func(string) string, opts ...Option) 
 	base := []Option{
 		WithBinary(getenv("REVERB_YTDLP_PATH")),
 		WithCookiesFile(existingPath(ytdlpCookiesPath())),
+		WithJSRuntime(existingPath(getenv("REVERB_DENO_PATH"))),
 	}
 	return New(lookup, append(base, opts...)...)
 }
@@ -154,6 +161,15 @@ func New(lookup TrackLookup, opts ...Option) *Service {
 // resolving is the expensive part (seconds), and a player that retries or a
 // second listener would otherwise spawn duplicate processes.
 func (s *Service) Resolve(ctx context.Context, source, externalID string) (string, error) {
+	return s.ResolveHinted(ctx, source, externalID, "", "")
+}
+
+// ResolveHinted is Resolve with the artist and title the caller already knows.
+// The search-source lookup exists only to obtain those two strings, so a caller
+// holding them (the SPA always does — it rendered the row) skips a network
+// round trip on the critical path before the first audio byte. Empty hints fall
+// back to the lookup.
+func (s *Service) ResolveHinted(ctx context.Context, source, externalID, artist, title string) (string, error) {
 	source, externalID = strings.TrimSpace(source), strings.TrimSpace(externalID)
 	if source == "" || externalID == "" {
 		return "", fmt.Errorf("extstream: source and id are required")
@@ -172,7 +188,7 @@ func (s *Service) Resolve(ctx context.Context, source, externalID string) (strin
 	// to every collapsed waiter that still has a live request.
 	detached := context.WithoutCancel(ctx)
 	v, err, _ := s.sf.Do(key, func() (any, error) {
-		url, rerr := s.resolveUncached(detached, source, externalID)
+		url, rerr := s.resolveUncached(detached, source, externalID, artist, title)
 		if rerr != nil {
 			return "", rerr
 		}
@@ -196,18 +212,22 @@ func (s *Service) Invalidate(source, externalID string) {
 	s.mu.Unlock()
 }
 
-func (s *Service) resolveUncached(ctx context.Context, source, externalID string) (string, error) {
-	if s.lookup == nil {
-		return "", fmt.Errorf("extstream: no search source configured")
+func (s *Service) resolveUncached(ctx context.Context, source, externalID, artist, title string) (string, error) {
+	artist, title = strings.TrimSpace(artist), strings.TrimSpace(title)
+	if title == "" {
+		if s.lookup == nil {
+			return "", fmt.Errorf("extstream: no search source configured")
+		}
+		track, err := s.lookup.GetTrack(ctx, source, externalID)
+		if err != nil {
+			return "", fmt.Errorf("extstream: looking up %s:%s: %w", source, externalID, err)
+		}
+		artist, title = strings.TrimSpace(track.Artist), strings.TrimSpace(track.Title)
 	}
-	track, err := s.lookup.GetTrack(ctx, source, externalID)
-	if err != nil {
-		return "", fmt.Errorf("extstream: looking up %s:%s: %w", source, externalID, err)
-	}
-	query := strings.TrimSpace(strings.TrimSpace(track.Artist) + " - " + strings.TrimSpace(track.Title))
-	if query == "-" || strings.TrimSpace(track.Title) == "" {
+	if title == "" {
 		return "", fmt.Errorf("extstream: %s:%s has no title to search for", source, externalID)
 	}
+	query := strings.TrimSpace(artist + " - " + title)
 
 	runCtx, cancel := context.WithTimeout(ctx, resolveTimeout)
 	defer cancel()
@@ -215,7 +235,10 @@ func (s *Service) resolveUncached(ctx context.Context, source, externalID string
 	// -g prints the direct media URL instead of downloading. bestaudio keeps the
 	// proxy off video bytes; --no-playlist stops a search hit that belongs to a
 	// playlist from expanding into one.
-	args := []string{"-f", "bestaudio", "--no-playlist", "-g"}
+	args := []string{"-f", "bestaudio", "--no-playlist", "-g", "--no-warnings", "--socket-timeout", "15"}
+	if s.jsRuntime != "" {
+		args = append(args, "--js-runtimes", "deno:"+s.jsRuntime)
+	}
 	if s.cookiesFile != "" {
 		args = append(args, "--cookies", s.cookiesFile)
 	}
