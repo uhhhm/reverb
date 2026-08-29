@@ -716,14 +716,22 @@ paths:
                 type: object
                 properties:
                   peerId: { type: string, description: Stable libp2p peer ID; also this device's Ed25519 verification key }
-                  addrs: { type: array, items: { type: string }, description: Listen multiaddrs }
+                  addrs: { type: array, items: { type: string }, description: Raw listen multiaddrs, including wildcards }
+                  dialAddrs:
+                    type: array
+                    items: { type: string }
+                    description: >
+                      Complete /p2p/-terminated addresses another device can dial
+                      this one on, with wildcard and loopback addresses removed.
+                      Give one of these to a device on a VPN, where mDNS and the
+                      DHT cannot resolve a bare peer ID.
                   peerCount: { type: integer, description: Currently connected peers, paired or not }
                   vector:
                     type: object
                     additionalProperties: { type: integer, format: int64 }
                     description: Per-device sequence vector
                   hlc: { type: integer, format: int64, description: Highest hybrid logical clock seen }
-                required: [peerId, addrs, peerCount]
+                required: [peerId, addrs, dialAddrs, peerCount]
         "503": { description: p2p unavailable }
   /p2p/peers:
     get:
@@ -754,7 +762,8 @@ paths:
       description: >
         Dials peerId and redeems code on it. On success both sides record each
         other as paired, binding the libp2p peer ID to a device row and its
-        Ed25519 verification key. Rate limited per peer and globally.
+        Ed25519 verification key, and persist the address used so later
+        reconnects need no discovery. Rate limited per peer and globally.
       requestBody:
         required: true
         content:
@@ -762,7 +771,14 @@ paths:
             schema:
               type: object
               properties:
-                peerId: { type: string }
+                peerId:
+                  type: string
+                  description: >
+                    Either a bare peer ID or a full multiaddr ending in
+                    /p2p/<peerID>. The bare form only resolves where discovery
+                    has already found the peer (a LAN, via mDNS); over a VPN the
+                    full multiaddr from the other device's dialAddrs is required.
+                  example: "/ip4/10.8.0.2/tcp/4331/p2p/12D3KooW..."
                 code: { type: string, example: "AB12-CD34" }
                 deviceName: { type: string }
               required: [peerId, code, deviceName]

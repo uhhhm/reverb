@@ -36,8 +36,13 @@ func (s *Server) handleP2PStatus(w http.ResponseWriter, r *http.Request) {
 	peers := h.LibHost().Network().Peers()
 	peerCount := len(peers)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"peerId":    h.ID(),
-		"addrs":     h.Addrs(),
+		"peerId": h.ID(),
+		"addrs":  h.Addrs(),
+		// dialAddrs are the complete /p2p/-terminated addresses another device
+		// can be given to reach this one. They are what the pairing UI shows,
+		// because on a VPN the peer ID alone is not dialable: mDNS multicast
+		// does not cross the tunnel and the DHT knows nothing of these hosts.
+		"dialAddrs": h.DialAddrs(),
 		"peerCount": peerCount,
 		"vector":    vector,
 		"hlc":       hlc,
@@ -70,6 +75,9 @@ func (s *Server) handleP2PPeers(w http.ResponseWriter, r *http.Request) {
 }
 
 type p2pRedeemRequest struct {
+	// PeerID is either a bare peer ID or a full multiaddr ending in
+	// /p2p/<peerID>. The bare form works only where discovery has already found
+	// the peer (a LAN, via mDNS); over a VPN the full multiaddr is required.
 	PeerID     string `json:"peerId"`
 	Code       string `json:"code"`
 	DeviceName string `json:"deviceName"`

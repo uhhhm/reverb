@@ -1,6 +1,11 @@
 -- name: TrustPeer :exec
+-- addrs is deliberately not touched on conflict: re-pairing an existing peer
+-- must not discard the addresses that are how we reach it.
 INSERT INTO p2p_peer (peer_id, device_id, name, added_at, last_seen) VALUES (?, ?, ?, unixepoch(), unixepoch())
 ON CONFLICT(peer_id) DO UPDATE SET device_id = excluded.device_id, name = excluded.name, last_seen = unixepoch();
+
+-- name: SetTrustedPeerAddrs :exec
+UPDATE p2p_peer SET addrs = ? WHERE peer_id = ?;
 
 -- name: GetTrustedPeer :one
 SELECT * FROM p2p_peer WHERE peer_id = ?;

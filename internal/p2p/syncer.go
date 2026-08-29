@@ -73,8 +73,12 @@ func (s *Syncer) syncAll(ctx context.Context) {
 	if len(trusted) == 0 {
 		return
 	}
-	for _, pid := range s.host.Network().Peers() {
-		if _, ok := trusted[pid]; !ok {
+	// Iterate the trust set and dial, rather than iterating live connections.
+	// Only connected peers were considered before, which silently confined sync
+	// to whatever mDNS had connected -- over a VPN, where multicast does not
+	// reach, that was nothing at all.
+	for pid := range trusted {
+		if !EnsureConnected(ctx, s.host, s.guard, pid) {
 			continue
 		}
 		_ = s.syncPeer(ctx, pid)
@@ -119,6 +123,11 @@ func (s *Syncer) syncPeer(ctx context.Context, pid peer.ID) error {
 	var resp reverbsync.SyncResponse
 	if err := decodeLimited(st, maxSyncMessageBytes, &resp); err != nil {
 		return err
+	}
+	// The exchange succeeded, so this address is known-good; persist it for the
+	// next restart, when discovery may have nothing to offer.
+	if err := s.guard.RememberAddrs(ctx, pid, ObservedAddrs(s.host, pid)); err != nil {
+		log.Printf("p2p syncer: remember addrs for %s: %v", pid, err)
 	}
 	// Remember peer's vector for next anti-entropy round.
 	if len(resp.Vector) > 0 {

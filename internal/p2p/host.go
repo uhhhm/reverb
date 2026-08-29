@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"sync/atomic"
 	"time"
 
@@ -40,30 +41,23 @@ func (n *discoveryNotifee) HandlePeerFound(pi peer.AddrInfo) {
 // mdnsTag is the service tag for local discovery.
 const mdnsTag = "_reverb._tcp"
 
-// NewHost creates a libp2p host listening on random ports, with mDNS and DHT.
+// NewHost creates a libp2p host with mDNS and DHT, listening on port (0 picks a
+// random one). A fixed port is what makes a manually entered peer address
+// survive a restart; with a random port any address written down goes stale the
+// moment the process restarts. If the requested port is already taken -- two Reverb instances on
+// one machine, most likely -- it falls back to a random port rather than failing
+// to start, since a reachable-but-unstable host beats no host at all.
+//
 // priv is this node's persistent identity; it must be stable across restarts or
 // every pairing bound to the resulting peer ID is invalidated. See
 // LoadOrCreateIdentity.
-func NewHost(ctx context.Context, priv crypto.PrivKey) (*Host, error) {
-	cm, err := connmgr.NewConnManager(10, 50)
-	if err != nil {
-		return nil, fmt.Errorf("connmgr: %w", err)
+func NewHost(ctx context.Context, priv crypto.PrivKey, port int) (*Host, error) {
+	h, err := newLibp2pHost(priv, port)
+	if err != nil && port != 0 {
+		log.Printf("WARNING: p2p listen on port %d failed (%v); falling back to a random port. "+
+			"Manually entered peer addresses will go stale on restart until the conflict is resolved.", port, err)
+		h, err = newLibp2pHost(priv, 0)
 	}
-	opts := []libp2p.Option{
-		libp2p.ListenAddrStrings(
-			"/ip4/0.0.0.0/tcp/0",
-			"/ip4/0.0.0.0/udp/0/quic-v1",
-			"/ip6/::/tcp/0",
-		),
-		libp2p.ConnectionManager(cm),
-		libp2p.EnableNATService(),
-		libp2p.EnableRelay(),
-		libp2p.EnableHolePunching(),
-	}
-	if priv != nil {
-		opts = append(opts, libp2p.Identity(priv))
-	}
-	h, err := libp2p.New(opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -80,8 +74,9 @@ func NewHost(ctx context.Context, priv crypto.PrivKey) (*Host, error) {
 		_ = d.Bootstrap(ctx2)
 	}()
 
-	// mDNS for LAN discovery. TXT advertisement of id/hlc/lanPort is not yet
-	// implemented (plan 305) — discovery is peerId-only for now.
+	// mDNS for LAN discovery. It does not traverse a VPN -- multicast is not
+	// forwarded over WireGuard or Tailscale -- so peers on a VPN are reached by
+	// stored or manually entered addresses instead (see Guard address storage).
 	ser := mdns.NewMdnsService(h, mdnsTag, &discoveryNotifee{h: h})
 	if err := ser.Start(); err != nil {
 		// mDNS may fail on some hosts (no multicast route) — log but don't fail.
@@ -95,6 +90,28 @@ func NewHost(ctx context.Context, priv crypto.PrivKey) (*Host, error) {
 	h.SetStreamHandler("/reverb/file/1.0.0", func(s network.Stream) { s.Close() })
 
 	return &Host{h: h, d: d, mdns: ser}, nil
+}
+
+func newLibp2pHost(priv crypto.PrivKey, port int) (host.Host, error) {
+	cm, err := connmgr.NewConnManager(10, 50)
+	if err != nil {
+		return nil, fmt.Errorf("connmgr: %w", err)
+	}
+	opts := []libp2p.Option{
+		libp2p.ListenAddrStrings(
+			fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", port),
+			fmt.Sprintf("/ip4/0.0.0.0/udp/%d/quic-v1", port),
+			fmt.Sprintf("/ip6/::/tcp/%d", port),
+		),
+		libp2p.ConnectionManager(cm),
+		libp2p.EnableNATService(),
+		libp2p.EnableRelay(),
+		libp2p.EnableHolePunching(),
+	}
+	if priv != nil {
+		opts = append(opts, libp2p.Identity(priv))
+	}
+	return libp2p.New(opts...)
 }
 
 func (h *Host) Close() error {
@@ -123,6 +140,56 @@ func (h *Host) Addrs() []string {
 		out = append(out, a.String())
 	}
 	return out
+}
+
+// DialAddrs returns the addresses another device can actually dial this host
+// on, each terminated with /p2p/<peerID> so it is a complete dial string the
+// user can copy into the other device's pairing form.
+//
+// Unspecified (0.0.0.0, ::) and loopback addresses are dropped: the first is a
+// listen wildcard rather than a destination, and the second is only reachable
+// from this machine. What survives is the set of concrete interface addresses,
+// which on a VPN host includes the VPN address -- the one that matters, since
+// mDNS multicast does not cross the tunnel and the DHT runs in client mode.
+func (h *Host) DialAddrs() []string {
+	if h.h == nil {
+		return nil
+	}
+	suffix, err := multiaddr.NewMultiaddr("/p2p/" + h.h.ID().String())
+	if err != nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	out := make([]string, 0, len(h.h.Addrs()))
+	for _, a := range h.h.Addrs() {
+		if !isDialableAddr(a) {
+			continue
+		}
+		full := a.Encapsulate(suffix).String()
+		if seen[full] {
+			continue
+		}
+		seen[full] = true
+		out = append(out, full)
+	}
+	return out
+}
+
+func isDialableAddr(a multiaddr.Multiaddr) bool {
+	ipStr, err := a.ValueForProtocol(multiaddr.P_IP4)
+	if err != nil {
+		ipStr, err = a.ValueForProtocol(multiaddr.P_IP6)
+		if err != nil {
+			// Not an IP address (a relay or DNS address): keep it, since we
+			// cannot judge it and it may well be the only way in.
+			return true
+		}
+	}
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	return !ip.IsUnspecified() && !ip.IsLoopback()
 }
 
 // ID returns the peer ID string.

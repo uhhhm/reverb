@@ -122,6 +122,7 @@ Reverb is configured by flags, environment variables, and the in-app Settings UI
 | `--db` | `./data/reverb.db` | SQLite database path |
 | `--dev` | `false` | Dev mode (proxies the Vite dev server) |
 | `--bind` | `127.0.0.1` | Interface to bind; `0.0.0.0` exposes Reverb to the network (see the warning under `REVERB_BIND`) |
+| `--p2p-port` | `4331` | libp2p listen port for device-to-device sync; `0` picks a random one |
 | `--update-repo` | `uhhhm/reverb` | GitHub `owner/name` checked for new releases; `off` disables update checks |
 
 ### Environment variables
@@ -130,6 +131,7 @@ Reverb is configured by flags, environment variables, and the in-app Settings UI
 | --- | --- |
 | `REVERB_PORT` | HTTP listen port (same as `--port`); defaults to `8090` |
 | `REVERB_BIND` | Interface to bind (same as `--bind`); defaults to `127.0.0.1`. Reverb authenticates every request as the household owner, so a listener reachable from the network hands that identity to anyone who can route to it. Widen it only behind an authenticating proxy. The Docker image sets `0.0.0.0` because the container's port mapping is the real exposure decision. |
+| `REVERB_P2P_PORT` | libp2p listen port (same as `--p2p-port`); defaults to `4331`. Fixed rather than random so a peer address entered on another device stays valid across restarts. If the port is taken, Reverb logs a warning and falls back to a random port. Unlike the HTTP API this listener is meant to be reachable from your other devices; it admits only peers that have completed a pairing exchange. |
 | `REVERB_DB` | SQLite path (same as `--db`); the Docker image defaults this to `/data/reverb.db` |
 | `REVERB_DEV=1` | Enable dev mode |
 | `REVERB_UPDATE_REPO` | GitHub `owner/name` checked for new releases (same as `--update-repo`); `off` disables update checks |

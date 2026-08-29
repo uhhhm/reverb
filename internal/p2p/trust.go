@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +23,7 @@ type TrustStore interface {
 	GetTrustedPeer(ctx context.Context, peerID string) (db.P2pPeer, error)
 	ListTrustedPeers(ctx context.Context) ([]db.P2pPeer, error)
 	TouchTrustedPeer(ctx context.Context, peerID string) error
+	SetTrustedPeerAddrs(ctx context.Context, arg db.SetTrustedPeerAddrsParams) error
 }
 
 // trustTTL bounds how long a positive trust lookup is cached. Short enough that
@@ -130,6 +132,88 @@ func (g *Guard) Invalidate() {
 	g.mu.Lock()
 	g.cache = make(map[peer.ID]trustEntry)
 	g.mu.Unlock()
+}
+
+// RememberAddrs persists how to reach pid, so a restart does not lose it.
+// Addresses are stored newline-separated and deduplicated, most recent first,
+// bounded to maxStoredAddrs so a peer that roams between networks does not grow
+// the row without limit.
+//
+// mDNS and the DHT cannot supply this over a VPN, so for the VPN case these
+// stored addresses are the only way a paired peer is ever dialed again.
+func (g *Guard) RememberAddrs(ctx context.Context, pid peer.ID, addrs []string) error {
+	if g == nil || g.store == nil || len(addrs) == 0 {
+		return nil
+	}
+	existing, err := g.AddrsFor(ctx, pid)
+	if err != nil {
+		existing = nil
+	}
+	merged := dedupeAddrs(append(append([]string{}, addrs...), existing...))
+	if equalAddrs(merged, existing) {
+		return nil
+	}
+	return g.store.SetTrustedPeerAddrs(ctx, db.SetTrustedPeerAddrsParams{
+		PeerID: pid.String(),
+		Addrs:  strings.Join(merged, "\n"),
+	})
+}
+
+// AddrsFor returns the stored dial addresses for pid, newest first.
+func (g *Guard) AddrsFor(ctx context.Context, pid peer.ID) ([]string, error) {
+	if g == nil || g.store == nil {
+		return nil, nil
+	}
+	row, err := g.store.GetTrustedPeer(ctx, pid.String())
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return splitAddrs(row.Addrs), nil
+}
+
+// maxStoredAddrs bounds the per-peer address list.
+const maxStoredAddrs = 8
+
+func splitAddrs(raw string) []string {
+	out := make([]string, 0, 4)
+	for _, line := range strings.Split(raw, "\n") {
+		if a := strings.TrimSpace(line); a != "" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func dedupeAddrs(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, a := range in {
+		a = strings.TrimSpace(a)
+		if a == "" || seen[a] {
+			continue
+		}
+		seen[a] = true
+		out = append(out, a)
+		if len(out) == maxStoredAddrs {
+			break
+		}
+	}
+	return out
+}
+
+func equalAddrs(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // TrustedPeers returns the current trust set as a lookup map, for callers that

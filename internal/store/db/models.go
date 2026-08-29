@@ -160,6 +160,7 @@ type P2pPeer struct {
 	Name     string         `json:"name"`
 	AddedAt  int64          `json:"added_at"`
 	LastSeen int64          `json:"last_seen"`
+	Addrs    string         `json:"addrs"`
 }
 
 type PairingCode struct {

@@ -34,6 +34,7 @@ func main() {
 		DBPath:     cfg.DBPath,
 		Version:    version,
 		UpdateRepo: cfg.UpdateRepo,
+		P2PPort:    cfg.P2PPort,
 		Dev:        cfg.Dev,
 		Getenv:     os.Getenv,
 	})

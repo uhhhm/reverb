@@ -71,7 +71,7 @@ Library modes (`internal/library/embedded`): **built-in** bundles Navidrome as a
 - `internal/matching` — matches search results against library (ISRC/metadata) to mark owned.
 - `internal/resolver` — resolves adapter/track identity; constructed against `ServiceReloader.MatcherProvider()` so it reads the live matcher per-resolve.
 - `internal/sync` — CRDT sync (HLC vector, per-field LWW, device pairing codes, Bearer token auth, Ed25519-signed changes, file manifests).
-- `internal/p2p` — libp2p host, peer trust (`p2p_peer`), manifest/file sync handlers, pull replication.
+- `internal/p2p` — libp2p host (fixed listen port, `--p2p-port`), peer trust (`p2p_peer`), manifest/file sync handlers, pull replication. Peers are dialed by stored multiaddr as well as by discovery, since mDNS multicast does not cross a VPN and the DHT runs in client mode; pairing accepts a full `/ip4/…/p2p/<id>` multiaddr and persists it on `p2p_peer.addrs`.
 - `internal/store` — SQLite (`modernc.org/sqlite`), migrations `internal/store/migrations/*.sql` (goose), sqlc `internal/store/queries` -> `internal/store/db` (`make gen`).
 - `internal/api` — chi handlers, OpenAPI at `/api/v1/openapi.yaml` (keep in sync), `embed.go` embeds SPA.
 - `internal/auth` + `internal/api/roles.go` — single household owner (`local`, holds every capability) plus paired-device Bearer auth for `/sync` and libp2p peer auth for P2P; capability gates (`can_manage_library`, etc.) still checked via the owner identity.
@@ -90,7 +90,7 @@ Wails wrapper — same monolith on `127.0.0.1:0` (`desktop/main.go:boot`, `deskt
 
 ### Configuration
 
-Flags > env > defaults. Flags: `--port`/`--bind`/`--db`/`--dev`/`--update-repo`. Env: `REVERB_PORT`/`REVERB_BIND`/`REVERB_DB`/`REVERB_DEV`/`REVERB_DOWNLOAD_DIR`/`REVERB_ADMIN_PASSWORD` (first-run) / `REVERB_SPOTIFY_CLIENT_ID/SECRET` / `REVERB_LIBRARY_PASSWORD` / `REVERB_SPOTDL_PATH`/`REVERB_NAVIDROME_BIN`/`REVERB_YTDLP_PATH`/`REVERB_DENO_PATH` (+ navidrome listen/port vars) — see `README.md` + `internal/config`. Secrets via env/`.env` only (gitignored; `.env.example` template).
+Flags > env > defaults. Flags: `--port`/`--bind`/`--p2p-port`/`--db`/`--dev`/`--update-repo`. Env: `REVERB_PORT`/`REVERB_BIND`/`REVERB_P2P_PORT`/`REVERB_DB`/`REVERB_DEV`/`REVERB_DOWNLOAD_DIR`/`REVERB_ADMIN_PASSWORD` (first-run) / `REVERB_SPOTIFY_CLIENT_ID/SECRET` / `REVERB_LIBRARY_PASSWORD` / `REVERB_SPOTDL_PATH`/`REVERB_NAVIDROME_BIN`/`REVERB_YTDLP_PATH`/`REVERB_DENO_PATH` (+ navidrome listen/port vars) — see `README.md` + `internal/config`. Secrets via env/`.env` only (gitignored; `.env.example` template).
 
 ### Linting
 

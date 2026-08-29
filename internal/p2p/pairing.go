@@ -10,6 +10,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multiaddr"
 )
 
 // PairingService is the minimal seam needed for p2p pairing.
@@ -76,6 +77,12 @@ func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, k
 				_ = json.NewEncoder(s).Encode(pairResponse{Error: fmt.Sprintf("trust peer: %v", err)})
 				return
 			}
+			// Remember where this peer dialed from. Whoever initiated had a way
+			// to reach us; recording the reverse direction is what lets us dial
+			// back later on a network where discovery cannot find them.
+			if err := guard.RememberAddrs(ctx, remote, ObservedAddrs(h, remote)); err != nil {
+				log.Printf("p2p pair: remember addrs for %s: %v", remote, err)
+			}
 		}
 		// Bind the peer's verification key to the device row. The key is
 		// carried inside the Ed25519 peer ID, so pairing needs no separate key
@@ -98,22 +105,32 @@ func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, k
 	}))
 }
 
-// RedeemViaPeer dials peerID via the host and redeems a pairing code over libp2p.
-// It is the remote counterpart to HTTP POST /pairing/redeem. It requires the
-// peer to be discoverable via mDNS or have a known multiaddr in the peerstore
-// (via relay). For LAN, mDNS will have already connected the hosts.
+// RedeemViaPeer dials target via the host and redeems a pairing code over
+// libp2p. It is the remote counterpart to HTTP POST /pairing/redeem.
+//
+// target is either a bare peer ID or a full multiaddr ending in /p2p/<peerID>.
+// The bare form works only where discovery has already found the peer, which in
+// practice means the same LAN via mDNS. Over a VPN the caller must give the full
+// multiaddr, since multicast does not cross the tunnel and the DHT advertises
+// addresses that are not routable there.
 //
 // On success the responding peer is added to the local trust set, bound to the
-// device ID it reported for itself. This is the redeemer half of the mutual
-// binding the pairing handler performs on the other side.
-func RedeemViaPeer(ctx context.Context, h host.Host, guard *Guard, keys DeviceKeyStore, peerIDStr, code, deviceName string) (string, string, error) {
+// device ID it reported for itself, and its address is persisted so later
+// reconnects need no discovery. This is the redeemer half of the mutual binding
+// the pairing handler performs on the other side.
+func RedeemViaPeer(ctx context.Context, h host.Host, guard *Guard, keys DeviceKeyStore, target, code, deviceName string) (string, string, error) {
 	if h == nil {
 		return "", "", fmt.Errorf("host is nil")
 	}
-	pid, err := peer.Decode(peerIDStr)
+	pi, err := ParsePeerTarget(target)
 	if err != nil {
 		return "", "", err
 	}
+	pid := pi.ID
+	// Seed before dialing: with no addresses in the peerstore NewStream has
+	// nothing to resolve the peer ID to and fails without ever touching the
+	// network.
+	SeedAddrs(h, pi)
 	s, err := h.NewStream(ctx, pid, "/reverb/pair/1.0.0")
 	if err != nil {
 		return "", "", fmt.Errorf("open stream: %w", err)
@@ -153,6 +170,29 @@ func RedeemViaPeer(ctx context.Context, h host.Host, guard *Guard, keys DeviceKe
 		if err := guard.Trust(ctx, pid, resp.PeerDeviceID, deviceName); err != nil {
 			return "", "", fmt.Errorf("trust peer: %w", err)
 		}
+		// Prefer the address the user supplied over the one observed on the
+		// connection: it is the one known to work from this network, whereas an
+		// observed address may be a transient port on a NAT.
+		addrs := append(addrStrings(pi), ObservedAddrs(h, pid)...)
+		if err := guard.RememberAddrs(ctx, pid, addrs); err != nil {
+			log.Printf("p2p pair: remember addrs for %s: %v", pid, err)
+		}
 	}
 	return resp.DeviceID, resp.Token, nil
+}
+
+// addrStrings renders pi's addresses as full dial strings including /p2p/<id>.
+func addrStrings(pi peer.AddrInfo) []string {
+	if len(pi.Addrs) == 0 {
+		return nil
+	}
+	suffix, err := multiaddr.NewMultiaddr("/p2p/" + pi.ID.String())
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(pi.Addrs))
+	for _, a := range pi.Addrs {
+		out = append(out, a.Encapsulate(suffix).String())
+	}
+	return out
 }

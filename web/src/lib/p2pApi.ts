@@ -3,6 +3,12 @@ import { api } from './api'
 export interface P2PStatus {
   peerId: string
   addrs: string[]
+  /**
+   * Complete /p2p/-terminated addresses another device can dial this one on.
+   * On a VPN the peer ID alone is not enough, so this is what the pairing UI
+   * shows the user to copy across.
+   */
+  dialAddrs: string[]
   peerCount: number
   vector: Record<string, number>
   hlc: number
@@ -32,6 +38,7 @@ export function getP2PPeers(): Promise<P2PPeer[]> {
   return api.get<P2PPeer[]>('/p2p/peers')
 }
 
+/** peerId is a bare peer ID or a full multiaddr ending in /p2p/<peerID>. */
 export function redeemViaPeer(peerId: string, code: string, deviceName: string): Promise<{ deviceId: string; token: string }> {
   return api.post<{ deviceId: string; token: string }>('/p2p/pair/redeem', { peerId, code, deviceName })
 }

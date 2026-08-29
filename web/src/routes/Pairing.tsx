@@ -12,6 +12,7 @@ import {
   type PairingCode,
   type DeviceInfo,
 } from '../lib/pairingApi'
+import { getP2PStatus } from '../lib/p2pApi'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
 import { Button } from '../components/ui/Button'
 
@@ -48,6 +49,11 @@ export default function Pairing() {
   const [genError, setGenError] = useState<string | null>(null)
   const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000))
   const [copied, setCopied] = useState(false)
+  // The address the other device needs in order to reach this one. mDNS finds a
+  // peer on the same LAN, but its multicast does not cross a VPN, so on a VPN
+  // this address is the only way the two devices ever connect.
+  const [dialAddrs, setDialAddrs] = useState<string[]>([])
+  const [copiedAddr, setCopiedAddr] = useState(false)
 
   const [redeemInput, setRedeemInput] = useState('')
   const [deviceName, setDeviceName] = useState(() => {
@@ -97,6 +103,11 @@ export default function Pairing() {
   useEffect(() => {
     void refreshDevices()
     void refreshSync()
+    // Best-effort: p2p may be unavailable, in which case there is simply no
+    // address to show and the LAN path is all that is on offer.
+    void getP2PStatus()
+      .then((s) => setDialAddrs(s.dialAddrs ?? []))
+      .catch(() => setDialAddrs([]))
   }, [])
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -184,6 +195,17 @@ export default function Pairing() {
     setThisDeviceId(null)
     setPaired(false)
     setRedeemSuccess(null)
+  }
+
+  async function onCopyAddr() {
+    if (dialAddrs.length === 0) return
+    try {
+      await navigator.clipboard.writeText(dialAddrs[0])
+      setCopiedAddr(true)
+      window.setTimeout(() => setCopiedAddr(false), 1500)
+    } catch {
+      setCopiedAddr(false)
+    }
   }
 
   async function onCopy() {
@@ -276,6 +298,26 @@ export default function Pairing() {
               <p className="text-xs text-text-secondary">
                 Code expires in {formatExpiry(expiresIn)} — paste it into Step 2 on your other device.
               </p>
+            )}
+            {dialAddrs.length > 0 && (
+              <div className="border-t border-border-subtle pt-2 space-y-1">
+                <p className="text-xs font-semibold tracking-wide text-text-muted uppercase">
+                  This device&apos;s address
+                </p>
+                <div className="flex items-start gap-3">
+                  <code className="min-w-0 flex-1 break-all font-mono text-xs text-text-primary" data-testid="dial-addr">
+                    {dialAddrs[0]}
+                  </code>
+                  <Button variant="secondary" size="sm" aria-label="Copy device address" onClick={() => void onCopyAddr()}>
+                    {copiedAddr ? 'Copied' : 'Copy'}
+                  </Button>
+                </div>
+                <p className="text-xs text-text-secondary">
+                  Only needed if the two devices are on a VPN rather than the same local network. Devices on the
+                  same network find each other automatically; across a VPN they cannot, so the other device needs
+                  this address as well as the code.
+                </p>
+              </div>
             )}
           </div>
         )}

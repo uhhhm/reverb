@@ -29,7 +29,7 @@ func (q *Queries) DeleteTrustedPeersByDevice(ctx context.Context, deviceID sql.N
 }
 
 const getTrustedPeer = `-- name: GetTrustedPeer :one
-SELECT peer_id, device_id, name, added_at, last_seen FROM p2p_peer WHERE peer_id = ?
+SELECT peer_id, device_id, name, added_at, last_seen, addrs FROM p2p_peer WHERE peer_id = ?
 `
 
 func (q *Queries) GetTrustedPeer(ctx context.Context, peerID string) (P2pPeer, error) {
@@ -41,12 +41,13 @@ func (q *Queries) GetTrustedPeer(ctx context.Context, peerID string) (P2pPeer, e
 		&i.Name,
 		&i.AddedAt,
 		&i.LastSeen,
+		&i.Addrs,
 	)
 	return i, err
 }
 
 const listTrustedPeers = `-- name: ListTrustedPeers :many
-SELECT peer_id, device_id, name, added_at, last_seen FROM p2p_peer ORDER BY added_at
+SELECT peer_id, device_id, name, added_at, last_seen, addrs FROM p2p_peer ORDER BY added_at
 `
 
 func (q *Queries) ListTrustedPeers(ctx context.Context) ([]P2pPeer, error) {
@@ -64,6 +65,7 @@ func (q *Queries) ListTrustedPeers(ctx context.Context) ([]P2pPeer, error) {
 			&i.Name,
 			&i.AddedAt,
 			&i.LastSeen,
+			&i.Addrs,
 		); err != nil {
 			return nil, err
 		}
@@ -76,6 +78,20 @@ func (q *Queries) ListTrustedPeers(ctx context.Context) ([]P2pPeer, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const setTrustedPeerAddrs = `-- name: SetTrustedPeerAddrs :exec
+UPDATE p2p_peer SET addrs = ? WHERE peer_id = ?
+`
+
+type SetTrustedPeerAddrsParams struct {
+	Addrs  string `json:"addrs"`
+	PeerID string `json:"peer_id"`
+}
+
+func (q *Queries) SetTrustedPeerAddrs(ctx context.Context, arg SetTrustedPeerAddrsParams) error {
+	_, err := q.db.ExecContext(ctx, setTrustedPeerAddrs, arg.Addrs, arg.PeerID)
+	return err
 }
 
 const touchTrustedPeer = `-- name: TouchTrustedPeer :exec
@@ -98,6 +114,8 @@ type TrustPeerParams struct {
 	Name     string         `json:"name"`
 }
 
+// addrs is deliberately not touched on conflict: re-pairing an existing peer
+// must not discard the addresses that are how we reach it.
 func (q *Queries) TrustPeer(ctx context.Context, arg TrustPeerParams) error {
 	_, err := q.db.ExecContext(ctx, trustPeer, arg.PeerID, arg.DeviceID, arg.Name)
 	return err

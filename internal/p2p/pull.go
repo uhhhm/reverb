@@ -78,7 +78,7 @@ func (p *Puller) pullAll(ctx context.Context) {
 		if pid == p.host.ID() {
 			continue
 		}
-		if !p.ensureConnected(ctx, pid) {
+		if !EnsureConnected(ctx, p.host, p.guard, pid) {
 			continue
 		}
 		if err := p.pullPeer(ctx, pid); err != nil {
@@ -87,30 +87,15 @@ func (p *Puller) pullAll(ctx context.Context) {
 	}
 }
 
-// ensureConnected dials a paired peer we are not currently connected to, using
-// whatever addresses discovery has already put in the peerstore. Without this
-// a peer that dropped its connection is never synced again until mDNS happens
-// to rediscover it.
-func (p *Puller) ensureConnected(ctx context.Context, pid peer.ID) bool {
-	if len(p.host.Network().ConnsToPeer(pid)) > 0 {
-		return true
-	}
-	addrs := p.host.Peerstore().Addrs(pid)
-	if len(addrs) == 0 {
-		return false
-	}
-	dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	if err := p.host.Connect(dialCtx, peer.AddrInfo{ID: pid, Addrs: addrs}); err != nil {
-		return false
-	}
-	return true
-}
-
 func (p *Puller) pullPeer(ctx context.Context, pid peer.ID) error {
 	resp, err := RequestManifest(ctx, p.host, pid)
 	if err != nil {
 		return err
+	}
+	// A round that got this far proves the current address works; persist it so
+	// the next restart can dial the peer without discovery.
+	if err := p.guard.RememberAddrs(ctx, pid, ObservedAddrs(p.host, pid)); err != nil {
+		log.Printf("p2p pull: remember addrs for %s: %v", pid, err)
 	}
 	if len(resp.Files) == 0 {
 		p.guard.Touch(ctx, pid)

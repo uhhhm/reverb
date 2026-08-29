@@ -53,7 +53,10 @@ type Options struct {
 	DBPath     string
 	Version    string
 	UpdateRepo string
-	Dev        bool
+	// P2PPort is the libp2p listen port. Fixed by default so a peer address
+	// entered on another device survives a restart; 0 picks a random port.
+	P2PPort int
+	Dev     bool
 	// Desktop marks the Wails build, which the SPA uses to enable desktop-only
 	// affordances.
 	Desktop bool
@@ -69,6 +72,7 @@ type Runtime struct {
 	Store    *store.Store
 	Reloader *ServiceReloader
 	Scrobble *scrobble.Service
+	P2PPort  int
 	P2P      *p2p.Host
 	// P2PGuard is the libp2p peer trust set, set once the host starts.
 	P2PGuard *p2p.Guard
@@ -304,6 +308,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		Store:    st,
 		Reloader: reloader,
 		Scrobble: scrobbleSvc,
+		P2PPort:  opts.P2PPort,
 		Getenv:   opts.Getenv,
 	}
 	rt.Deps.P2P = func() *p2p.Host { return rt.P2P }
@@ -322,11 +327,11 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 		priv, kerr := p2p.LoadOrCreateIdentity(ctx, r.Store.Q())
 		if kerr != nil {
 			logf("WARNING: p2p identity: %v", kerr)
-		} else if h, err := p2p.NewHost(ctx, priv); err != nil {
+		} else if h, err := p2p.NewHost(ctx, priv, r.P2PPort); err != nil {
 			logf("WARNING: p2p host: %v", err)
 		} else {
 			r.P2P = h
-			logf("p2p host %s ready addrs=%v", h.ID(), h.Addrs())
+			logf("p2p host %s ready addrs=%v", h.ID(), h.DialAddrs())
 			// Peer trust set. Every handler except pairing is gated on it:
 			// mDNS and DHT connect us to strangers, so a live connection means
 			// nothing until a pairing code has been exchanged.

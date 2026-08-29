@@ -17,7 +17,12 @@ type Config struct {
 	// the deliberate exposure decision.
 	BindAddr string
 	DBPath   string
-	Dev      bool
+	// P2PPort is the fixed libp2p listen port. It is fixed rather than random
+	// so that a peer address entered on another device stays valid across
+	// restarts -- the only way to reach a peer on a VPN, where mDNS multicast
+	// does not cross the tunnel. 0 asks libp2p for a random port.
+	P2PPort int
+	Dev     bool
 	// UpdateRepo is the GitHub "owner/name" polled for releases. Empty
 	// disables update checks entirely (REVERB_UPDATE_REPO=off).
 	UpdateRepo string
@@ -27,12 +32,15 @@ type Config struct {
 // REVERB_UPDATE_REPO is unset.
 const DefaultUpdateRepo = "uhhhm/reverb"
 
+// DefaultP2PPort is the libp2p listen port when none is configured.
+const DefaultP2PPort = 4331
+
 // DefaultBindAddr keeps the listener on loopback unless explicitly widened.
 const DefaultBindAddr = "127.0.0.1"
 
 // Load resolves config: flags win over env, env wins over defaults.
 func Load(args []string, getenv func(string) string) (Config, error) {
-	c := Config{Port: 8090, BindAddr: DefaultBindAddr, DBPath: "./data/reverb.db", UpdateRepo: DefaultUpdateRepo}
+	c := Config{Port: 8090, BindAddr: DefaultBindAddr, DBPath: "./data/reverb.db", P2PPort: DefaultP2PPort, UpdateRepo: DefaultUpdateRepo}
 
 	if v := getenv("REVERB_PORT"); v != "" {
 		if p, err := strconv.Atoi(v); err == nil {
@@ -41,6 +49,11 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	}
 	if v := getenv("REVERB_BIND"); v != "" {
 		c.BindAddr = v
+	}
+	if v := getenv("REVERB_P2P_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil && p >= 0 && p <= 65535 {
+			c.P2PPort = p
+		}
 	}
 	if v := getenv("REVERB_DB"); v != "" {
 		c.DBPath = v
@@ -57,6 +70,7 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	fs.IntVar(&c.Port, "port", c.Port, "HTTP port")
 	fs.StringVar(&c.BindAddr, "bind", c.BindAddr, "interface to bind (0.0.0.0 exposes Reverb to the network)")
 	fs.StringVar(&c.DBPath, "db", c.DBPath, "SQLite path")
+	fs.IntVar(&c.P2PPort, "p2p-port", c.P2PPort, "libp2p listen port (0 picks a random port)")
 	fs.BoolVar(&c.Dev, "dev", c.Dev, "dev mode (proxy Vite)")
 	fs.StringVar(&c.UpdateRepo, "update-repo", c.UpdateRepo, `GitHub owner/name to check for updates ("off" disables)`)
 	if err := fs.Parse(args); err != nil {

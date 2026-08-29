@@ -79,6 +79,7 @@ func boot(args []string) (*App, error) {
 		DBPath:     cfg.DBPath,
 		Version:    version,
 		UpdateRepo: cfg.UpdateRepo,
+		P2PPort:    cfg.P2PPort,
 		Dev:        cfg.Dev,
 		Desktop:    true,
 		Getenv:     os.Getenv,

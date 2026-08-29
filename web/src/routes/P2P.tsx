@@ -42,7 +42,26 @@ export default function P2P() {
         ) : statusQ.data ? (
           <div className="text-sm space-y-1">
             <div><span className="text-text-secondary">Peer ID:</span> <code className="break-all">{statusQ.data.peerId}</code></div>
-            <div><span className="text-text-secondary">Addrs:</span> {statusQ.data.addrs.join(', ') || '—'}</div>
+            <div className="space-y-1">
+              <span className="text-text-secondary">Address to give another device:</span>
+              {(statusQ.data.dialAddrs ?? []).length ? (
+                <ul className="space-y-1">
+                  {(statusQ.data.dialAddrs ?? []).map((a) => (
+                    <li key={a}>
+                      <code className="break-all text-xs" data-testid="dial-addr">{a}</code>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-text-secondary">
+                  No routable address yet — this host has only loopback interfaces.
+                </p>
+              )}
+              <p className="text-xs text-text-secondary">
+                Paste one of these into the other device&apos;s Peer field. A bare peer ID only works on the
+                same LAN, where mDNS can find it; over a VPN the full address is required.
+              </p>
+            </div>
             <div><span className="text-text-secondary">Peers:</span> {statusQ.data.peerCount}</div>
             <div><span className="text-text-secondary">HLC:</span> {statusQ.data.hlc}</div>
             <div><span className="text-text-secondary">Vector:</span> <code>{JSON.stringify(statusQ.data.vector)}</code></div>
@@ -89,7 +108,8 @@ export default function P2P() {
         </div>
         <div className="grid gap-2 sm:grid-cols-3">
           <input
-            placeholder="Peer ID"
+            placeholder="Peer ID or /ip4/…/p2p/…"
+            aria-label="Peer ID or multiaddr"
             value={peerId}
             onChange={(e) => setPeerId(e.target.value)}
             className="rounded border border-border-subtle bg-input px-2 py-1.5 text-sm"
