@@ -98,6 +98,17 @@ Prefer your own server? In **Settings → Library backend**, switch to **Externa
 Subsonic** and add your Navidrome/Subsonic server under **Admin**. In external
 mode nothing extra runs inside the Reverb container.
 
+## Upgrade notes
+
+**The HTTP listener now binds `127.0.0.1` by default.** Earlier builds bound
+every interface, so a bare-metal instance that was reached from another machine
+on the LAN becomes unreachable after upgrading. That is deliberate: Reverb
+authenticates every request as the household owner, so a listener on the network
+hands that identity to anyone who can route to it. To restore the old behaviour,
+set `--bind 0.0.0.0` (or `REVERB_BIND=0.0.0.0`) and put an authenticating proxy
+in front of it. Docker deployments are unaffected — the image sets `0.0.0.0`
+because the container's port mapping is the real exposure decision.
+
 ## Configuration reference
 
 Reverb is configured by flags, environment variables, and the in-app Settings UI.
@@ -110,6 +121,7 @@ Reverb is configured by flags, environment variables, and the in-app Settings UI
 | `--port` | `8090` | HTTP listen port |
 | `--db` | `./data/reverb.db` | SQLite database path |
 | `--dev` | `false` | Dev mode (proxies the Vite dev server) |
+| `--bind` | `127.0.0.1` | Interface to bind; `0.0.0.0` exposes Reverb to the network (see the warning under `REVERB_BIND`) |
 | `--update-repo` | `uhhhm/reverb` | GitHub `owner/name` checked for new releases; `off` disables update checks |
 
 ### Environment variables
@@ -117,6 +129,7 @@ Reverb is configured by flags, environment variables, and the in-app Settings UI
 | Variable | Description |
 | --- | --- |
 | `REVERB_PORT` | HTTP listen port (same as `--port`); defaults to `8090` |
+| `REVERB_BIND` | Interface to bind (same as `--bind`); defaults to `127.0.0.1`. Reverb authenticates every request as the household owner, so a listener reachable from the network hands that identity to anyone who can route to it. Widen it only behind an authenticating proxy. The Docker image sets `0.0.0.0` because the container's port mapping is the real exposure decision. |
 | `REVERB_DB` | SQLite path (same as `--db`); the Docker image defaults this to `/data/reverb.db` |
 | `REVERB_DEV=1` | Enable dev mode |
 | `REVERB_UPDATE_REPO` | GitHub `owner/name` checked for new releases (same as `--update-repo`); `off` disables update checks |

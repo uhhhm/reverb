@@ -17,6 +17,7 @@ docs/HANDOFF-*.md
 docs/superpowers/
 docs/task-reports/
 docs/user-notes.md
+docs/plans/
 
 .agents/
 .claude/

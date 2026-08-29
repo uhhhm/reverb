@@ -598,6 +598,13 @@ func (s *Server) handleLinkChapters(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url is required"})
 		return
 	}
+	// ListChapters shells out to yt-dlp against this URL, so it is an outbound
+	// request to whatever host the caller names. Hold it to the same allowlist
+	// as /links/resolve rather than the downloader's pass-through normalizer.
+	if !linkresolve.IsAllowedSourceURL(body.URL) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "unsupported URL"})
+		return
+	}
 	dm := s.downloads()
 	if dm == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "no downloader configured"})

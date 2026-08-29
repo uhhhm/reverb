@@ -90,7 +90,7 @@ Wails wrapper — same monolith on `127.0.0.1:0` (`desktop/main.go:boot`, `deskt
 
 ### Configuration
 
-Flags > env > defaults. Flags: `--port`/`--db`/`--dev`/`--update-repo`. Env: `REVERB_PORT`/`REVERB_DB`/`REVERB_DEV`/`REVERB_DOWNLOAD_DIR`/`REVERB_ADMIN_PASSWORD` (first-run) / `REVERB_SPOTIFY_CLIENT_ID/SECRET` / `REVERB_LIBRARY_PASSWORD` / `REVERB_SPOTDL_PATH`/`REVERB_NAVIDROME_BIN`/`REVERB_YTDLP_PATH`/`REVERB_DENO_PATH` (+ navidrome listen/port vars) — see `README.md` + `internal/config`. Secrets via env/`.env` only (gitignored; `.env.example` template).
+Flags > env > defaults. Flags: `--port`/`--bind`/`--db`/`--dev`/`--update-repo`. Env: `REVERB_PORT`/`REVERB_BIND`/`REVERB_DB`/`REVERB_DEV`/`REVERB_DOWNLOAD_DIR`/`REVERB_ADMIN_PASSWORD` (first-run) / `REVERB_SPOTIFY_CLIENT_ID/SECRET` / `REVERB_LIBRARY_PASSWORD` / `REVERB_SPOTDL_PATH`/`REVERB_NAVIDROME_BIN`/`REVERB_YTDLP_PATH`/`REVERB_DENO_PATH` (+ navidrome listen/port vars) — see `README.md` + `internal/config`. Secrets via env/`.env` only (gitignored; `.env.example` template).
 
 ### Linting
 

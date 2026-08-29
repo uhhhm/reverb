@@ -33,9 +33,10 @@ func (s *Server) authenticateSync(r *http.Request) (string, error) {
 	// No Bearer token: fall back to the server device only for a request that
 	// arrived over loopback. The browser UI is implicitly the household owner, so
 	// requireAuth puts LocalUser in the context of every request it wraps -- that
-	// alone proves nothing about who sent it. The server binds 0.0.0.0 by default,
-	// so without the transport check any host on the network could author sync
-	// changes as the server device with no pairing token at all. Loopback keeps
+	// alone proves nothing about who sent it. The listener defaults to loopback,
+	// but the bind address is configurable, so without this transport check any
+	// host that can reach a widened listener could author sync changes as the
+	// server device with no pairing token at all. Loopback keeps
 	// the built-in UI (desktop and locally-browsed server) working unpaired while
 	// remote paired devices must present a Bearer sync token.
 	if _, ok := currentUser(r); !ok {

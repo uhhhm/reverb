@@ -10,6 +10,10 @@ services:
     ports:
       - "8090:8090"
     environment:
+      # A container binds every interface so Docker's port mapping works; the
+      # "8090:8090" line above is the real exposure decision. Publish to
+      # 127.0.0.1:8090:8090 instead unless an authenticating proxy fronts it.
+      REVERB_BIND: 0.0.0.0
       REVERB_ADMIN_PASSWORD: ${REVERB_ADMIN_PASSWORD:-}
       REVERB_SPOTIFY_CLIENT_ID: ${REVERB_SPOTIFY_CLIENT_ID:-}
       REVERB_SPOTIFY_CLIENT_SECRET: ${REVERB_SPOTIFY_CLIENT_SECRET:-}

@@ -54,3 +54,17 @@ func TestNewHTTPServer_UsesConnectionLimits(t *testing.T) {
 		t.Fatalf("WriteTimeout = %v, want 0 for SSE/WebSocket support", srv.WriteTimeout)
 	}
 }
+
+func TestIsLoopbackAddr(t *testing.T) {
+	for _, addr := range []string{"127.0.0.1", "localhost", "LOCALHOST", "::1", "[::1]", "127.0.0.53"} {
+		if !isLoopbackAddr(addr) {
+			t.Errorf("isLoopbackAddr(%q) = false, want true", addr)
+		}
+	}
+	// The empty string and 0.0.0.0 both bind every interface.
+	for _, addr := range []string{"", "0.0.0.0", "::", "192.168.1.10", "10.0.0.5", "example.com", "::1]", "[::"} {
+		if isLoopbackAddr(addr) {
+			t.Errorf("isLoopbackAddr(%q) = true, want false", addr)
+		}
+	}
+}

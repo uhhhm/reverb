@@ -59,3 +59,61 @@ func TestUpdateRepo(t *testing.T) {
 		})
 	}
 }
+
+func TestBindAddrDefaultsToLoopback(t *testing.T) {
+	c, err := Load(nil, func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.BindAddr != DefaultBindAddr {
+		t.Fatalf("BindAddr = %q, want %q", c.BindAddr, DefaultBindAddr)
+	}
+}
+
+func TestBindAddrEnvAndFlag(t *testing.T) {
+	env := func(k string) string {
+		if k == "REVERB_BIND" {
+			return "0.0.0.0"
+		}
+		return ""
+	}
+	c, err := Load(nil, env)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.BindAddr != "0.0.0.0" {
+		t.Fatalf("env BindAddr = %q, want 0.0.0.0", c.BindAddr)
+	}
+	// Flags win over env.
+	c, err = Load([]string{"--bind", "10.0.0.5"}, env)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.BindAddr != "10.0.0.5" {
+		t.Fatalf("flag BindAddr = %q, want 10.0.0.5", c.BindAddr)
+	}
+}
+
+func TestBindAddrUnbracketsIPv6(t *testing.T) {
+	// Users write the bracketed form because that is how an IPv6 host appears
+	// in host:port, but net.JoinHostPort re-brackets it, so Load must not.
+	c, err := Load([]string{"--bind", "[::1]"}, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.BindAddr != "::1" {
+		t.Errorf("BindAddr = %q, want %q", c.BindAddr, "::1")
+	}
+	c, err = Load(nil, func(k string) string {
+		if k == "REVERB_BIND" {
+			return "[fd00::1]"
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.BindAddr != "fd00::1" {
+		t.Errorf("BindAddr = %q, want %q", c.BindAddr, "fd00::1")
+	}
+}

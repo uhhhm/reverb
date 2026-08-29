@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/linkresolve"
 )
 
 // createDownloadBody is the POST /downloads request DTO.
@@ -196,9 +198,17 @@ func (s *Server) handleRetryDownload(w http.ResponseWriter, r *http.Request) {
 		if rerr == nil && len(raw) > 0 {
 			var rb retryBody
 			if jerr := json.Unmarshal(raw, &rb); jerr == nil {
-				manualURL = rb.ManualURL
+				manualURL = strings.TrimSpace(rb.ManualURL)
 			}
 		}
+	}
+
+	// A manual URL is handed to yt-dlp/spotDL, which will fetch whatever host it
+	// names. Constrain it to the same sources /links/resolve accepts so a retry
+	// cannot be used to reach the deployment's private network.
+	if manualURL != "" && !linkresolve.IsAllowedSourceURL(manualURL) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "unsupported manual URL"})
+		return
 	}
 
 	job, err := dl.Retry(r.Context(), id, manualURL)
