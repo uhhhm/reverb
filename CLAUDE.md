@@ -98,6 +98,12 @@ Flags > env > defaults. Flags: `--port`/`--bind`/`--p2p-port`/`--db`/`--dev`/`--
 
 `.golangci.yml`: errcheck, govet, ineffassign, misspell, staticcheck, unconvert. Deferred `Close()` ignores pre-configured. staticcheck disables QF1001/QF1003/ST1000/ST1003 (ST1003 because `CoverUrl` etc. is pervasive).
 
+### How to use subagents (opencode MCP)
+
+- Invocation: always pass model: "opencode-go/muse-spark-1.2-contributor", variant: "high"|"xhigh", and dir set to the repo root (dir is enforced; only opencode-go/* models are accepted). Use opencode_run (read-only, parallel across calls), opencode_run_write (permission: "write" for edits, "full" for edits + shell), or opencode_run_batch (many tasks at once, any permission). Spawn them freely and in parallel — they're cheap and need no confirmation. Prompts must be self-contained; the agent can't ask a human, so anything the profile disallows is silently denied. Results carry a session_id for follow-ups.
+- Backgrounding: add background: true to get a job_id instantly and keep working; collect with opencode_result ({"job_id": "..."}, "wait": true to block, no args to list). Nothing is pushed — you must ask. On a running job it returns live progress (model, attempt, tools so far, partial output); use that to decide whether to wait or opencode_cancel, which kills the run but does not roll back files already written.
+- Failures: empty runs are auto-retried — rate limits and network errors on the same model, billing/model errors down the fallback chain. Check the failure= line: agent means the prompt is wrong, not that it's worth retrying.
+
 ## Project rules
 
 **Write the current truth, not its history.** Do not layer a correction on top of
