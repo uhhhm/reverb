@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -30,6 +31,28 @@ type SyncStore struct {
 	// directly from us.
 	signer        ed25519.PrivateKey
 	localDeviceID string
+
+	// materializer projects accepted inbound changes onto the domain tables
+	// they describe. The change log is the source of truth; materialization is
+	// the readable copy, so it runs AFTER the log commits and a failure there
+	// is logged rather than rolling the change back.
+	materializer Materializer
+}
+
+// Materializer applies a change that has been accepted into the log onto the
+// table it describes (a rename onto track_override, a crop onto track_crop).
+// Without one, changes replicate but never become visible.
+type Materializer interface {
+	Apply(ctx context.Context, ch SyncChange) error
+}
+
+// SetMaterializer installs the projection applied to accepted inbound changes.
+// Optional: a store without one still replicates, it just does not surface
+// what it received.
+func (s *SyncStore) SetMaterializer(m Materializer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.materializer = m
 }
 
 // SetSigner installs the key used to sign locally-authored changes. deviceID
@@ -816,7 +839,8 @@ func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int
 				txQ := dbq.WithTx(tx)
 				txStore := &SyncStore{q: txQ, policy: s.policy, hlc: s.hlc}
 				txPolicy := txStore.effectivePolicy(ctx)
-				outbound, newRev, rejected, err = txStore.reconcileInternal(ctx, deviceID, sinceRev, inbound, txPolicy)
+				var accepted []SyncChange
+				outbound, newRev, rejected, accepted, err = txStore.reconcileInternal(ctx, deviceID, sinceRev, inbound, txPolicy)
 				if err != nil {
 					_ = tx.Rollback()
 					return nil, 0, nil, err
@@ -824,21 +848,42 @@ func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int
 				if err := tx.Commit(); err != nil {
 					return nil, 0, nil, err
 				}
+				s.materialize(ctx, accepted)
 				return outbound, newRev, rejected, nil
 			}
 		}
 	}
-	return s.reconcileInternal(ctx, deviceID, sinceRev, inbound, policy)
+	outbound, newRev, rejected, accepted, err := s.reconcileInternal(ctx, deviceID, sinceRev, inbound, policy)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	s.materialize(ctx, accepted)
+	return outbound, newRev, rejected, nil
 }
 
-func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange, policy MergePolicy) (outbound []SyncChange, newRev int64, rejected []SyncChange, err error) {
+// materialize projects accepted changes onto the tables they describe. It runs
+// after the log has committed: the log is the source of truth, so a projection
+// failure is logged and left for the next change to correct rather than
+// discarding a change every peer has already accepted.
+func (s *SyncStore) materialize(ctx context.Context, accepted []SyncChange) {
+	if s.materializer == nil || len(accepted) == 0 {
+		return
+	}
+	for _, ch := range accepted {
+		if err := s.materializer.Apply(ctx, ch); err != nil {
+			log.Printf("sync: could not apply %s/%s %s: %v", ch.EntityType, ch.EntityID, ch.Field, err)
+		}
+	}
+}
+
+func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange, policy MergePolicy) (outbound []SyncChange, newRev int64, rejected []SyncChange, accepted []SyncChange, err error) {
 	// Validate sender exists (defense in depth; p2p handler also validates).
 	if deviceID != "" {
 		if err := s.ValidateDevice(ctx, deviceID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return nil, 0, nil, fmt.Errorf("unknown device %q: %w", deviceID, err)
+				return nil, 0, nil, nil, fmt.Errorf("unknown device %q: %w", deviceID, err)
 			}
-			return nil, 0, nil, err
+			return nil, 0, nil, nil, err
 		}
 	}
 	// Observe inbound HLCs to advance clock (P2P). Single pass before processing.
@@ -862,13 +907,13 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 				rejected = append(rejected, inc)
 				continue
 			}
-			return nil, 0, nil, err
+			return nil, 0, nil, nil, err
 		}
 
 		if inc.Field != "__deleted" {
 			tomb, terr := s.GetLatestForField(ctx, inc.EntityType, inc.EntityID, "__deleted")
 			if terr != nil {
-				return nil, 0, nil, terr
+				return nil, 0, nil, nil, terr
 			}
 			if tomb != nil {
 				rejected = append(rejected, inc)
@@ -878,12 +923,13 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 
 		existing, err := s.GetLatestForField(ctx, inc.EntityType, inc.EntityID, inc.Field)
 		if err != nil {
-			return nil, 0, nil, err
+			return nil, 0, nil, nil, err
 		}
 		if existing == nil {
 			if _, aerr := s.appendChangeLocked(ctx, effectiveID, inc); aerr != nil {
-				return nil, 0, nil, aerr
+				return nil, 0, nil, nil, aerr
 			}
+			accepted = append(accepted, inc)
 			continue
 		}
 
@@ -896,14 +942,16 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 		}
 		if !isExistingDeleted && isIncomingDeleted {
 			if _, aerr := s.appendChangeLocked(ctx, effectiveID, inc); aerr != nil {
-				return nil, 0, nil, aerr
+				return nil, 0, nil, nil, aerr
 			}
+			accepted = append(accepted, inc)
 			continue
 		}
 		if policy.PickWinner(*existing, inc) {
 			if _, aerr := s.appendChangeLocked(ctx, effectiveID, inc); aerr != nil {
-				return nil, 0, nil, aerr
+				return nil, 0, nil, nil, aerr
 			}
+			accepted = append(accepted, inc)
 		} else {
 			rejected = append(rejected, inc)
 		}
@@ -911,18 +959,18 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 
 	outbound, err = s.ListSince(ctx, sinceRev, 10000)
 	if err != nil {
-		return nil, 0, nil, err
+		return nil, 0, nil, nil, err
 	}
 	newRev, err = s.GetMaxRevision(ctx)
 	if err != nil {
-		return nil, 0, nil, err
+		return nil, 0, nil, nil, err
 	}
 	// Vector is maintained per-change via appendChangeLocked/nextSeqLocked; no global overwriting.
 	if cerr := s.SetCursor(ctx, deviceID, newRev); cerr != nil {
-		return nil, 0, nil, cerr
+		return nil, 0, nil, nil, cerr
 	}
 	if rejected == nil {
 		rejected = []SyncChange{}
 	}
-	return outbound, newRev, rejected, nil
+	return outbound, newRev, rejected, accepted, nil
 }

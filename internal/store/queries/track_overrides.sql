@@ -23,3 +23,6 @@ INSERT INTO track_override (track_id, title, artist, updated_at, catalog_id) VAL
 
 -- name: ListTrackOverridesByCatalogIDs :many
 SELECT * FROM track_override WHERE catalog_id IN (sqlc.slice('catalog_ids'));
+
+-- name: DeleteTrackOverrideByCatalogID :exec
+DELETE FROM track_override WHERE catalog_id = ?;

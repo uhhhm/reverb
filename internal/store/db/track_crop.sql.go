@@ -19,8 +19,17 @@ func (q *Queries) DeleteTrackCrop(ctx context.Context, trackID string) error {
 	return err
 }
 
+const deleteTrackCropByCatalogID = `-- name: DeleteTrackCropByCatalogID :exec
+DELETE FROM track_crop WHERE catalog_id = ?
+`
+
+func (q *Queries) DeleteTrackCropByCatalogID(ctx context.Context, catalogID sql.NullString) error {
+	_, err := q.db.ExecContext(ctx, deleteTrackCropByCatalogID, catalogID)
+	return err
+}
+
 const getTrackCrop = `-- name: GetTrackCrop :one
-SELECT track_id, start_ms, end_ms, updated_at FROM track_crop WHERE track_id = ?
+SELECT track_id, start_ms, end_ms, updated_at, catalog_id FROM track_crop WHERE track_id = ?
 `
 
 func (q *Queries) GetTrackCrop(ctx context.Context, trackID string) (TrackCrop, error) {
@@ -31,12 +40,30 @@ func (q *Queries) GetTrackCrop(ctx context.Context, trackID string) (TrackCrop, 
 		&i.StartMs,
 		&i.EndMs,
 		&i.UpdatedAt,
+		&i.CatalogID,
+	)
+	return i, err
+}
+
+const getTrackCropByCatalogID = `-- name: GetTrackCropByCatalogID :one
+SELECT track_id, start_ms, end_ms, updated_at, catalog_id FROM track_crop WHERE catalog_id = ?
+`
+
+func (q *Queries) GetTrackCropByCatalogID(ctx context.Context, catalogID sql.NullString) (TrackCrop, error) {
+	row := q.db.QueryRowContext(ctx, getTrackCropByCatalogID, catalogID)
+	var i TrackCrop
+	err := row.Scan(
+		&i.TrackID,
+		&i.StartMs,
+		&i.EndMs,
+		&i.UpdatedAt,
+		&i.CatalogID,
 	)
 	return i, err
 }
 
 const listTrackCrops = `-- name: ListTrackCrops :many
-SELECT track_id, start_ms, end_ms, updated_at FROM track_crop
+SELECT track_id, start_ms, end_ms, updated_at, catalog_id FROM track_crop
 `
 
 func (q *Queries) ListTrackCrops(ctx context.Context) ([]TrackCrop, error) {
@@ -53,6 +80,7 @@ func (q *Queries) ListTrackCrops(ctx context.Context) ([]TrackCrop, error) {
 			&i.StartMs,
 			&i.EndMs,
 			&i.UpdatedAt,
+			&i.CatalogID,
 		); err != nil {
 			return nil, err
 		}
@@ -89,6 +117,35 @@ func (q *Queries) UpsertTrackCrop(ctx context.Context, arg UpsertTrackCropParams
 		arg.StartMs,
 		arg.EndMs,
 		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertTrackCropByCatalogID = `-- name: UpsertTrackCropByCatalogID :exec
+INSERT INTO track_crop (track_id, start_ms, end_ms, updated_at, catalog_id)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(track_id) DO UPDATE SET
+  start_ms = excluded.start_ms,
+  end_ms = excluded.end_ms,
+  updated_at = excluded.updated_at,
+  catalog_id = excluded.catalog_id
+`
+
+type UpsertTrackCropByCatalogIDParams struct {
+	TrackID   string         `json:"track_id"`
+	StartMs   int64          `json:"start_ms"`
+	EndMs     sql.NullInt64  `json:"end_ms"`
+	UpdatedAt int64          `json:"updated_at"`
+	CatalogID sql.NullString `json:"catalog_id"`
+}
+
+func (q *Queries) UpsertTrackCropByCatalogID(ctx context.Context, arg UpsertTrackCropByCatalogIDParams) error {
+	_, err := q.db.ExecContext(ctx, upsertTrackCropByCatalogID,
+		arg.TrackID,
+		arg.StartMs,
+		arg.EndMs,
+		arg.UpdatedAt,
+		arg.CatalogID,
 	)
 	return err
 }

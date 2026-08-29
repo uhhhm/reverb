@@ -255,10 +255,11 @@ type SyncedPlaylist struct {
 }
 
 type TrackCrop struct {
-	TrackID   string        `json:"track_id"`
-	StartMs   int64         `json:"start_ms"`
-	EndMs     sql.NullInt64 `json:"end_ms"`
-	UpdatedAt int64         `json:"updated_at"`
+	TrackID   string         `json:"track_id"`
+	StartMs   int64          `json:"start_ms"`
+	EndMs     sql.NullInt64  `json:"end_ms"`
+	UpdatedAt int64          `json:"updated_at"`
+	CatalogID sql.NullString `json:"catalog_id"`
 }
 
 type TrackLoudness struct {

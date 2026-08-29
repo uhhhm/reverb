@@ -236,6 +236,11 @@ type Server struct {
 	deps   Deps
 	router chi.Router
 
+	// loudness tracks the opt-in bulk loudness measurement pass. Normal
+	// operation measures lazily on first play; this is the user-triggered
+	// alternative for someone who would rather spend the CPU up front.
+	loudness loudnessBackfill
+
 	// live holds the currently active services. Handlers read them through the
 	// getters under the RLock; reload swaps them under the write lock so adapter
 	// mutations take effect without a restart.
@@ -441,6 +446,9 @@ func (s *Server) routes() {
 				// Uploading writes into the managed music directory, so it sits
 				// with the library-management capability, not the download one.
 				mr.Post("/library/upload", s.handleUploadTracks)
+				mr.Get("/library/loudness/backfill", s.handleLoudnessBackfillStatus)
+				mr.Post("/library/loudness/backfill", s.handleLoudnessBackfillStart)
+				mr.Post("/library/loudness/backfill/cancel", s.handleLoudnessBackfillCancel)
 				mr.Get("/settings", s.handleGetSettings)
 				mr.Put("/settings", s.handlePutSettings)
 				mr.Get("/admin/integrations/lastfm", s.handleGetLastfmIntegration)

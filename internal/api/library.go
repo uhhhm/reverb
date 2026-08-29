@@ -183,5 +183,6 @@ func (s *Server) handleRenameTrack(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.emitTrackRename(r.Context(), id, name.Title, name.Artist)
 	writeJSON(w, http.StatusOK, name)
 }

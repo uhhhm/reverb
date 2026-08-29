@@ -20,6 +20,15 @@ func (q *Queries) DeleteTrackOverride(ctx context.Context, trackID string) error
 	return err
 }
 
+const deleteTrackOverrideByCatalogID = `-- name: DeleteTrackOverrideByCatalogID :exec
+DELETE FROM track_override WHERE catalog_id = ?
+`
+
+func (q *Queries) DeleteTrackOverrideByCatalogID(ctx context.Context, catalogID sql.NullString) error {
+	_, err := q.db.ExecContext(ctx, deleteTrackOverrideByCatalogID, catalogID)
+	return err
+}
+
 const getTrackOverride = `-- name: GetTrackOverride :one
 SELECT track_id, title, artist, updated_at, catalog_id FROM track_override WHERE track_id = ?
 `

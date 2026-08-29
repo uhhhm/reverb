@@ -61,6 +61,58 @@ func (s *Service) Set(ctx context.Context, trackID string, n Name) error {
 	})
 }
 
+// SetByCatalogID applies a rename that arrived from a peer, which identifies
+// the track by its catalog id. When this device has the track bound to a
+// backend id the row is keyed on that, so ApplyTracks finds it; otherwise it is
+// parked under the catalog id until a binding exists.
+func (s *Service) SetByCatalogID(ctx context.Context, catalogID string, n Name) error {
+	if s == nil || s.q == nil {
+		return errors.New("override: no store")
+	}
+	title := strings.TrimSpace(n.Title)
+	artist := strings.TrimSpace(n.Artist)
+	trackID := catalogID
+	if id, err := s.q.GetBackendIDByCatalogID(ctx, catalogID); err == nil && id != "" {
+		trackID = id
+	}
+	if title == "" && artist == "" {
+		if err := s.q.DeleteTrackOverrideByCatalogID(ctx, sql.NullString{String: catalogID, Valid: true}); err != nil {
+			return err
+		}
+		return s.q.DeleteTrackOverride(ctx, trackID)
+	}
+	return s.q.UpsertTrackOverrideByCatalogID(ctx, db.UpsertTrackOverrideByCatalogIDParams{
+		TrackID:   trackID,
+		Title:     title,
+		Artist:    artist,
+		UpdatedAt: time.Now().Unix(),
+		CatalogID: sql.NullString{String: catalogID, Valid: true},
+	})
+}
+
+// GetByCatalogID returns the rename stored under a catalog id, or a zero Name.
+func (s *Service) GetByCatalogID(ctx context.Context, catalogID string) (Name, error) {
+	if s == nil || s.q == nil {
+		return Name{}, nil
+	}
+	row, err := s.q.GetTrackOverrideByCatalogID(ctx, sql.NullString{String: catalogID, Valid: true})
+	if errors.Is(err, sql.ErrNoRows) {
+		return Name{}, nil
+	}
+	if err != nil {
+		return Name{}, err
+	}
+	return Name{Title: row.Title, Artist: row.Artist}, nil
+}
+
+// CatalogIDForTrack resolves the stable catalog id a backend track is bound to,
+// or "" when it has no binding yet. Callers publishing a rename need it: the
+// backend track id changes when the library backend is swapped, so it is not an
+// identity peers can agree on.
+func (s *Service) CatalogIDForTrack(ctx context.Context, trackID string) string {
+	return s.catalogIDForTrack(ctx, trackID)
+}
+
 // catalogIDForTrack tries to resolve the stable catalog_id for a backend trackID
 // via backend_binding. Returns "" if not found (legacy or not yet bound).
 func (s *Service) catalogIDForTrack(ctx context.Context, trackID string) string {

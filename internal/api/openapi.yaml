@@ -202,6 +202,39 @@ paths:
         "200": { description: the resulting quality }
         "400": { description: unknown tier }
         "503": { description: per-track quality unavailable }
+  /library/loudness/backfill:
+    get:
+      summary: Progress of the bulk loudness measurement pass
+      responses:
+        "200":
+          description: state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  running: { type: boolean }
+                  total: { type: integer }
+                  done: { type: integer }
+                  skipped: { type: integer }
+                  failed: { type: integer }
+                  error: { type: string }
+                  startedAt: { type: integer, format: int64 }
+    post:
+      summary: Measure every library track's loudness up front
+      description: >-
+        Normal operation measures a track the first time it is played. This is
+        the opt-in bulk pass; it returns immediately and reports progress via
+        GET on the same path. Already-measured tracks are skipped.
+      responses:
+        "202": { description: started }
+        "409": { description: already measuring }
+        "503": { description: needs a library whose files are on this machine }
+  /library/loudness/backfill/cancel:
+    post:
+      summary: Stop a measurement pass (everything measured so far is kept)
+      responses:
+        "200": { description: state }
   /library/track/{id}/crop:
     get:
       summary: A track's playback boundaries (zeroes mean the whole file)

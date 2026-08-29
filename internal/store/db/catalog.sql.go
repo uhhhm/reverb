@@ -68,6 +68,17 @@ func (q *Queries) GetBackendBinding(ctx context.Context, arg GetBackendBindingPa
 	return i, err
 }
 
+const getBackendIDByCatalogID = `-- name: GetBackendIDByCatalogID :one
+SELECT backend_id FROM backend_binding WHERE catalog_id = ? LIMIT 1
+`
+
+func (q *Queries) GetBackendIDByCatalogID(ctx context.Context, catalogID string) (string, error) {
+	row := q.db.QueryRowContext(ctx, getBackendIDByCatalogID, catalogID)
+	var backend_id string
+	err := row.Scan(&backend_id)
+	return backend_id, err
+}
+
 const getCatalogEntity = `-- name: GetCatalogEntity :one
 SELECT id, kind, title, artist, album, duration_ms, isrc, mbid, source, external_id, created_at FROM catalog_entity WHERE id = ?
 `

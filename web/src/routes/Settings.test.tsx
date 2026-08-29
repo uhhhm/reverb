@@ -31,6 +31,23 @@ vi.mock('../lib/scrobbleApi', () => ({
 const mockMutate = vi.fn()
 const mockUpdateAdapter = vi.fn(() => Promise.resolve({ data: {}, pendingRestart: false }))
 const mockUseAdapters = vi.fn(() => ({ data: [] as AdapterInstance[] }))
+const mockStartBackfill = vi.fn()
+const mockCancelBackfill = vi.fn()
+let backfillState = { running: false, total: 0, done: 0, skipped: 0, failed: 0 } as {
+  running: boolean
+  total: number
+  done: number
+  skipped: number
+  failed: number
+  error?: string
+  startedAt?: number
+}
+
+vi.mock('../lib/loudnessApi', () => ({
+  useLoudnessBackfill: () => ({ data: backfillState }),
+  useStartLoudnessBackfill: () => ({ mutate: mockStartBackfill, isPending: false }),
+  useCancelLoudnessBackfill: () => ({ mutate: mockCancelBackfill, isPending: false }),
+}))
 
 vi.mock('../lib/settingsApi', () => ({
   useSettings: vi.fn(() => ({
@@ -152,5 +169,54 @@ describe('Settings — Audio tab', () => {
     openAudioTab()
     fireEvent.click(screen.getByRole('switch', { name: /normalize volume/i }))
     await waitFor(() => expect(mockMutate).toHaveBeenCalledWith({ audioNormalization: true }))
+  })
+})
+
+// ── Audio tab: loudness backfill ──────────────────────────────────────────────
+describe('Settings — measure library', () => {
+  beforeEach(() => {
+    mockStartBackfill.mockClear()
+    mockCancelBackfill.mockClear()
+    backfillState = { running: false, total: 0, done: 0, skipped: 0, failed: 0 }
+  })
+  afterEach(() => vi.clearAllMocks())
+
+  function openAudioTab() {
+    wrap(<Settings />)
+    fireEvent.click(screen.getByRole('button', { name: /^audio$/i }))
+  }
+
+  // Measuring a whole library is expensive, so it is never started for the user.
+  it('offers the measure pass but does not start it on its own', () => {
+    openAudioTab()
+    expect(screen.getByRole('button', { name: /measure library/i })).toBeInTheDocument()
+    expect(mockStartBackfill).not.toHaveBeenCalled()
+  })
+
+  it('starts the measure pass on request', async () => {
+    openAudioTab()
+    fireEvent.click(screen.getByRole('button', { name: /measure library/i }))
+    await waitFor(() => expect(mockStartBackfill).toHaveBeenCalledTimes(1))
+  })
+
+  it('shows progress and a Stop button while it runs', () => {
+    backfillState = { running: true, total: 900, done: 100, skipped: 20, failed: 0 }
+    openAudioTab()
+    expect(screen.getByRole('status')).toHaveTextContent('Measured 120 of 900')
+    expect(screen.getByRole('button', { name: /stop/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /measure library/i })).toBeNull()
+  })
+
+  it('stops a running pass on request', async () => {
+    backfillState = { running: true, total: 900, done: 100, skipped: 20, failed: 0 }
+    openAudioTab()
+    fireEvent.click(screen.getByRole('button', { name: /stop/i }))
+    await waitFor(() => expect(mockCancelBackfill).toHaveBeenCalledTimes(1))
+  })
+
+  it('reports a pass that could not run', () => {
+    backfillState = { running: false, total: 0, done: 0, skipped: 0, failed: 0, error: 'ffmpeg missing' }
+    openAudioTab()
+    expect(screen.getByRole('alert')).toHaveTextContent('ffmpeg missing')
   })
 })

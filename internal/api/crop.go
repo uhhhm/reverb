@@ -54,6 +54,7 @@ func (s *Server) handleSetTrackCrop(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.emitTrackCrop(r.Context(), id, body.StartMs, body.EndMs)
 	s.handleGetTrackCrop(w, r)
 }
 
@@ -73,5 +74,6 @@ func (s *Server) handleDeleteTrackCrop(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.emitTrackCrop(r.Context(), id, 0, 0)
 	writeJSON(w, http.StatusOK, crop.Points{})
 }

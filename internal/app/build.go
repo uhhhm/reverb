@@ -31,6 +31,7 @@ import (
 	"github.com/uhhhm/reverb/internal/library/lyrics"
 	"github.com/uhhhm/reverb/internal/library/subsonic"
 	"github.com/uhhhm/reverb/internal/linkadd"
+	"github.com/uhhhm/reverb/internal/materialize"
 	"github.com/uhhhm/reverb/internal/override"
 	"github.com/uhhhm/reverb/internal/p2p"
 	"github.com/uhhhm/reverb/internal/play"
@@ -275,6 +276,13 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	}
 	if deps.SyncStore == nil {
 		deps.SyncStore = reverbsync.NewSyncStore(st.Q())
+	}
+	// Without a materializer, per-track metadata would replicate into the change
+	// log and stay invisible: nothing would write a peer's rename or crop into
+	// the tables the app reads.
+	deps.SyncStore.SetMaterializer(materialize.New(deps.Overrides, deps.Crop))
+	if syncStoreForLink != deps.SyncStore {
+		syncStoreForLink.SetMaterializer(materialize.New(deps.Overrides, deps.Crop))
 	}
 	// Only set an interface field when the concrete service is present, or it
 	// becomes a non-nil interface wrapping a nil pointer.
