@@ -170,7 +170,7 @@ export default function Admin() {
       <h1 className="text-3xl font-black tracking-tight text-text-primary">Admin</h1>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-border-subtle pb-0" role="tablist" aria-label="Admin sections">
+      <div className="flex flex-wrap gap-2 border-b border-border-subtle pb-3" role="tablist" aria-label="Admin sections">
         <Chip selected={tab === 'providers'} onClick={() => setTab('providers')}>
           Providers
         </Chip>

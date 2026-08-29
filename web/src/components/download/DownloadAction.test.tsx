@@ -206,11 +206,14 @@ describe('DownloadAction', () => {
   })
 
   // ── 5. job completed ──────────────────────────────────────────────────────
-  it('completed job → renders downloaded badge', () => {
+  // "Downloaded" and "In Library" are one concept: a completed job reads as
+  // in-library immediately, before the match rollup resolves a library track id.
+  it('completed job → renders In Library badge', () => {
     useDownloads.getState().upsert(makeJob({ status: 'completed', progress: 100 }))
     render(<DownloadAction result={makeResult()} onPlay={onPlay} />)
 
-    expect(screen.getByText('Downloaded')).toBeInTheDocument()
+    expect(screen.getByText('In Library')).toBeInTheDocument()
+    expect(screen.queryByText('Downloaded')).not.toBeInTheDocument()
   })
 
   // ── 6. job failed ─────────────────────────────────────────────────────────

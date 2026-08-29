@@ -34,11 +34,15 @@ export function DownloadAction({ result, onPlay }: Props) {
   const job = useDownloads((s) => s.byExternal(result.source, result.externalId))
   const downloaders = useDownloaders()
 
-  // A completed job that matched a library track is treated as in-library.
+  // "Downloaded" and "In Library" are the same concept: a completed job is
+  // in-library immediately, even before the match rollup has resolved a
+  // libraryTrackId (that lags job completion by a scan + rollup).
+  const completed = job?.status === 'completed'
   const inLibraryTrackId =
     (result.match?.status === 'in_library' && result.match.libraryTrackId) ||
-    (job?.status === 'completed' && job.libraryTrackId) ||
+    (completed && job.libraryTrackId) ||
     ''
+  const inLibrary = Boolean(inLibraryTrackId) || completed
 
   // Reset modal state whenever the job leaves the failed status (prevents auto-reopen
   // after a failed → running → failed cycle without a user gesture). Uses React's
@@ -107,8 +111,19 @@ export function DownloadAction({ result, onPlay }: Props) {
     enqueue(downloaders[0].name)
   }
 
-  // ── 1. In library ─────────────────────────────────────────────────────────
-  if (inLibraryTrackId) {
+  // ── 1. In library (includes just-completed downloads) ─────────────────────
+  if (inLibrary) {
+    const badge = (
+      <Badge kind="in-library">
+        <Icon name="check" className="text-xs" />
+        In Library
+      </Badge>
+    )
+    // No library track id yet (match rollup still catching up) — show the same
+    // badge, but without a play affordance.
+    if (!inLibraryTrackId) {
+      return <span title="In Library">{badge}</span>
+    }
     return (
       <button
         type="button"
@@ -120,10 +135,7 @@ export function DownloadAction({ result, onPlay }: Props) {
         }}
         className="inline-flex items-center gap-1.5 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
-        <Badge kind="in-library">
-          <Icon name="check" className="text-xs" />
-          In Library
-        </Badge>
+        {badge}
       </button>
     )
   }
@@ -149,16 +161,6 @@ export function DownloadAction({ result, onPlay }: Props) {
         <ProgressRing value={isIndeterminate ? 0 : job.progress} size={24} indeterminate={isIndeterminate} />
         <Badge kind="downloading">Downloading</Badge>
       </span>
-    )
-  }
-
-  // ── 3. Completed ──────────────────────────────────────────────────────────
-  if (job?.status === 'completed') {
-    return (
-      <Badge kind="downloaded">
-        <Icon name="check" className="text-xs" />
-        Downloaded
-      </Badge>
     )
   }
 

@@ -209,7 +209,66 @@ describe('PlayerBar (shell)', () => {
 
   // --- seek bar ---
 
-  it('seek bar click calls seekMs with ratio * durationMs', () => {
+  it('dragging the seek bar seeks continuously', () => {
+    const eng = engine as unknown as { durationMs: number; emit(): void }
+    act(() => {
+      eng.durationMs = 200000
+      eng.emit()
+    })
+
+    const seekSpy = vi.spyOn(engine, 'seekMs')
+    render(<PlayerBar />)
+    const seekBar = screen.getByRole('slider', { name: /seek/i })
+    vi.spyOn(seekBar, 'getBoundingClientRect').mockReturnValue({
+      left: 100, width: 400, top: 0, bottom: 0, right: 500, height: 0, x: 100, y: 0,
+      toJSON: () => ({}),
+    } as DOMRect)
+
+    act(() => {
+      fireEvent.mouseDown(seekBar, { clientX: 200, button: 0 })
+      fireEvent.mouseMove(window, { clientX: 300 })
+      fireEvent.mouseMove(window, { clientX: 400 })
+      fireEvent.mouseUp(window, { clientX: 400 })
+    })
+
+    expect(seekSpy).toHaveBeenCalledWith(50000)
+    expect(seekSpy).toHaveBeenCalledWith(100000)
+    expect(seekSpy).toHaveBeenCalledWith(150000)
+    seekSpy.mockRestore()
+
+    act(() => {
+      eng.durationMs = 0
+      eng.emit()
+    })
+  })
+
+  // Clicking the rail focuses it (role="slider", tabIndex=0), and the global
+  // shortcut handler ignores events from interactive elements — so the slider
+  // has to handle Space itself.
+  it('Space on the focused seek bar toggles playback', () => {
+    const eng = engine as unknown as { durationMs: number; emit(): void }
+    act(() => {
+      eng.durationMs = 200000
+      eng.emit()
+    })
+    const toggleSpy = vi.spyOn(engine, 'toggle')
+    render(<PlayerBar />)
+    const seekBar = screen.getByRole('slider', { name: /seek/i })
+
+    act(() => {
+      fireEvent.keyDown(seekBar, { key: ' ', code: 'Space' })
+    })
+
+    expect(toggleSpy).toHaveBeenCalledTimes(1)
+    toggleSpy.mockRestore()
+
+    act(() => {
+      eng.durationMs = 0
+      eng.emit()
+    })
+  })
+
+  it('seek bar mousedown calls seekMs with ratio * durationMs', () => {
     const eng = engine as unknown as { durationMs: number; emit(): void }
     act(() => {
       eng.durationMs = 200000
@@ -234,10 +293,10 @@ describe('PlayerBar (shell)', () => {
     } as DOMRect)
 
     act(() => {
-      fireEvent.click(seekBar, { clientX: 300 })
+      fireEvent.mouseDown(seekBar, { clientX: 300, button: 0 })
+      fireEvent.mouseUp(window, { clientX: 300 })
     })
 
-    expect(seekSpy).toHaveBeenCalledTimes(1)
     expect(seekSpy).toHaveBeenCalledWith(100000) // 0.5 * 200000
     seekSpy.mockRestore()
 

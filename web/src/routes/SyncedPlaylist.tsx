@@ -19,6 +19,7 @@ import { Button, IconButton, Cover, Skeleton, EmptyState, Badge, Toggle, Select,
 import { PortalMenu } from '../components/PortalMenu'
 import type { ExternalResult, ExternalTrackRef, AlbumDetailTrack, Track } from '../lib/types'
 import { usePlayer } from '../lib/playerStore'
+import { useDownloads } from '../lib/downloadStore'
 import { RenameTrackDialog } from '../components/RenameTrackDialog'
 import { ManagePlaylistTracksDialog } from '../components/ManagePlaylistTracksDialog'
 import { useToastStore } from '../lib/toastStore'
@@ -93,6 +94,9 @@ export default function SyncedPlaylist() {
   const playTrackList = usePlayer((s) => s.playTrackList)
   const currentTrack = usePlayer((s) => s.current)
   const isPlaying = usePlayer((s) => s.playing)
+  // Local job overlay: a track whose download is queued/running/completed is no
+  // longer "missing", even before the server's coverage rollup catches up.
+  const jobs = useDownloads((s) => s.jobs)
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
   const [renaming, setRenaming] = useState<Track | null>(null)
   const [managingTracks, setManagingTracks] = useState(false)
@@ -183,7 +187,15 @@ export default function SyncedPlaylist() {
     .filter((t) => t.state === 'full' && t.libraryTrack)
     .map((t) => ({ ...t.libraryTrack!, ...(t.artistExternalId ? { artistExternalId: t.artistExternalId } : {}) }))
 
-  const missingCount = tracks.filter((t) => t.state === 'none').length
+  const claimedByJob = (t: (typeof tracks)[number]) => {
+    if (!t.key) return false
+    const job = Object.values(jobs).find(
+      (j) => j.source === t.key!.source && j.externalId === t.key!.externalId,
+    )
+    return job?.status === 'queued' || job?.status === 'running' || job?.status === 'completed'
+  }
+
+  const missingCount = tracks.filter((t) => t.state === 'none' && !claimedByJob(t)).length
 
   const ownedIndexMap = new Map<string, number>(
     ownedTracks.map((t, i) => [t.id, i]),

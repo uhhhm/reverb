@@ -61,19 +61,58 @@ function SeekBar() {
   const isExternal = usePlayer((s) => (s.current ? isExternalTrack(s.current) : false))
   const peaks = usePeaks(trackId, isExternal).data
 
-  const pct = durationMs > 0 ? (currentTimeMs / durationMs) * 100 : 0
+  const toggle = usePlayer((s) => s.toggle)
+
+  // While dragging, the rail follows the cursor rather than the store, so the
+  // thumb doesn't snap back between seek and the next timeupdate.
+  const railRef = useRef<HTMLDivElement>(null)
+  const [dragRatio, setDragRatio] = useState<number | null>(null)
+
+  const shownMs = dragRatio != null ? dragRatio * durationMs : currentTimeMs
+  const pct = durationMs > 0 ? (shownMs / durationMs) * 100 : 0
   const bufPct = durationMs > 0 ? (bufferedMs / durationMs) * 100 : 0
 
-  function onClick(e: React.MouseEvent<HTMLDivElement>) {
-    if (durationMs <= 0) return
-    const rect = e.currentTarget.getBoundingClientRect()
-    const ratio = (e.clientX - rect.left) / rect.width
-    seekMs(Math.max(0, Math.min(1, ratio)) * durationMs)
+  function ratioAt(clientX: number): number {
+    const rect = railRef.current?.getBoundingClientRect()
+    if (!rect || rect.width <= 0) return 0
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+  }
+
+  // A click is a zero-distance drag, so mousedown handles both. Listeners live
+  // on window so dragging past the rail's edges keeps tracking.
+  function onMouseDown(e: React.MouseEvent<HTMLDivElement>) {
+    if (durationMs <= 0 || e.button !== 0) return
+    e.preventDefault()
+    const startRatio = ratioAt(e.clientX)
+    setDragRatio(startRatio)
+    seekMs(startRatio * durationMs)
+
+    function onMove(ev: MouseEvent) {
+      const r = ratioAt(ev.clientX)
+      setDragRatio(r)
+      seekMs(r * durationMs)
+    }
+    function onUp(ev: MouseEvent) {
+      const r = ratioAt(ev.clientX)
+      seekMs(r * durationMs)
+      setDragRatio(null)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
   }
 
   // Keyboard operability for the slider role — mirrors the global Arrow-seek
   // shortcuts (±5s) and adds Home/End to jump to the ends of the track.
+  // Space is handled here too: clicking the rail focuses it, and the global
+  // shortcut handler skips events originating inside interactive controls.
   function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key === ' ' || e.code === 'Space') {
+      e.preventDefault()
+      toggle()
+      return
+    }
     if (durationMs <= 0) return
     switch (e.key) {
       case 'ArrowRight':
@@ -99,7 +138,7 @@ function SeekBar() {
 
   return (
     <div className="flex w-full max-w-[560px] items-center gap-2.5 text-xs text-text-muted">
-      <span className="w-9 text-right tabular-nums">{formatDuration(currentTimeMs)}</span>
+      <span className="w-9 text-right tabular-nums">{formatDuration(shownMs)}</span>
 
       {/* Track rail */}
       <div
@@ -107,9 +146,10 @@ function SeekBar() {
         aria-label="Seek"
         aria-valuemin={0}
         aria-valuemax={durationMs}
-        aria-valuenow={currentTimeMs}
+        aria-valuenow={Math.round(shownMs)}
         tabIndex={0}
-        onClick={onClick}
+        ref={railRef}
+        onMouseDown={onMouseDown}
         onKeyDown={onKeyDown}
         className="group relative h-1 flex-1 cursor-pointer rounded-full bg-border-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
