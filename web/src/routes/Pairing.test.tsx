@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Pairing from './Pairing'
+import { useSyncStore } from '../lib/syncStore'
 
 const mockGeneratePairingCode = vi.fn()
 const mockRedeemPairingCode = vi.fn()
@@ -13,6 +14,12 @@ const mockStoreSyncCredentials = vi.fn()
 const mockGetSyncToken = vi.fn()
 const mockGetSyncDeviceId = vi.fn()
 const mockClearSyncCredentials = vi.fn()
+const mockTriggerSync = vi.fn()
+
+vi.mock('../lib/syncApi', async (orig) => ({
+  ...(await orig<Record<string, unknown>>()),
+  triggerSync: (...args: unknown[]) => mockTriggerSync(...args),
+}))
 
 vi.mock('../lib/pairingApi', () => ({
   generatePairingCode: (...args: unknown[]) => mockGeneratePairingCode(...args),
@@ -48,6 +55,8 @@ describe('Pairing', () => {
       { id: 'dev_1', name: 'My Laptop', isServer: false, createdAt: 1100, lastSeen: 2100 },
     ])
     mockGetSyncStatus.mockResolvedValue({ revision: 5, deviceCount: 2 })
+    mockTriggerSync.mockResolvedValue({ status: 'started' })
+    useSyncStore.setState({ syncing: false })
     mockGeneratePairingCode.mockResolvedValue({ code: 'AB12-CD34', expiresAt: Math.floor(Date.now() / 1000) + 600 })
     mockRedeemPairingCode.mockResolvedValue({ deviceId: 'dev_new', token: 'tok123', serverDeviceId: 'srv_1' })
     mockDeleteDevice.mockResolvedValue({ ok: true })
@@ -250,5 +259,39 @@ describe('Pairing', () => {
     expect(screen.getAllByText(/server/i).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/sync token/i).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/device/i).length).toBeGreaterThan(0)
+  })
+})
+
+describe('Pairing — manual sync', () => {
+  beforeEach(() => {
+    mockGetSyncToken.mockReturnValue(null)
+    mockGetSyncDeviceId.mockReturnValue('dev_1')
+    mockListDevices.mockResolvedValue([])
+    mockGetSyncStatus.mockResolvedValue({ revision: 5, deviceCount: 2 })
+    mockTriggerSync.mockResolvedValue({ status: 'started' })
+    useSyncStore.setState({ syncing: false })
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+    useSyncStore.setState({ syncing: false })
+  })
+
+  it('"Sync now" triggers a sync round', async () => {
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: /sync now/i }))
+    await waitFor(() => expect(mockTriggerSync).toHaveBeenCalledTimes(1))
+  })
+
+  // The indicator is driven by the WebSocket store, so a background round shows
+  // it too — not only a round this tab started.
+  it('shows a syncing indicator while a round is in flight', async () => {
+    wrap()
+    await screen.findByRole('button', { name: /sync now/i })
+    act(() => {
+      useSyncStore.getState().setSyncing(true)
+    })
+    expect(screen.getByRole('status')).toHaveTextContent(/syncing with paired devices/i)
+    expect(screen.getByRole('button', { name: /syncing/i })).toBeDisabled()
   })
 })

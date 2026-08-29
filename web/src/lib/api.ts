@@ -1,5 +1,8 @@
 const BASE = '/api/v1'
 
+/** The API path prefix, for callers that cannot go through `request` (e.g. XHR uploads). */
+export const API_BASE = BASE
+
 export class ApiError extends Error {
   status: number
   body: Record<string, unknown> | null

@@ -15,6 +15,13 @@ export interface Track {
   isrc?: string
   artistExternalId?: string
   /**
+   * Non-destructive playback boundaries. The file is never rewritten — the
+   * player starts at cropStartMs and stops at cropEndMs, so a crop can be
+   * changed or removed at any time. Absent/0 means the whole file.
+   */
+  cropStartMs?: number
+  cropEndMs?: number
+  /**
    * Set only for a search result that is not in the library. The player streams
    * it from the source instead of the library, so it plays without being
    * downloaded — id is then a display key, not a library track id.

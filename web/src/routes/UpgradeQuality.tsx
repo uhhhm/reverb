@@ -7,13 +7,16 @@ import { AUDIO_QUALITIES, DEFAULT_AUDIO_QUALITY, qualityLabel, type AudioQuality
 import { Button, EmptyState, Checkbox } from '../components/ui'
 
 /**
- * Bulk quality upgrade: every download Reverb made below the target tier, with
- * select-and-upgrade. It lists Reverb's own download history rather than the
- * whole library, because a file Reverb did not fetch has no known source to
- * re-fetch it from.
+ * Bulk quality change: every download Reverb made at a tier other than the
+ * target, with select-and-apply. The target may be BELOW what you have — a
+ * deliberate downgrade to save space is as valid as an upgrade, so the list is
+ * "differs from target", not "below target".
+ *
+ * It lists Reverb's own download history rather than the whole library, because
+ * a file Reverb did not fetch has no known source to re-fetch it from.
  */
 export default function UpgradeQuality() {
-  useDocumentTitle('Upgrade quality')
+  useDocumentTitle('Audio quality')
   const { data: settings } = useSettings()
   const configured = settings?.downloadQuality ?? DEFAULT_AUDIO_QUALITY
   const [target, setTarget] = useState<AudioQuality | ''>('')
@@ -66,8 +69,8 @@ export default function UpgradeQuality() {
     setSelected(new Set())
     pushToast(
       ok === targets.length
-        ? `Queued ${ok} upgrade${ok === 1 ? '' : 's'}`
-        : `Queued ${ok} of ${targets.length} upgrades`,
+        ? `Queued ${ok} re-download${ok === 1 ? '' : 's'}`
+        : `Queued ${ok} of ${targets.length} re-downloads`,
       ok === targets.length ? 'success' : 'error',
     )
   }
@@ -75,10 +78,10 @@ export default function UpgradeQuality() {
   return (
     <div className="max-w-4xl space-y-6 pb-8">
       <header>
-        <h1 className="text-3xl font-black tracking-tight text-text-primary">Upgrade quality</h1>
+        <h1 className="text-3xl font-black tracking-tight text-text-primary">Audio quality</h1>
         <p className="mt-1 text-sm text-text-secondary">
-          Downloads sitting below your target tier. Upgrading re-downloads the track and replaces the
-          existing file.
+          Downloads whose tier differs from your target — above it as well as below. Applying
+          re-downloads the track and replaces the existing file.
         </p>
       </header>
 
@@ -105,11 +108,11 @@ export default function UpgradeQuality() {
         <Button
           variant="primary"
           size="sm"
-          aria-label="Upgrade selected"
+          aria-label="Apply to selected"
           disabled={selected.size === 0 || upgrade.isPending}
           onClick={() => void upgradeSelected()}
         >
-          {upgrade.isPending ? 'Queueing…' : `Upgrade selected (${selected.size})`}
+          {upgrade.isPending ? 'Queueing…' : `Apply to selected (${selected.size})`}
         </Button>
       </div>
 
@@ -118,15 +121,15 @@ export default function UpgradeQuality() {
       ) : pending.length === 0 ? (
         <EmptyState
           icon="check"
-          title="Nothing to upgrade"
-          hint={`Every download is already at ${qualityLabel(effective)} or better.`}
+          title="Nothing to change"
+          hint={`Every download is already at ${qualityLabel(effective)}.`}
         />
       ) : (
         <div className="rounded-lg border border-border-subtle bg-raised">
           <div className="flex items-center gap-3 border-b border-border-subtle px-4 py-3">
             <Checkbox label="Select all" checked={allSelected} onChange={toggleAll} />
             <span className="text-sm font-semibold text-text-primary">
-              {pending.length} below {qualityLabel(effective)}
+              {pending.length} not at {qualityLabel(effective)}
             </span>
           </div>
           <ul>

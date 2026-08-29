@@ -10,6 +10,14 @@ export function getSyncStatus(): Promise<SyncStatus> {
   return api.get<SyncStatus>('/sync/status')
 }
 
+/**
+ * Kicks off one device sync round. Returns as soon as the server accepts it —
+ * completion arrives over the WebSocket as sync.finished.
+ */
+export function triggerSync(): Promise<{ status: string }> {
+  return api.post<{ status: string }>('/sync/trigger', {})
+}
+
 export function useSyncStatus() {
   return useQuery({
     queryKey: ['sync', 'status'],

@@ -25,6 +25,7 @@ import { startNowPlaying } from '../lib/nowPlaying'
 import { startMediaSession } from '../lib/mediaSession'
 import { recordPlay } from '../lib/playApi'
 import { useToastStore } from '../lib/toastStore'
+import { useSettings } from '../lib/settingsApi'
 
 function RouteLoading() {
   return (
@@ -64,6 +65,11 @@ export function AppShell() {
       pushToast("Couldn't record this play. Check your connection and try again.", 'error')
     }
   }), [pushToast, queryClient])
+  // Loudness normalization is a setting, so the engine has to be told about it
+  // whenever it loads or changes rather than reading it once at construction.
+  const normalization = useSettings().data?.audioNormalization ?? false
+  useEffect(() => engine.setNormalization(normalization), [normalization])
+
   useEffect(() => startNowPlaying(engine), [])
   useEffect(() => startMediaSession(engine), [])
 

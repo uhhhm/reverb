@@ -37,6 +37,7 @@ export type IconName =
   | 'grip'
   | 'chart'
   | 'more'
+  | 'scissors'
 
 /**
  * Per-icon descriptor.
@@ -291,6 +292,18 @@ const icons: Record<IconName, IconDef> = {
         <circle cx="5" cy="12" r="1.75" />
         <circle cx="12" cy="12" r="1.75" />
         <circle cx="19" cy="12" r="1.75" />
+      </>
+    ),
+  },
+  // scissors: crop (trim) affordance on track rows
+  scissors: {
+    content: (
+      <>
+        <circle cx="6" cy="6" r="3" />
+        <circle cx="6" cy="18" r="3" />
+        <path d="M20 4 8.12 15.88" />
+        <path d="M14.47 14.48 20 20" />
+        <path d="M8.12 8.12 12 12" />
       </>
     ),
   },

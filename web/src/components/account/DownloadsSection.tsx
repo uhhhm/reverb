@@ -34,9 +34,11 @@ export function DownloadsSection() {
 
       <div className="flex items-start gap-5 py-5">
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-bold text-text-primary">Upgrade existing downloads</div>
+          <div className="text-sm font-bold text-text-primary">Change quality of existing downloads</div>
           <div className="mt-0.5 text-xs text-text-secondary">
-            Re-download tracks that were fetched below your current tier, replacing the existing files.
+            Re-download tracks whose tier differs from the one you pick, replacing the existing
+            files. The tier can be lower than what you have — a downgrade to save space works the
+            same way.
           </div>
         </div>
         <div className="flex-none">
@@ -44,7 +46,7 @@ export function DownloadsSection() {
             to="/upgrade-quality"
             className="inline-flex items-center rounded-md border border-border-subtle bg-input px-3 py-2 text-sm font-semibold text-text-primary hover:bg-raised-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
-            Review upgrades
+            Review tracks
           </Link>
         </div>
       </div>

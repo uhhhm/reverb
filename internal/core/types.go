@@ -30,6 +30,12 @@ type Track struct {
 	Suffix      string `json:"suffix"`
 	ContentType string `json:"contentType"`
 	ISRC        string `json:"isrc,omitempty"`
+	// CropStartMs/CropEndMs are non-destructive playback boundaries. The file is
+	// never rewritten; the player starts at CropStartMs and stops at CropEndMs.
+	// Zero on both means the whole file, and a zero CropEndMs alone means
+	// "play to the end".
+	CropStartMs int `json:"cropStartMs,omitempty"`
+	CropEndMs   int `json:"cropEndMs,omitempty"`
 }
 
 type Album struct {

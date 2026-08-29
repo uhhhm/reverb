@@ -30,6 +30,7 @@ vi.mock('../../lib/settingsApi', () => ({
 }))
 vi.mock('../../lib/upgradeApi', () => ({
   useUpgradable: () => ({ data: [] }),
+  useRefetchable: () => ({ data: [] }),
   useUpgradeDownload: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 

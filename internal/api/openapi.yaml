@@ -82,6 +82,9 @@ paths:
                   type: string
                   enum: [default-dark, catppuccin-mocha, catppuccin-macchiato, catppuccin-frappe]
                   description: UI theme — all dark, Catppuccin-inspired.
+                audioNormalization:
+                  type: boolean
+                  description: Apply a per-track playback gain so tracks sound level. Files are never re-encoded.
       responses:
         "200": { description: ok, pendingRestart flag included }
         "400": { description: invalid value }
@@ -136,6 +139,119 @@ paths:
       responses:
         "200": { description: the stored override }
         "503": { description: renaming unavailable }
+  /library/upload:
+    post:
+      summary: Upload audio files into the managed music directory (built-in library only)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files:
+                  type: array
+                  items: { type: string, format: binary }
+      responses:
+        "200":
+          description: what was accepted and what was refused
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uploaded:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        bytes: { type: integer, format: int64 }
+                  rejected: { type: object, additionalProperties: { type: string } }
+                  scanning: { type: boolean }
+        "400": { description: invalid form or no files field }
+        "422": { description: nothing was accepted }
+        "503": { description: uploads need the built-in library }
+  /library/track/{id}/quality:
+    get:
+      summary: A track's standing download quality (its override, else the global setting)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200":
+          description: quality
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  quality: { type: string, enum: [low, medium, high, best] }
+                  overridden: { type: boolean }
+                  default: { type: string, enum: [low, medium, high, best] }
+    put:
+      summary: Set (or, with an empty quality, clear) a track's quality override
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                quality: { type: string, enum: ["", low, medium, high, best] }
+      responses:
+        "200": { description: the resulting quality }
+        "400": { description: unknown tier }
+        "503": { description: per-track quality unavailable }
+  /library/track/{id}/crop:
+    get:
+      summary: A track's playback boundaries (zeroes mean the whole file)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: Crop }
+        "503": { description: cropping unavailable }
+    put:
+      summary: Set non-destructive playback boundaries for a track
+      description: >-
+        The audio file is never rewritten — the player starts at startMs and
+        stops at endMs, so a crop can be changed or removed at any time.
+        startMs=0 with endMs=0 clears the crop.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                startMs: { type: integer }
+                endMs: { type: integer, description: 0 means play to the end of the file }
+      responses:
+        "200": { description: the stored crop }
+        "400": { description: end is not after start }
+        "503": { description: cropping unavailable }
+    delete:
+      summary: Uncrop a track (restores full-length playback)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: the cleared crop }
+        "503": { description: cropping unavailable }
+  /library/track/{id}/gain:
+    get:
+      summary: Playback gain in dB that brings the track to Reverb's reference loudness
+      description: >-
+        Measured with ffmpeg on first request and cached. The audio file is never
+        modified — the gain is applied by the player.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200":
+          description: gain
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  gainDb: { type: number, format: double }
+        "204": { description: no measurement possible (no local file or no ffmpeg) }
   /library/track/{id}/peaks:
     get:
       summary: Waveform peaks for a local track (computed on demand; embedded library only)
@@ -420,7 +536,7 @@ paths:
       responses: { "200": { description: ok }, "404": { description: not found } }
   /downloads/upgrade:
     post:
-      summary: Re-download a track at a higher quality tier, replacing the existing file
+      summary: Re-download a track at a different quality tier (up or down), replacing the existing file
       requestBody:
         required: true
         content:
@@ -439,27 +555,38 @@ paths:
                 artist: { type: string }
                 title: { type: string }
                 album: { type: string }
-                quality: { type: string, enum: [low, medium, high, best] }
+                quality:
+                  type: string
+                  enum: [low, medium, high, best]
+                  description: Omit to use the track's standing quality (its override, else the global setting).
                 currentQuality:
                   type: string
                   enum: [low, medium, high, best]
-                  description: When given, a request that would not raise the tier is rejected.
-              required: [artist, title, quality]
+                  description: When given, a re-fetch at the tier the file already has is rejected as a no-op.
+                setOverride:
+                  type: boolean
+                  description: Also persist quality as this track's standing override (needs libraryTrackId).
+              required: [artist, title]
       responses:
         "200": { description: DownloadJob }
         "400": { description: missing artist/title or unknown tier }
-        "422": { description: not an upgrade, unknown source, or nothing can fetch it }
+        "422": { description: already at that tier, unknown source, or nothing can fetch it }
   /downloads/upgradable:
     get:
-      summary: Completed downloads sitting below the target quality tier
+      summary: Completed downloads whose tier differs from the target (below it, or above it when downgrading)
       parameters:
         - name: quality
           in: query
           required: false
           schema: { type: string, enum: [low, medium, high, best] }
           description: Defaults to the configured download_quality setting.
+        - name: all
+          in: query
+          required: false
+          schema: { type: string, enum: ["1", "true"] }
+          description: Drop the tier filter and list every re-fetchable track (for the per-track quality picker).
       responses:
-        "200": { description: array of upgradable tracks }
+        "200": { description: array of tracks whose tier differs from the target }
   /links/resolve:
     post:
       summary: Resolve a Spotify or YouTube URL to track/album/playlist metadata
@@ -713,6 +840,12 @@ paths:
                   deviceCount: { type: integer }
                 required: [revision, deviceCount]
         "401": { description: invalid sync token }
+        "503": { description: sync unavailable }
+  /sync/trigger:
+    post:
+      summary: Start one device-sync round now (progress arrives over the WebSocket)
+      responses:
+        "202": { description: sync started }
         "503": { description: sync unavailable }
   /p2p/status:
     get:

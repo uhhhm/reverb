@@ -127,3 +127,30 @@ describe('Settings — Appearance tab', () => {
     await waitFor(() => expect(mockMutate).toHaveBeenCalledWith({ dynamicBackground: false }))
   })
 })
+// ── Audio tab ─────────────────────────────────────────────────────────────────
+describe('Settings — Audio tab', () => {
+  beforeEach(() => {
+    mockMutate.mockClear()
+  })
+  afterEach(() => vi.clearAllMocks())
+
+  function openAudioTab() {
+    wrap(<Settings />)
+    fireEvent.click(screen.getByRole('button', { name: /^audio$/i }))
+  }
+
+  // Defaults to off: normalization changes how everything sounds, so it is an
+  // opt-in rather than something that silently alters playback.
+  it('shows the normalize-volume toggle, off by default', () => {
+    openAudioTab()
+    const toggle = screen.getByRole('switch', { name: /normalize volume/i })
+    expect(toggle).toBeInTheDocument()
+    expect(toggle).toHaveAttribute('aria-checked', 'false')
+  })
+
+  it('toggling normalization saves the setting', async () => {
+    openAudioTab()
+    fireEvent.click(screen.getByRole('switch', { name: /normalize volume/i }))
+    await waitFor(() => expect(mockMutate).toHaveBeenCalledWith({ audioNormalization: true }))
+  })
+})

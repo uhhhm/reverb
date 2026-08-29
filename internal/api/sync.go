@@ -128,3 +128,21 @@ func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"revision": rev, "hlc": newHLC, "vector": seqMap, "hlcVector": hlcMap, "deviceCount": count})
 }
+
+// handleSyncTrigger kicks off one on-demand anti-entropy round with paired
+// peers. It returns immediately — progress is reported over the WebSocket as
+// sync.started / sync.finished, since a round can take as long as the dial
+// timeout of the slowest peer.
+func (s *Server) handleSyncTrigger(w http.ResponseWriter, r *http.Request) {
+	if s.deps.P2PSyncer == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "sync unavailable"})
+		return
+	}
+	syncer := s.deps.P2PSyncer()
+	if syncer == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "sync unavailable"})
+		return
+	}
+	go syncer.SyncNow(context.WithoutCancel(r.Context()))
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+}

@@ -9,6 +9,8 @@ export interface AppSettings {
   libraryBackendMode: string // 'built-in' | 'external'
   downloadQuality: AudioQuality
   theme: ThemeId
+  /** Apply a per-track playback gain so tracks sound level against each other. */
+  audioNormalization: boolean
 }
 
 const DEFAULT_ACCENT_CHANNELS = '240 53 75' // #F0354B

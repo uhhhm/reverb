@@ -20,6 +20,7 @@ import (
 	"github.com/uhhhm/reverb/internal/api"
 	"github.com/uhhhm/reverb/internal/auth"
 	"github.com/uhhhm/reverb/internal/catalog"
+	"github.com/uhhhm/reverb/internal/crop"
 	"github.com/uhhhm/reverb/internal/download"
 	"github.com/uhhhm/reverb/internal/download/lidarr"
 	"github.com/uhhhm/reverb/internal/download/spotdl"
@@ -72,11 +73,15 @@ type Runtime struct {
 	Store    *store.Store
 	Reloader *ServiceReloader
 	Scrobble *scrobble.Service
-	P2PPort  int
-	P2P      *p2p.Host
+	// Bus is the in-process event bus backing the WebSocket stream.
+	Bus     *events.Bus
+	P2PPort int
+	P2P     *p2p.Host
 	// P2PGuard is the libp2p peer trust set, set once the host starts.
 	P2PGuard *p2p.Guard
-	Getenv   func(string) string
+	// P2PSyncer is the anti-entropy syncer, set once the host starts.
+	P2PSyncer *p2p.Syncer
+	Getenv    func(string) string
 }
 
 // Build opens the store, runs migrations, constructs every service, and returns
@@ -242,10 +247,13 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 			ProviderLookup{Get: reloader.TrackLookupProvider()},
 			opts.Getenv,
 		),
-		Overrides: override.New(st.Q()),
-		Play:      playSvc,
-		Stats:     statsSvc,
-		Scrobble:  scrobbleSvc,
+		Overrides:    override.New(st.Q()),
+		TrackQuality: st.Q(),
+		Crop:         crop.New(st.Q()),
+		Loudness:     st.Q(),
+		Play:         playSvc,
+		Stats:        statsSvc,
+		Scrobble:     scrobbleSvc,
 		Lyrics: &lyrics.Service{
 			Store: st.Q(),
 			Client: &lyrics.LRCLibClient{
@@ -300,6 +308,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 
 	rt := &Runtime{
 		Deps:     deps,
+		Bus:      bus,
 		Bundle:   bundle,
 		Store:    st,
 		Reloader: reloader,
@@ -309,6 +318,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	}
 	rt.Deps.P2P = func() *p2p.Host { return rt.P2P }
 	rt.Deps.P2PGuard = func() *p2p.Guard { return rt.P2PGuard }
+	rt.Deps.P2PSyncer = func() *p2p.Syncer { return rt.P2PSyncer }
 	return rt, nil
 }
 
@@ -389,6 +399,8 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 				// P2P anti-entropy for sync changes over libp2p.
 				if r.Deps.SyncStore != nil && h.LibHost() != nil {
 					syncer := p2p.NewSyncer(h.LibHost(), r.Deps.SyncStore, guard, r.Store.Q(), localID)
+					syncer.SetBus(r.Bus)
+					r.P2PSyncer = syncer
 					p2p.SafeGo("syncer", func() { _ = syncer.Run(ctx) })
 				}
 			}

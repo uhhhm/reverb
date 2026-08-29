@@ -9,7 +9,14 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/uhhhm/reverb/internal/events"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
+)
+
+// EventBus topics published around a sync round, so the UI can show progress.
+const (
+	TopicSyncStarted  = "sync.started"
+	TopicSyncFinished = "sync.finished"
 )
 
 // Syncer drives anti-entropy between peers via /reverb/sync/1.0.0.
@@ -23,6 +30,33 @@ type Syncer struct {
 	interval      time.Duration
 	mu            stdsync.Mutex
 	peerVectors   map[peer.ID]map[string]int64
+
+	bus *events.Bus
+	// runMu single-flights sync rounds: the 30s ticker and an on-demand
+	// SyncNow must not overlap and double-push the change log.
+	runMu stdsync.Mutex
+}
+
+// SetBus installs the event bus used to publish sync.started / sync.finished.
+// Optional — a Syncer without a bus syncs silently.
+func (s *Syncer) SetBus(b *events.Bus) { s.bus = b }
+
+// SyncNow runs one anti-entropy round on demand. It blocks until the round
+// finishes, so callers that must not block should run it in a goroutine.
+func (s *Syncer) SyncNow(ctx context.Context) {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	s.publish(TopicSyncStarted, nil)
+	start := time.Now()
+	s.syncAll(ctx)
+	s.publish(TopicSyncFinished, map[string]any{"durationMs": time.Since(start).Milliseconds()})
+}
+
+func (s *Syncer) publish(topic string, payload any) {
+	if s.bus == nil {
+		return
+	}
+	s.bus.Publish(events.Event{Topic: topic, Payload: payload})
 }
 
 func NewSyncer(h host.Host, store *reverbsync.SyncStore, guard *Guard, keys DeviceKeyStore, localDeviceID string) *Syncer {
@@ -45,14 +79,14 @@ func (s *Syncer) Run(ctx context.Context) error {
 	case <-ctx.Done():
 		return nil
 	case <-time.After(5 * time.Second):
-		s.syncAll(ctx)
+		s.SyncNow(ctx)
 	}
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-t.C:
-			s.syncAll(ctx)
+			s.SyncNow(ctx)
 		}
 	}
 }

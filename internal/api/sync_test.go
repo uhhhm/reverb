@@ -496,3 +496,17 @@ func TestSyncDeviceIDSpoofRejected(t *testing.T) {
 		t.Fatalf("own-device change = %d accepted=%d, want 200 and 1", code, resp.Accepted)
 	}
 }
+
+// /sync/trigger is only meaningful once the libp2p host (and with it the
+// syncer) exists; without one it must report unavailable rather than 404/500.
+func TestSyncTriggerUnavailableWithoutSyncer(t *testing.T) {
+	srv, _, _ := newSyncTestServer(t)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync/trigger", nil)
+	req.AddCookie(&http.Cookie{Name: "reverb_session", Value: "test"})
+	req.RemoteAddr = "127.0.0.1:54321"
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("sync trigger without syncer = %d, want 503 (body %s)", rec.Code, rec.Body.String())
+	}
+}

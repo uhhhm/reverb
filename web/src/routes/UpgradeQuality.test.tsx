@@ -42,11 +42,11 @@ beforeEach(() => {
 })
 
 describe('UpgradeQuality route', () => {
-  it('lists downloads below the target tier with their current quality', () => {
+  it('lists downloads whose tier differs from the target, with their current quality', () => {
     wrap()
     expect(screen.getByText('First')).toBeInTheDocument()
     expect(screen.getByText('Second')).toBeInTheDocument()
-    expect(screen.getByText(/2 below High/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 not at High/i)).toBeInTheDocument()
   })
 
   it('defaults the target to the configured download quality', () => {
@@ -54,10 +54,10 @@ describe('UpgradeQuality route', () => {
     expect((screen.getByLabelText(/target quality/i) as HTMLSelectElement).value).toBe('high')
   })
 
-  it('upgrades only the selected tracks, carrying their current quality', async () => {
+  it('re-downloads only the selected tracks, carrying their current quality', async () => {
     wrap()
     fireEvent.click(screen.getByLabelText('Select First'))
-    fireEvent.click(screen.getByRole('button', { name: /upgrade selected/i }))
+    fireEvent.click(screen.getByRole('button', { name: /apply to selected/i }))
     await waitFor(() => expect(mockMutateAsync).toHaveBeenCalledTimes(1))
     expect(mockMutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'First', quality: 'high', currentQuality: 'low' }),
@@ -67,23 +67,23 @@ describe('UpgradeQuality route', () => {
   it('select all picks up every row', async () => {
     wrap()
     fireEvent.click(screen.getByLabelText('Select all'))
-    fireEvent.click(screen.getByRole('button', { name: /upgrade selected/i }))
+    fireEvent.click(screen.getByRole('button', { name: /apply to selected/i }))
     await waitFor(() => expect(mockMutateAsync).toHaveBeenCalledTimes(2))
   })
 
-  it('keeps going when one upgrade fails and reports the shortfall', async () => {
+  it('keeps going when one re-download fails and reports the shortfall', async () => {
     mockMutateAsync.mockRejectedValueOnce(new Error('nope'))
     wrap()
     fireEvent.click(screen.getByLabelText('Select all'))
-    fireEvent.click(screen.getByRole('button', { name: /upgrade selected/i }))
+    fireEvent.click(screen.getByRole('button', { name: /apply to selected/i }))
     await waitFor(() => expect(mockPush).toHaveBeenCalled())
     expect(mockMutateAsync).toHaveBeenCalledTimes(2)
-    expect(mockPush).toHaveBeenCalledWith('Queued 1 of 2 upgrades', 'error')
+    expect(mockPush).toHaveBeenCalledWith('Queued 1 of 2 re-downloads', 'error')
   })
 
-  it('shows an empty state when nothing is below the tier', () => {
+  it('shows an empty state when every download is already at the tier', () => {
     mockUseUpgradable.mockReturnValue({ data: [], isLoading: false })
     wrap()
-    expect(screen.getByText(/nothing to upgrade/i)).toBeInTheDocument()
+    expect(screen.getByText(/nothing to change/i)).toBeInTheDocument()
   })
 })

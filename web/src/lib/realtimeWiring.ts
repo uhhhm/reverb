@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { RealtimeConnection, type WebSocketLike } from './realtime'
 import { useDownloads } from './downloadStore'
+import { useSyncStore } from './syncStore'
 import { useLibraryRevision } from './libraryRevisionStore'
 import { getDownloads, getQueueState } from './downloadApi'
 import type { DownloadEvent, DownloadRemovedEvent, LibraryUpdatedEvent, QueueStateEvent, RealtimeEvent } from './types'
@@ -54,6 +55,14 @@ export function useRealtime(makeSocket?: (url: string) => WebSocketLike): void {
         }
         case 'download.queue': {
           useDownloads.getState().setPaused((frame.payload as QueueStateEvent).paused)
+          break
+        }
+        case 'sync.started': {
+          useSyncStore.getState().setSyncing(true)
+          break
+        }
+        case 'sync.finished': {
+          useSyncStore.getState().setSyncing(false)
           break
         }
         case 'download.removed': {

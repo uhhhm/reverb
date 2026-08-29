@@ -15,6 +15,7 @@ const (
 	keyLibraryBackendMode = "library_backend_mode"
 	keyDownloadQuality    = "download_quality"
 	keyTheme              = "theme"
+	keyAudioNormalization = "audio_normalization"
 	defaultAccentColor    = "#F0354B"
 	defaultTheme          = "default-dark"
 )
@@ -27,6 +28,9 @@ type settingsDTO struct {
 	LibraryBackendMode string `json:"libraryBackendMode"`
 	DownloadQuality    string `json:"downloadQuality"`
 	Theme              string `json:"theme"`
+	// AudioNormalization applies a per-track playback gain so tracks sound
+	// level against each other. The files are never re-encoded.
+	AudioNormalization bool `json:"audioNormalization"`
 }
 
 var allowedThemes = map[string]bool{
@@ -58,6 +62,9 @@ func (s *Server) currentSettings(r *http.Request) settingsDTO {
 	if v, err := s.deps.Adapters.GetSetting(r.Context(), keyDownloadQuality); err == nil && v != "" {
 		out.DownloadQuality = string(core.ParseAudioQuality(v, core.DefaultAudioQuality))
 	}
+	if v, err := s.deps.Adapters.GetSetting(r.Context(), keyAudioNormalization); err == nil {
+		out.AudioNormalization = v == "true"
+	}
 	if v, err := s.deps.Adapters.GetSetting(r.Context(), keyTheme); err == nil && v != "" {
 		if allowedThemes[v] {
 			out.Theme = v
@@ -77,6 +84,7 @@ type putSettingsBody struct {
 	LibraryBackendMode *string `json:"libraryBackendMode"`
 	DownloadQuality    *string `json:"downloadQuality"`
 	Theme              *string `json:"theme"`
+	AudioNormalization *bool   `json:"audioNormalization"`
 }
 
 func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +135,16 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.deps.Adapters.UpsertSetting(r.Context(), db.UpsertSettingParams{Key: keyDownloadQuality, Value: string(q)}); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save settings"})
+			return
+		}
+	}
+	if body.AudioNormalization != nil {
+		v := "false"
+		if *body.AudioNormalization {
+			v = "true"
+		}
+		if err := s.deps.Adapters.UpsertSetting(r.Context(), db.UpsertSettingParams{Key: keyAudioNormalization, Value: v}); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save settings"})
 			return
 		}

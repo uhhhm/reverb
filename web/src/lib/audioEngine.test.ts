@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { AudioEngine, type AudioElement } from './audioEngine'
 import type { Track } from './types'
 
@@ -317,5 +317,135 @@ describe('AudioEngine loading state', () => {
     audios[0].fire('canplay')
     expect(seen).toContain(true)
     expect(seen[seen.length - 1]).toBe(false)
+  })
+})
+
+// ── Loudness normalization ───────────────────────────────────────────────────
+// The gain is applied at playback time by a gain stage in front of the output;
+// the file itself is never touched, so switching this off is instant.
+describe('AudioEngine normalization', () => {
+  function normEngine(gains: Record<string, number | null>) {
+    const gain = { gain: { value: 1 } }
+    const fetched: string[] = []
+    const engine = new AudioEngine(
+      () => new FakeAudio(),
+      (t) => `mock://${t.id}`,
+      async (id) => {
+        fetched.push(id)
+        return gains[id] ?? null
+      },
+      () => gain,
+    )
+    return { engine, gain, fetched }
+  }
+
+  it('applies the measured gain for the playing track', async () => {
+    const { engine, gain } = normEngine({ '1': 6 })
+    engine.setNormalization(true)
+    engine.playTrackList([track('1')], 0)
+    await vi.waitFor(() => expect(gain.gain.value).toBeCloseTo(Math.pow(10, 6 / 20), 5))
+  })
+
+  // A track with no measurement plays untouched rather than at some guessed level.
+  it('leaves gain at unity when the server has no measurement', async () => {
+    const { engine, gain } = normEngine({ '1': null })
+    engine.setNormalization(true)
+    engine.playTrackList([track('1')], 0)
+    await vi.waitFor(() => expect(gain.gain.value).toBe(1))
+  })
+
+  it('does not measure anything while normalization is off', async () => {
+    const { engine, fetched } = normEngine({ '1': 6 })
+    engine.playTrackList([track('1')], 0)
+    await Promise.resolve()
+    expect(fetched).toEqual([])
+  })
+
+  it('restores unity gain the moment normalization is switched off', async () => {
+    const { engine, gain } = normEngine({ '1': -6 })
+    engine.setNormalization(true)
+    engine.playTrackList([track('1')], 0)
+    await vi.waitFor(() => expect(gain.gain.value).toBeLessThan(1))
+    engine.setNormalization(false)
+    expect(gain.gain.value).toBe(1)
+  })
+
+  // Measuring runs ffmpeg server-side on first play, so it must be cached —
+  // re-measuring on every replay would stall the track each time.
+  it('measures each track once', async () => {
+    const { engine, fetched } = normEngine({ '1': 3, '2': 3 })
+    engine.setNormalization(true)
+    engine.playTrackList([track('1'), track('2')], 0)
+    await vi.waitFor(() => expect(fetched).toEqual(['1']))
+    engine.next()
+    await vi.waitFor(() => expect(fetched).toEqual(['1', '2']))
+    engine.prev()
+    await vi.waitFor(() => expect(fetched).toEqual(['1', '2']))
+  })
+})
+
+// ── Cropping ────────────────────────────────────────────────────────────────
+// A crop is a playback window over an untouched file, so the engine plays the
+// window and reports times relative to it.
+describe('AudioEngine crop', () => {
+  function cropped(overrides: Partial<Track>): Track {
+    return { ...track('1'), durationMs: 200000, ...overrides }
+  }
+
+  it('starts playback at the crop start', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([cropped({ cropStartMs: 30000 })], 0)
+    expect(audios[0].currentTime).toBe(30)
+  })
+
+  it('reports position and duration relative to the crop window', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([cropped({ cropStartMs: 30000, cropEndMs: 90000 })], 0)
+    audios[0].duration = 200
+    audios[0].currentTime = 45
+    audios[0].fire('timeupdate')
+    expect(engine.getState().currentTimeMs).toBe(15000)
+    expect(engine.getState().durationMs).toBe(60000)
+  })
+
+  it('seeks relative to the crop start', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([cropped({ cropStartMs: 30000, cropEndMs: 90000 })], 0)
+    audios[0].duration = 200
+    audios[0].fire('timeupdate')
+    engine.seekMs(10000)
+    expect(audios[0].currentTime).toBe(40)
+  })
+
+  // Reaching the crop end is the end of the track, so the queue advances.
+  it('advances at the crop end instead of playing the trimmed outro', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([cropped({ cropEndMs: 60000 }), track('2')], 0)
+    audios[0].duration = 200
+    audios[0].currentTime = 61
+    audios[0].fire('timeupdate')
+    expect(engine.getState().current?.id).toBe('2')
+  })
+
+  // The file still holds the trimmed intro, so playback that lands before the
+  // start must jump forward rather than let it through.
+  it('skips forward when playback lands before the crop start', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([cropped({ cropStartMs: 30000 })], 0)
+    audios[0].duration = 200
+    audios[0].currentTime = 0
+    audios[0].fire('timeupdate')
+    expect(audios[0].currentTime).toBe(30)
+    expect(engine.getState().currentTimeMs).toBe(0)
+  })
+
+  it('leaves an uncropped track alone', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([cropped({})], 0)
+    audios[0].duration = 200
+    audios[0].currentTime = 45
+    audios[0].fire('timeupdate')
+    expect(engine.getState().currentTimeMs).toBe(45000)
+    expect(engine.getState().durationMs).toBe(200000)
   })
 })

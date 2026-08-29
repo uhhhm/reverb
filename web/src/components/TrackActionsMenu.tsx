@@ -4,6 +4,8 @@ import { Icon } from './ui'
 import type { IconName } from './ui/Icon'
 import { AddToPlaylistMenu } from './AddToPlaylistMenu'
 import { useTrackUpgrade } from '../lib/useTrackUpgrade'
+import { TrackQualityDialog } from './TrackQualityDialog'
+import { TrackCropDialog } from './TrackCropDialog'
 import { qualityLabel } from '../lib/audioQuality'
 import type { Track } from '../lib/types'
 
@@ -35,6 +37,8 @@ export function TrackActionsMenu({ track, onRename }: TrackActionsMenuProps) {
   const panelRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
   const [playlistOpen, setPlaylistOpen] = useState(false)
+  const [qualityOpen, setQualityOpen] = useState(false)
+  const [cropOpen, setCropOpen] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
   const upgrade = useTrackUpgrade(track)
 
@@ -65,15 +69,21 @@ export function TrackActionsMenu({ track, onRename }: TrackActionsMenuProps) {
     description: 'Put this track in one of your playlists',
     onSelect: () => setPlaylistOpen(true),
   })
+  items.push({
+    icon: 'scissors',
+    label: 'Crop',
+    description: 'Trim the intro or outro — your file is never modified',
+    onSelect: () => setCropOpen(true),
+  })
   if (upgrade.available) {
     items.push({
       icon: 'up',
-      label: `Upgrade to ${qualityLabel(upgrade.target)}`,
+      label: 'Audio quality',
       description: upgrade.current
-        ? `Re-download from the original source and replace the current ${qualityLabel(upgrade.current)} file`
-        : 'Re-download from the original source and replace the current file',
+        ? `Currently ${qualityLabel(upgrade.current)} — pick a higher or lower tier`
+        : 'Pick the tier this track is fetched at',
       disabled: upgrade.isPending,
-      onSelect: upgrade.run,
+      onSelect: () => setQualityOpen(true),
     })
   }
 
@@ -164,6 +174,8 @@ export function TrackActionsMenu({ track, onRename }: TrackActionsMenuProps) {
         )}
 
       {playlistOpen && <AddToPlaylistMenu track={track} onClose={() => setPlaylistOpen(false)} />}
+      {qualityOpen && <TrackQualityDialog track={track} onClose={() => setQualityOpen(false)} />}
+      {cropOpen && <TrackCropDialog track={track} onClose={() => setCropOpen(false)} />}
     </>
   )
 }

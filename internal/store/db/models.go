@@ -206,14 +206,6 @@ type ScrobbleQueue struct {
 	CreatedAt     int64  `json:"created_at"`
 }
 
-type Session struct {
-	ID        string `json:"id"`
-	TokenHash string `json:"token_hash"`
-	CreatedAt int64  `json:"created_at"`
-	ExpiresAt int64  `json:"expires_at"`
-	LastSeen  int64  `json:"last_seen"`
-}
-
 type Setting struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
@@ -262,12 +254,31 @@ type SyncedPlaylist struct {
 	OwnerUserID     sql.NullString `json:"owner_user_id"`
 }
 
+type TrackCrop struct {
+	TrackID   string        `json:"track_id"`
+	StartMs   int64         `json:"start_ms"`
+	EndMs     sql.NullInt64 `json:"end_ms"`
+	UpdatedAt int64         `json:"updated_at"`
+}
+
+type TrackLoudness struct {
+	TrackID   string  `json:"track_id"`
+	GainDb    float64 `json:"gain_db"`
+	UpdatedAt int64   `json:"updated_at"`
+}
+
 type TrackOverride struct {
 	TrackID   string         `json:"track_id"`
 	Title     string         `json:"title"`
 	Artist    string         `json:"artist"`
 	UpdatedAt int64          `json:"updated_at"`
 	CatalogID sql.NullString `json:"catalog_id"`
+}
+
+type TrackQualityOverride struct {
+	TrackID   string `json:"track_id"`
+	Quality   string `json:"quality"`
+	UpdatedAt int64  `json:"updated_at"`
 }
 
 type User struct {

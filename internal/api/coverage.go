@@ -103,6 +103,7 @@ func (s *Server) handleAlbumDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.deps.Overrides.ApplyDetailTracks(r.Context(), det.Tracks)
+	s.deps.Crop.ApplyDetailTracks(r.Context(), det.Tracks)
 	writeJSON(w, http.StatusOK, det)
 }
 

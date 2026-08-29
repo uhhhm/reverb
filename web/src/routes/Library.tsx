@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAlbums, useArtists, useLibraryStatus, useSongs } from '../lib/libraryApi'
+import { UploadTracksButton } from '../components/UploadTracksButton'
 import { useSyncedPlaylists } from '../lib/syncedPlaylistApi'
 import { Chip, MediaCard, Skeleton, EmptyState, Button, TrackRow } from '../components/ui'
 import { ImportPlaylistDialog } from '../components/ImportPlaylistDialog'
@@ -115,6 +116,9 @@ export default function Library() {
           >
             Collection
           </Button>
+          {/* Uploading writes into the managed music directory, which only
+              exists with the built-in library. */}
+          {libStatus.data?.mode === 'built-in' && <UploadTracksButton />}
           <Button
             size="sm"
             variant="secondary"

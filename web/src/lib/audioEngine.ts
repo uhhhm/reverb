@@ -1,5 +1,6 @@
 import type { Track } from './types'
 import { streamUrlFor } from './trackRef'
+import { fetchTrackGainDb } from './gainApi'
 
 export type RepeatMode = 'off' | 'all' | 'one'
 
@@ -15,6 +16,14 @@ export interface AudioElement {
   buffered: { length: number; end(i: number): number; start(i: number): number }
   addEventListener(type: string, cb: () => void): void
   removeEventListener(type: string, cb: () => void): void
+}
+
+/**
+ * The gain control the engine drives. Modelled as an interface so tests (and any
+ * future non-Web-Audio path) can stand in for a real GainNode.
+ */
+export interface GainControl {
+  gain: { value: number }
 }
 
 export interface PlayerState {
@@ -63,6 +72,18 @@ export class AudioEngine {
 
   private loading = false
 
+  // Playback-time loudness normalization. The file is never re-encoded: the
+  // measured per-track gain is applied by a Web Audio GainNode in front of the
+  // output. A media element can only be wrapped in a MediaElementSource ONCE,
+  // which is why the graph is built against the long-lived `active` element and
+  // then only has its gain value updated per track.
+  private normalization = false
+  private audioCtx: AudioContext | null = null
+  private gainNode: GainControl | null = null
+  private createGain: () => GainControl | null
+  private gainDbCache = new Map<string, number>()
+  private fetchGainDb: (trackId: string) => Promise<number | null>
+
   // stream-error recovery
   private consecutiveErrors = 0
   private repeatOneReloadAttempted = false
@@ -70,9 +91,13 @@ export class AudioEngine {
   constructor(
     factory: () => AudioElement = realAudioFactory,
     resolveSrc: (t: Track) => string = (t) => streamUrlFor(t),
+    fetchGainDb: (trackId: string) => Promise<number | null> = fetchTrackGainDb,
+    createGain?: () => GainControl | null,
   ) {
     this.factory = factory
     this.resolveSrc = resolveSrc
+    this.fetchGainDb = fetchGainDb
+    this.createGain = createGain ?? (() => this.createWebAudioGain())
     this.active = this.factory()
     this.preload = this.factory()
     this.bindActive()
@@ -94,14 +119,48 @@ export class AudioEngine {
     // null/ignore the preload src silently, never advance the queue.
   }
 
+  /**
+   * The current track's crop, as absolute file positions in ms. A crop is
+   * non-destructive: the file still holds every sample, so the engine simply
+   * plays the window and reports times relative to it. `end` of 0 means "to the
+   * end of the file".
+   */
+  private cropWindow(): { start: number; end: number } {
+    const t = this.getState().current
+    return { start: Math.max(0, t?.cropStartMs ?? 0), end: Math.max(0, t?.cropEndMs ?? 0) }
+  }
+
   private onTime = () => {
-    this.currentTimeMs = Math.round((this.active.currentTime || 0) * 1000)
-    this.durationMs = Number.isFinite(this.active.duration)
+    const { start, end } = this.cropWindow()
+    const rawMs = Math.round((this.active.currentTime || 0) * 1000)
+    const rawDurationMs = Number.isFinite(this.active.duration)
       ? Math.round((this.active.duration || 0) * 1000)
-      : this.durationMs
+      : 0
+
+    // Playing before the crop start (a fresh load, or a seek that landed short)
+    // jumps forward rather than letting the trimmed intro through.
+    if (start > 0 && rawMs < start - 250) {
+      this.active.currentTime = start / 1000
+      this.currentTimeMs = 0
+      this.emit()
+      return
+    }
+
+    // The crop end is the track's end: stop there and move on, exactly as if
+    // the file had run out.
+    if (end > 0 && rawMs >= end) {
+      this.onEnded()
+      return
+    }
+
+    this.currentTimeMs = Math.max(0, rawMs - start)
+    const effectiveEnd = end > 0 ? end : rawDurationMs
+    if (effectiveEnd > 0) {
+      this.durationMs = Math.max(0, effectiveEnd - start)
+    }
     const b = this.active.buffered
     if (b && b.length > 0) {
-      this.bufferedMs = Math.round(b.end(b.length - 1) * 1000)
+      this.bufferedMs = Math.max(0, Math.round(b.end(b.length - 1) * 1000) - start)
     }
     this.emit()
   }
@@ -166,13 +225,82 @@ export class AudioEngine {
 
   private onEnded = () => {
     if (this.repeat === 'one') {
-      this.active.currentTime = 0
+      this.active.currentTime = this.cropWindow().start / 1000
       void this.active.play()
       this.playing = true
       this.emit()
       return
     }
     this.advance(1, true)
+  }
+
+  /**
+   * Turns loudness normalization on or off. Off simply pins the gain at unity —
+   * the graph stays in place, because a MediaElementSource cannot be undone.
+   */
+  setNormalization(enabled: boolean) {
+    if (this.normalization === enabled) return
+    this.normalization = enabled
+    if (!enabled) {
+      if (this.gainNode) this.gainNode.gain.value = 1
+      return
+    }
+    const t = this.getState().current
+    if (t) void this.applyGainFor(t)
+  }
+
+  /** Builds the gain stage once and reuses it for every track. */
+  private ensureGraph(): GainControl | null {
+    if (this.gainNode) return this.gainNode
+    this.gainNode = this.createGain()
+    return this.gainNode
+  }
+
+  /** The real graph: AudioContext → MediaElementSource → GainNode → output. */
+  private createWebAudioGain(): GainControl | null {
+    if (typeof window === 'undefined') return null
+    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!Ctx) return null
+    const el = this.active as unknown as HTMLMediaElement
+    // Test doubles are plain objects, not media elements; there is nothing to wrap.
+    if (typeof HTMLMediaElement === 'undefined' || !(el instanceof HTMLMediaElement)) return null
+    try {
+      const ctx = new Ctx()
+      const source = ctx.createMediaElementSource(el)
+      const gain = ctx.createGain()
+      source.connect(gain)
+      gain.connect(ctx.destination)
+      this.audioCtx = ctx
+      return gain
+    } catch {
+      // A browser that refuses the graph (autoplay policy, already-wrapped
+      // element) just means unmodified playback.
+      return null
+    }
+  }
+
+  /**
+   * Sets the gain for one track. Applied asynchronously because the first
+   * measurement of a file runs ffmpeg server-side; the track starts at unity
+   * and settles to its level, rather than being held back on the network.
+   */
+  private async applyGainFor(track: Track) {
+    if (!this.normalization || !track.id) return
+    const gain = this.ensureGraph()
+    if (!gain) return
+    // The context starts suspended until a user gesture in most browsers.
+    if (this.audioCtx?.state === 'suspended') void this.audioCtx.resume()
+
+    let db = this.gainDbCache.get(track.id)
+    if (db === undefined) {
+      const fetched = await this.fetchGainDb(track.id).catch(() => null)
+      db = fetched ?? 0
+      this.gainDbCache.set(track.id, db)
+    }
+    // A track change during the fetch must not apply the wrong gain.
+    if (this.getState().current?.id !== track.id) return
+    if (!this.normalization) return
+    gain.gain.value = Math.pow(10, db / 20)
   }
 
   subscribe(cb: (s: PlayerState) => void): () => void {
@@ -257,6 +385,16 @@ export class AudioEngine {
     this.active.load()
     this.loading = true
     this.currentTimeMs = 0
+    // A crop starts playback inside the file. The assignment may be ignored
+    // until metadata arrives, which onTime's forward-clamp then fixes.
+    const cropStart = Math.max(0, t.cropStartMs ?? 0)
+    this.active.currentTime = cropStart / 1000
+    this.durationMs = t.cropEndMs && t.cropEndMs > cropStart ? t.cropEndMs - cropStart : 0
+    if (this.normalization) {
+      // Start at unity so a leftover gain from the previous track cannot leak in.
+      if (this.gainNode) this.gainNode.gain.value = 1
+      void this.applyGainFor(t)
+    }
     if (autoplay) {
       void this.active.play()
       this.playing = true
@@ -384,9 +522,10 @@ export class AudioEngine {
     this.advance(-1)
   }
 
+  /** Seeks within the cropped window; ms is relative to the crop start. */
   seekMs(ms: number) {
     const clamped = Math.max(0, this.durationMs > 0 ? Math.min(ms, this.durationMs) : ms)
-    this.active.currentTime = clamped / 1000
+    this.active.currentTime = (this.cropWindow().start + clamped) / 1000
     this.currentTimeMs = clamped
     this.emit()
   }

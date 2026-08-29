@@ -58,6 +58,7 @@ func (s *Server) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.deps.Overrides.ApplyTracks(r.Context(), res.Tracks)
+	s.deps.Crop.ApplyTracks(r.Context(), res.Tracks)
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -85,6 +86,7 @@ func (s *Server) handleLibraryAlbum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.deps.Overrides.ApplyTracks(r.Context(), al.Tracks)
+	s.deps.Crop.ApplyTracks(r.Context(), al.Tracks)
 	writeJSON(w, http.StatusOK, al)
 }
 
@@ -150,6 +152,7 @@ func (s *Server) handleLibrarySongs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.deps.Overrides.ApplyTracks(r.Context(), songs)
+	s.deps.Crop.ApplyTracks(r.Context(), songs)
 	writeJSON(w, http.StatusOK, songs)
 }
 

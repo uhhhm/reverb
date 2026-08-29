@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/uhhhm/reverb/internal/auth"
 	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/crop"
 	"github.com/uhhhm/reverb/internal/events"
 	"github.com/uhhhm/reverb/internal/library"
 	"github.com/uhhhm/reverb/internal/linkadd"
@@ -156,6 +157,16 @@ type Deps struct {
 	// Overrides applies user-supplied track renames on read and records them on
 	// write. Nil disables renaming (handlers return 503).
 	Overrides *override.Service
+	// TrackQuality persists per-track download-quality overrides, which take
+	// precedence over the global download_quality setting. *db.Queries satisfies
+	// it. Nil disables per-track quality (handlers return 503).
+	TrackQuality TrackQualityStore
+	// Crop stores non-destructive playback boundaries and applies them on read.
+	// Nil disables cropping (handlers return 503).
+	Crop *crop.Service
+	// Loudness caches measured playback gain per track. *db.Queries satisfies
+	// it. Nil means every request re-measures (or, with no local files, none).
+	Loudness LoudnessStore
 	// Play records user play events and mints catalog IDs. Nil in tests/legacy
 	// that don't exercise the listening-history boundary.
 	Play *play.Service
@@ -189,10 +200,28 @@ type Deps struct {
 	P2P       func() *p2p.Host
 	// P2PGuard provides the libp2p peer trust set for pairing binds.
 	P2PGuard func() *p2p.Guard
+	// P2PSyncer exposes the anti-entropy syncer so the UI can trigger a round
+	// on demand. Reads the live field, since the syncer only exists once the
+	// libp2p host has started (see app.StartBackground).
+	P2PSyncer func() *p2p.Syncer
 	// DeviceKeys records peer devices and their Ed25519 verification keys.
 	DeviceKeys p2p.DeviceKeyStore
 	FileStore  FileManifestStore
 	MusicDir   string
+}
+
+// TrackQualityStore persists per-track download-quality overrides.
+// *db.Queries satisfies it.
+type TrackQualityStore interface {
+	GetTrackQualityOverride(ctx context.Context, trackID string) (db.TrackQualityOverride, error)
+	UpsertTrackQualityOverride(ctx context.Context, arg db.UpsertTrackQualityOverrideParams) error
+	DeleteTrackQualityOverride(ctx context.Context, trackID string) error
+}
+
+// LoudnessStore caches measured per-track playback gain. *db.Queries satisfies it.
+type LoudnessStore interface {
+	GetTrackLoudness(ctx context.Context, trackID string) (db.TrackLoudness, error)
+	UpsertTrackLoudness(ctx context.Context, arg db.UpsertTrackLoudnessParams) error
 }
 
 // FileManifestStore backs p2p file manifest listing. *db.Queries satisfies it.
@@ -314,6 +343,7 @@ func (s *Server) routes() {
 			// Cookie existence check, which was bypassable and broke fresh installs).
 			pr.Post("/sync", s.handleSync)
 			pr.Get("/sync/status", s.handleSyncStatus)
+			pr.Post("/sync/trigger", s.handleSyncTrigger)
 			pr.Get("/me", s.handleMe)
 			pr.Get("/config/pending-restart", s.handlePendingRestart)
 			pr.Get("/library/status", s.handleLibraryStatus)
@@ -324,6 +354,12 @@ func (s *Server) routes() {
 			pr.Get("/library/albums", s.handleLibraryAlbums)
 			pr.Get("/library/songs", s.handleLibrarySongs)
 			pr.Put("/library/track/{id}/name", s.handleRenameTrack)
+			pr.Get("/library/track/{id}/gain", s.handleTrackGain)
+			pr.Get("/library/track/{id}/crop", s.handleGetTrackCrop)
+			pr.Put("/library/track/{id}/crop", s.handleSetTrackCrop)
+			pr.Delete("/library/track/{id}/crop", s.handleDeleteTrackCrop)
+			pr.Get("/library/track/{id}/quality", s.handleGetTrackQuality)
+			pr.Put("/library/track/{id}/quality", s.handleSetTrackQuality)
 			pr.Get("/downloads/upgradable", s.handleListUpgradable)
 			pr.Get("/library/track/{id}/peaks", s.handleTrackPeaks)
 			pr.Get("/library/track/{id}/lyrics", s.handleTrackLyrics)
@@ -402,6 +438,9 @@ func (s *Server) routes() {
 				mr.Put("/adapters/{id}", s.handleUpdateAdapter)
 				mr.Delete("/adapters/{id}", s.handleDeleteAdapter)
 				mr.Post("/adapters/test", s.handleTestAdapter)
+				// Uploading writes into the managed music directory, so it sits
+				// with the library-management capability, not the download one.
+				mr.Post("/library/upload", s.handleUploadTracks)
 				mr.Get("/settings", s.handleGetSettings)
 				mr.Put("/settings", s.handlePutSettings)
 				mr.Get("/admin/integrations/lastfm", s.handleGetLastfmIntegration)

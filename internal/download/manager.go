@@ -1206,6 +1206,11 @@ func (m *Manager) process(id string) {
 	m.scheduleScan(id)
 }
 
+// ScheduleScan asks for a library rescan through the same debounced window a
+// completed download uses, so a file that arrived by another route (an upload)
+// is picked up without a second, competing rescan mechanism.
+func (m *Manager) ScheduleScan() { m.scheduleScan("") }
+
 // scheduleScan (re)arms the debounce timer. Multiple completions within the
 // window collapse into ONE scan. Uses the injectable clock so tests advance time.
 func (m *Manager) scheduleScan(jobID string) {
