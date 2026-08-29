@@ -1,5 +1,6 @@
 import { Toggle } from '../ui'
 import { AccentSwatches } from '../AccentSwatches'
+import { ThemePicker } from '../ThemePicker'
 import { useSettings, useUpdateSettings } from '../../lib/settingsApi'
 
 /** Appearance tab panel — accent color, dynamic-bg toggle, theme. */
@@ -42,17 +43,15 @@ export function AppearanceSection() {
         </div>
       </div>
 
-      {/* Theme row — dark only, honest */}
-      <div className="flex items-center gap-5 py-5">
-        <div className="flex-1 min-w-0">
+      {/* Theme row */}
+      <div className="py-5 space-y-3">
+        <div>
           <div className="text-sm font-bold text-text-primary">Theme</div>
           <div className="text-xs text-text-secondary mt-0.5">
-            Dark-first. Light theme is on the roadmap.
+            Pick your darkness — all dark, inspired by Catppuccin.
           </div>
         </div>
-        <div className="flex-none">
-          <span className="text-sm font-semibold text-text-secondary">Dark</span>
-        </div>
+        <ThemePicker />
       </div>
     </div>
   )

@@ -5,12 +5,18 @@ import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import App from './App'
 import { getSettings, applyAccent } from './lib/settingsApi'
+import { applyTheme, applyThemeFromCache } from './lib/themes'
 import './index.css'
 
-// Best-effort: theme the app with the saved accent before the user notices.
-// Fails silently when logged out (settings is auth-gated) — the CSS default red wins.
+// Best-effort: theme the app with the saved accent + theme before the user notices.
+// 1) Apply cached theme synchronously to avoid flash.
+// 2) Fetch authoritative settings and apply both accent and theme.
+applyThemeFromCache()
 void getSettings()
-  .then((s) => applyAccent(s.accentColor))
+  .then((s) => {
+    applyAccent(s.accentColor)
+    if (s.theme) applyTheme(s.theme)
+  })
   .catch(() => {})
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

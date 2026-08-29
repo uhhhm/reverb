@@ -10,7 +10,7 @@
   /* accent — configurable; default red #F0354B as space-separated RGB channels */
   --color-accent: 240 53 75;
 
-  /* surfaces (fixed) */
+  /* surfaces (themed — overridden per [data-theme]) */
   --bg-base: #000000;        /* gaps between panels */
   --bg-surface: #121212;     /* panels */
   --bg-raised: #181818;      /* cards */
@@ -18,7 +18,7 @@
   --bg-input: #1f1f1f;
   --border-subtle: #242424;
 
-  /* text (fixed) */
+  /* text (themed) */
   --text-primary: #ffffff;
   --text-secondary: #b3b3b3;
   --text-muted: #8a8a8a;
@@ -33,6 +33,63 @@
 
   /* dynamic album wash — set live by the palette service; defaults to surface (invisible) */
   --album-wash: 18 18 18;
+}
+
+/* ── Themes ──────────────────────────────────────────────────────────── */
+/* Default dark — explicit so [data-theme="default-dark"] is predictable. */
+[data-theme='default-dark'] {
+  --bg-base: #000000;
+  --bg-surface: #121212;
+  --bg-raised: #181818;
+  --bg-raised-hover: #1f1f1f;
+  --bg-input: #1f1f1f;
+  --border-subtle: #242424;
+  --text-primary: #ffffff;
+  --text-secondary: #b3b3b3;
+  --text-muted: #8a8a8a;
+  --album-wash: 18 18 18;
+}
+
+/* Catppuccin Mocha — Base #1e1e2e / Mantle #181825 / Crust #11111b */
+[data-theme='catppuccin-mocha'] {
+  --bg-base: #11111b;        /* Crust — gaps */
+  --bg-surface: #181825;     /* Mantle — panels */
+  --bg-raised: #1e1e2e;      /* Base — cards */
+  --bg-raised-hover: #313244; /* Surface0 */
+  --bg-input: #313244;       /* Surface0 */
+  --border-subtle: #45475a;  /* Surface1 */
+  --text-primary: #cdd6f4;   /* Text */
+  --text-secondary: #bac2de; /* Subtext1 */
+  --text-muted: #7f849c;     /* Overlay1 — subtle per style guide */
+  --album-wash: 24 24 37;    /* #181825 Mantle */
+}
+
+/* Catppuccin Macchiato — Base #24273a / Mantle #1e2030 / Crust #181926 */
+[data-theme='catppuccin-macchiato'] {
+  --bg-base: #181926;        /* Crust */
+  --bg-surface: #1e2030;     /* Mantle */
+  --bg-raised: #24273a;      /* Base */
+  --bg-raised-hover: #363a4f; /* Surface0 */
+  --bg-input: #363a4f;
+  --border-subtle: #494d64;  /* Surface1 */
+  --text-primary: #cad3f5;
+  --text-secondary: #b8c0e0; /* Subtext1 */
+  --text-muted: #8087a2;     /* Overlay1 */
+  --album-wash: 30 32 48;    /* #1e2030 Mantle */
+}
+
+/* Catppuccin Frappé — Base #303446 / Mantle #292c3c / Crust #232634 */
+[data-theme='catppuccin-frappe'] {
+  --bg-base: #232634;        /* Crust */
+  --bg-surface: #292c3c;     /* Mantle */
+  --bg-raised: #303446;      /* Base */
+  --bg-raised-hover: #414559; /* Surface0 */
+  --bg-input: #414559;
+  --border-subtle: #51576d;  /* Surface1 */
+  --text-primary: #c6d0f5;
+  --text-secondary: #b5bfe2; /* Subtext1 */
+  --text-muted: #838ba7;     /* Overlay1 */
+  --album-wash: 41 44 60;    /* #292c3c Mantle */
 }
 
 html, body, #root { height: 100%; }

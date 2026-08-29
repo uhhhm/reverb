@@ -1,12 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
 import type { AudioQuality } from './audioQuality'
+import type { ThemeId } from './themes'
 
 export interface AppSettings {
   accentColor: string
   dynamicBackground: boolean
   libraryBackendMode: string // 'built-in' | 'external'
   downloadQuality: AudioQuality
+  theme: ThemeId
 }
 
 const DEFAULT_ACCENT_CHANNELS = '240 53 75' // #F0354B

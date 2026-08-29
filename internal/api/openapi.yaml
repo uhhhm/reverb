@@ -78,6 +78,10 @@ paths:
                   type: string
                   enum: [low, medium, high, best]
                   description: Default audio quality tier for new downloads (a ceiling, never an upscale).
+                theme:
+                  type: string
+                  enum: [default-dark, catppuccin-mocha, catppuccin-macchiato, catppuccin-frappe]
+                  description: UI theme — all dark, Catppuccin-inspired.
       responses:
         "200": { description: ok, pendingRestart flag included }
         "400": { description: invalid value }
