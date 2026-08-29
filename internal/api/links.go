@@ -37,19 +37,22 @@ func (s *Server) linkStore() LinkStore {
 	return nil
 }
 
-func (s *Server) linkServerDeviceID(ctx context.Context) (string, error) {
+// linkAuthorDeviceID returns the identity link-derived changes are authored
+// under. It is the local device (AuthorDeviceID), because only that identity
+// can be signed and verified by a peer.
+func (s *Server) linkAuthorDeviceID(ctx context.Context) (string, error) {
 	if ls := s.linkStore(); ls != nil {
-		if id, err := reverbsync.ServerDeviceID(ctx, ls); err == nil {
+		if id, err := reverbsync.AuthorDeviceID(ctx, ls); err == nil {
 			return id, nil
 		}
 	}
 	if s.deps.OfflineSet != nil {
-		if id, err := reverbsync.ServerDeviceID(ctx, s.deps.OfflineSet); err == nil {
+		if id, err := reverbsync.AuthorDeviceID(ctx, s.deps.OfflineSet); err == nil {
 			return id, nil
 		}
 	}
 	if s.deps.PairingStore != nil {
-		if id, err := reverbsync.ServerDeviceID(ctx, s.deps.PairingStore); err == nil {
+		if id, err := reverbsync.AuthorDeviceID(ctx, s.deps.PairingStore); err == nil {
 			return id, nil
 		}
 	}
@@ -262,7 +265,7 @@ func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
 
 		// Emit sync change for new entity so canonical library reflects it.
 		if createdNew && s.deps.SyncStore != nil {
-			deviceID, derr := s.linkServerDeviceID(r.Context())
+			deviceID, derr := s.linkAuthorDeviceID(r.Context())
 			if derr == nil && deviceID != "" {
 				ch := reverbsync.SyncChange{
 					EntityType: kind,
@@ -309,7 +312,7 @@ func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
 		}
 		// Emit playlist membership sync_change if we have sync store.
 		if s.deps.SyncStore != nil {
-			deviceID, derr := s.linkServerDeviceID(r.Context())
+			deviceID, derr := s.linkAuthorDeviceID(r.Context())
 			if derr == nil && deviceID != "" {
 				ch := reverbsync.SyncChange{
 					EntityType: "playlist",

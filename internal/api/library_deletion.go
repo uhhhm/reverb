@@ -23,7 +23,7 @@ func (s *Server) emitPlaylistDeletion(ctx context.Context, playlistID string) {
 	if s.deps.SyncStore == nil {
 		return
 	}
-	deviceID := s.resolveServerDeviceForSync(ctx)
+	deviceID := s.resolveAuthorDeviceForSync(ctx)
 	if deviceID == "" {
 		return
 	}
@@ -51,7 +51,7 @@ func (s *Server) emitTrackDeletion(ctx context.Context, catalogID string) {
 	if s.deps.SyncStore == nil {
 		return
 	}
-	deviceID := s.resolveServerDeviceForSync(ctx)
+	deviceID := s.resolveAuthorDeviceForSync(ctx)
 	if deviceID == "" {
 		return
 	}
@@ -65,18 +65,16 @@ func (s *Server) emitTrackDeletion(ctx context.Context, catalogID string) {
 	}
 }
 
-// resolveServerDeviceForSync returns the server device ID via the canonical sync helper.
-func (s *Server) resolveServerDeviceForSync(ctx context.Context) string {
-	if sid, err := s.serverDeviceID(ctx); err == nil && sid != "" {
-		return sid
-	}
-	if s.deps.PairingStore != nil {
-		if id, err := reverbsync.ServerDeviceID(ctx, s.deps.PairingStore); err == nil {
+// resolveAuthorDeviceForSync returns the identity tombstones are authored under
+// -- the local device, the only one that can be signed (see AuthorDeviceID).
+func (s *Server) resolveAuthorDeviceForSync(ctx context.Context) string {
+	if s.deps.OfflineSet != nil {
+		if id, err := reverbsync.AuthorDeviceID(ctx, s.deps.OfflineSet); err == nil && id != "" {
 			return id
 		}
 	}
-	if s.deps.OfflineSet != nil {
-		if id, err := reverbsync.ServerDeviceID(ctx, s.deps.OfflineSet); err == nil {
+	if s.deps.PairingStore != nil {
+		if id, err := reverbsync.AuthorDeviceID(ctx, s.deps.PairingStore); err == nil && id != "" {
 			return id
 		}
 	}

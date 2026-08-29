@@ -73,8 +73,10 @@ func (s *DeletionService) IsDeleted(ctx context.Context, entityType, entityID st
 }
 
 // resolveServerDevice mirrors offline_set serverDeviceID lookup: settings key then ListDevices fallback.
+// resolveServerDevice picks the identity a tombstone is authored under. It is
+// the author identity (local device), not the server device: see AuthorDeviceID.
 func resolveServerDevice(ctx context.Context, q Querier) (string, error) {
-	return ServerDeviceID(ctx, q)
+	return AuthorDeviceID(ctx, q)
 }
 
 // ErrNoServerDevice is returned when no server device can be resolved.

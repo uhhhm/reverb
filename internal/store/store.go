@@ -89,6 +89,7 @@ func (s *Store) prepareGoose() error {
 	}
 	registerGoOnce.Do(func() {
 		goose.AddNamedMigrationContext("0025_single_user.go", upSingleUser, nil)
+		goose.AddNamedMigrationContext("0035_change_authorship.go", upChangeAuthorship, nil)
 	})
 	return nil
 }

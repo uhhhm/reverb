@@ -150,9 +150,9 @@ func (s *Syncer) syncPeer(ctx context.Context, pid peer.ID) error {
 			return nil
 		}
 		ApplyDeviceAnnouncements(ctx, s.keys, resp.Devices)
-		accepted, refused := filterAuthorizedChanges(ctx, s.store, peerDevice, resp.Changes)
+		accepted, refused, why := filterAuthorizedChanges(ctx, s.store, peerDevice, resp.Changes)
 		if refused > 0 {
-			log.Printf("p2p syncer: dropped %d unverifiable change(s) from %s", refused, pid)
+			log.Printf("p2p syncer: dropped %d unverifiable change(s) from %s (%s)", refused, pid, why)
 		}
 		byDevice := make(map[string][]reverbsync.SyncChange)
 		for _, ch := range accepted {

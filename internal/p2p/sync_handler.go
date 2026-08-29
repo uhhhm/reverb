@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/host"
@@ -55,9 +58,9 @@ func RegisterSyncHandler(h host.Host, store *sync.SyncStore, guard *Guard, keys 
 		// a relayed change from a device we have never paired with can be
 		// checked against its own key.
 		ApplyDeviceAnnouncements(ctx, keys, req.Devices)
-		accepted, refused := filterAuthorizedChanges(ctx, store, deviceID, req.Changes)
+		accepted, refused, why := filterAuthorizedChanges(ctx, store, deviceID, req.Changes)
 		if refused > 0 {
-			log.Printf("p2p sync: dropped %d unverifiable change(s) from device %s", refused, deviceID)
+			log.Printf("p2p sync: dropped %d unverifiable change(s) from device %s (%s)", refused, deviceID, why)
 		}
 		req.Changes = accepted
 		guard.Touch(ctx, s.Conn().RemotePeer())
@@ -117,9 +120,16 @@ func RegisterSyncHandler(h host.Host, store *sync.SyncStore, guard *Guard, keys 
 // If a peer-authored change carries a signature, it is verified. A corrupt
 // signature would be stored as-is and become an unrelayable row that fails
 // VerifyChangeAuthorship on the next hop, so it is rejected here.
-func filterAuthorizedChanges(ctx context.Context, store *sync.SyncStore, peerDevice string, in []sync.SyncChange) ([]sync.SyncChange, int) {
+// The int result is the number refused; the string is a short description of
+// who authored them and why they failed, for the log. A refusal is not a
+// transient event -- the sender has no way to learn we dropped its change, so
+// it resends the same rows on every anti-entropy round forever. Naming the
+// author and the reason is what makes that loop diagnosable instead of a bare
+// count repeating every 30 seconds.
+func filterAuthorizedChanges(ctx context.Context, store *sync.SyncStore, peerDevice string, in []sync.SyncChange) ([]sync.SyncChange, int, string) {
 	out := make([]sync.SyncChange, 0, len(in))
 	refused := 0
+	reasons := make(map[string]string)
 	for _, ch := range in {
 		if ch.DeviceID == "" || ch.DeviceID == peerDevice {
 			ch.DeviceID = peerDevice
@@ -131,6 +141,7 @@ func filterAuthorizedChanges(ctx context.Context, store *sync.SyncStore, peerDev
 						// connection itself is trusted via Guard, so accept.
 					} else {
 						refused++
+						reasons[ch.DeviceID] = err.Error()
 						continue
 					}
 				}
@@ -140,9 +151,27 @@ func filterAuthorizedChanges(ctx context.Context, store *sync.SyncStore, peerDev
 		}
 		if err := store.VerifyChangeAuthorship(ctx, ch); err != nil {
 			refused++
+			reasons[ch.DeviceID] = err.Error()
 			continue
 		}
 		out = append(out, ch)
 	}
-	return out, refused
+	return out, refused, describeRefusals(reasons)
+}
+
+// describeRefusals renders the per-author reasons in a stable order.
+func describeRefusals(reasons map[string]string) string {
+	if len(reasons) == 0 {
+		return ""
+	}
+	authors := make([]string, 0, len(reasons))
+	for did := range reasons {
+		authors = append(authors, did)
+	}
+	sort.Strings(authors)
+	parts := make([]string, 0, len(authors))
+	for _, did := range authors {
+		parts = append(parts, fmt.Sprintf("author %s: %s", did, reasons[did]))
+	}
+	return strings.Join(parts, "; ")
 }

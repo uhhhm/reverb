@@ -197,6 +197,24 @@ func LocalDeviceID(ctx context.Context, q ServerDeviceQuerier) (string, error) {
 	return "", ErrNoServerDevice
 }
 
+// AuthorDeviceID returns the device identity changes authored on this node must
+// be attributed to: the local device, falling back to the server device only if
+// there is none.
+//
+// This must be the local device, not the server device. The local device is the
+// one bound to the libp2p identity, so it is the only one that has a signing key
+// (SetSigner installs it for that ID and signerFor refuses every other) and the
+// only one whose public key peers learn during pairing. A change authored under
+// the server device can never be signed and can never be verified by a peer: it
+// arrives naming an author the peer has no key for, is refused as unverifiable,
+// and is resent on every anti-entropy round forever.
+func AuthorDeviceID(ctx context.Context, q ServerDeviceQuerier) (string, error) {
+	if id, err := LocalDeviceID(ctx, q); err == nil && id != "" {
+		return id, nil
+	}
+	return ServerDeviceID(ctx, q)
+}
+
 // EnsureServerDevice ensures one device row with is_server=1 exists.
 // If none exists it creates dev_<uuid> name="server" with a random token hash.
 // It stores server_device_id in settings for convenience and is idempotent.

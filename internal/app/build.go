@@ -212,11 +212,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	linkAddSvc := linkadd.New(st.Q(), syncStoreForLink, bundle.Manager,
 		linkadd.WithTrackLookup(ProviderLookup{Get: reloader.TrackLookupProvider()}),
 		linkadd.WithDeviceID(func(ctx context.Context) (string, error) {
-			// Prefer P2P local device, fall back to server device for back-compat.
-			if id, err := reverbsync.LocalDeviceID(ctx, st.Q()); err == nil && id != "" {
-				return id, nil
-			}
-			return reverbsync.ServerDeviceID(ctx, st.Q())
+			return reverbsync.AuthorDeviceID(ctx, st.Q())
 		}),
 	)
 
