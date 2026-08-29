@@ -426,6 +426,12 @@ paths:
               properties:
                 source: { type: string }
                 externalId: { type: string }
+                libraryTrackId:
+                  type: string
+                  description: >-
+                    Used to recover source/externalId from the original download
+                    job when the caller does not know them. Without a recoverable
+                    source the request is refused rather than guessed from text.
                 artist: { type: string }
                 title: { type: string }
                 album: { type: string }
@@ -438,7 +444,7 @@ paths:
       responses:
         "200": { description: DownloadJob }
         "400": { description: missing artist/title or unknown tier }
-        "422": { description: not an upgrade, or nothing can fetch it }
+        "422": { description: not an upgrade, unknown source, or nothing can fetch it }
   /downloads/upgradable:
     get:
       summary: Completed downloads sitting below the target quality tier

@@ -25,6 +25,14 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
   }
 })
 
+vi.mock('../../lib/settingsApi', () => ({
+  useSettings: () => ({ data: { downloadQuality: 'high' } }),
+}))
+vi.mock('../../lib/upgradeApi', () => ({
+  useUpgradable: () => ({ data: [] }),
+  useUpgradeDownload: () => ({ mutate: vi.fn(), isPending: false }),
+}))
+
 import { useSyncedPlaylists } from '../../lib/syncedPlaylistApi'
 
 const track: Track = {
@@ -303,22 +311,44 @@ describe('TrackRow', () => {
   })
 })
 
-describe('Add-to-playlist button', () => {
-  it('shows an "Add to playlist" button on a row with a truthy track.id', () => {
+describe('Row actions menu', () => {
+  it('shows the actions trigger on a row with a truthy track.id', () => {
     renderRow({ onPlay: vi.fn() })
-    expect(screen.getByRole('button', { name: /add to playlist/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /more actions for/i })).toBeInTheDocument()
   })
 
-  it('does NOT show an "Add to playlist" button when track.id is empty', () => {
+  it('does NOT show the actions trigger when track.id is empty', () => {
     renderRow({ onPlay: vi.fn(), track: { ...track, id: '' } })
-    expect(screen.queryByRole('button', { name: /add to playlist/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /more actions for/i })).toBeNull()
   })
 
-  it('clicking "Add to playlist" opens AddToPlaylistMenu and does NOT call onPlay', () => {
+  it('opens a menu whose items carry a description, and does NOT call onPlay', () => {
     const onPlay = vi.fn()
     renderRow({ onPlay })
-    fireEvent.click(screen.getByRole('button', { name: /add to playlist/i }))
-    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /more actions for/i }))
+    const menu = screen.getByRole('menu')
+    expect(menu).toBeInTheDocument()
+    expect(menu).toHaveTextContent(/put this track in one of your playlists/i)
     expect(onPlay).not.toHaveBeenCalled()
+  })
+
+  it('reaches Add to playlist through the menu', () => {
+    renderRow({ onPlay: vi.fn() })
+    fireEvent.click(screen.getByRole('button', { name: /more actions for/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /add to playlist/i }))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('offers Edit details only when onRename is given', () => {
+    renderRow({ onPlay: vi.fn() })
+    fireEvent.click(screen.getByRole('button', { name: /more actions for/i }))
+    expect(screen.queryByRole('menuitem', { name: /edit details/i })).toBeNull()
+
+    const onRename = vi.fn()
+    fireEvent.click(screen.getByTestId('track-actions-backdrop'))
+    renderRow({ onPlay: vi.fn(), onRename })
+    fireEvent.click(screen.getAllByRole('button', { name: /more actions for/i })[1])
+    fireEvent.click(screen.getByRole('menuitem', { name: /edit details/i }))
+    expect(onRename).toHaveBeenCalled()
   })
 })

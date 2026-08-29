@@ -11,11 +11,13 @@ export interface UpgradableTrack {
   album: string
   quality: AudioQuality
   canonicalId?: string
+  libraryTrackId?: string
 }
 
 export interface UpgradeRequest {
   source?: string
   externalId?: string
+  libraryTrackId?: string
   artist: string
   title: string
   album?: string

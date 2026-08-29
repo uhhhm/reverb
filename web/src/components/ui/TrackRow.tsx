@@ -1,10 +1,9 @@
-import { useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import type { Track } from '../../lib/types'
 import { formatDuration } from '../../lib/types'
 import { trackCoverUrl } from '../../lib/libraryApi'
-import { AddToPlaylistMenu } from '../AddToPlaylistMenu'
-import { UpgradeQualityButton } from '../UpgradeQualityButton'
+import { TrackActionsMenu } from '../TrackActionsMenu'
 import { Cover } from './Cover'
 import { Equalizer } from './Equalizer'
 import { Icon } from './Icon'
@@ -42,7 +41,6 @@ export function TrackRow({ track, index, active = false, playing, onPlay, right,
   // coverSrc overrides (external Spotify images); otherwise use album cover directly
   // (album art reliably resolves; per-song embedded art is usually absent).
   const src = coverSrc ?? trackCoverUrl(track, 80)
-  const [menuOpen, setMenuOpen] = useState(false)
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -64,7 +62,7 @@ export function TrackRow({ track, index, active = false, playing, onPlay, right,
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         active ? 'text-accent' : 'text-text-primary',
       ].join(' ')}
-      style={{ gridTemplateColumns: `26px 40px 1fr 1fr ${rightWidth} ${onRename ? '64px' : '36px'} 44px` }}
+      style={{ gridTemplateColumns: `26px 40px 1fr 1fr ${rightWidth} 36px 44px` }}
     >
       {/* Lead: index or Equalizer when active */}
       <span className="grid place-items-center text-sm font-bold text-text-muted">
@@ -148,41 +146,7 @@ export function TrackRow({ track, index, active = false, playing, onPlay, right,
 
       {/* Row actions — only for owned tracks (truthy track.id) */}
       <span className="flex items-center justify-center">
-        <UpgradeQualityButton track={track} />
-        {track.id ? (
-          <button
-            type="button"
-            aria-label="Add to playlist"
-            onClick={(e) => { e.stopPropagation(); setMenuOpen(true) }}
-            onDoubleClick={(e) => e.stopPropagation()}
-            className={[
-              'inline-grid place-items-center w-7 h-7 rounded-md',
-              'text-text-muted hover:text-text-primary',
-              'opacity-0 group-hover:opacity-100',
-              'transition-opacity duration-150',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:opacity-100',
-            ].join(' ')}
-          >
-            <Icon name="plus" className="w-3.5 h-3.5" />
-          </button>
-        ) : null}
-        {track.id && onRename ? (
-          <button
-            type="button"
-            aria-label={`Rename ${track.title}`}
-            onClick={(e) => { e.stopPropagation(); onRename(track) }}
-            onDoubleClick={(e) => e.stopPropagation()}
-            className={[
-              'inline-grid place-items-center w-7 h-7 rounded-md',
-              'text-text-muted hover:text-text-primary',
-              'opacity-0 group-hover:opacity-100',
-              'transition-opacity duration-150',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:opacity-100',
-            ].join(' ')}
-          >
-            <Icon name="pencil" className="w-3.5 h-3.5" />
-          </button>
-        ) : null}
+        <TrackActionsMenu track={track} onRename={onRename} />
       </span>
 
       {/* Duration */}
@@ -190,7 +154,6 @@ export function TrackRow({ track, index, active = false, playing, onPlay, right,
         {formatDuration(track.durationMs)}
       </span>
     </div>
-    {menuOpen && <AddToPlaylistMenu track={track} onClose={() => setMenuOpen(false)} />}
     </>
   )
 }

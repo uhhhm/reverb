@@ -36,6 +36,7 @@ export type IconName =
   | 'camera'
   | 'grip'
   | 'chart'
+  | 'more'
 
 /**
  * Per-icon descriptor.
@@ -282,7 +283,17 @@ const icons: Record<IconName, IconDef> = {
       </>
     ),
   },
-  // camera: lens + body — used for cover-art upload overlay
+  // more: horizontal ellipsis — opens the row actions menu
+  more: {
+    filled: true,
+    content: (
+      <>
+        <circle cx="5" cy="12" r="1.75" />
+        <circle cx="12" cy="12" r="1.75" />
+        <circle cx="19" cy="12" r="1.75" />
+      </>
+    ),
+  },
   // pencil: rename/edit affordance on track rows
   pencil: {
     content: (
@@ -292,6 +303,7 @@ const icons: Record<IconName, IconDef> = {
       </>
     ),
   },
+  // camera: lens + body — used for cover-art upload overlay
   camera: {
     content: (
       <>

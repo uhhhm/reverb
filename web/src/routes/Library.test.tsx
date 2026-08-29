@@ -426,7 +426,8 @@ describe('Library page', () => {
     } as unknown as UseQueryResult<Track[], Error>)
 
     render(wrap(<Library />))
-    fireEvent.click(screen.getByRole('button', { name: /rename idioteque/i }))
+    fireEvent.click(screen.getByRole('button', { name: /more actions for idioteque/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /edit details/i }))
     expect(screen.getByRole('dialog', { name: /rename track/i })).toBeInTheDocument()
     expect(screen.getByLabelText(/title/i)).toHaveValue('Idioteque')
     expect(screen.getByLabelText(/artist/i)).toHaveValue('Radiohead')

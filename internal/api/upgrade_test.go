@@ -61,11 +61,11 @@ func TestUpgradeValidatesInput(t *testing.T) {
 
 func TestListUpgradableFindsCompletedBelowTarget(t *testing.T) {
 	mgr := newFakeManager()
-	mgr.jobs["a"] = core.DownloadJob{ID: "a", Status: core.DownloadCompleted, Artist: "A", Title: "Low one", Quality: core.QualityLow}
-	mgr.jobs["b"] = core.DownloadJob{ID: "b", Status: core.DownloadCompleted, Artist: "B", Title: "Already high", Quality: core.QualityHigh}
-	mgr.jobs["c"] = core.DownloadJob{ID: "c", Status: core.DownloadFailed, Artist: "C", Title: "Failed", Quality: core.QualityLow}
+	mgr.jobs["a"] = core.DownloadJob{ID: "a", Source: "spotify", ExternalID: "sp-a", Status: core.DownloadCompleted, Artist: "A", Title: "Low one", Quality: core.QualityLow}
+	mgr.jobs["b"] = core.DownloadJob{ID: "b", Source: "spotify", ExternalID: "sp-b", Status: core.DownloadCompleted, Artist: "B", Title: "Already high", Quality: core.QualityHigh}
+	mgr.jobs["c"] = core.DownloadJob{ID: "c", Source: "spotify", ExternalID: "sp-c", Status: core.DownloadFailed, Artist: "C", Title: "Failed", Quality: core.QualityLow}
 	// No recorded tier: predates the feature, so it is spotDL's old 128k default.
-	mgr.jobs["d"] = core.DownloadJob{ID: "d", Status: core.DownloadCompleted, Artist: "D", Title: "Legacy"}
+	mgr.jobs["d"] = core.DownloadJob{ID: "d", Source: "spotify", ExternalID: "sp-d", Status: core.DownloadCompleted, Artist: "D", Title: "Legacy"}
 
 	rec := doUpgrade(t, mgr, http.MethodGet, "/api/v1/downloads/upgradable?quality=high", "")
 	if rec.Code != http.StatusOK {
@@ -84,5 +84,53 @@ func TestListUpgradableFindsCompletedBelowTarget(t *testing.T) {
 	}
 	if got["Low one"] != "low" || got["Legacy"] != "low" {
 		t.Errorf("unexpected set: %v", got)
+	}
+}
+
+// A source-less job cannot be re-fetched: re-running it would be a blind text
+// search, which is how an upgrade ends up downloading a different song.
+func TestListUpgradableSkipsJobsWithNoSource(t *testing.T) {
+	mgr := newFakeManager()
+	mgr.jobs["a"] = core.DownloadJob{ID: "a", Status: core.DownloadCompleted, Artist: "A", Title: "01 - Dunanna Pit", Quality: core.QualityLow}
+
+	rec := doUpgrade(t, mgr, http.MethodGet, "/api/v1/downloads/upgradable?quality=high", "")
+	var out []upgradableTrack
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("want none, got %v", out)
+	}
+}
+
+// Without a source the handler must refuse rather than let the downloader guess
+// from "<artist> - <title>" and overwrite the file with an unrelated track.
+func TestUpgradeRefusesWhenSourceUnknown(t *testing.T) {
+	mgr := newFakeManager()
+	rec := doUpgrade(t, mgr, http.MethodPost, "/api/v1/downloads/upgrade",
+		`{"artist":"A","title":"01 - Dunanna Pit","quality":"high","currentQuality":"low"}`)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422: %s", rec.Code, rec.Body.String())
+	}
+	if mgr.enqueueCalls != 0 {
+		t.Error("must not enqueue a sourceless upgrade")
+	}
+}
+
+// When the caller does not know the source, it is recovered from the original
+// download job so the same recording is re-fetched.
+func TestUpgradeRecoversSourceFromHistory(t *testing.T) {
+	mgr := newFakeManager()
+	mgr.jobs["a"] = core.DownloadJob{
+		ID: "a", Source: "spotify", ExternalID: "sp-a", Status: core.DownloadCompleted,
+		Artist: "A", Title: "01 - Dunanna Pit", Album: "OST", LibraryTrackID: "lib1", Quality: core.QualityLow,
+	}
+	rec := doUpgrade(t, mgr, http.MethodPost, "/api/v1/downloads/upgrade",
+		`{"libraryTrackId":"lib1","artist":"A","title":"01 - Dunanna Pit","quality":"high","currentQuality":"low"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if mgr.lastReq.Source != "spotify" || mgr.lastReq.ExternalID != "sp-a" {
+		t.Errorf("source not recovered: %+v", mgr.lastReq)
 	}
 }
