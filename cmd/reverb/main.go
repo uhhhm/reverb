@@ -30,6 +30,19 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// The HTTP API has no authentication: every request is served as the
+	// household owner, so the bind address is the whole access boundary. Refuse
+	// a non-loopback bind unless the operator has said so explicitly, so the
+	// safe configuration is the one that requires no thought.
+	if !isLoopbackAddr(cfg.BindAddr) && !cfg.AllowNetworkAccess {
+		log.Fatalf("refusing to bind %s: Reverb authenticates every request as the household "+
+			"owner, so anyone who can reach this port has full access to your library, "+
+			"settings and downloads. Bind %s instead, or pass --allow-network-access "+
+			"(REVERB_ALLOW_NETWORK_ACCESS=1) if an authenticating proxy fronts it. "+
+			"Device-to-device sync does not need this: it runs over libp2p on its own "+
+			"port and admits only paired peers.", cfg.BindAddr, config.DefaultBindAddr)
+	}
+
 	rt, err := app.Build(ctx, app.Options{
 		DBPath:     cfg.DBPath,
 		Version:    version,
@@ -52,10 +65,9 @@ func main() {
 	}
 	log.Printf("reverb listening on %s (dev=%v)", addr, cfg.Dev)
 	if !isLoopbackAddr(cfg.BindAddr) {
-		log.Printf("WARNING: bound to %s, which is reachable from the network. "+
-			"Reverb authenticates every request as the household owner, so anyone "+
-			"who can reach this port has full access. Put an authenticating proxy "+
-			"in front of it or bind %s.", cfg.BindAddr, config.DefaultBindAddr)
+		log.Printf("WARNING: bound to %s with --allow-network-access. The API has no "+
+			"authentication of its own; anyone who can reach this port has full access. "+
+			"Only do this behind a proxy that authenticates for it.", cfg.BindAddr)
 	}
 
 	stop := make(chan struct{})

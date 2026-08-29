@@ -117,3 +117,55 @@ func TestBindAddrUnbracketsIPv6(t *testing.T) {
 		t.Errorf("BindAddr = %q, want %q", c.BindAddr, "fd00::1")
 	}
 }
+
+func TestAllowNetworkAccessDefaultsOff(t *testing.T) {
+	c, err := Load(nil, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.AllowNetworkAccess {
+		t.Error("AllowNetworkAccess defaulted to true; a widened bind must be a deliberate act")
+	}
+}
+
+func TestAllowNetworkAccessFlagAndEnv(t *testing.T) {
+	c, err := Load([]string{"--allow-network-access"}, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.AllowNetworkAccess {
+		t.Error("--allow-network-access did not set AllowNetworkAccess")
+	}
+	for _, v := range []string{"1", "true", "TRUE"} {
+		c, err = Load(nil, func(k string) string {
+			if k == "REVERB_ALLOW_NETWORK_ACCESS" {
+				return v
+			}
+			return ""
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !c.AllowNetworkAccess {
+			t.Errorf("REVERB_ALLOW_NETWORK_ACCESS=%q did not set AllowNetworkAccess", v)
+		}
+	}
+}
+
+func TestP2PPortDefaultsFixed(t *testing.T) {
+	c, err := Load(nil, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A random port would invalidate any peer address the user wrote down.
+	if c.P2PPort != DefaultP2PPort {
+		t.Errorf("P2PPort = %d, want %d", c.P2PPort, DefaultP2PPort)
+	}
+	c, err = Load([]string{"--p2p-port", "0"}, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.P2PPort != 0 {
+		t.Errorf("P2PPort = %d, want 0", c.P2PPort)
+	}
+}

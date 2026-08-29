@@ -14,6 +14,10 @@ services:
       # "8090:8090" line above is the real exposure decision. Publish to
       # 127.0.0.1:8090:8090 instead unless an authenticating proxy fronts it.
       REVERB_BIND: 0.0.0.0
+      # Reverb refuses a non-loopback bind unless this is set, because the API
+      # has no authentication of its own. In a container the bind is not the
+      # boundary -- the port mapping is -- so the acknowledgement belongs here.
+      REVERB_ALLOW_NETWORK_ACCESS: "1"
       REVERB_ADMIN_PASSWORD: ${REVERB_ADMIN_PASSWORD:-}
       REVERB_SPOTIFY_CLIENT_ID: ${REVERB_SPOTIFY_CLIENT_ID:-}
       REVERB_SPOTIFY_CLIENT_SECRET: ${REVERB_SPOTIFY_CLIENT_SECRET:-}

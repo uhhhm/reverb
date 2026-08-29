@@ -22,7 +22,13 @@ type Config struct {
 	// restarts -- the only way to reach a peer on a VPN, where mDNS multicast
 	// does not cross the tunnel. 0 asks libp2p for a random port.
 	P2PPort int
-	Dev     bool
+	// AllowNetworkAccess permits a non-loopback BindAddr. Without it Reverb
+	// refuses to start on one. The HTTP API has no authentication -- every
+	// request is the household owner -- so the bind address is the entire
+	// access boundary, and widening it must be a deliberate act rather than a
+	// default someone inherits.
+	AllowNetworkAccess bool
+	Dev                bool
 	// UpdateRepo is the GitHub "owner/name" polled for releases. Empty
 	// disables update checks entirely (REVERB_UPDATE_REPO=off).
 	UpdateRepo string
@@ -58,6 +64,9 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	if v := getenv("REVERB_DB"); v != "" {
 		c.DBPath = v
 	}
+	if v := getenv("REVERB_ALLOW_NETWORK_ACCESS"); v == "1" || strings.EqualFold(v, "true") {
+		c.AllowNetworkAccess = true
+	}
 	if getenv("REVERB_DEV") == "1" {
 		c.Dev = true
 	}
@@ -71,6 +80,8 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	fs.StringVar(&c.BindAddr, "bind", c.BindAddr, "interface to bind (0.0.0.0 exposes Reverb to the network)")
 	fs.StringVar(&c.DBPath, "db", c.DBPath, "SQLite path")
 	fs.IntVar(&c.P2PPort, "p2p-port", c.P2PPort, "libp2p listen port (0 picks a random port)")
+	fs.BoolVar(&c.AllowNetworkAccess, "allow-network-access", c.AllowNetworkAccess,
+		"permit a non-loopback --bind, accepting that the API has no authentication")
 	fs.BoolVar(&c.Dev, "dev", c.Dev, "dev mode (proxy Vite)")
 	fs.StringVar(&c.UpdateRepo, "update-repo", c.UpdateRepo, `GitHub owner/name to check for updates ("off" disables)`)
 	if err := fs.Parse(args); err != nil {
