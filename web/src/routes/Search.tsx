@@ -1,5 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useLibrarySearch, prewarmExternalStream } from '../lib/libraryApi'
+import { prewarmTopResults } from '../lib/extstreamPrewarm'
 import { useEverywhere } from '../lib/everywhereStore'
 import { dedupKey, dedupKeyForTrack, encodeExternalId } from '../lib/trackRef'
 import { usePlayer } from '../lib/playerStore'
@@ -7,7 +8,7 @@ import { useSearch } from '../lib/searchStore'
 import { postDownload } from '../lib/downloadApi'
 import { useDownloads } from '../lib/downloadStore'
 import { DownloadAction } from '../components/download/DownloadAction'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Segmented,
   TrackRow,
@@ -164,6 +165,16 @@ export default function Search() {
   const libraryTrackKeys = new Set(libTracks.map((track) => dedupKeyForTrack(track)))
   const externalTracks = tracks.filter((result) => result.match?.status !== 'in_library' && !libraryTrackKeys.has(dedupKey(result)))
 
+  // Resolving a not-in-library track costs seconds on the play path. Start the
+  // top few as soon as they appear, so a play the user does make is close to
+  // instant rather than a wait they watch.
+  const prewarmKey = externalTracks.slice(0, 4).map((r) => `${r.source}:${r.externalId}`).join(',')
+  useEffect(() => {
+    if (prewarmKey) prewarmTopResults(externalTracks)
+    // externalTracks is rebuilt every render; prewarmKey is its stable identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prewarmKey])
+
   function toggleSource(source: string) {
     setHiddenSources((current) => {
       const next = new Set(current)
@@ -315,7 +326,7 @@ export default function Search() {
                       // Resolving an external track to a playable URL takes
                       // seconds. Start it when the row is pointed at so the wait
                       // overlaps the click instead of following it.
-                      if (syntheticTrack) {
+                      if (!syntheticTrack) {
                         prewarmExternalStream(r.source, r.externalId, r.artist, r.title)
                       }
                     }}

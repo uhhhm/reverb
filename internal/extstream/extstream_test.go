@@ -27,35 +27,69 @@ func (f *fakeLookup) GetTrack(_ context.Context, source, id string) (core.Extern
 	return t, nil
 }
 
+// fakeRunner stands in for yt-dlp. Resolving is two invocations — a search that
+// prints a video id, then a format extraction that prints the media URL — so the
+// fake answers by stage. `lines` is the media stage, which is what most tests
+// care about.
 type fakeRunner struct {
-	lines []string
-	err   error
+	lines       []string
+	searchLines []string
+	err         error
 
-	mu      sync.Mutex
-	calls   int
-	gotArgs []string
-	block   chan struct{} // when non-nil, Run waits on it before returning
+	mu          sync.Mutex
+	searchCalls int
+	mediaCalls  int
+	gotArgs     []string
+	searchArgs  []string
+	block       chan struct{} // when non-nil, Run waits on it before returning
 }
 
 func (f *fakeRunner) Run(ctx context.Context, name string, args []string, onLine func(string)) error {
+	search := false
+	for _, a := range args {
+		if a == "--flat-playlist" {
+			search = true
+		}
+	}
+
 	f.mu.Lock()
-	f.calls++
-	f.gotArgs = args
+	lines := f.lines
+	if search {
+		f.searchCalls++
+		f.searchArgs = args
+		lines = f.searchLines
+		if lines == nil {
+			lines = []string{"vid123"}
+		}
+	} else {
+		f.mediaCalls++
+		f.gotArgs = args
+	}
+	err := f.err
 	block := f.block
 	f.mu.Unlock()
 	if block != nil {
 		<-block
 	}
-	for _, l := range f.lines {
+	for _, l := range lines {
 		onLine(l)
 	}
-	return f.err
+	return err
 }
 
+// callCount reports format extractions — the per-play work. The search stage is
+// counted separately because its answer is cached forever and so does not
+// repeat.
 func (f *fakeRunner) callCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.calls
+	return f.mediaCalls
+}
+
+func (f *fakeRunner) searchCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.searchCalls
 }
 
 func newService(t *testing.T, l *fakeLookup, r *fakeRunner, opts ...Option) *Service {
@@ -77,8 +111,8 @@ func TestResolveReturnsDirectAudioURL(t *testing.T) {
 	if !strings.Contains(args, "-g") || !strings.Contains(args, "bestaudio") {
 		t.Errorf("args %q must ask yt-dlp for a bestaudio URL, not a download", args)
 	}
-	if !strings.Contains(args, "ytsearch1:Air - Alone in Kyoto") {
-		t.Errorf("args %q must search for the looked-up artist/title", args)
+	if got := strings.Join(r.searchArgs, " "); !strings.Contains(got, "ytsearch1:Air - Alone in Kyoto") {
+		t.Errorf("search args %q must search for the looked-up artist/title", got)
 	}
 }
 
@@ -221,7 +255,7 @@ func TestResolveHintedSkipsLookup(t *testing.T) {
 	if lookup.calls != 0 {
 		t.Fatalf("lookup called %d times, want 0", lookup.calls)
 	}
-	if want, got := "ytsearch1:Boards of Canada - Roygbiv", runner.gotArgs[len(runner.gotArgs)-1]; got != want {
+	if want, got := "ytsearch1:Boards of Canada - Roygbiv", runner.searchArgs[len(runner.searchArgs)-1]; got != want {
 		t.Fatalf("query = %q, want %q", got, want)
 	}
 }

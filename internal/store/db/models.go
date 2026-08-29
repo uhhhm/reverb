@@ -114,6 +114,15 @@ type DownloadJob struct {
 	CanonicalID    string         `json:"canonical_id"`
 }
 
+type ExtstreamResolve struct {
+	Source       string `json:"source"`
+	ExternalID   string `json:"external_id"`
+	VideoID      string `json:"video_id"`
+	Url          string `json:"url"`
+	UrlExpiresAt int64  `json:"url_expires_at"`
+	UpdatedAt    int64  `json:"updated_at"`
+}
+
 type FileManifest struct {
 	CanonicalID string `json:"canonical_id"`
 	ContentHash string `json:"content_hash"`

@@ -247,6 +247,9 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		ExternalStream: extstream.NewFromEnv(
 			ProviderLookup{Get: reloader.TrackLookupProvider()},
 			opts.Getenv,
+			// Resolves persist: the signed URL stays good for hours, and which
+			// upstream track this is never changes at all.
+			extstream.WithStore(st.Q()),
 		),
 		Overrides:    override.New(st.Q()),
 		TrackQuality: st.Q(),
