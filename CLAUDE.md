@@ -74,7 +74,9 @@ Library modes (`internal/library/embedded`): **built-in** bundles Navidrome as a
 - `internal/p2p` — libp2p host (fixed listen port, `--p2p-port`), peer trust (`p2p_peer`), manifest/file sync handlers, pull replication. Peers are dialed by stored multiaddr as well as by discovery, since mDNS multicast does not cross a VPN and the DHT runs in client mode; pairing accepts a full `/ip4/…/p2p/<id>` multiaddr and persists it on `p2p_peer.addrs`.
 - `internal/store` — SQLite (`modernc.org/sqlite`), migrations `internal/store/migrations/*.sql` (goose), sqlc `internal/store/queries` -> `internal/store/db` (`make gen`).
 - `internal/api` — chi handlers, OpenAPI at `/api/v1/openapi.yaml` (keep in sync), `embed.go` embeds SPA.
-- `internal/auth` + `internal/api/roles.go` — single household owner (`local`, holds every capability) plus paired-device Bearer auth for `/sync` and libp2p peer auth for P2P; capability gates (`can_manage_library`, etc.) still checked via the owner identity.
+- `internal/auth` + `internal/api/roles.go` — a single household owner (`local`, holding every capability) is the intended end state, not a stopgap. There are no accounts, no login and no sessions: the HTTP API is loopback-only (Reverb refuses a non-loopback bind without `--allow-network-access`) and the transport is the access boundary, so `requireAuth` fabricating the owner for every request is correct. Paired devices authenticate separately — Bearer tokens on `/sync`, libp2p peer identity on P2P. The capability gates (`can_manage_library`, etc.) are therefore never denials in practice; they document intent. Per-user columns from migration 0013 are inert by design.
+
+  `csrfGuard` (`internal/api/security.go`) stays: with no session cookie it is tempting to think CSRF is impossible, but reaching the loopback port *is* the ambient credential, so a page in the user's browser could otherwise POST to Reverb as the owner. The Origin check is the only thing stopping it.
 
 ### Frontend (`web/`)
 

@@ -7,8 +7,6 @@ import (
 	"github.com/uhhhm/reverb/internal/auth"
 )
 
-const sessionCookie = "reverb_session"
-
 type ctxKey int
 
 const userCtxKey ctxKey = iota

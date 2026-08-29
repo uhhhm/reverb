@@ -14,6 +14,12 @@ import (
 	"github.com/uhhhm/reverb/internal/store"
 )
 
+// sessionCookie is the cookie name the tests attach to requests. The server
+// ignores it entirely -- the browser UI is authenticated by reaching the
+// loopback listener, not by a session -- but the helpers build one so the
+// requests look like a real browser's.
+const sessionCookie = "reverb_session"
+
 // testDirty is a minimal ConfigDirty for tests.
 type testDirty struct{ b atomic.Bool }
 

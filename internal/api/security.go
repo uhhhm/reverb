@@ -68,10 +68,14 @@ func isStateChanging(method string) bool {
 }
 
 // csrfGuard rejects state-changing requests whose Origin (or, absent that,
-// Referer) names a host other than the one the request targeted. The browser UI
-// is implicitly authenticated as the household owner with no session cookie to
-// gate on — this Origin check is the primary protection against drive-by
-// cross-site requests. Paired-device /sync calls use Bearer tokens and are
+// Referer) names a host other than the one the request targeted.
+//
+// There is no session cookie, which makes it tempting to conclude CSRF cannot
+// apply. It can: the browser UI is authenticated as the household owner purely
+// by reaching the loopback listener, and that reachability is itself an ambient
+// credential every page in the user's browser holds. Without this check, any
+// site the user visits could POST to 127.0.0.1 and be served as the owner. The
+// Origin check is the only thing standing in the way. Paired-device /sync calls use Bearer tokens and are
 // exempted (see the sync prefix bypass below). A browser always attaches Origin
 // to a cross-site POST/PUT/DELETE, so a forged request is caught here.
 //
