@@ -172,6 +172,71 @@ func (h *Host) DialAddrs() []string {
 		seen[full] = true
 		out = append(out, full)
 	}
+	if len(out) > 0 {
+		return out
+	}
+	// Fallback: libp2p returned only wildcards (e.g. /ip4/0.0.0.0/tcp/4331).
+	// On some platforms Addrs() does not expand the wildcard to per-interface
+	// IPs, so synthesize dialable addresses from the host's interface list.
+	var tcpPort, udpPort string
+	for _, a := range h.h.Addrs() {
+		if p, err := a.ValueForProtocol(multiaddr.P_TCP); err == nil && tcpPort == "" {
+			tcpPort = p
+		}
+		if p, err := a.ValueForProtocol(multiaddr.P_UDP); err == nil && udpPort == "" {
+			udpPort = p
+		}
+	}
+	if tcpPort == "" && udpPort == "" {
+		return out
+	}
+	ifaces, err := net.InterfaceAddrs()
+	if err != nil {
+		return out
+	}
+	for _, ia := range ifaces {
+		var ip net.IP
+		switch v := ia.(type) {
+		case *net.IPNet:
+			ip = v.IP
+		case *net.IPAddr:
+			ip = v.IP
+		}
+		if ip == nil || ip.IsLoopback() || ip.IsUnspecified() {
+			continue
+		}
+		if ip4 := ip.To4(); ip4 != nil {
+			ip = ip4
+			if tcpPort != "" {
+				if ma, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%s", ip.String(), tcpPort)); err == nil && isDialableAddr(ma) {
+					full := ma.Encapsulate(suffix).String()
+					if !seen[full] {
+						seen[full] = true
+						out = append(out, full)
+					}
+				}
+			}
+			if udpPort != "" {
+				if ma, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/udp/%s/quic-v1", ip.String(), udpPort)); err == nil && isDialableAddr(ma) {
+					full := ma.Encapsulate(suffix).String()
+					if !seen[full] {
+						seen[full] = true
+						out = append(out, full)
+					}
+				}
+			}
+		} else {
+			if tcpPort != "" {
+				if ma, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip6/%s/tcp/%s", ip.String(), tcpPort)); err == nil && isDialableAddr(ma) {
+					full := ma.Encapsulate(suffix).String()
+					if !seen[full] {
+						seen[full] = true
+						out = append(out, full)
+					}
+				}
+			}
+		}
+	}
 	return out
 }
 

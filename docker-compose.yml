@@ -9,6 +9,8 @@ services:
     image: ghcr.io/uhhhm/reverb:${REVERB_VERSION:-latest}
     ports:
       - "8090:8090"
+      - "4331:4331"
+      - "4331:4331/udp"
     environment:
       # A container binds every interface so Docker's port mapping works; the
       # "8090:8090" line above is the real exposure decision. Publish to

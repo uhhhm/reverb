@@ -77,12 +77,22 @@ func (s *Syncer) syncAll(ctx context.Context) {
 	// Only connected peers were considered before, which silently confined sync
 	// to whatever mDNS had connected -- over a VPN, where multicast does not
 	// reach, that was nothing at all.
+	//
+	// Dial + sync per peer is done concurrently so one offline peer (15s
+	// dialTimeout) does not stall the others and drift the 30s ticker.
+	var wg stdsync.WaitGroup
 	for pid := range trusted {
-		if !EnsureConnected(ctx, s.host, s.guard, pid) {
-			continue
-		}
-		_ = s.syncPeer(ctx, pid)
+		pid := pid
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if !EnsureConnected(ctx, s.host, s.guard, pid) {
+				return
+			}
+			_ = s.syncPeer(ctx, pid)
+		}()
 	}
+	wg.Wait()
 }
 
 func (s *Syncer) syncPeer(ctx context.Context, pid peer.ID) error {

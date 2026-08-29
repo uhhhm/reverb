@@ -3,6 +3,7 @@ package config
 import (
 	"flag"
 	"io"
+	"log"
 	"strconv"
 	"strings"
 )
@@ -49,7 +50,9 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	c := Config{Port: 8090, BindAddr: DefaultBindAddr, DBPath: "./data/reverb.db", P2PPort: DefaultP2PPort, UpdateRepo: DefaultUpdateRepo}
 
 	if v := getenv("REVERB_PORT"); v != "" {
-		if p, err := strconv.Atoi(v); err == nil {
+		if p, err := strconv.Atoi(v); err != nil || p < 0 || p > 65535 {
+			log.Printf("WARNING: invalid REVERB_PORT=%q, using default %d", v, c.Port)
+		} else {
 			c.Port = p
 		}
 	}
@@ -57,7 +60,9 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 		c.BindAddr = v
 	}
 	if v := getenv("REVERB_P2P_PORT"); v != "" {
-		if p, err := strconv.Atoi(v); err == nil && p >= 0 && p <= 65535 {
+		if p, err := strconv.Atoi(v); err != nil || p < 0 || p > 65535 {
+			log.Printf("WARNING: invalid REVERB_P2P_PORT=%q, using default %d", v, c.P2PPort)
+		} else {
 			c.P2PPort = p
 		}
 	}

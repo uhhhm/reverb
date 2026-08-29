@@ -3,6 +3,7 @@ package p2p
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/host"
@@ -23,6 +24,7 @@ const dialTimeout = 15 * time.Second
 // VPN it is not: multicast does not cross the tunnel, so the caller must supply
 // the address, and the full multiaddr is how they do it.
 func ParsePeerTarget(target string) (peer.AddrInfo, error) {
+	target = strings.TrimSpace(target)
 	if target == "" {
 		return peer.AddrInfo{}, fmt.Errorf("empty peer target")
 	}

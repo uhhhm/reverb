@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/host"
@@ -74,17 +75,24 @@ func (p *Puller) pullAll(ctx context.Context) {
 		log.Printf("p2p pull: trusted peer lookup failed: %v", err)
 		return
 	}
+	var wg sync.WaitGroup
 	for pid := range trusted {
 		if pid == p.host.ID() {
 			continue
 		}
-		if !EnsureConnected(ctx, p.host, p.guard, pid) {
-			continue
-		}
-		if err := p.pullPeer(ctx, pid); err != nil {
-			log.Printf("p2p pull: peer %s: %v", pid, err)
-		}
+		pid := pid
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if !EnsureConnected(ctx, p.host, p.guard, pid) {
+				return
+			}
+			if err := p.pullPeer(ctx, pid); err != nil {
+				log.Printf("p2p pull: peer %s: %v", pid, err)
+			}
+		}()
 	}
+	wg.Wait()
 }
 
 func (p *Puller) pullPeer(ctx context.Context, pid peer.ID) error {
