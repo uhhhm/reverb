@@ -32,12 +32,7 @@ func (s *Server) handleTrackGain(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	paths, ok := s.library().(localTrackPath)
-	if !ok {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	path, ok := paths.LocalTrackPath(id)
+	path, ok := s.localPathFor(r.Context(), id)
 	if !ok || path == "" {
 		w.WriteHeader(http.StatusNoContent)
 		return

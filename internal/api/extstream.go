@@ -45,9 +45,16 @@ func (s *Server) handleExternalStream(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "external streaming unavailable"})
 		return
 	}
-	source, id := chi.URLParam(r, "source"), chi.URLParam(r, "id")
-	artist, title := r.URL.Query().Get("artist"), r.URL.Query().Get("title")
+	s.serveExternalStream(w, r,
+		chi.URLParam(r, "source"), chi.URLParam(r, "id"),
+		r.URL.Query().Get("artist"), r.URL.Query().Get("title"))
+}
 
+// serveExternalStream resolves source+id to a direct audio URL and proxies it.
+// Shared by the external-stream route and the canonical-id stream path, which
+// falls back here for a track that was played from a source and has no copy in
+// the library.
+func (s *Server) serveExternalStream(w http.ResponseWriter, r *http.Request, source, id, artist, title string) {
 	url, err := s.deps.ExternalStream.ResolveHinted(r.Context(), source, id, artist, title)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})

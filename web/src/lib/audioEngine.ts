@@ -18,14 +18,6 @@ export interface AudioElement {
   removeEventListener(type: string, cb: () => void): void
 }
 
-/**
- * The gain control the engine drives. Modelled as an interface so tests (and any
- * future non-Web-Audio path) can stand in for a real GainNode.
- */
-export interface GainControl {
-  gain: { value: number }
-}
-
 export interface PlayerState {
   queue: Track[]
   index: number
@@ -77,14 +69,23 @@ export class AudioEngine {
   private lastRawMs = -1
 
   // Playback-time loudness normalization. The file is never re-encoded: the
-  // measured per-track gain is applied by a Web Audio GainNode in front of the
-  // output. A media element can only be wrapped in a MediaElementSource ONCE,
-  // which is why the graph is built against the long-lived `active` element and
-  // then only has its gain value updated per track.
+  // measured per-track gain is folded into the media element's own volume, so
+  // the output level is always `volume * gainLinear`, clamped to the element's
+  // 0..1 range.
+  //
+  // This deliberately does NOT use a Web Audio GainNode. In the desktop window
+  // the page is served from the wails: scheme while audio has to be loaded from
+  // the 127.0.0.1 listener (see mediaBase.ts), which makes the media element
+  // cross-origin. A MediaElementSource over a cross-origin resource is tainted
+  // and outputs silence, and the wrapping cannot be undone — so building that
+  // graph muted playback for the rest of the session, whether normalization was
+  // then left on or switched back off.
+  //
+  // The cost is that boosts are limited by the headroom the volume slider has
+  // left: at full volume a track needing +6 dB stays at unity. Attenuation, the
+  // common case for modern masters, is always exact.
   private normalization = false
-  private audioCtx: AudioContext | null = null
-  private gainNode: GainControl | null = null
-  private createGain: () => GainControl | null
+  private gainLinear = 1
   private gainDbCache = new Map<string, number>()
   private fetchGainDb: (trackId: string) => Promise<number | null>
 
@@ -96,14 +97,13 @@ export class AudioEngine {
     factory: () => AudioElement = realAudioFactory,
     resolveSrc: (t: Track) => string = (t) => streamUrlFor(t),
     fetchGainDb: (trackId: string) => Promise<number | null> = fetchTrackGainDb,
-    createGain?: () => GainControl | null,
   ) {
     this.factory = factory
     this.resolveSrc = resolveSrc
     this.fetchGainDb = fetchGainDb
-    this.createGain = createGain ?? (() => this.createWebAudioGain())
     this.active = this.factory()
     this.preload = this.factory()
+    this.applyVolume()
     this.bindActive()
   }
 
@@ -185,6 +185,9 @@ export class AudioEngine {
   }
 
   private onLoaded = () => {
+    // A newly attached source can come up at the element's own default rather
+    // than the level the slider shows; re-assert it.
+    this.applyVolume()
     this.setLoading(false)
   }
 
@@ -257,41 +260,12 @@ export class AudioEngine {
     if (this.normalization === enabled) return
     this.normalization = enabled
     if (!enabled) {
-      if (this.gainNode) this.gainNode.gain.value = 1
+      this.gainLinear = 1
+      this.applyVolume()
       return
     }
     const t = this.getState().current
     if (t) void this.applyGainFor(t)
-  }
-
-  /** Builds the gain stage once and reuses it for every track. */
-  private ensureGraph(): GainControl | null {
-    if (this.gainNode) return this.gainNode
-    this.gainNode = this.createGain()
-    return this.gainNode
-  }
-
-  /** The real graph: AudioContext → MediaElementSource → GainNode → output. */
-  private createWebAudioGain(): GainControl | null {
-    if (typeof window === 'undefined') return null
-    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-    if (!Ctx) return null
-    const el = this.active as unknown as HTMLMediaElement
-    // Test doubles are plain objects, not media elements; there is nothing to wrap.
-    if (typeof HTMLMediaElement === 'undefined' || !(el instanceof HTMLMediaElement)) return null
-    try {
-      const ctx = new Ctx()
-      const source = ctx.createMediaElementSource(el)
-      const gain = ctx.createGain()
-      source.connect(gain)
-      gain.connect(ctx.destination)
-      this.audioCtx = ctx
-      return gain
-    } catch {
-      // A browser that refuses the graph (autoplay policy, already-wrapped
-      // element) just means unmodified playback.
-      return null
-    }
   }
 
   /**
@@ -301,11 +275,6 @@ export class AudioEngine {
    */
   private async applyGainFor(track: Track) {
     if (!this.normalization || !track.id) return
-    const gain = this.ensureGraph()
-    if (!gain) return
-    // The context starts suspended until a user gesture in most browsers.
-    if (this.audioCtx?.state === 'suspended') void this.audioCtx.resume()
-
     let db = this.gainDbCache.get(track.id)
     if (db === undefined) {
       const fetched = await this.fetchGainDb(track.id).catch(() => null)
@@ -315,7 +284,21 @@ export class AudioEngine {
     // A track change during the fetch must not apply the wrong gain.
     if (this.getState().current?.id !== track.id) return
     if (!this.normalization) return
-    gain.gain.value = Math.pow(10, db / 20)
+    this.gainLinear = Math.pow(10, db / 20)
+    this.applyVolume()
+  }
+
+  /**
+   * Pushes the engine's level onto both elements. The engine's value is the
+   * only truth: an element playing at some other level than the slider shows
+   * would make the first slider drag jump the output.
+   *
+   * The preload element carries the plain volume — the gain belongs to the
+   * track that is playing, and the next one gets its own on load.
+   */
+  private applyVolume() {
+    this.active.volume = Math.min(1, Math.max(0, this.volume * this.gainLinear))
+    this.preload.volume = this.volume
   }
 
   subscribe(cb: (s: PlayerState) => void): () => void {
@@ -398,6 +381,7 @@ export class AudioEngine {
     }
     this.active.src = this.resolveSrc(t)
     this.active.load()
+    this.applyVolume()
     this.loading = true
     this.lastRawMs = -1
     this.currentTimeMs = 0
@@ -406,11 +390,10 @@ export class AudioEngine {
     const cropStart = Math.max(0, t.cropStartMs ?? 0)
     this.active.currentTime = cropStart / 1000
     this.durationMs = t.cropEndMs && t.cropEndMs > cropStart ? t.cropEndMs - cropStart : 0
-    if (this.normalization) {
-      // Start at unity so a leftover gain from the previous track cannot leak in.
-      if (this.gainNode) this.gainNode.gain.value = 1
-      void this.applyGainFor(t)
-    }
+    // Start at unity so a leftover gain from the previous track cannot leak in.
+    this.gainLinear = 1
+    this.applyVolume()
+    if (this.normalization) void this.applyGainFor(t)
     if (autoplay) {
       void this.active.play()
       this.playing = true
@@ -424,6 +407,7 @@ export class AudioEngine {
     if (ni < 0 || ni >= this.queue.length) return
     this.preload.src = this.resolveSrc(this.queue[ni])
     this.preload.load()
+    this.preload.volume = this.volume
   }
 
   play() {
@@ -548,8 +532,7 @@ export class AudioEngine {
 
   setVolume(v: number) {
     this.volume = Math.min(1, Math.max(0, v))
-    this.active.volume = this.volume
-    this.preload.volume = this.volume
+    this.applyVolume()
     this.emit()
   }
 

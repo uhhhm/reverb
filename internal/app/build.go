@@ -240,6 +240,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		DataDir:       filepath.Dir(opts.DBPath),
 		MusicDir:      embedded.MusicDir(opts.Getenv),
 		Resolver:      resolverSvc,
+		Catalog:       st.Q(),
 		Deletion:      bundle.Deletion,
 		// Plays a search result that is not in the library by streaming it from
 		// the source instead of downloading it. Reads the LIVE aggregator so it

@@ -32,14 +32,11 @@ func (s *Server) handleTrackLyrics(w http.ResponseWriter, r *http.Request) {
 			DurationMs: durationMs,
 		},
 	}
-	// Local file access is optional, mirroring the peaks handler. An external
-	// track (id "<source>:<externalId>") has no file and is unknown to the
-	// library, so skip the lookup rather than make it fail — lyrics still resolve
-	// from the artist/title query below.
-	if paths, ok := s.library().(localTrackPath); ok && !isExternalTrackID(id) {
-		if p, ok := paths.LocalTrackPath(id); ok {
-			req.LocalPath = p
-		}
+	// Local file access is optional, mirroring the peaks handler: an external
+	// track has no file at all, and a remote library exposes none. Lyrics still
+	// resolve from the artist/title query below.
+	if p, ok := s.localPathFor(r.Context(), id); ok {
+		req.LocalPath = p
 	}
 	lyr, ok, err := s.deps.Lyrics.Get(r.Context(), req)
 	if err != nil || !ok {

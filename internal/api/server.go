@@ -101,6 +101,13 @@ type Resolver interface {
 	Resolve(ctx context.Context, catalogID string) (resolver.Addressing, error)
 }
 
+// CatalogLookup reads catalog entities and their aliases, so a canonical id can
+// be traced back to the source it was played from. *db.Queries satisfies it.
+type CatalogLookup interface {
+	GetCatalogEntity(ctx context.Context, id string) (db.CatalogEntity, error)
+	ListAliasesForCatalog(ctx context.Context, catalogID string) ([]db.ListAliasesForCatalogRow, error)
+}
+
 // LinkAddService is the add-from-link planner. *linkadd.Service satisfies it.
 type LinkAddService interface {
 	Resolve(ctx context.Context, rawURL string) (*linkresolve.ResolveResult, error)
@@ -150,6 +157,11 @@ type Deps struct {
 	// the LIVE matcher, so it survives adapter hot-reloads (the matcher is rebuilt
 	// on each reload). Nil in tests/legacy that don't use the addressing boundary.
 	Resolver Resolver
+
+	// Catalog traces a canonical id back to the search source it was played
+	// from, so history can play a track the library has no copy of. Nil disables
+	// that fallback (the stream endpoint then 404s, as before).
+	Catalog CatalogLookup
 	// ExternalStream resolves and proxies audio for a search result that is not
 	// in the library, so it can be played without being downloaded. Nil when no
 	// search source is configured — the endpoint then reports unavailable.

@@ -290,3 +290,67 @@ func TestDelete_OwnerScoped(t *testing.T) {
 		t.Fatalf("expected play %q to remain, got %q", ownerPlayID, after[0].ID)
 	}
 }
+
+// A track played straight from a search source must stay reachable at that
+// source afterwards: the play is what records the addressing, and history plays
+// the track back through it.
+func TestRecord_KeepsTheSourceATrackWasPlayedFrom(t *testing.T) {
+	s, q := newTestPlayService(t)
+	ctx := context.Background()
+
+	if err := s.Record(ctx, "user-1", play.PlayInput{
+		LibraryTrackID: "deezer:2784931362",
+		Title:          "Hurt",
+		Artist:         "Johnny Cash",
+		Album:          "American IV",
+		DurationMs:     218000,
+		MsPlayed:       140000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := q.ListRecentPlays(ctx, db.ListRecentPlaysParams{UserID: "user-1", PlayedAt: 9999999999, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("plays = %d, want 1", len(rows))
+	}
+	aliases, err := q.ListAliasesForCatalog(ctx, rows[0].CatalogID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range aliases {
+		if a.AliasKind == "external" && a.AliasValue == "deezer:2784931362" {
+			return
+		}
+	}
+	t.Fatalf("no external alias on %s: %+v", rows[0].CatalogID, aliases)
+}
+
+// A library play carries a plain backend id, which is not external addressing
+// and must not be recorded as any.
+func TestRecord_LibraryPlayRecordsNoExternalAlias(t *testing.T) {
+	s, q := newTestPlayService(t)
+	ctx := context.Background()
+
+	if err := s.Record(ctx, "user-1", play.PlayInput{
+		LibraryTrackID: "abc123",
+		Title:          "Hurt",
+		Artist:         "Johnny Cash",
+		DurationMs:     218000,
+		MsPlayed:       140000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := q.ListRecentPlays(ctx, db.ListRecentPlaysParams{UserID: "user-1", PlayedAt: 9999999999, Limit: 10})
+	aliases, err := q.ListAliasesForCatalog(ctx, rows[0].CatalogID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range aliases {
+		if a.AliasKind == "external" {
+			t.Fatalf("library play recorded external addressing: %+v", a)
+		}
+	}
+}

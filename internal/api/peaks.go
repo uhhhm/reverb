@@ -14,13 +14,7 @@ type localTrackPath interface {
 }
 
 func (s *Server) handleTrackPeaks(w http.ResponseWriter, r *http.Request) {
-	lib := s.library()
-	paths, ok := lib.(localTrackPath)
-	if !ok {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	path, ok := paths.LocalTrackPath(chi.URLParam(r, "id"))
+	path, ok := s.localPathFor(r.Context(), chi.URLParam(r, "id"))
 	if !ok || path == "" {
 		w.WriteHeader(http.StatusNoContent)
 		return

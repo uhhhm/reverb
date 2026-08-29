@@ -18,6 +18,7 @@ import (
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/resolver"
 	"github.com/uhhhm/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 func TestStreamProxyForwardsRangeAnd206(t *testing.T) {
@@ -356,5 +357,180 @@ func TestHandleStream_CanonicalResolvesThenServes(t *testing.T) {
 	}
 	if n := res.calls.Load(); n != 1 {
 		t.Fatalf("resolver must be called exactly once; got %d call(s)", n)
+	}
+}
+
+// ── canonical id with no library copy ────────────────────────────────────────
+// A track played straight from a search source is addressed canonically
+// everywhere in the app (history, stats). The library has no copy of it, so the
+// resolver finds nothing — but it is still perfectly playable from the source
+// it was played from, which the "external" catalog alias records.
+
+type fakeCatalogLookup struct {
+	entity  db.CatalogEntity
+	aliases []db.ListAliasesForCatalogRow
+	err     error
+}
+
+func (f *fakeCatalogLookup) GetCatalogEntity(context.Context, string) (db.CatalogEntity, error) {
+	return f.entity, f.err
+}
+
+func (f *fakeCatalogLookup) ListAliasesForCatalog(context.Context, string) ([]db.ListAliasesForCatalogRow, error) {
+	return f.aliases, f.err
+}
+
+// notFoundResolver stands in for "the library has no copy of this track".
+type notFoundResolver struct{}
+
+func (notFoundResolver) Resolve(context.Context, string) (resolver.Addressing, error) {
+	return resolver.Addressing{Found: false}, nil
+}
+
+func canonicalStreamServer(t *testing.T, cat CatalogLookup, ext ExternalStreamResolver) (*Server, *http.Cookie) {
+	t.Helper()
+	st, err := store.Open(t.TempDir() + "/canon.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if err := st.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	authSvc, tok := seededAuthToken(t, st)
+	srv := NewServer(Deps{
+		Auth:           authSvc,
+		Library:        &fakeLibrary{},
+		Search:         registry.NewRegistry("search"),
+		Downloader:     registry.NewRegistry("downloader"),
+		Resolver:       notFoundResolver{},
+		Catalog:        cat,
+		ExternalStream: ext,
+	})
+	return srv, &http.Cookie{Name: sessionCookie, Value: tok}
+}
+
+func TestStreamFallsBackToTheSourceForATrackNotInTheLibrary(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "audio/webm")
+		_, _ = w.Write([]byte("AUDIO"))
+	}))
+	defer upstream.Close()
+
+	ext := &fakeExtStream{url: upstream.URL}
+	cat := &fakeCatalogLookup{
+		entity:  db.CatalogEntity{Artist: "Artist", Title: "Title"},
+		aliases: []db.ListAliasesForCatalogRow{{AliasKind: "norm", AliasValue: "x"}, {AliasKind: "external", AliasValue: "deezer:123"}},
+	}
+	srv, cookie := canonicalStreamServer(t, cat, ext)
+
+	rec := doAuthed(t, srv, http.MethodGet, "/api/v1/stream/trk_abc", cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "AUDIO" {
+		t.Fatalf("body = %q", rec.Body.String())
+	}
+	// The artist/title the entity carries are what the resolver looks the track
+	// up by when the source id alone is not enough.
+	if ext.lastArtist != "Artist" || ext.lastTitle != "Title" {
+		t.Fatalf("hints = %q/%q, want Artist/Title", ext.lastArtist, ext.lastTitle)
+	}
+}
+
+// History recorded before the external alias existed still names the track, and
+// artist plus title is all the source needs to find it again.
+func TestStreamFallsBackOnArtistAndTitleWithNoAlias(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("AUDIO"))
+	}))
+	defer upstream.Close()
+
+	ext := &fakeExtStream{url: upstream.URL}
+	cat := &fakeCatalogLookup{
+		entity:  db.CatalogEntity{Artist: "Artist", Title: "Title"},
+		aliases: []db.ListAliasesForCatalogRow{{AliasKind: "norm", AliasValue: "x"}},
+	}
+	srv, cookie := canonicalStreamServer(t, cat, ext)
+
+	rec := doAuthed(t, srv, http.MethodGet, "/api/v1/stream/trk_abc", cookie)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if ext.lastArtist != "Artist" || ext.lastTitle != "Title" {
+		t.Fatalf("hints = %q/%q", ext.lastArtist, ext.lastTitle)
+	}
+}
+
+// Nothing names the track: there is no query to run, so 404 stands.
+func TestStreamStays404WhenTheEntityHasNoTitle(t *testing.T) {
+	cat := &fakeCatalogLookup{aliases: []db.ListAliasesForCatalogRow{{AliasKind: "norm", AliasValue: "x"}}}
+	srv, cookie := canonicalStreamServer(t, cat, &fakeExtStream{url: "http://unused"})
+	rec := doAuthed(t, srv, http.MethodGet, "/api/v1/stream/trk_abc", cookie)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestStreamStays404WithNoExternalStreamConfigured(t *testing.T) {
+	cat := &fakeCatalogLookup{aliases: []db.ListAliasesForCatalogRow{{AliasKind: "external", AliasValue: "deezer:123"}}}
+	srv, cookie := canonicalStreamServer(t, cat, nil)
+	rec := doAuthed(t, srv, http.MethodGet, "/api/v1/stream/trk_abc", cookie)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+}
+
+// ── canonical ids at the file boundary ───────────────────────────────────────
+// Waveform peaks, loudness, and lyrics all need the file on disk. The library
+// knows only its own backend ids, so a canonical id has to be resolved first —
+// handing it over raw is a lookup that can only fail.
+
+type pathRecordingLibrary struct {
+	*fakeLibrary
+	asked string
+}
+
+func (l *pathRecordingLibrary) LocalTrackPath(id string) (string, bool) {
+	l.asked = id
+	return "", false
+}
+
+type foundResolver struct{ backendID string }
+
+func (f foundResolver) Resolve(context.Context, string) (resolver.Addressing, error) {
+	return resolver.Addressing{BackendID: f.backendID, Found: true}, nil
+}
+
+func TestPeaksResolvesACanonicalIDBeforeAskingTheLibraryForAFile(t *testing.T) {
+	lib := &pathRecordingLibrary{fakeLibrary: &fakeLibrary{}}
+	st, err := store.Open(t.TempDir() + "/peaks.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if err := st.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	authSvc, tok := seededAuthToken(t, st)
+	srv := NewServer(Deps{
+		Auth:       authSvc,
+		Library:    lib,
+		Search:     registry.NewRegistry("search"),
+		Downloader: registry.NewRegistry("downloader"),
+		Resolver:   foundResolver{backendID: "backend-7"},
+	})
+	cookie := &http.Cookie{Name: sessionCookie, Value: tok}
+
+	doAuthed(t, srv, http.MethodGet, "/api/v1/library/track/trk_abc/peaks", cookie)
+	if lib.asked != "backend-7" {
+		t.Fatalf("library asked for %q, want the resolved backend id", lib.asked)
+	}
+
+	// An external track has no file at all: the library must not be asked.
+	lib.asked = ""
+	doAuthed(t, srv, http.MethodGet, "/api/v1/library/track/deezer:123/peaks", cookie)
+	if lib.asked != "" {
+		t.Fatalf("library asked for %q for an external track", lib.asked)
 	}
 }

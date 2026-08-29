@@ -338,37 +338,52 @@ describe('AudioEngine loading state', () => {
 })
 
 // ── Loudness normalization ───────────────────────────────────────────────────
-// The gain is applied at playback time by a gain stage in front of the output;
-// the file itself is never touched, so switching this off is instant.
+// The gain is folded into the media element's own volume at playback time; the
+// file itself is never touched, so switching this off is instant.
 describe('AudioEngine normalization', () => {
   function normEngine(gains: Record<string, number | null>) {
-    const gain = { gain: { value: 1 } }
+    const audios: FakeAudio[] = []
     const fetched: string[] = []
     const engine = new AudioEngine(
-      () => new FakeAudio(),
+      () => {
+        const a = new FakeAudio()
+        audios.push(a)
+        return a
+      },
       (t) => `mock://${t.id}`,
       async (id) => {
         fetched.push(id)
         return gains[id] ?? null
       },
-      () => gain,
     )
-    return { engine, gain, fetched }
+    return { engine, audios, fetched }
   }
 
   it('applies the measured gain for the playing track', async () => {
-    const { engine, gain } = normEngine({ '1': 6 })
+    const { engine, audios } = normEngine({ '1': -6 })
     engine.setNormalization(true)
     engine.playTrackList([track('1')], 0)
-    await vi.waitFor(() => expect(gain.gain.value).toBeCloseTo(Math.pow(10, 6 / 20), 5))
+    await vi.waitFor(() => expect(audios[0].volume).toBeCloseTo(Math.pow(10, -6 / 20), 5))
+  })
+
+  // The element cannot go above unity, so a boost is limited by the headroom
+  // the volume slider has left — and must never be clipped to silence.
+  it('takes a boost only as far as the remaining headroom allows', async () => {
+    const { engine, audios } = normEngine({ '1': 6 })
+    engine.setNormalization(true)
+    engine.setVolume(0.5)
+    engine.playTrackList([track('1')], 0)
+    await vi.waitFor(() => expect(audios[0].volume).toBeCloseTo(0.5 * Math.pow(10, 6 / 20), 5))
+    engine.setVolume(1)
+    expect(audios[0].volume).toBe(1)
   })
 
   // A track with no measurement plays untouched rather than at some guessed level.
-  it('leaves gain at unity when the server has no measurement', async () => {
-    const { engine, gain } = normEngine({ '1': null })
+  it('leaves the level untouched when the server has no measurement', async () => {
+    const { engine, audios } = normEngine({ '1': null })
     engine.setNormalization(true)
     engine.playTrackList([track('1')], 0)
-    await vi.waitFor(() => expect(gain.gain.value).toBe(1))
+    await vi.waitFor(() => expect(audios[0].volume).toBe(1))
   })
 
   it('does not measure anything while normalization is off', async () => {
@@ -378,13 +393,24 @@ describe('AudioEngine normalization', () => {
     expect(fetched).toEqual([])
   })
 
-  it('restores unity gain the moment normalization is switched off', async () => {
-    const { engine, gain } = normEngine({ '1': -6 })
+  it('restores the plain volume the moment normalization is switched off', async () => {
+    const { engine, audios } = normEngine({ '1': -6 })
     engine.setNormalization(true)
     engine.playTrackList([track('1')], 0)
-    await vi.waitFor(() => expect(gain.gain.value).toBeLessThan(1))
+    await vi.waitFor(() => expect(audios[0].volume).toBeLessThan(1))
     engine.setNormalization(false)
-    expect(gain.gain.value).toBe(1)
+    expect(audios[0].volume).toBe(1)
+  })
+
+  // Gain belongs to the track that measured it: the next track starts at unity
+  // and settles to its own level.
+  it('does not leak a track gain into the next track', async () => {
+    const { engine, audios } = normEngine({ '1': -12, '2': null })
+    engine.setNormalization(true)
+    engine.playTrackList([track('1'), track('2')], 0)
+    await vi.waitFor(() => expect(audios[0].volume).toBeLessThan(1))
+    engine.next()
+    expect(audios[0].volume).toBe(1)
   })
 
   // Measuring runs ffmpeg server-side on first play, so it must be cached —
@@ -464,5 +490,40 @@ describe('AudioEngine crop', () => {
     audios[0].fire('timeupdate')
     expect(engine.getState().currentTimeMs).toBe(45000)
     expect(engine.getState().durationMs).toBe(200000)
+  })
+})
+
+// ── Volume ──────────────────────────────────────────────────────────────────
+// The engine's volume is the only truth: the slider shows it, so any element
+// playing at some other level makes the first drag jump the output.
+describe('AudioEngine volume', () => {
+  it('pins both elements to the engine volume at construction', () => {
+    const { audios } = newEngine()
+    expect(audios.map((a) => a.volume)).toEqual([1, 1])
+  })
+
+  it('re-asserts the volume on the element when a new source is loaded', () => {
+    const { engine, audios } = newEngine()
+    engine.setVolume(0.4)
+    // An element that comes up at its own default rather than the engine's.
+    audios[0].volume = 1
+    engine.playTrackList(list, 0)
+    expect(audios[0].volume).toBe(0.4)
+  })
+
+  it('re-asserts the volume when the source becomes playable', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList(list, 0)
+    engine.setVolume(0.3)
+    audios[0].volume = 0.9
+    audios[0].fire('canplay')
+    expect(audios[0].volume).toBe(0.3)
+  })
+
+  it('keeps the preloaded next track at the same volume', () => {
+    const { engine, audios } = newEngine()
+    engine.setVolume(0.5)
+    engine.playTrackList(list, 0)
+    expect(audios[1].volume).toBe(0.5)
   })
 })

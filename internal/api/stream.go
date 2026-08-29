@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/library"
+	"github.com/uhhhm/reverb/internal/trackref"
 )
 
 // isCanonicalID reports whether id carries a catalog-entity prefix. Only these
@@ -44,6 +46,13 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !addr.Found || addr.BackendID == "" {
+			// No copy in the library. The track may still be playable from the
+			// source it was played from before — history and anything else that
+			// addresses tracks canonically would otherwise dead-end on a track
+			// that plays perfectly well from search.
+			if s.streamCanonicalExternally(w, r, id) {
+				return
+			}
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}
@@ -138,4 +147,81 @@ func (s *Server) serveCover(w http.ResponseWriter, r *http.Request, lib library.
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, cover.Body)
+}
+
+// streamCanonicalExternally plays a canonical track from a search source when
+// the library has no copy of it. Reports whether it handled the response; false
+// means there is nothing to fall back to and the caller should answer 404.
+//
+// The "external" alias recorded when the track was played from a source is the
+// precise answer, and it carries the source id that keeps the resolve cached
+// under the same key the search page uses. Failing that, the entity's own
+// artist and title are enough to find the track again — which is what makes a
+// history entry recorded before that alias existed still playable.
+func (s *Server) streamCanonicalExternally(w http.ResponseWriter, r *http.Request, catalogID string) bool {
+	if s.deps.ExternalStream == nil || s.deps.Catalog == nil {
+		return false
+	}
+	source, externalID := s.externalAliasFor(r.Context(), catalogID)
+
+	e, err := s.deps.Catalog.GetCatalogEntity(r.Context(), catalogID)
+	if err != nil {
+		return false
+	}
+	if source == "" || externalID == "" {
+		if e.Title == "" {
+			return false
+		}
+		// The source pair is only a cache key once artist and title are known,
+		// so the catalog id itself is a perfectly good one — and a stable one,
+		// which keeps the resolve reusable across plays.
+		source, externalID = "catalog", catalogID
+	}
+	s.serveExternalStream(w, r, source, externalID, e.Artist, e.Title)
+	return true
+}
+
+// externalAliasFor returns the source addressing recorded for a catalog entity,
+// or empty strings when it has none.
+func (s *Server) externalAliasFor(ctx context.Context, catalogID string) (source, externalID string) {
+	aliases, err := s.deps.Catalog.ListAliasesForCatalog(ctx, catalogID)
+	if err != nil {
+		return "", ""
+	}
+	for _, a := range aliases {
+		if a.AliasKind != "external" {
+			continue
+		}
+		if src, ext, ok := trackref.DecodeExternalID(a.AliasValue); ok {
+			return src, ext
+		}
+	}
+	return "", ""
+}
+
+// localPathFor resolves a track id to a file on disk, mapping a canonical id
+// through the resolver first. The library only knows its own backend ids, so
+// handing it a canonical one produces nothing but a failed lookup.
+//
+// Returns ("", false) for an external track (no file exists), when the library
+// has no local files (a remote Subsonic server), or when nothing resolves.
+func (s *Server) localPathFor(ctx context.Context, id string) (string, bool) {
+	if id == "" || isExternalTrackID(id) {
+		return "", false
+	}
+	paths, ok := s.library().(localTrackPath)
+	if !ok {
+		return "", false
+	}
+	if isCanonicalID(id) {
+		if s.deps.Resolver == nil {
+			return "", false
+		}
+		addr, err := s.deps.Resolver.Resolve(ctx, id)
+		if err != nil || !addr.Found || addr.BackendID == "" {
+			return "", false
+		}
+		id = addr.BackendID
+	}
+	return paths.LocalTrackPath(id)
 }

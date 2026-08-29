@@ -7,6 +7,7 @@ import (
 
 	"github.com/uhhhm/reverb/internal/catalog"
 	"github.com/uhhhm/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/trackref"
 )
 
 // PlayInput carries the metadata and timing for a single play event.
@@ -51,9 +52,16 @@ func NewService(q Querier, cat CanonicalMinter, now func() time.Time, idgen func
 }
 
 // Record mints a catalog ID for the given track and inserts a play row scoped
-// to userID. Source and ExternalID are intentionally left empty: the FE Track
-// has no track-level external id, so these are pure-library entities.
+// to userID.
+//
+// A track played straight from a search source (not in the library) arrives
+// with a synthetic "<source>:<externalId>" id, and that addressing is carried
+// into the identity: it attaches an "external" alias to the entity, which is
+// what lets the play be played again later from history. It does not fork the
+// entity — the norm/ISRC aliases still fuse the external play with the library
+// copy of the same track.
 func (s *Service) Record(ctx context.Context, userID string, in PlayInput) error {
+	source, externalID, _ := trackref.DecodeExternalID(in.LibraryTrackID)
 	cid, err := s.cat.CanonicalFor(ctx, catalog.Identity{
 		Kind:       "track",
 		Title:      in.Title,
@@ -61,7 +69,8 @@ func (s *Service) Record(ctx context.Context, userID string, in PlayInput) error
 		Album:      in.Album,
 		ISRC:       in.ISRC,
 		DurationMs: in.DurationMs,
-		// Source and ExternalID intentionally empty.
+		Source:     source,
+		ExternalID: externalID,
 	})
 	if err != nil {
 		return err
@@ -116,7 +125,8 @@ func (s *Service) PlayCounts(ctx context.Context, userID string, items []PlayCou
 			Album:      it.Album,
 			ISRC:       it.ISRC,
 			DurationMs: it.DurationMs,
-			// Source and ExternalID intentionally empty, exactly like Record.
+			// No Source/ExternalID: the ISRC and norm aliases resolve the same
+			// entity whether the play came from the library or a search source.
 		})
 		if err != nil {
 			return nil, err
