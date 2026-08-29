@@ -4,8 +4,10 @@ package coverage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"sync"
 
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/matching"
@@ -313,7 +315,14 @@ func (s *Service) libraryAlbumsAsSkeleton(ctx context.Context, libArtistID strin
 	return out
 }
 
+// streamCoverageConcurrency caps concurrent GetAlbum+RollUp work. 5 is enough
+// to turn a 50-album × 150ms = 7.5s serial stream into ~1.5s without
+// hammering Spotify rate limits or the library DB.
+const streamCoverageConcurrency = 5
+
 // StreamCoverage emits one AlbumCoverage per canonical album (cache-first).
+// Album coverages are fetched concurrently (bounded) and emitted as soon as
+// ready — order is not guaranteed.
 func (s *Service) StreamCoverage(ctx context.Context, source, id string) <-chan core.AlbumCoverage {
 	out := make(chan core.AlbumCoverage)
 	go func() {
@@ -322,17 +331,57 @@ func (s *Service) StreamCoverage(ctx context.Context, source, id string) <-chan 
 		if err != nil || !det.Resolved {
 			return
 		}
-		for _, da := range det.Albums {
-			cov, cErr := s.coverageForAlbum(ctx, da.Source, da.ExternalID)
-			if cErr != nil {
-				cov = core.AlbumCoverage{Source: da.Source, ExternalAlbumID: da.ExternalID, State: core.CoverageNone, MissingTracks: []core.ExternalTrackRef{}}
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case out <- cov:
-			}
+		if len(det.Albums) == 0 {
+			return
 		}
+		curVer, vErr := s.version(ctx)
+		if vErr != nil {
+			// Version unavailable — degrade each album to none without
+			// attempting cache or upstream fetch.
+			for _, da := range det.Albums {
+				select {
+				case <-ctx.Done():
+					return
+				case out <- core.AlbumCoverage{
+					Source: da.Source, ExternalAlbumID: da.ExternalID,
+					State: core.CoverageNone, TotalCount: da.TotalTracks, MissingTracks: []core.ExternalTrackRef{},
+				}:
+				}
+			}
+			return
+		}
+		sem := make(chan struct{}, streamCoverageConcurrency)
+		var wg sync.WaitGroup
+		for _, da := range det.Albums {
+			da := da
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				// Acquire concurrency slot or abort on cancel. Semaphore is
+				// released BEFORE the blocking send on unbuffered out so a
+				// slow client does not hold a slot and stall the remaining
+				// workers (previously defer <-sem ran after out <- cov).
+				select {
+				case sem <- struct{}{}:
+				case <-ctx.Done():
+					return
+				}
+				cov, cErr := s.coverageForAlbumWithVersion(ctx, da.Source, da.ExternalID, curVer)
+				<-sem
+				if cErr != nil {
+					cov = core.AlbumCoverage{
+						Source: da.Source, ExternalAlbumID: da.ExternalID,
+						State: core.CoverageNone, TotalCount: da.TotalTracks, MissingTracks: []core.ExternalTrackRef{},
+					}
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case out <- cov:
+				}
+			}()
+		}
+		wg.Wait()
 	}()
 	return out
 }
@@ -342,6 +391,10 @@ func (s *Service) coverageForAlbum(ctx context.Context, source, extAlbumID strin
 	if err != nil {
 		return core.AlbumCoverage{}, err
 	}
+	return s.coverageForAlbumWithVersion(ctx, source, extAlbumID, curVer)
+}
+
+func (s *Service) coverageForAlbumWithVersion(ctx context.Context, source, extAlbumID string, curVer int64) (core.AlbumCoverage, error) {
 	if row, err := s.cache.GetAlbumCoverage(ctx, source, extAlbumID); err == nil && row.Found && row.LibraryVersion >= curVer {
 		var cov core.AlbumCoverage
 		if json.Unmarshal([]byte(row.CoverageJSON), &cov) == nil {
@@ -380,25 +433,86 @@ func (s *Service) backfillLibraryAlbumID(ctx context.Context, cov core.AlbumCove
 	return ""
 }
 
+// albumDetailTrackConcurrency caps concurrent Match calls when building an
+// AlbumDetail (same rationale as RollUp).
+const albumDetailTrackConcurrency = 8
+
 // albumDetailFromExternal builds an AlbumDetail from a full external album by
 // matching each track against the library. Source metadata is preserved;
 // callers that need different metadata (e.g. the library branch) override afterwards.
+// Matching is concurrent (bounded) and tracks are reassembled in original order.
 func (s *Service) albumDetailFromExternal(ctx context.Context, full core.ExternalAlbum) (core.AlbumDetail, error) {
 	det := core.AlbumDetail{
 		Source: full.Source, ID: full.ExternalID, Name: full.Name, Artist: full.Artist,
 		CoverURL: full.CoverURL, Year: full.Year, TotalCount: len(full.Tracks),
 	}
-	for i, tr := range full.Tracks {
+	if len(full.Tracks) == 0 {
+		return det, nil
+	}
+	if len(full.Tracks) == 1 {
+		tr := full.Tracks[0]
 		res, mErr := s.match.Match(ctx, tr)
 		if mErr != nil {
 			return core.AlbumDetail{}, mErr
 		}
-		dt := core.AlbumDetailTrack{Title: tr.Title, Artist: tr.Artist, Album: full.Name, TrackNumber: i + 1, DurationMs: tr.DurationMs, CoverURL: tr.CoverURL,
+		dt := core.AlbumDetailTrack{Title: tr.Title, Artist: tr.Artist, Album: full.Name, TrackNumber: 1, DurationMs: tr.DurationMs, CoverURL: tr.CoverURL,
 			ArtistExternalID: tr.ArtistExternalID, AlbumExternalID: tr.AlbumExternalID}
 		if res.Status == core.MatchInLibrary && res.LibraryTrackID != "" {
-			det.OwnedCount++
+			det.OwnedCount = 1
 			dt.State = core.CoverageFull
 			dt.LibraryTrack = &core.Track{ID: res.LibraryTrackID, Title: tr.Title, Artist: tr.Artist, DurationMs: tr.DurationMs, ArtistID: res.ArtistID, AlbumID: res.AlbumID, CoverArtID: res.CoverArtID}
+		} else {
+			dt.State = core.CoverageNone
+			ref := core.ExternalTrackRef{Source: tr.Source, ExternalID: tr.ExternalID, Title: tr.Title, Artist: tr.Artist, Album: full.Name, ISRC: tr.ISRC, DurationMs: tr.DurationMs}
+			dt.ExternalRef = &ref
+		}
+		det.Tracks = append(det.Tracks, dt)
+		return det, nil
+	}
+	type trackRes struct {
+		res core.MatchResult
+		err error
+	}
+	results := make([]trackRes, len(full.Tracks))
+	sem := make(chan struct{}, albumDetailTrackConcurrency)
+	var wg sync.WaitGroup
+	for i, tr := range full.Tracks {
+		wg.Add(1)
+		go func(idx int, tr core.ExternalResult) {
+			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				results[idx] = trackRes{err: ctx.Err()}
+				return
+			}
+			r, err := s.match.Match(ctx, tr)
+			results[idx] = trackRes{res: r, err: err}
+		}(i, tr)
+	}
+	wg.Wait()
+	// Prefer a real Match error over a concurrent context cancellation.
+	for _, r := range results {
+		if r.err != nil && !errors.Is(r.err, context.Canceled) && !errors.Is(r.err, context.DeadlineExceeded) {
+			return core.AlbumDetail{}, r.err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return core.AlbumDetail{}, err
+	}
+	det.Tracks = make([]core.AlbumDetailTrack, 0, len(full.Tracks))
+	for i, tr := range full.Tracks {
+		r := results[i]
+		if r.err != nil {
+			return core.AlbumDetail{}, r.err
+		}
+		dt := core.AlbumDetailTrack{Title: tr.Title, Artist: tr.Artist, Album: full.Name, TrackNumber: i + 1, DurationMs: tr.DurationMs, CoverURL: tr.CoverURL,
+			ArtistExternalID: tr.ArtistExternalID, AlbumExternalID: tr.AlbumExternalID}
+		if r.res.Status == core.MatchInLibrary && r.res.LibraryTrackID != "" {
+			det.OwnedCount++
+			dt.State = core.CoverageFull
+			dt.LibraryTrack = &core.Track{ID: r.res.LibraryTrackID, Title: tr.Title, Artist: tr.Artist, DurationMs: tr.DurationMs, ArtistID: r.res.ArtistID, AlbumID: r.res.AlbumID, CoverArtID: r.res.CoverArtID}
 		} else {
 			dt.State = core.CoverageNone
 			ref := core.ExternalTrackRef{Source: tr.Source, ExternalID: tr.ExternalID, Title: tr.Title, Artist: tr.Artist, Album: full.Name, ISRC: tr.ISRC, DurationMs: tr.DurationMs}
