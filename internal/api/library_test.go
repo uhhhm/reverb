@@ -18,6 +18,7 @@ import (
 // fakeLibrary implements library.LibraryAdapter (+ browse interfaces) for tests.
 type fakeLibrary struct {
 	lastRange string
+	lastOpts  core.StreamOpts
 
 	// playlist-mutation recorders
 	createdName string
@@ -52,6 +53,7 @@ func (f *fakeLibrary) AddTracksToPlaylist(ctx context.Context, playlistID string
 }
 func (f *fakeLibrary) Stream(ctx context.Context, trackID string, opts core.StreamOpts, rangeHeader string) (core.StreamHandle, error) {
 	f.lastRange = rangeHeader
+	f.lastOpts = opts
 	status := http.StatusOK
 	cr := ""
 	if rangeHeader != "" {

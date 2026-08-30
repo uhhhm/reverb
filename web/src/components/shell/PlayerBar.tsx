@@ -23,9 +23,8 @@ import { IconButton } from '../ui/IconButton'
 import { Icon } from '../ui/Icon'
 import { AddToPlaylistMenu } from '../AddToPlaylistMenu'
 import { ProgressRing } from '../ui/ProgressRing'
-import { usePeaks } from '../../lib/peaksApi'
+import { useWaveformPeaks } from '../../lib/peaksApi'
 import { useLyrics } from '../../lib/lyricsApi'
-import { isExternalTrack } from '../../lib/trackRef'
 
 /**
  * Gates a transient flag behind a delay. A library track is playable in well
@@ -53,13 +52,11 @@ function useSettledFlag(active: boolean, delayMs: number): boolean {
 // position/duration from the player store. Click-to-seek updates seekMs.
 // ---------------------------------------------------------------------------
 function SeekBar() {
-  const trackId = usePlayer((s) => s.current?.id)
   const currentTimeMs = usePlayer((s) => s.currentTimeMs)
   const durationMs = usePlayer((s) => s.durationMs)
   const bufferedMs = usePlayer((s) => s.bufferedMs)
   const seekMs = usePlayer((s) => s.seekMs)
-  const isExternal = usePlayer((s) => (s.current ? isExternalTrack(s.current) : false))
-  const peaks = usePeaks(trackId, isExternal).data
+  const peaks = useWaveformPeaks(usePlayer((s) => s.current))
 
 
   // While dragging, the rail follows the cursor rather than the store, so the
@@ -149,7 +146,7 @@ function SeekBar() {
       >
         {peaks?.length ? (
           <div data-testid="waveform" className="absolute inset-x-0 top-1/2 flex h-6 -translate-y-1/2 items-center gap-px">
-            {peaks.map((peak, index) => <div key={index} className={index / peaks.length * 100 <= pct ? 'flex-1 rounded-full bg-text-primary group-hover:bg-accent' : 'flex-1 rounded-full bg-border-subtle'} style={{ minHeight: '2px', height: `${Math.max(8, peak * 100)}%` }} />)}
+            {peaks.map((peak, index) => <div key={index} className={(index + 1) / peaks.length * 100 <= pct ? 'flex-1 rounded-full bg-text-primary group-hover:bg-accent' : 'flex-1 rounded-full bg-border-subtle'} style={{ minHeight: '2px', height: `${Math.max(8, peak * 100)}%` }} />)}
           </div>
         ) : <>
           <div data-testid="flat-rail" className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-raised-hover" style={{ width: `${bufPct}%` }} />

@@ -1,6 +1,7 @@
 import type { Track } from './types'
-import { streamUrlFor } from './trackRef'
+import { isExternalTrack, needsBackendSeek, streamUrlFor } from './trackRef'
 import { fetchTrackGainDb } from './gainApi'
+import { fetchTrackDurationMs } from './durationApi'
 
 export type RepeatMode = 'off' | 'all' | 'one'
 
@@ -50,9 +51,14 @@ function realAudioFactory(): AudioElement {
 
 const UP_NEXT_LIMIT = 20
 
+// The largest forward step still read as playing rather than jumping.
+// 'timeupdate' fires about every 250 ms; a stalled stream can stretch that, so
+// this leaves room for a slow tick without admitting a seek.
+const CONTINUOUS_TICK_MS = 2000
+
 export class AudioEngine {
   private factory: () => AudioElement
-  private resolveSrc: (t: Track) => string
+  private resolveSrc: (t: Track, startMs: number) => string
   private active: AudioElement
   private preload: AudioElement
   private listeners = new Set<(s: PlayerState) => void>()
@@ -76,6 +82,27 @@ export class AudioEngine {
   // spurious 'stalled'/'waiting': if the clock is still advancing, audio is
   // playing and the spinner must come down.
   private lastRawMs = -1
+  // Largest end position claimed for the loaded track, and the furthest the
+  // clock has actually reached in it; see effectiveEndMs. Both are reset on
+  // every load and never during one.
+  private claimedEndMs = 0
+  private playedToMs = 0
+  // Whether the loaded track has been seeked. Seeking a stream the browser has
+  // no length for is a byte-offset guess, so everything the element reports
+  // afterwards — its `duration`, and its clock — is offset by that guess rather
+  // than read from the file. Neither counts as evidence of the length; see
+  // effectiveEndMs and onTime.
+  private seekedSinceLoad = false
+  // The file position the loaded source begins at. Zero for the whole file; a
+  // backend seek re-opens the stream partway in, and everything the element
+  // reports is then relative to that point.
+  private seekBaseMs = 0
+  // The server's measured length for the loaded track, once it has arrived.
+  // Unlike everything else this is decoded from the file, so it overrides the
+  // claims rather than joining them.
+  private measuredEndMs = 0
+  private measuredCache = new Map<string, number | null>()
+  private fetchDurationMs: (trackId: string) => Promise<number | null>
 
   // Playback-time loudness normalization. The file is never re-encoded: the
   // measured per-track gain is folded into the media element's own volume, so
@@ -104,12 +131,14 @@ export class AudioEngine {
 
   constructor(
     factory: () => AudioElement = realAudioFactory,
-    resolveSrc: (t: Track) => string = (t) => streamUrlFor(t),
+    resolveSrc: (t: Track, startMs: number) => string = (t, startMs) => streamUrlFor(t, startMs),
     fetchGainDb: (trackId: string) => Promise<number | null> = fetchTrackGainDb,
+    fetchDurationMs: (trackId: string) => Promise<number | null> = fetchTrackDurationMs,
   ) {
     this.factory = factory
     this.resolveSrc = resolveSrc
     this.fetchGainDb = fetchGainDb
+    this.fetchDurationMs = fetchDurationMs
     this.active = this.factory()
     this.preload = this.factory()
     this.applyVolume()
@@ -145,16 +174,62 @@ export class AudioEngine {
     return { start: Math.max(0, t?.cropStartMs ?? 0), end: Math.max(0, t?.cropEndMs ?? 0) }
   }
 
+  /**
+   * The playable length of the current track, in file positions. A crop end
+   * defines it outright; otherwise it comes from two kinds of source, which are
+   * combined rather than ranked.
+   *
+   * Claims — the tag, and the element's own `duration` — are guesses. A tag can
+   * understate a VBR file, and a browser estimating a stream that declares no
+   * length revises `duration` as it buffers. Each errs by being too short, so
+   * the largest claim so far is kept, latched for as long as the track is
+   * loaded: the readout can only correct upward instead of drifting down, back
+   * up, and jumping again on every loop. A measured length, decoded from the
+   * file server-side, replaces the claims outright in either direction — it is
+   * the one source that cannot disagree with the file.
+   *
+   * Playback is not a claim. However short the claims are, and however short a
+   * measurement comes out — ffmpeg trims an MP3's encoder padding that the
+   * browser plays, a trailing tag can decode as a moment of audio — a position
+   * the clock has *played* to is proof the track runs at least that far. So it
+   * is a floor under the answer, and the readout can never be overrun by the
+   * audio it describes.
+   *
+   * Only played-through positions count, never a seek (see onTime). Seeking is
+   * offered up to the length shown, so counting where a seek lands would let a
+   * click near the end of an already-too-long bar cite that bar as its own
+   * evidence and latch it for the rest of the track.
+   */
+  private effectiveEndMs(): number {
+    const { end } = this.cropWindow()
+    if (end > 0) return end
+    let claimed = this.measuredEndMs
+    if (claimed <= 0) {
+      const meta = this.getState().current?.durationMs ?? 0
+      // Once the track has been seeked the element's own duration is a reading
+      // taken from the seek target, not from the file: seeking is offered up to
+      // the length shown, so a jump near the end of an already-too-long bar
+      // would have the element restate that bar and latch it for good. The
+      // claims gathered before the first seek stand — unless there were none at
+      // all, where the element's guess is still better than no readout.
+      const trustElement = !this.seekedSinceLoad || Math.max(this.claimedEndMs, meta) <= 0
+      const element =
+        trustElement && Number.isFinite(this.active.duration)
+          ? Math.round((this.active.duration || 0) * 1000)
+          : 0
+      this.claimedEndMs = Math.max(this.claimedEndMs, element, meta)
+      claimed = this.claimedEndMs
+    }
+    return Math.max(claimed, this.playedToMs)
+  }
+
   private onTime = () => {
     const { start, end } = this.cropWindow()
-    const rawMs = Math.round((this.active.currentTime || 0) * 1000)
-    const rawDurationMs = Number.isFinite(this.active.duration)
-      ? Math.round((this.active.duration || 0) * 1000)
-      : 0
+    const rawMs = this.seekBaseMs + Math.round((this.active.currentTime || 0) * 1000)
 
     // Playing before the crop start (a fresh load, or a seek that landed short)
     // jumps forward rather than letting the trimmed intro through.
-    if (start > 0 && rawMs < start - 250) {
+    if (this.seekBaseMs === 0 && start > 0 && rawMs < start - 250) {
       this.active.currentTime = start / 1000
       this.currentTimeMs = 0
       this.emit()
@@ -168,6 +243,11 @@ export class AudioEngine {
       return
     }
 
+    // How far the clock moved since the last tick, or -1 with nothing to compare
+    // against. A tick's worth of playback is a small forward step; a seek is a
+    // jump, and a reload starts over.
+    const advancedBy = this.lastRawMs < 0 ? -1 : rawMs - this.lastRawMs
+
     // A proxied external stream drops and re-opens its upstream connection on a
     // seek, which fires 'stalled' even though the buffer keeps feeding the
     // element. Nothing further fires once playback simply continues, so the
@@ -178,13 +258,28 @@ export class AudioEngine {
     }
 
     this.currentTimeMs = Math.max(0, rawMs - start)
-    const effectiveEnd = end > 0 ? end : rawDurationMs
+    // Audio played through past the claimed end is proof the track is longer —
+    // but only audio played through from the load, never after a seek. Seeking
+    // an unlabelled stream is a byte-offset guess: the decoder lands somewhere
+    // other than where the clock then says it is, and the real audio remaining
+    // after it carries that clock past the true end. Positions counted from
+    // there would be measuring the seek's error, not the file.
+    if (!this.seekedSinceLoad && advancedBy > 0 && advancedBy <= CONTINUOUS_TICK_MS) {
+      this.playedToMs = Math.max(this.playedToMs, rawMs)
+    }
+    const effectiveEnd = this.effectiveEndMs()
     if (effectiveEnd > 0) {
       this.durationMs = Math.max(0, effectiveEnd - start)
+      // A clock offset by a seek's guess can run past the end it was seeked
+      // within. There the length is the better answer, so the position is
+      // pinned to it rather than allowed to overrun the rail it is drawn on.
+      // Un-seeked, the clock is the trustworthy one and extends the length
+      // instead (see playedToMs above).
+      if (this.seekedSinceLoad) this.currentTimeMs = Math.min(this.currentTimeMs, this.durationMs)
     }
     const b = this.active.buffered
     if (b && b.length > 0) {
-      this.bufferedMs = Math.max(0, Math.round(b.end(b.length - 1) * 1000) - start)
+      this.bufferedMs = Math.max(0, this.seekBaseMs + Math.round(b.end(b.length - 1) * 1000) - start)
     }
     this.emit()
   }
@@ -295,6 +390,30 @@ export class AudioEngine {
     if (!this.normalization) return
     this.gainLinear = Math.pow(10, db / 20)
     this.applyVolume()
+  }
+
+  /**
+   * Replaces the track's assumed length with the server's measured one.
+   *
+   * Fetched rather than waited on: the first measurement of a file decodes it
+   * server-side, and holding playback back on that would cost a second of
+   * silence at the start of every new track. The tag's length carries the
+   * readout until this lands.
+   */
+  private async applyMeasuredDurationFor(track: Track) {
+    // Nothing to decode for a track that is not a local file.
+    if (!track.id || isExternalTrack(track)) return
+    let ms = this.measuredCache.get(track.id)
+    if (ms === undefined) {
+      ms = await this.fetchDurationMs(track.id).catch(() => null)
+      this.measuredCache.set(track.id, ms)
+    }
+    // A track change during the fetch must not apply the wrong length.
+    if (ms == null || ms <= 0 || this.getState().current?.id !== track.id) return
+    this.measuredEndMs = ms
+    const { start } = this.cropWindow()
+    this.durationMs = Math.max(0, this.effectiveEndMs() - start)
+    this.emit()
   }
 
   /**
@@ -418,7 +537,7 @@ export class AudioEngine {
       this.emit()
       return
     }
-    this.active.src = this.resolveSrc(t)
+    this.active.src = this.resolveSrc(t, 0)
     this.active.load()
     this.applyVolume()
     this.loading = true
@@ -428,7 +547,16 @@ export class AudioEngine {
     // until metadata arrives, which onTime's forward-clamp then fixes.
     const cropStart = Math.max(0, t.cropStartMs ?? 0)
     this.active.currentTime = cropStart / 1000
-    this.durationMs = t.cropEndMs && t.cropEndMs > cropStart ? t.cropEndMs - cropStart : 0
+    // Only the new track's own numbers: the element still carries the previous
+    // source's duration until it has loaded metadata for this one.
+    const knownEnd = t.cropEndMs && t.cropEndMs > cropStart ? t.cropEndMs : (t.durationMs || 0)
+    this.claimedEndMs = Math.max(0, knownEnd)
+    this.playedToMs = 0
+    this.seekedSinceLoad = false
+    this.seekBaseMs = 0
+    this.measuredEndMs = 0
+    this.durationMs = Math.max(0, knownEnd - cropStart)
+    void this.applyMeasuredDurationFor(t)
     // Start at unity so a leftover gain from the previous track cannot leak in.
     this.gainLinear = 1
     this.applyVolume()
@@ -444,7 +572,7 @@ export class AudioEngine {
   private preloadNext() {
     const ni = this.peekNextIndex()
     if (ni < 0 || ni >= this.queue.length) return
-    this.preload.src = this.resolveSrc(this.queue[ni])
+    this.preload.src = this.resolveSrc(this.queue[ni], 0)
     this.preload.load()
     this.preload.volume = this.volume
   }
@@ -569,8 +697,28 @@ export class AudioEngine {
   /** Seeks within the cropped window; ms is relative to the crop start. */
   seekMs(ms: number) {
     const clamped = Math.max(0, this.durationMs > 0 ? Math.min(ms, this.durationMs) : ms)
-    this.active.currentTime = (this.cropWindow().start + clamped) / 1000
+    const target = this.cropWindow().start + clamped
+    const t = this.getState().current
+    if (t && needsBackendSeek(t)) {
+      // The browser cannot find this position in the file, so the stream is
+      // re-opened at it instead. The element then plays from zero and its clock
+      // is read through seekBaseMs. Seeking back to the start re-opens the whole
+      // file the same way — the loaded source is a fragment, so its own zero is
+      // wherever the last seek landed, not the track's beginning.
+      this.seekBaseMs = target
+      this.active.src = this.resolveSrc(t, target)
+      this.active.load()
+      this.applyVolume()
+      if (this.playing) void this.active.play()
+    } else {
+      this.seekBaseMs = 0
+      this.active.currentTime = target / 1000
+    }
     this.currentTimeMs = clamped
+    this.seekedSinceLoad = true
+    // The next tick lands wherever this seek went, which is not a step from the
+    // old position — there is nothing to measure it against.
+    this.lastRawMs = -1
     this.emit()
   }
 

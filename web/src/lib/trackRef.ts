@@ -67,7 +67,7 @@ export function isExternalTrack(track: Track): boolean {
 }
 
 /** Returns the correct stream URL for any track, library or external. */
-export function streamUrlFor(track: Track): string {
+export function streamUrlFor(track: Track, startMs = 0): string {
   if (track.externalStream) {
     return externalStreamUrl(
       track.externalStream.source,
@@ -76,7 +76,26 @@ export function streamUrlFor(track: Track): string {
       track.title,
     )
   }
-  return streamUrl(track.id)
+  return streamUrl(track.id, startMs)
+}
+
+/**
+ * Whether seeking this track has to be done by the backend rather than by the
+ * browser.
+ *
+ * A browser seeks a file it cannot index by mapping the position onto a byte
+ * offset through an assumed bitrate. For Ogg/Opus — what a downloaded track
+ * usually is — that lands seconds away from where the clock then claims to be,
+ * so the track plays on past its own end, or stops before it. The backend can
+ * start the audio at the position instead, which it knows exactly.
+ *
+ * MP3 and the MP4 family carry what a browser needs to seek them itself, and
+ * are left to: seeking in place keeps the original file and costs nothing.
+ */
+export function needsBackendSeek(track: Track): boolean {
+  if (track.externalStream) return false
+  const fmt = `${track.suffix ?? ''} ${track.contentType ?? ''}`.toLowerCase()
+  return /ogg|opus|vorbis|webm|matroska/.test(fmt)
 }
 
 /**

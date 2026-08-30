@@ -264,6 +264,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		TrackQuality: st.Q(),
 		Crop:         crop.New(st.Q()),
 		Loudness:     st.Q(),
+		Duration:     st.Q(),
 		Play:         playSvc,
 		Stats:        statsSvc,
 		Scrobble:     scrobbleSvc,

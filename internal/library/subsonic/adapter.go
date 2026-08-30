@@ -279,6 +279,9 @@ func (a *Adapter) Stream(ctx context.Context, trackID string, opts core.StreamOp
 	if opts.Format != "" {
 		params.Set("format", opts.Format)
 	}
+	if opts.TimeOffsetSec > 0 {
+		params.Set("timeOffset", strconv.Itoa(opts.TimeOffsetSec))
+	}
 	resp, err := a.client.RawGet(ctx, "stream", params, rangeHeader)
 	if err != nil {
 		// Transport error: backend unreachable — leave unwrapped so caller returns 502.

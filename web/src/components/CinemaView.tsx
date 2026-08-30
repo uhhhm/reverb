@@ -7,8 +7,7 @@ import { formatDuration } from '../lib/types'
 import { useUI } from '../lib/uiStore'
 import { useActiveLyricLine } from '../lib/useActiveLyricLine'
 import { useAlbumPalette } from '../lib/useAlbumPalette'
-import { usePeaks } from '../lib/peaksApi'
-import { isExternalTrack } from '../lib/trackRef'
+import { useWaveformPeaks } from '../lib/peaksApi'
 import { Cover } from './ui/Cover'
 import { Icon } from './ui/Icon'
 import { LyricsLines } from './lyrics/LyricsLines'
@@ -28,7 +27,7 @@ export function CinemaView() {
   const currentTimeMs = usePlayer((s) => s.currentTimeMs)
   const durationMs = usePlayer((s) => s.durationMs)
   const palette = useAlbumPalette(current ? trackCoverUrl(current, 80) : undefined)
-  const peaks = usePeaks(current?.id, current ? isExternalTrack(current) : false).data
+  const peaks = useWaveformPeaks(current)
   const [sideView, setSideView] = useState<'queue' | 'lyrics'>('queue')
   const { data: lyrics } = useLyrics(open ? current : null)
   const activeIndex = useActiveLyricLine(lyrics?.synced ? lyrics.lines : undefined)
@@ -152,7 +151,7 @@ export function CinemaView() {
         <div role="slider" aria-label="Seek" aria-valuemin={0} aria-valuemax={durationMs} aria-valuenow={currentTimeMs} tabIndex={0} onClick={seek} onKeyDown={onSeekKeyDown} className="group relative h-1 w-full cursor-pointer rounded-full bg-border-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           {peaks?.length ? (
             <div data-testid="waveform" className="absolute inset-x-0 top-1/2 flex h-8 -translate-y-1/2 items-center gap-px">
-              {peaks.map((peak, i) => <div key={i} className={i / peaks.length * 100 <= pct ? 'flex-1 rounded-full bg-text-primary group-hover:bg-accent' : 'flex-1 rounded-full bg-border-subtle'} style={{ minHeight: '2px', height: `${Math.max(8, peak * 100)}%` }} />)}
+              {peaks.map((peak, i) => <div key={i} className={(i + 1) / peaks.length * 100 <= pct ? 'flex-1 rounded-full bg-text-primary group-hover:bg-accent' : 'flex-1 rounded-full bg-border-subtle'} style={{ minHeight: '2px', height: `${Math.max(8, peak * 100)}%` }} />)}
             </div>
           ) : (
             <div className="h-full rounded-full bg-text-primary" style={{ width: `${pct}%` }} />

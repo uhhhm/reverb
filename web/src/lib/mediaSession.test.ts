@@ -171,6 +171,15 @@ describe('startMediaSession', () => {
     })
   })
 
+  // Skipping the update instead would leave the OS showing the previous
+  // track's length beside the new track's position.
+  it('clears the position state when the length is not known yet', () => {
+    const { engine, emit } = makeEngine()
+    startMediaSession(engine)
+    emit(makeState({ current: makeTrack('t1', 'Karma Police'), playing: true, durationMs: 0 }))
+    expect(ms.setPositionState).toHaveBeenCalledWith()
+  })
+
   it('clears metadata when the queue empties, and tears down on stop()', () => {
     const { engine, emit, unsub } = makeEngine()
     const stop = startMediaSession(engine)

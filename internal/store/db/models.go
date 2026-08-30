@@ -271,6 +271,12 @@ type TrackCrop struct {
 	CatalogID sql.NullString `json:"catalog_id"`
 }
 
+type TrackDuration struct {
+	TrackID    string `json:"track_id"`
+	DurationMs int64  `json:"duration_ms"`
+	UpdatedAt  int64  `json:"updated_at"`
+}
+
 type TrackLoudness struct {
 	TrackID   string         `json:"track_id"`
 	GainDb    float64        `json:"gain_db"`

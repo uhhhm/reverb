@@ -290,6 +290,11 @@ paths:
       summary: Waveform peaks for a local track (computed on demand; embedded library only)
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses: { "200": { description: waveform data }, "204": { description: peaks unavailable } }
+  /library/track/{id}/duration:
+    get:
+      summary: Measured playable length of a local track, in ms (decoded on demand, cached; embedded library only)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { "200": { description: measured duration }, "204": { description: measurement unavailable } }
   /library/track/{id}/lyrics:
     get:
       summary: Lyrics for a track (local tags/sidecar → LRCLIB, DB-cached)
@@ -349,7 +354,16 @@ paths:
   /stream/{id}:
     get:
       summary: Stream/transcode-proxy a library track by id (Range supported)
-      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - name: t
+          in: query
+          required: false
+          description: >
+            Start the stream this many ms into the track. The backend transcodes
+            from that position, which is exact where a byte-range seek is a
+            guess; the inbound Range header is ignored.
+          schema: { type: integer }
       responses: { "200": { description: audio bytes }, "206": { description: partial content }, "404": { description: not found } }
   /external/stream/{source}/{id}:
     get:

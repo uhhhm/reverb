@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodeExternalId, dedupKey, dedupKeyForTrack, encodeExternalId, isExternalId, isExternalTrack, normalize } from './trackRef'
+import { decodeExternalId, dedupKey, dedupKeyForTrack, encodeExternalId, isExternalId, isExternalTrack, needsBackendSeek, normalize } from './trackRef'
 import type { ExternalResult, Track } from './types'
 
 function ext(p: Partial<ExternalResult>): ExternalResult {
@@ -101,5 +101,32 @@ describe('dedupKey', () => {
   })
   it('diacritic folded', () => {
     expect(dedupKey(ext({ artist: 'Björk', title: 'Jóga' }))).toBe('nf:bjork␟joga')
+  })
+})
+
+// A browser cannot find a position in a container it has no index for: it maps
+// the time onto a byte offset through an assumed bitrate and lands seconds away,
+// so the backend is asked to start the audio there instead.
+describe('needsBackendSeek', () => {
+  const t = (o: Partial<Track>): Track =>
+    ({ id: '1', title: 'T', artist: 'A', album: 'Al', ...o }) as Track
+
+  it('is true for ogg/opus, whatever names it', () => {
+    expect(needsBackendSeek(t({ suffix: 'opus', contentType: 'audio/ogg' }))).toBe(true)
+    expect(needsBackendSeek(t({ suffix: 'ogg' }))).toBe(true)
+    expect(needsBackendSeek(t({ contentType: 'audio/webm; codecs=opus' }))).toBe(true)
+  })
+
+  it('is false for the formats a browser seeks itself', () => {
+    expect(needsBackendSeek(t({ suffix: 'mp3', contentType: 'audio/mpeg' }))).toBe(false)
+    expect(needsBackendSeek(t({ suffix: 'm4a', contentType: 'audio/mp4' }))).toBe(false)
+    expect(needsBackendSeek(t({ suffix: 'flac' }))).toBe(false)
+  })
+
+  // An external stream is not a file the backend can seek into.
+  it('is false for an external track', () => {
+    expect(
+      needsBackendSeek(t({ suffix: 'opus', externalStream: { source: 'deezer', externalId: 'x' } })),
+    ).toBe(false)
   })
 })

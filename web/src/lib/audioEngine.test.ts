@@ -47,13 +47,13 @@ class FakeAudio implements AudioElement {
   }
 }
 
-function newEngine() {
+function newEngine(measured: (trackId: string) => Promise<number | null> = async () => null) {
   const audios: FakeAudio[] = []
   const engine = new AudioEngine(() => {
     const a = new FakeAudio()
     audios.push(a)
     return a
-  }, (t) => `mock://${t.id}`)
+  }, (t) => `mock://${t.id}`, async () => null, measured)
   return { engine, audios }
 }
 
@@ -474,6 +474,17 @@ describe('AudioEngine normalization', () => {
 // A crop is a playback window over an untouched file, so the engine plays the
 // window and reports times relative to it.
 describe('AudioEngine crop', () => {
+  // Playing through: 'timeupdate' ticks a quarter-second at a time, which is
+  // what separates played audio from a seek.
+  function playThrough(audio: FakeAudio, fromSec: number, toSec: number) {
+    for (let t = fromSec; t < toSec; t += 0.25) {
+      audio.currentTime = t
+      audio.fire('timeupdate')
+    }
+    audio.currentTime = toSec
+    audio.fire('timeupdate')
+  }
+
   function cropped(overrides: Partial<Track>): Track {
     return { ...track('1'), durationMs: 200000, ...overrides }
   }
@@ -523,6 +534,267 @@ describe('AudioEngine crop', () => {
     audios[0].fire('timeupdate')
     expect(audios[0].currentTime).toBe(30)
     expect(engine.getState().currentTimeMs).toBe(0)
+  })
+
+  // A stream that declares no length makes the browser revise `duration` as it
+  // buffers. Every revision is a lower bound, so the readout keeps the longest
+  // one instead of following the drift back down.
+  it('never shrinks the duration as the element revises its own', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([cropped({})], 0)
+    expect(engine.getState().durationMs).toBe(200000)
+    for (const [d, expected] of [[252, 252000], [247, 252000], [269, 269000]]) {
+      audios[0].duration = d
+      audios[0].fire('durationchange')
+      expect(engine.getState().durationMs).toBe(expected)
+    }
+  })
+
+  // A tag that understates a VBR file is disproved by playing past it.
+  it('extends the duration when playback passes the claimed end', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([cropped({ durationMs: 239000 })], 0)
+    expect(engine.getState().durationMs).toBe(239000)
+    playThrough(audios[0], 238, 247)
+    expect(engine.getState().durationMs).toBe(247000)
+  })
+
+  // The latch belongs to one loaded track, not to the engine.
+  it('resets the latched duration on the next track', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([cropped({}), cropped({ id: '2', durationMs: 90000 })], 0)
+    audios[0].duration = 300
+    audios[0].fire('durationchange')
+    expect(engine.getState().durationMs).toBe(300000)
+    engine.next()
+    expect(engine.getState().durationMs).toBe(90000)
+  })
+
+  // The server decodes the file, so its length is the one that cannot disagree
+  // with what is heard — it replaces the tag's claim in either direction.
+  it('takes the measured length over a tag that overstates the file', async () => {
+    const { engine } = newEngine(async () => 180000)
+    engine.playTrackList([cropped({ durationMs: 391000 })], 0)
+    expect(engine.getState().durationMs).toBe(391000)
+    await vi.waitFor(() => expect(engine.getState().durationMs).toBe(180000))
+  })
+
+  it('takes the measured length over a tag that understates the file', async () => {
+    const { engine } = newEngine(async () => 247000)
+    engine.playTrackList([cropped({ durationMs: 239000 })], 0)
+    await vi.waitFor(() => expect(engine.getState().durationMs).toBe(247000))
+  })
+
+  // The measurement covers the whole file; the rail spans the crop window.
+  it('reports the measured length relative to the crop start', async () => {
+    const { engine } = newEngine(async () => 180000)
+    engine.playTrackList([cropped({ cropStartMs: 30000 })], 0)
+    await vi.waitFor(() => expect(engine.getState().durationMs).toBe(150000))
+  })
+
+  // A measurement can still fall short of what the browser plays: ffmpeg trims
+  // an MP3's encoder padding, a trailing tag can decode as a moment of audio.
+  // The clock passing it is proof, and the readout has to follow.
+  it('extends past the measured length when playback passes it', async () => {
+    const { engine, audios } = newEngine(async () => 180000)
+    engine.playTrackList([cropped({})], 0)
+    await vi.waitFor(() => expect(engine.getState().durationMs).toBe(180000))
+    playThrough(audios[0], 179.5, 180.4)
+    expect(engine.getState().durationMs).toBe(180400)
+  })
+
+  // Seeking is offered up to the length shown, so a seek that lands near the end
+  // of an already-too-long bar must not be able to cite that bar as evidence and
+  // latch it — only played-through audio counts.
+  it('does not treat a seek destination as proof of the length', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([cropped({ durationMs: 200000 })], 0)
+    audios[0].duration = 269
+    audios[0].fire('durationchange')
+    expect(engine.getState().durationMs).toBe(269000)
+
+    // Click near the end of the (inflated) rail, then let it play on from there.
+    engine.seekMs(265000)
+    playThrough(audios[0], 265, 266)
+    expect(engine.getState().durationMs).toBe(269000)
+  })
+
+  // Ogg/Opus is what a downloaded track usually is, and a browser cannot find a
+  // position in one: it maps the time onto a byte offset through an assumed
+  // bitrate and lands seconds away. The backend is asked to start the audio at
+  // the position instead, and the element's clock is read from there.
+  describe('backend seeking', () => {
+    function opusEngine() {
+      const audios: FakeAudio[] = []
+      const starts: number[] = []
+      const engine = new AudioEngine(
+        () => {
+          const a = new FakeAudio()
+          audios.push(a)
+          return a
+        },
+        (t, startMs) => {
+          starts.push(startMs)
+          return `mock://${t.id}?t=${startMs}`
+        },
+        async () => null,
+        async () => 137853,
+      )
+      return { engine, audios, starts }
+    }
+
+    const opus = (o: Partial<Track> = {}): Track => ({
+      ...track('1'),
+      durationMs: 137853,
+      suffix: 'opus',
+      contentType: 'audio/ogg',
+      ...o,
+    })
+
+    it('re-opens the stream at the position instead of seeking in place', () => {
+      const { engine, audios, starts } = opusEngine()
+      engine.playTrackList([opus()], 0)
+      engine.seekMs(130000)
+      expect(starts).toContain(130000)
+      expect(audios[0].src).toBe('mock://1?t=130000')
+      expect(audios[0].currentTime).toBe(0)
+    })
+
+    it('reports the position from the point the stream was re-opened at', () => {
+      const { engine, audios } = opusEngine()
+      engine.playTrackList([opus()], 0)
+      engine.seekMs(130000)
+      audios[0].currentTime = 4
+      audios[0].fire('timeupdate')
+      expect(engine.getState().currentTimeMs).toBe(134000)
+    })
+
+    it('offsets the re-opened stream by the crop start', () => {
+      const { engine, starts } = opusEngine()
+      engine.playTrackList([opus({ cropStartMs: 30000 })], 0)
+      engine.seekMs(10000)
+      expect(starts).toContain(40000)
+    })
+
+    // The loaded source is a fragment, so its own zero is wherever the last seek
+    // landed — going back to the start has to re-open the whole file.
+    it('re-opens the whole file when seeking back to the start', () => {
+      const { engine, audios } = opusEngine()
+      engine.playTrackList([opus()], 0)
+      engine.seekMs(130000)
+      engine.seekMs(0)
+      expect(audios[0].src).toBe('mock://1?t=0')
+      audios[0].currentTime = 2
+      audios[0].fire('timeupdate')
+      expect(engine.getState().currentTimeMs).toBe(2000)
+    })
+
+    it('keeps playing across a seek that re-opens the stream', () => {
+      const { engine, audios } = opusEngine()
+      engine.playTrackList([opus()], 0)
+      engine.seekMs(130000)
+      expect(audios[0].paused).toBe(false)
+    })
+
+    // A format the browser can index seeks in place: no re-fetch, no transcode.
+    it('seeks an mp3 in place', () => {
+      const { engine, audios, starts } = opusEngine()
+      engine.playTrackList([opus({ suffix: 'mp3', contentType: 'audio/mpeg' })], 0)
+      engine.seekMs(60000)
+      expect(starts).toEqual([0])
+      expect(audios[0].currentTime).toBe(60)
+    })
+
+    // The next track loads whole again.
+    it('drops the offset on the next load', () => {
+      const { engine, audios } = opusEngine()
+      engine.playTrackList([opus(), opus({ id: '2' })], 0)
+      engine.seekMs(130000)
+      engine.next()
+      expect(audios[0].src).toBe('mock://2?t=0')
+      audios[0].currentTime = 3
+      audios[0].fire('timeupdate')
+      expect(engine.getState().currentTimeMs).toBe(3000)
+    })
+  })
+
+  // Seeking a stream with no length is a byte-offset guess: the decoder lands
+  // short of where the clock then claims to be, and the real audio still ahead
+  // of it carries that clock past the end. Counting those positions measured
+  // the seek's error, growing a 2:17 track to 2:30 as it played out.
+  it('does not extend the length from playback after a seek', async () => {
+    const { engine, audios } = newEngine(async () => 137000)
+    engine.playTrackList([cropped({ durationMs: 137000 })], 0)
+    await vi.waitFor(() => expect(engine.getState().durationMs).toBe(137000))
+
+    engine.seekMs(130000)
+    playThrough(audios[0], 130, 145)
+    expect(engine.getState().durationMs).toBe(137000)
+  })
+
+  // And the position it reports cannot overrun the rail it is drawn on.
+  it('pins a post-seek clock that runs past the end to the length', async () => {
+    const { engine, audios } = newEngine(async () => 137000)
+    engine.playTrackList([cropped({ durationMs: 137000 })], 0)
+    await vi.waitFor(() => expect(engine.getState().durationMs).toBe(137000))
+
+    engine.seekMs(130000)
+    playThrough(audios[0], 130, 145)
+    expect(engine.getState().currentTimeMs).toBe(137000)
+  })
+
+  // A browser estimating an unlabelled stream re-derives `duration` after a
+  // seek, from wherever the decoder now is — which is the seek target, offered
+  // out of the readout itself. Nothing about the file was learned, so the
+  // readout must not move.
+  it('ignores an element duration revised after a seek', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([cropped({ durationMs: 200000 })], 0)
+    audios[0].duration = 200
+    audios[0].fire('durationchange')
+
+    engine.seekMs(195000)
+    audios[0].duration = 269
+    audios[0].fire('durationchange')
+    expect(engine.getState().durationMs).toBe(200000)
+  })
+
+  // With nothing else to go on, a post-seek estimate still beats no readout.
+  it('still takes the element duration after a seek when nothing is known', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([cropped({ durationMs: 0 })], 0)
+    engine.seekMs(5000)
+    audios[0].duration = 247
+    audios[0].fire('durationchange')
+    expect(engine.getState().durationMs).toBe(247000)
+  })
+
+  // The distrust belongs to one loaded track.
+  it('trusts the element again on the next track', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([cropped({ durationMs: 200000 }), cropped({ id: '2', durationMs: 90000 })], 0)
+    engine.seekMs(195000)
+    engine.next()
+    audios[0].duration = 269
+    audios[0].fire('durationchange')
+    expect(engine.getState().durationMs).toBe(269000)
+  })
+
+  // An external track has no file on disk to decode.
+  it('does not ask for a measurement of an external track', () => {
+    const asked: string[] = []
+    const { engine } = newEngine(async (id) => { asked.push(id); return null })
+    engine.playTrackList([{ ...cropped({}), externalStream: { source: 'deezer', externalId: 'x' } }], 0)
+    expect(asked).toEqual([])
+  })
+
+  // Without any known length the element is all there is.
+  it('falls back to the element duration when the track has none', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([cropped({ durationMs: 0 })], 0)
+    audios[0].duration = 247
+    audios[0].fire('durationchange')
+    expect(engine.getState().durationMs).toBe(247000)
   })
 
   it('leaves an uncropped track alone', () => {

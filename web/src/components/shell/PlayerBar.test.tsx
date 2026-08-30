@@ -6,8 +6,9 @@ import { useUI } from '../../lib/uiStore'
 import type { Track } from '../../lib/types'
 import { useAlbumPalette } from '../../lib/useAlbumPalette'
 import { useLyrics } from '../../lib/lyricsApi'
+import { useWaveformPeaks } from '../../lib/peaksApi'
 vi.mock('../../lib/useAlbumPalette', () => ({ useAlbumPalette: vi.fn(() => null) }))
-vi.mock('../../lib/peaksApi', () => ({ usePeaks: vi.fn(() => ({ data: null })) }))
+vi.mock('../../lib/peaksApi', () => ({ useWaveformPeaks: vi.fn(() => null) }))
 vi.mock('../../lib/lyricsApi', () => ({ useLyrics: vi.fn(() => ({ data: null })) }))
 
 const mockNavigate = vi.fn()
@@ -464,6 +465,24 @@ describe('PlayerBar (shell)', () => {
   })
 
   // --- dynamic tint ---
+
+  describe('waveform', () => {
+    const peaks = Array.from({ length: 100 }, (_, i) => i / 100)
+
+    beforeEach(() => {
+      vi.mocked(useWaveformPeaks).mockReturnValue(peaks)
+    })
+
+    afterEach(() => {
+      vi.mocked(useWaveformPeaks).mockReturnValue(null)
+    })
+
+    it('draws every peak for an uncropped track', () => {
+      render(<PlayerBar />)
+      expect(screen.getByTestId('waveform').children).toHaveLength(100)
+    })
+
+  })
 
   describe('dynamic tint', () => {
     beforeEach(() => {

@@ -73,10 +73,17 @@ type SearchResults struct {
 	Artists []Artist `json:"artists"`
 }
 
-// StreamOpts reserves transcoding knobs; MVP passes through (Navidrome transcodes).
+// StreamOpts carries the transcoding knobs; with all of them zero the file is
+// proxied byte for byte.
+//
+// TimeOffsetSec asks the backend to begin the stream that far into the track.
+// It only means anything alongside a Format: a backend can start a transcode
+// wherever it likes, but the original file is served whole and seeked into by
+// byte range.
 type StreamOpts struct {
-	MaxBitRate int    `json:"maxBitRate"`
-	Format     string `json:"format"`
+	MaxBitRate    int    `json:"maxBitRate"`
+	Format        string `json:"format"`
+	TimeOffsetSec int    `json:"timeOffsetSec"`
 }
 
 // StreamHandle is the upstream stream response, carried through the proxy.

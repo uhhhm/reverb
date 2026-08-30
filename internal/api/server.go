@@ -183,6 +183,9 @@ type Deps struct {
 	// Loudness caches measured playback gain per track. *db.Queries satisfies
 	// it. Nil means every request re-measures (or, with no local files, none).
 	Loudness LoudnessStore
+	// Duration caches the measured playable length of a track. *db.Queries
+	// satisfies it. Nil means every request re-measures.
+	Duration DurationStore
 	// Play records user play events and mints catalog IDs. Nil in tests/legacy
 	// that don't exercise the listening-history boundary.
 	Play *play.Service
@@ -250,6 +253,13 @@ type LoudnessStore interface {
 	GetTrackLoudness(ctx context.Context, trackID string) (db.TrackLoudness, error)
 	UpsertTrackLoudness(ctx context.Context, arg db.UpsertTrackLoudnessParams) error
 	UpsertTrackLoudnessByCatalogID(ctx context.Context, arg db.UpsertTrackLoudnessByCatalogIDParams) error
+}
+
+// DurationStore caches the measured playable length of a track, in ms.
+// *db.Queries satisfies it.
+type DurationStore interface {
+	GetTrackDuration(ctx context.Context, trackID string) (db.TrackDuration, error)
+	UpsertTrackDuration(ctx context.Context, arg db.UpsertTrackDurationParams) error
 }
 
 // FileManifestStore backs p2p file manifest listing. *db.Queries satisfies it.
@@ -395,6 +405,7 @@ func (s *Server) routes() {
 			pr.Put("/library/track/{id}/quality", s.handleSetTrackQuality)
 			pr.Get("/downloads/upgradable", s.handleListUpgradable)
 			pr.Get("/library/track/{id}/peaks", s.handleTrackPeaks)
+			pr.Get("/library/track/{id}/duration", s.handleTrackDuration)
 			pr.Get("/library/track/{id}/lyrics", s.handleTrackLyrics)
 			pr.Get("/collection", s.handleCollection)
 			pr.Get("/stream/{id}", s.handleStream)

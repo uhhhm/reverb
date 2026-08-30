@@ -61,6 +61,30 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	s.serveStream(w, r, lib, id)
 }
 
+// seekOptsFor reads the `t` query parameter — a position in ms to start the
+// stream at — and turns it into transcode options.
+//
+// Seeking by byte range is the browser guessing where a moment lives in the
+// file, which for a container it cannot index (Ogg/Opus) misses by seconds: the
+// audio lands somewhere other than where the player's clock then says it is, so
+// the track plays past its own end or stops before it. Asking the backend to
+// begin the stream at the position instead makes the answer exact, at the cost
+// of transcoding — which is also what makes the offset honoured at all, since a
+// file served whole can only be seeked into by byte.
+//
+// Zero ms means an ordinary whole-file stream, and the empty opts proxy it.
+func seekOptsFor(r *http.Request) (core.StreamOpts, bool) {
+	raw := r.URL.Query().Get("t")
+	if raw == "" {
+		return core.StreamOpts{}, false
+	}
+	ms, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || ms <= 0 {
+		return core.StreamOpts{}, false
+	}
+	return core.StreamOpts{Format: "mp3", TimeOffsetSec: int(ms / 1000)}, true
+}
+
 // handleCover proxies cover art from the library adapter.
 //
 // For canonical ids (trk_/alb_/art_) the resolver is consulted first to obtain
@@ -95,7 +119,15 @@ func (s *Server) handleCover(w http.ResponseWriter, r *http.Request) {
 // canonical-id resolution path. It threads the Range header and copies back
 // all relevant response headers.
 func (s *Server) serveStream(w http.ResponseWriter, r *http.Request, lib library.LibraryAdapter, backendID string) {
-	handle, err := lib.Stream(r.Context(), backendID, core.StreamOpts{}, r.Header.Get("Range"))
+	// A transcode starting mid-track has no byte offsets in common with the file
+	// the browser asked a range of, so the range is dropped rather than applied
+	// to a different stream than it was computed against.
+	opts, seeking := seekOptsFor(r)
+	rangeHeader := r.Header.Get("Range")
+	if seeking {
+		rangeHeader = ""
+	}
+	handle, err := lib.Stream(r.Context(), backendID, opts, rangeHeader)
 	if err != nil {
 		if errors.Is(err, core.ErrLibraryItemNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})

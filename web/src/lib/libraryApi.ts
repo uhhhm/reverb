@@ -22,8 +22,11 @@ export function useLibraryStatus() {
 
 // Audio is loaded by the webview's media pipeline rather than by fetch, so it
 // needs an absolute origin on desktop — see mediaBase.
-export function streamUrl(id: string): string {
-  return `${mediaBase()}/api/v1/stream/${encodeURIComponent(id)}`
+export function streamUrl(id: string, startMs = 0): string {
+  const base = `${mediaBase()}/api/v1/stream/${encodeURIComponent(id)}`
+  // A start position asks the backend to transcode from that point, which is
+  // exact where the browser's own byte-range seek is a guess.
+  return startMs > 0 ? `${base}?t=${Math.round(startMs)}` : base
 }
 
 /**

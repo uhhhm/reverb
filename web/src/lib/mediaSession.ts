@@ -68,16 +68,21 @@ export function startMediaSession(engine: Enginelike): () => void {
       })
     }
     ms.playbackState = s.playing ? 'playing' : 'paused'
-    if (s.durationMs > 0) {
-      try {
+    try {
+      // An unknown length has to clear the OS readout rather than skip the
+      // update: leaving the last state in place shows the previous track's
+      // length against the new track's position.
+      if (s.durationMs > 0) {
         ms.setPositionState({
           duration: s.durationMs / 1000,
           playbackRate: 1,
           position: Math.min(s.currentTimeMs, s.durationMs) / 1000,
         })
-      } catch {
-        // browsers throw on transiently inconsistent position state — ignore
+      } else {
+        ms.setPositionState()
       }
+    } catch {
+      // browsers throw on transiently inconsistent position state — ignore
     }
   })
 

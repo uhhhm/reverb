@@ -53,6 +53,48 @@ func TestStreamProxyForwardsRangeAnd206(t *testing.T) {
 	}
 }
 
+// A browser seeks a file it cannot index by guessing a byte offset from an
+// assumed bitrate, which for Ogg/Opus misses by seconds. `t` asks the backend to
+// start the audio at the position instead — which it can only honour by
+// transcoding, so the inbound range, computed against the whole file, is dropped.
+func TestStreamStartsAtTheRequestedPosition(t *testing.T) {
+	lib := &fakeLibrary{}
+	srv, cookie := libTestServer(t, lib)
+
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/stream/t1?t=130000", nil)
+	r.AddCookie(cookie)
+	r.Header.Set("Range", "bytes=0-3")
+	srv.Handler().ServeHTTP(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if lib.lastOpts.TimeOffsetSec != 130 {
+		t.Fatalf("timeOffset = %d, want 130", lib.lastOpts.TimeOffsetSec)
+	}
+	if lib.lastOpts.Format == "" {
+		t.Fatal("a seeking stream must be transcoded, else the offset is ignored")
+	}
+	if lib.lastRange != "" {
+		t.Fatalf("range forwarded to a different stream than it was computed against: %q", lib.lastRange)
+	}
+}
+
+func TestStreamWithoutAPositionIsProxiedWhole(t *testing.T) {
+	lib := &fakeLibrary{}
+	srv, cookie := libTestServer(t, lib)
+	for _, q := range []string{"", "?t=0", "?t=junk"} {
+		lib.lastOpts = core.StreamOpts{}
+		if rec := doAuthed(t, srv, http.MethodGet, "/api/v1/stream/t1"+q, cookie); rec.Code != http.StatusOK {
+			t.Fatalf("%q status = %d", q, rec.Code)
+		}
+		if lib.lastOpts != (core.StreamOpts{}) {
+			t.Fatalf("%q transcoded: %+v", q, lib.lastOpts)
+		}
+	}
+}
+
 func TestCoverProxy(t *testing.T) {
 	srv, cookie := libTestServer(t, &fakeLibrary{})
 	rec := doAuthed(t, srv, http.MethodGet, "/api/v1/cover/al-1?size=300", cookie)
