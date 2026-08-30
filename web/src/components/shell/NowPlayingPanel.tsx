@@ -84,7 +84,7 @@ export function NowPlayingPanel() {
 
   const current = usePlayer((s) => s.current)
   const queue = usePlayer((s) => s.queue)
-  const index = usePlayer((s) => s.index)
+  const upNextIndices = usePlayer((s) => s.upNext)
   const jumpTo = usePlayer((s) => s.jumpTo)
 
   const navigate = useNavigate()
@@ -92,10 +92,10 @@ export function NowPlayingPanel() {
 
   if (rightPanel !== 'nowplaying') return null
 
-  const upNext = queue
-    .map((t, i) => ({ t, i }))
-    .filter(({ i }) => i > index)
+  const upNext = upNextIndices
     .slice(0, 5) // show at most 5 upcoming tracks
+    .map((i) => ({ t: queue[i], i }))
+    .filter(({ t }) => t != null)
 
   const coverSrc = current ? trackCoverUrl(current, 300) || undefined : undefined
 

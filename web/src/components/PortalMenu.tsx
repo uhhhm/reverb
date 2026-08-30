@@ -12,6 +12,8 @@ interface PortalMenuProps {
   widthClass?: string
 }
 
+const MIN_MENU_HEIGHT = 180
+
 /**
  * PortalMenu — renders a dropdown panel via a React portal to document.body so
  * it escapes any `overflow-auto` scroll-container ancestor (e.g. AppShell's
@@ -30,7 +32,14 @@ export function PortalMenu({
   // Compute fixed position from trigger rect on mount
   // eslint-disable-next-line react-hooks/refs -- intentional: portal position is read once at render time; menu re-mounts on each open
   const rect = triggerRef.current?.getBoundingClientRect()
-  const top = rect ? rect.bottom + 4 : 0
+  // Below the trigger normally; above it when the space below is both too small
+  // and smaller than the space above, so a trigger low in the window still gets
+  // a usable menu instead of one clipped by the window edge.
+  const below = rect ? window.innerHeight - rect.bottom - 8 : 0
+  const above = rect ? rect.top - 8 : 0
+  const flip = rect != null && below < MIN_MENU_HEIGHT && above > below
+  const top = rect ? (flip ? Math.max(8, rect.top - 4 - above) : rect.bottom + 4) : 0
+  const maxHeight = rect ? Math.max(MIN_MENU_HEIGHT, flip ? above : below) : undefined
   // Align the right edge of the menu with the right edge of the trigger
   const right = rect ? window.innerWidth - rect.right : 0
 
@@ -72,8 +81,8 @@ export function PortalMenu({
         ref={menuRef}
         role="menu"
         aria-label={label}
-        style={{ top, right }}
-        className={`fixed z-50 ${widthClass} rounded-xl border border-border-subtle bg-raised shadow-pop`}
+        style={{ top, right, maxHeight }}
+        className={`fixed z-50 ${widthClass} overflow-y-auto rounded-xl border border-border-subtle bg-raised shadow-pop`}
       >
         {children}
       </div>

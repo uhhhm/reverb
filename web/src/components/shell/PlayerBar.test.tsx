@@ -380,6 +380,46 @@ describe('PlayerBar (shell)', () => {
       expect(toggleSpy).not.toHaveBeenCalled()
     })
 
+    it('Space toggles playback even while a button holds focus', () => {
+      const toggleSpy = vi.spyOn(engine, 'toggle')
+      render(
+        <>
+          <PlayerBar />
+          <button type="button" data-testid="row-button">row</button>
+        </>,
+      )
+
+      const button = screen.getByTestId('row-button')
+      button.focus()
+
+      act(() => {
+        button.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true, cancelable: true }))
+      })
+
+      expect(toggleSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('Space does NOT toggle playback while a menu is open', () => {
+      const toggleSpy = vi.spyOn(engine, 'toggle')
+      render(
+        <>
+          <PlayerBar />
+          <div role="menu">
+            <button type="button" role="menuitem" data-testid="menu-item">item</button>
+          </div>
+        </>,
+      )
+
+      const item = screen.getByTestId('menu-item')
+      item.focus()
+
+      act(() => {
+        item.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true, cancelable: true }))
+      })
+
+      expect(toggleSpy).not.toHaveBeenCalled()
+    })
+
     it('ArrowRight seeks forward 5 seconds', () => {
       const seekSpy = vi.spyOn(engine, 'seekMs')
       render(<PlayerBar />)

@@ -35,11 +35,20 @@ export interface PlayerState {
   volume: number
   shuffle: boolean
   repeat: RepeatMode
+  /**
+   * Queue indices that will play after the current track, in the order they
+   * will actually play. Under shuffle that is the remaining shuffle order, not
+   * the tail of the queue — otherwise the last row of a playlist looks like the
+   * end of playback even with most tracks still unplayed.
+   */
+  upNext: number[]
 }
 
 function realAudioFactory(): AudioElement {
   return new Audio() as unknown as AudioElement
 }
+
+const UP_NEXT_LIMIT = 20
 
 export class AudioEngine {
   private factory: () => AudioElement
@@ -320,7 +329,37 @@ export class AudioEngine {
       volume: this.volume,
       shuffle: this.shuffle,
       repeat: this.repeat,
+      upNext: this.upcomingIndices(UP_NEXT_LIMIT),
     }
+  }
+
+  /** The next `limit` queue indices in play order. */
+  private upcomingIndices(limit: number): number[] {
+    const out: number[] = []
+    if (this.queue.length === 0 || this.index < 0) return out
+    if (this.shuffle) {
+      for (let p = this.shufflePos + 1; out.length < limit; p++) {
+        if (p >= this.shuffleOrder.length) {
+          if (this.repeat !== 'all') break
+          p = -1
+          continue
+        }
+        const i = this.shuffleOrder[p]
+        if (i === this.index) break
+        out.push(i)
+      }
+      return out
+    }
+    for (let i = this.index + 1; out.length < limit; i++) {
+      if (i >= this.queue.length) {
+        if (this.repeat !== 'all') break
+        i = -1
+        continue
+      }
+      if (i === this.index) break
+      out.push(i)
+    }
+    return out
   }
 
   private emit() {
@@ -500,12 +539,17 @@ export class AudioEngine {
 
   playAt(index: number) {
     if (this.queue.length === 0 || index < 0 || index >= this.queue.length) return
-    this.index = index
     if (this.shuffle) {
-      // Align shufflePos so next/prev stay coherent from this index.
-      const pos = this.shuffleOrder.indexOf(index)
-      this.shufflePos = pos >= 0 ? pos : 0
+      // Move the picked track to right after the current position instead of
+      // jumping to wherever it sat in the shuffle order — jumping would drop
+      // every track between here and there from the cycle.
+      const at = this.shuffleOrder.indexOf(index)
+      if (at >= 0) this.shuffleOrder.splice(at, 1)
+      const insert = Math.min(Math.max(this.shufflePos + (at >= 0 && at <= this.shufflePos ? 0 : 1), 0), this.shuffleOrder.length)
+      this.shuffleOrder.splice(insert, 0, index)
+      this.shufflePos = insert
     }
+    this.index = index
     this.loadCurrent(true)
   }
 

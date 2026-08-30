@@ -39,6 +39,7 @@ function baseState(): PlayerState {
     volume: 1,
     shuffle: false,
     repeat: 'off',
+    upNext: [],
   }
 }
 

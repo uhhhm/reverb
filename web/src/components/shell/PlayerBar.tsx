@@ -61,7 +61,6 @@ function SeekBar() {
   const isExternal = usePlayer((s) => (s.current ? isExternalTrack(s.current) : false))
   const peaks = usePeaks(trackId, isExternal).data
 
-  const toggle = usePlayer((s) => s.toggle)
 
   // While dragging, the rail follows the cursor rather than the store, so the
   // thumb doesn't snap back between seek and the next timeupdate.
@@ -105,14 +104,9 @@ function SeekBar() {
 
   // Keyboard operability for the slider role — mirrors the global Arrow-seek
   // shortcuts (±5s) and adds Home/End to jump to the ends of the track.
-  // Space is handled here too: clicking the rail focuses it, and the global
-  // shortcut handler skips events originating inside interactive controls.
+  // Space is deliberately NOT handled here: the global shortcut owns it, so it
+  // always means play/pause no matter what happens to hold focus.
   function onKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
-    if (e.key === ' ' || e.code === 'Space') {
-      e.preventDefault()
-      toggle()
-      return
-    }
     if (durationMs <= 0) return
     switch (e.key) {
       case 'ArrowRight':
@@ -222,11 +216,18 @@ export function PlayerBar() {
     function onKey(e: KeyboardEvent) {
       if (!current) return
       const el = e.target as HTMLElement | null
-      if (el instanceof HTMLElement && el.closest('input, textarea, select, button, [role], [contenteditable="true"]')) return
+      // Space means play/pause and nothing else. It is suppressed only where a
+      // space is text, or where it drives an open menu/dialog; notably it is
+      // NOT suppressed for a focused button, so the last thing clicked can
+      // never change what the key does.
       if (e.code === 'Space') {
+        if (el instanceof HTMLElement && el.closest('input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select, [contenteditable="true"], [role="menu"], [role="menuitem"], [role="dialog"]')) return
         e.preventDefault()
         toggle()
-      } else if (e.key === 'ArrowRight' && e.shiftKey) {
+        return
+      }
+      if (el instanceof HTMLElement && el.closest('input, textarea, select, button, [role], [contenteditable="true"]')) return
+      if (e.key === 'ArrowRight' && e.shiftKey) {
         e.preventDefault()
         next()
       } else if (e.key === 'ArrowLeft' && e.shiftKey) {
@@ -358,8 +359,14 @@ export function PlayerBar() {
             onClick={next}
           />
           <IconButton
-            name="repeat"
-            label={`Repeat ${repeat}`}
+            name={repeat === 'one' ? 'repeat-one' : 'repeat'}
+            label={
+              repeat === 'off'
+                ? 'Enable repeat'
+                : repeat === 'all'
+                  ? 'Repeat all — click for repeat one'
+                  : 'Repeat one — click to turn repeat off'
+            }
             active={repeat !== 'off'}
             size="sm"
             onClick={cycleRepeat}

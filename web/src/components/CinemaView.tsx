@@ -19,7 +19,7 @@ export function CinemaView() {
   const current = usePlayer((s) => s.current)
   const playing = usePlayer((s) => s.playing)
   const queue = usePlayer((s) => s.queue)
-  const index = usePlayer((s) => s.index)
+  const upNext = usePlayer((s) => s.upNext)
   const jumpTo = usePlayer((s) => s.jumpTo)
   const toggle = usePlayer((s) => s.toggle)
   const next = usePlayer((s) => s.next)
@@ -129,9 +129,13 @@ export function CinemaView() {
             </div>
           ) : (
             <ul className="space-y-1">
-              {queue.slice(index + 1, index + 6).map((track, offset) => (
-                <li key={`${track.id}-${offset}`}>
-                  <button type="button" onClick={() => jumpTo(index + 1 + offset)} className="flex w-full items-center gap-3 rounded p-2 text-left hover:bg-raised-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+              {upNext
+                .slice(0, 5)
+                .map((qi) => ({ qi, track: queue[qi] }))
+                .filter(({ track }) => track != null)
+                .map(({ qi, track }) => (
+                <li key={`${track.id}-${qi}`}>
+                  <button type="button" onClick={() => jumpTo(qi)} className="flex w-full items-center gap-3 rounded p-2 text-left hover:bg-raised-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
                     <Cover src={trackCoverUrl(track, 80) || undefined} alt={track.title} size={40} rounded="md" />
                     <span className="min-w-0"><span className="block truncate text-sm font-semibold text-text-primary">{track.title}</span><span className="block truncate text-xs text-text-secondary">{track.artist}</span></span>
                   </button>

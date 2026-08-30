@@ -121,6 +121,16 @@ describe('AudioEngine queue + transport', () => {
     expect(engine.getState().index).toBe(1)
   })
 
+  it('cycleRepeat goes off -> all -> one -> off', () => {
+    expect(engine.getState().repeat).toBe('off')
+    engine.cycleRepeat()
+    expect(engine.getState().repeat).toBe('all')
+    engine.cycleRepeat()
+    expect(engine.getState().repeat).toBe('one')
+    engine.cycleRepeat()
+    expect(engine.getState().repeat).toBe('off')
+  })
+
   it('shuffle produces a permutation covering all tracks', () => {
     engine.playTrackList(list, 0)
     engine.toggleShuffle()
@@ -173,6 +183,39 @@ describe('AudioEngine queue + transport', () => {
     engine.playAt(2)
     expect(engine.getState().index).toBe(2)
     expect(engine.getState().current?.id).toBe('3')
+  })
+
+  it('upNext follows the shuffle order, not the tail of the queue', () => {
+    engine.playTrackList(list, 2) // start on the LAST row
+    engine.toggleShuffle()
+    const s = engine.getState()
+    expect(s.upNext.length).toBe(2) // two unplayed tracks still ahead
+    expect(new Set(s.upNext)).toEqual(new Set([0, 1]))
+  })
+
+  it('upNext is empty on the last shuffled track with repeat off', () => {
+    engine.playTrackList(list, 0)
+    engine.toggleShuffle()
+    engine.next()
+    engine.next()
+    expect(engine.getState().upNext).toEqual([])
+  })
+
+  it('upNext wraps when repeat is all', () => {
+    engine.playTrackList(list, 2)
+    engine.cycleRepeat() // 'all'
+    expect(engine.getState().upNext).toEqual([0, 1])
+  })
+
+  it('playAt under shuffle keeps the tracks that have not played yet', () => {
+    engine.playTrackList(list, 0)
+    engine.toggleShuffle()
+    const upcoming = engine.getState().upNext
+    engine.playAt(upcoming[1]) // pick the second one ahead
+    const after = engine.getState()
+    expect(after.index).toBe(upcoming[1])
+    expect(after.upNext).toContain(upcoming[0]) // the skipped one is still queued
+    expect(after.upNext.length).toBe(1)
   })
 
   it('setVolume clamps 0..1 and notifies subscribers', () => {

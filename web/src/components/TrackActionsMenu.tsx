@@ -24,6 +24,14 @@ interface MenuItem {
 }
 
 const PANEL_WIDTH = 264
+const MARGIN = 8
+/** Panel chrome plus one row; rows are two lines of text at a fixed size. */
+const ITEM_HEIGHT = 56
+const PANEL_PADDING = 12
+
+function estimatedHeight(count: number): number {
+  return count * ITEM_HEIGHT + PANEL_PADDING
+}
 
 /**
  * The row-level actions for an owned track, behind one "…" trigger.
@@ -90,8 +98,17 @@ export function TrackActionsMenu({ track, onRename }: TrackActionsMenuProps) {
   function openMenu() {
     const rect = triggerRef.current?.getBoundingClientRect()
     if (rect) {
+      // Flip above the trigger when the panel would not fit below it, and clamp
+      // so a row near the bottom of the window never pushes the menu off-screen.
+      const height = estimatedHeight(items.length)
+      const below = window.innerHeight - rect.bottom - MARGIN
+      const above = rect.top - MARGIN
+      const top =
+        height <= below || below >= above
+          ? Math.min(rect.bottom + 6, window.innerHeight - MARGIN - Math.min(height, below))
+          : Math.max(MARGIN, rect.top - 6 - Math.min(height, above))
       setPos({
-        top: Math.min(rect.bottom + 6, window.innerHeight - 8),
+        top: Math.max(MARGIN, top),
         left: Math.max(8, Math.min(rect.right - PANEL_WIDTH, window.innerWidth - PANEL_WIDTH - 8)),
       })
     }
@@ -143,8 +160,13 @@ export function TrackActionsMenu({ track, onRename }: TrackActionsMenuProps) {
               ref={panelRef}
               role="menu"
               aria-label={`Actions for ${track.title}`}
-              style={{ top: pos.top, left: pos.left, width: PANEL_WIDTH }}
-              className="fixed z-50 rounded-xl border border-border-subtle bg-raised p-1.5 shadow-pop"
+              style={{
+                top: pos.top,
+                left: pos.left,
+                width: PANEL_WIDTH,
+                maxHeight: `calc(100vh - ${pos.top + MARGIN}px)`,
+              }}
+              className="fixed z-50 overflow-y-auto rounded-xl border border-border-subtle bg-raised p-1.5 shadow-pop"
               onClick={(e) => e.stopPropagation()}
             >
               {items.map((item) => (
