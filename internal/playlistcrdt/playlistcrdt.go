@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/matching"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
 
@@ -55,12 +56,32 @@ type member struct {
 	Entry   *core.ExternalResult `json:"entry,omitempty"`
 }
 
-// MemberKey is the field suffix identifying one track within a playlist. It
-// hashes the same (source, externalID) pair the playlist itself deduplicates
-// on, so the log agrees with the tracklist about what counts as the same track.
-func MemberKey(source, externalID string) string {
-	sum := sha256.Sum256([]byte(source + "\x00" + externalID))
+// MemberKey is the field suffix identifying one track within a playlist.
+//
+// For a track from a search source, the (source, externalID) pair is the
+// identity and every device agrees on it. A library track's id is not: it
+// belongs to one library backend, and two devices index the same file under
+// different ids — hashing it would make one track look like two after a merge.
+// So a library track is keyed on the metadata fingerprint instead, the same one
+// the catalog uses to decide that two library entries are the same recording.
+func MemberKey(e core.ExternalResult) string {
+	identity := e.Source + "\x00" + e.ExternalID
+	if e.Source == "library" {
+		identity = "norm\x00" + matching.Fingerprint(e.Title, e.Artist, e.Album, e.DurationMs)
+	}
+	sum := sha256.Sum256([]byte(identity))
 	return memberPrefix + hex.EncodeToString(sum[:])[:16]
+}
+
+// published is the form of an entry that travels.
+//
+// The catalog id is stripped: it is this device's own addressing for the track,
+// minted from a random token, so it means nothing to a peer. Worse, carrying it
+// would make the entry differ between the two devices forever, and every local
+// edit would rewrite every member of the playlist to swap one id for the other.
+func published(e core.ExternalResult) core.ExternalResult {
+	e.CanonicalID = ""
+	return e
 }
 
 // state is a playlist as the change log currently has it.

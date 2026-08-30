@@ -26,11 +26,10 @@ type DeviceResolver func(ctx context.Context) string
 // Service publishes local playlist edits into the change log and projects
 // accepted changes back onto the playlist store.
 type Service struct {
-	log     Log
-	store   playlistsync.Store
-	device  DeviceResolver
-	now     func() int64
-	catalog CatalogResolver
+	log    Log
+	store  playlistsync.Store
+	device DeviceResolver
+	now    func() int64
 }
 
 // New constructs a Service. Any of log, store, or device may be absent, in
@@ -100,11 +99,11 @@ func (s *Service) publishMembers(ctx context.Context, device, id string, st stat
 	wantOrder := make([]string, 0, len(tracks))
 	want := make(map[string]core.ExternalResult, len(tracks))
 	for _, t := range tracks {
-		k := MemberKey(t.Source, t.ExternalID)
+		k := MemberKey(t)
 		if _, dup := want[k]; dup {
 			continue
 		}
-		want[k] = t
+		want[k] = published(t)
 		wantOrder = append(wantOrder, k)
 	}
 

@@ -34,14 +34,3 @@ func (s *SyncStore) ListLatestForEntity(ctx context.Context, entityType, entityI
 	}
 	return out, nil
 }
-
-// ListEntityIDs returns every entity id the log has ever carried a change for,
-// for one entity type.
-func (s *SyncStore) ListEntityIDs(ctx context.Context, entityType string) ([]string, error) {
-	if qq, ok := any(s.q).(interface {
-		ListSyncEntityIDsByType(context.Context, string) ([]string, error)
-	}); ok {
-		return qq.ListSyncEntityIDsByType(ctx, entityType)
-	}
-	return nil, fmt.Errorf("querier does not support ListSyncEntityIDsByType")
-}

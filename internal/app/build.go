@@ -304,8 +304,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	playSvc.WithEmitter(emitter)
 	deps.SyncEmit = emitter
 
-	playlistProjection := playlistcrdt.New(deps.SyncStore, wiring.NewSyncStore(st.Q()), authorDevice).
-		WithCatalogResolver(catalogSvc)
+	playlistProjection := playlistcrdt.New(deps.SyncStore, wiring.NewSyncStore(st.Q()), authorDevice)
 	if bundle.Sync != nil {
 		bundle.Sync.WithEmitter(playlistProjection)
 	}

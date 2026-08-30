@@ -227,3 +227,114 @@ func TestDeletionRemovesThePlaylistOnThePeer(t *testing.T) {
 		t.Fatal("playlist still present on B after the tombstone replicated")
 	}
 }
+
+// libraryTrack is the same recording indexed under a different backend id, which
+// is what two devices running their own library server actually have.
+func libraryTrack(title, backendID string) core.ExternalResult {
+	return core.ExternalResult{
+		Source: "library", ExternalID: backendID, Title: title,
+		Artist: "Band", Album: "Record", DurationMs: 180000, Type: core.EntityTrack,
+	}
+}
+
+// Two devices adding the same recording from their own libraries must end with
+// one track, not two: a library track id belongs to one backend, so it cannot
+// be what decides whether two entries are the same track.
+func TestSameLibraryTrackAddedOnBothDevicesIsOneTrack(t *testing.T) {
+	a, b := newDevice(t, "dev_a", "dev_b"), newDevice(t, "dev_b", "dev_a")
+	a.save(t, "pl1", "Roadtrip", nil)
+	push(t, a, b)
+
+	a.save(t, "pl1", "Roadtrip", []core.ExternalResult{libraryTrack("Song", "nav-a-1")})
+	b.save(t, "pl1", "Roadtrip", []core.ExternalResult{libraryTrack("Song", "nav-b-9")})
+	push(t, a, b)
+	push(t, b, a)
+
+	for _, d := range []*device{a, b} {
+		if got := d.tracks(t, "pl1"); len(got) != 1 {
+			t.Fatalf("tracks on %s = %v, want the one recording", d.id, got)
+		}
+	}
+}
+
+// A catalog id is this device's own addressing for a track. It must not travel:
+// the peer would store an id that means nothing there, and every later edit on
+// either device would rewrite every member of the playlist to swap one id for
+// the other.
+func TestCatalogIDsStayLocal(t *testing.T) {
+	a, b := newDevice(t, "dev_a", "dev_b"), newDevice(t, "dev_b", "dev_a")
+	withID := libraryTrack("Song", "nav-a-1")
+	withID.CanonicalID = "trk_a"
+	a.save(t, "pl1", "Roadtrip", []core.ExternalResult{withID})
+	push(t, a, b)
+
+	row, err := b.store.Get(context.Background(), "pl1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []core.ExternalResult
+	if err := json.Unmarshal([]byte(row.TracksJSON), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].CanonicalID != "" {
+		t.Fatalf("track on B = %+v, want no catalog id carried over", got)
+	}
+
+	// And the device that has one keeps it when a peer's edit is applied.
+	push(t, b, a)
+	rowA, err := a.store.Get(context.Background(), "pl1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var onA []core.ExternalResult
+	if err := json.Unmarshal([]byte(rowA.TracksJSON), &onA); err != nil {
+		t.Fatal(err)
+	}
+	if len(onA) != 1 || onA[0].CanonicalID != "trk_a" {
+		t.Fatalf("track on A = %+v, want its own catalog id kept", onA)
+	}
+}
+
+// A peer sends its log in pages, and a page can end in the middle of one
+// playlist. Half an entity must not create a row under the wrong identity.
+func TestHalfDeliveredPlaylistIsNotCreated(t *testing.T) {
+	a, b := newDevice(t, "dev_a", "dev_b"), newDevice(t, "dev_b", "dev_a")
+	a.save(t, "pl1", "Roadtrip", []core.ExternalResult{track("one")})
+
+	ctx := context.Background()
+	all, err := a.log.ListSince(ctx, 0, 10000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var head, tail []reverbsync.SyncChange
+	for _, ch := range all {
+		if ch.Field == "source" {
+			tail = append(tail, ch)
+		} else {
+			head = append(head, ch)
+		}
+	}
+	if len(tail) != 1 {
+		t.Fatalf("expected exactly one source field, got %d", len(tail))
+	}
+	if _, _, _, err := b.log.Reconcile(ctx, "dev_a", 0, head); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.store.Get(ctx, "pl1"); err == nil {
+		t.Fatal("a playlist was created before its identity arrived")
+	}
+
+	if _, _, _, err := b.log.Reconcile(ctx, "dev_a", 0, tail); err != nil {
+		t.Fatal(err)
+	}
+	row, err := b.store.Get(ctx, "pl1")
+	if err != nil {
+		t.Fatalf("the playlist was not created once the rest arrived: %v", err)
+	}
+	if row.Source != "local" || row.Name != "Roadtrip" {
+		t.Fatalf("row = %+v, want the whole entity applied", row)
+	}
+	if got := b.tracks(t, "pl1"); !equal(got, "one") {
+		t.Fatalf("tracks = %v, want [one]", got)
+	}
+}

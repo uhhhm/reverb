@@ -53,15 +53,16 @@ SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_a
 UPDATE sync_change SET sig = ?2 WHERE revision = ?1;
 
 -- name: ListLatestSyncFieldsForEntity :many
+-- Highest revision per field, matching GetLatestSyncChangeForField. Reconcile
+-- only appends a change that beat what was there, so the last row appended for
+-- a field IS the winner; ordering by hlc instead could pick a row the merge
+-- policy rejected.
 SELECT c.revision, c.device_id, c.entity_type, c.entity_id, c.field, c.value_json, c.updated_at, c.created_at, c.hlc, c.seq, c.sig
 FROM sync_change c
 WHERE c.entity_type = ? AND c.entity_id = ?
   AND c.revision = (
     SELECT c2.revision FROM sync_change c2
     WHERE c2.entity_type = c.entity_type AND c2.entity_id = c.entity_id AND c2.field = c.field
-    ORDER BY c2.hlc DESC, c2.revision DESC LIMIT 1
+    ORDER BY c2.revision DESC LIMIT 1
   )
 ORDER BY c.field ASC;
-
--- name: ListSyncEntityIDsByType :many
-SELECT DISTINCT entity_id FROM sync_change WHERE entity_type = ?;

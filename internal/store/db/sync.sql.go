@@ -212,7 +212,7 @@ WHERE c.entity_type = ? AND c.entity_id = ?
   AND c.revision = (
     SELECT c2.revision FROM sync_change c2
     WHERE c2.entity_type = c.entity_type AND c2.entity_id = c.entity_id AND c2.field = c.field
-    ORDER BY c2.hlc DESC, c2.revision DESC LIMIT 1
+    ORDER BY c2.revision DESC LIMIT 1
   )
 ORDER BY c.field ASC
 `
@@ -222,6 +222,10 @@ type ListLatestSyncFieldsForEntityParams struct {
 	EntityID   string `json:"entity_id"`
 }
 
+// Highest revision per field, matching GetLatestSyncChangeForField. Reconcile
+// only appends a change that beat what was there, so the last row appended for
+// a field IS the winner; ordering by hlc instead could pick a row the merge
+// policy rejected.
 func (q *Queries) ListLatestSyncFieldsForEntity(ctx context.Context, arg ListLatestSyncFieldsForEntityParams) ([]SyncChange, error) {
 	rows, err := q.db.QueryContext(ctx, listLatestSyncFieldsForEntity, arg.EntityType, arg.EntityID)
 	if err != nil {
@@ -335,33 +339,6 @@ func (q *Queries) ListSyncChangesSinceHLC(ctx context.Context, arg ListSyncChang
 			return nil, err
 		}
 		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listSyncEntityIDsByType = `-- name: ListSyncEntityIDsByType :many
-SELECT DISTINCT entity_id FROM sync_change WHERE entity_type = ?
-`
-
-func (q *Queries) ListSyncEntityIDsByType(ctx context.Context, entityType string) ([]string, error) {
-	rows, err := q.db.QueryContext(ctx, listSyncEntityIDsByType, entityType)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []string
-	for rows.Next() {
-		var entity_id string
-		if err := rows.Scan(&entity_id); err != nil {
-			return nil, err
-		}
-		items = append(items, entity_id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

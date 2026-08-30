@@ -4,25 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/playlistsync"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
-
-// CatalogResolver maps a catalog id minted on another device onto the id this
-// one stores the same entity under. *catalog.Service satisfies it.
-type CatalogResolver interface {
-	Resolve(ctx context.Context, catalogID string) string
-}
-
-// WithCatalogResolver attaches catalog-id translation for incoming tracklists.
-// Without it a peer's catalog ids are carried through unchanged, which still
-// works — they simply do not resolve to a local binding until they are minted.
-func (s *Service) WithCatalogResolver(r CatalogResolver) *Service {
-	s.catalog = r
-	return s
-}
 
 // Apply rebuilds one playlist from the change log.
 //
@@ -49,32 +36,48 @@ func (s *Service) Apply(ctx context.Context, id string) error {
 		return nil
 	}
 
-	mode := str(st.fields[FieldMode])
-	if mode == "" {
-		mode = "once"
-	}
-	source := str(st.fields[FieldSource])
-	if source == "" {
-		source = "local"
-	}
-	externalID := str(st.fields[FieldExternalID])
-	if externalID == "" {
-		externalID = id
-	}
-
 	existing, err := s.store.Get(ctx, id)
+	exists := err == nil
 	switch {
-	case err == nil:
+	case exists:
 	case errors.Is(err, playlistsync.ErrNotFound):
 		existing = playlistsync.SyncedRow{}
 	default:
 		return err
 	}
 
+	// A playlist's identity is fixed when it is created and no edit changes it,
+	// so it is only read from the log for a row that does not exist yet. Writing
+	// it on an existing row would also collide: the insert resolves conflicts on
+	// (source, external_id), so changing either on a row already keyed by id
+	// fails on the primary key.
+	mode := existing.Mode
+	if !exists {
+		// Changes for one playlist are appended together, but a peer sends its
+		// log in pages and a page can split them. Creating the row from half an
+		// entity would fix the wrong identity onto it, so wait: the fields
+		// already stored are re-read when the rest arrives.
+		if st.fields[FieldSource] == nil {
+			return nil
+		}
+		mode = str(st.fields[FieldMode])
+		if mode == "" {
+			mode = "once"
+		}
+	}
+
 	// A mirrored playlist rebuilds its own tracklist from upstream, so the log
 	// carries no membership for it and whatever is here already stands.
 	tracksJSON := existing.TracksJSON
 	if tracksReplicate(mode) {
+		// Catalog ids do not travel, so the ones this device minted are carried
+		// over rather than blanked every time a peer's edit is applied.
+		local := map[string]string{}
+		for _, t := range decodeTracks(existing.TracksJSON) {
+			if t.CanonicalID != "" {
+				local[MemberKey(t)] = t.CanonicalID
+			}
+		}
 		tracks := make([]core.ExternalResult, 0, len(st.members))
 		for _, k := range st.orderedMembers() {
 			e := st.members[k].Entry
@@ -82,9 +85,7 @@ func (s *Service) Apply(ctx context.Context, id string) error {
 				continue
 			}
 			entry := *e
-			if s.catalog != nil && entry.CanonicalID != "" {
-				entry.CanonicalID = s.catalog.Resolve(ctx, entry.CanonicalID)
-			}
+			entry.CanonicalID = local[k]
 			tracks = append(tracks, entry)
 		}
 		encoded, mErr := json.Marshal(tracks)
@@ -97,30 +98,50 @@ func (s *Service) Apply(ctx context.Context, id string) error {
 		tracksJSON = "[]"
 	}
 
-	createdAt := int64(num(st.fields[FieldCreatedAt]))
-	if createdAt == 0 {
-		createdAt = existing.CreatedAt
+	// Fields the log does not carry keep what the row already says, rather than
+	// being blanked by a half-delivered entity.
+	name := existing.Name
+	if v, ok := st.fields[FieldName]; ok {
+		name = str(v)
 	}
-	name := str(st.fields[FieldName])
-	cover := str(st.fields[FieldCoverURL])
+	cover := existing.CoverURL
+	if v, ok := st.fields[FieldCoverURL]; ok {
+		cover = str(v)
+	}
 
-	storedID, err := s.store.Upsert(ctx, core.SyncedPlaylist{
-		ID:         id,
-		Source:     source,
-		ExternalID: externalID,
-		Name:       name,
-		CoverURL:   cover,
-		Mode:       mode,
-	}, tracksJSON, createdAt)
-	if err != nil {
+	if !exists {
+		createdAt := int64(num(st.fields[FieldCreatedAt]))
+		if createdAt == 0 {
+			createdAt = time.Now().Unix()
+		}
+		externalID := str(st.fields[FieldExternalID])
+		if externalID == "" {
+			externalID = id
+		}
+		if _, err := s.store.Upsert(ctx, core.SyncedPlaylist{
+			ID:         id,
+			Source:     str(st.fields[FieldSource]),
+			ExternalID: externalID,
+			Name:       name,
+			CoverURL:   cover,
+			Mode:       mode,
+		}, tracksJSON, createdAt); err != nil {
+			return err
+		}
+		// A playlist that arrived whole was synced when its author made it, so
+		// it is stamped rather than shown as "Never synced" on this device.
+		existing.LastSyncedAt = createdAt
+	}
+
+	if err := s.store.UpdateTracks(ctx, id, name, cover, tracksJSON, existing.LastSyncedAt); err != nil {
 		return err
 	}
-	// Upsert only writes name/cover/tracks on conflict, so the fields it leaves
-	// alone are written explicitly.
-	if err := s.store.UpdateTracks(ctx, storedID, name, cover, tracksJSON, existing.LastSyncedAt); err != nil {
-		return err
+	// Settings the log does not carry are left alone for the same reason as the
+	// name: a half-delivered entity must not switch off a playlist's auto-sync.
+	if st.fields[FieldSyncEnabled] == nil && st.fields[FieldSyncIntervalSec] == nil && st.fields[FieldAutoDownload] == nil {
+		return nil
 	}
-	return s.store.UpdateSettings(ctx, storedID,
+	return s.store.UpdateSettings(ctx, id,
 		boolean(st.fields[FieldSyncEnabled]),
 		num(st.fields[FieldSyncIntervalSec]),
 		boolean(st.fields[FieldAutoDownload]),
