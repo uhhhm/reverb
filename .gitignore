@@ -26,3 +26,6 @@ docs/plans/
 desktop/tools/bin/
 desktop/tools/python/
 dist/
+
+# packaging cache (standalone python tarball + unpacked runtime)
+desktop/tools/.cache/

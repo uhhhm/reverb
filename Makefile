@@ -1,4 +1,4 @@
-.PHONY: gen gen-check test build web dev clean desktop desktop-dev desktop-deps
+.PHONY: gen gen-check test build web dev clean desktop desktop-dev desktop-deps package-mac
 
 VERSION ?= dev
 
@@ -39,6 +39,11 @@ desktop: web
 desktop-dev:
 	wails dev -projectdir ./desktop
 
+# Distributable Reverb.app + zip in dist/. Bundles its own relocatable Python
+# (spotDL/yt-dlp) rather than desktop/tools/python, which only works in-tree.
+package-mac:
+	VERSION=$(VERSION) desktop/tools/package-mac.sh
+
 desktop-deps: # fetch ffmpeg, navidrome, deno and the spotDL venv into desktop/tools/
 	desktop/tools/fetch-ffmpeg.sh
 	desktop/tools/fetch-navidrome.sh
@@ -46,4 +51,4 @@ desktop-deps: # fetch ffmpeg, navidrome, deno and the spotDL venv into desktop/t
 	desktop/tools/setup-python-venv.sh
 
 clean:
-	rm -rf reverb web/dist internal/api/dist
+	rm -rf reverb web/dist internal/api/dist dist
