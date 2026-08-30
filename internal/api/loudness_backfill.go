@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/uhhhm/reverb/internal/library/loudness"
-	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // loudnessPageSize is how many tracks the backfill pulls per browse call.
@@ -153,11 +152,7 @@ func (s *Server) measureOne(ctx context.Context, paths localTrackPath, trackID s
 		return
 	}
 	if s.deps.Loudness != nil {
-		if err := s.deps.Loudness.UpsertTrackLoudness(ctx, db.UpsertTrackLoudnessParams{
-			TrackID:   trackID,
-			GainDb:    gain,
-			UpdatedAt: time.Now().Unix(),
-		}); err != nil {
+		if err := s.storeTrackGain(ctx, trackID, gain); err != nil {
 			log.Printf("WARNING: could not cache track loudness for %s: %v", trackID, err)
 			record(&s.loudness.state.Failed)
 			return

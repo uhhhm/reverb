@@ -113,6 +113,7 @@ type Service struct {
 	newID           func() string
 	resolve         func() BindingResolver // optional provider; Tasks 4-5 add call sites
 	canonicalMinter CanonicalMinter        // optional; Task 5 mints canonical ids at persist time
+	emitter         Emitter                // optional; replicates edits to paired devices
 }
 
 // NewService constructs a playlist-sync Service. resolve is an optional provider
@@ -173,6 +174,7 @@ func (s *Service) Import(ctx context.Context, rawURL string, downloadMissing boo
 	if uErr := s.store.UpdateTracks(ctx, id, pl.Name, pl.CoverURL, string(tj), now); uErr != nil {
 		return core.SyncedPlaylistDetail{}, uErr
 	}
+	s.publish(ctx, id)
 	det, err := s.Detail(ctx, id)
 	if err != nil {
 		return det, err
@@ -301,6 +303,7 @@ func (s *Service) Sync(ctx context.Context, id string) (core.SyncedPlaylistDetai
 	if err := s.store.UpdateTracks(ctx, id, pl.Name, pl.CoverURL, string(tj), s.now()); err != nil {
 		return core.SyncedPlaylistDetail{}, err
 	}
+	s.publish(ctx, id)
 	det, err := s.Detail(ctx, id)
 	if err != nil {
 		return det, err
@@ -354,6 +357,7 @@ func (s *Service) ImportOnce(ctx context.Context, url string) (core.SyncedPlayli
 	if uErr := s.store.UpdateTracks(ctx, id, pl.Name, pl.CoverURL, string(tj), now); uErr != nil {
 		return core.SyncedPlaylistDetail{}, uErr
 	}
+	s.publish(ctx, id)
 	// Enqueue all missing tracks for download.
 	for _, tr := range pl.Tracks {
 		res, _ := s.match.Match(ctx, tr)
@@ -392,6 +396,7 @@ func (s *Service) CreateManaged(ctx context.Context, name string) (core.SyncedPl
 	if uErr := s.store.UpdateTracks(ctx, storedID, name, "", "[]", now); uErr != nil {
 		return core.SyncedPlaylistDetail{}, uErr
 	}
+	s.publish(ctx, storedID)
 	return s.Detail(ctx, storedID)
 }
 
@@ -455,6 +460,7 @@ func (s *Service) MigrateLibraryPlaylists(ctx context.Context) error {
 			log.Printf("migrate library playlists: UpdateTracks %q: %v — skipping", full.Name, uErr)
 			continue
 		}
+		s.publish(ctx, storedID)
 		migrated++
 	}
 	// Set flag regardless of partial errors so a subsequent restart doesn't re-run.
@@ -487,8 +493,16 @@ func (s *Service) List(ctx context.Context) ([]core.SyncedPlaylist, error) {
 }
 
 func (s *Service) UpdateSettings(ctx context.Context, id string, enabled bool, intervalSec int, autoDownload bool) error {
-	return s.store.UpdateSettings(ctx, id, enabled, intervalSec, autoDownload)
+	if err := s.store.UpdateSettings(ctx, id, enabled, intervalSec, autoDownload); err != nil {
+		return err
+	}
+	s.publish(ctx, id)
+	return nil
 }
+
+// Delete removes the playlist locally. The tombstone that tells peers it is
+// gone is emitted by the caller: deletion is the one edit that cannot be
+// re-derived from the row, because the row no longer exists.
 func (s *Service) Delete(ctx context.Context, id string) error { return s.store.Delete(ctx, id) }
 
 // DownloadMissing enqueues the missing tracks for a synced playlist; returns jobs.
@@ -559,6 +573,7 @@ func (s *Service) AddTrack(ctx context.Context, id string, entry core.ExternalRe
 	if err := s.store.UpdateTracks(ctx, id, row.Name, row.CoverURL, string(tj), s.now()); err != nil {
 		return core.SyncedPlaylistDetail{}, err
 	}
+	s.publish(ctx, id)
 	// Enqueue download if missing (not a library entry and not matched).
 	if entry.Source != "library" {
 		res, _ := s.match.Match(ctx, entry)
@@ -599,6 +614,7 @@ func (s *Service) RemoveTrack(ctx context.Context, id, source, externalID string
 	if err := s.store.UpdateTracks(ctx, id, row.Name, row.CoverURL, string(tj), s.now()); err != nil {
 		return core.SyncedPlaylistDetail{}, err
 	}
+	s.publish(ctx, id)
 	return s.Detail(ctx, id)
 }
 
@@ -615,6 +631,7 @@ func (s *Service) SetCover(ctx context.Context, id, coverURL string) (core.Synce
 	if err := s.store.UpdateTracks(ctx, id, row.Name, coverURL, row.TracksJSON, s.now()); err != nil {
 		return core.SyncedPlaylistDetail{}, err
 	}
+	s.publish(ctx, id)
 	return s.Detail(ctx, id)
 }
 
@@ -633,6 +650,7 @@ func (s *Service) Rename(ctx context.Context, id, name string) (core.SyncedPlayl
 	if err := s.store.UpdateTracks(ctx, id, name, row.CoverURL, row.TracksJSON, s.now()); err != nil {
 		return core.SyncedPlaylistDetail{}, err
 	}
+	s.publish(ctx, id)
 	return s.Detail(ctx, id)
 }
 
@@ -679,6 +697,7 @@ func (s *Service) ReorderTracks(ctx context.Context, id string, order []core.Tra
 	if err := s.store.UpdateTracks(ctx, id, row.Name, row.CoverURL, string(tj), s.now()); err != nil {
 		return core.SyncedPlaylistDetail{}, err
 	}
+	s.publish(ctx, id)
 	return s.Detail(ctx, id)
 }
 

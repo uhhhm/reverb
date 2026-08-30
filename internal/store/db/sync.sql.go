@@ -205,6 +205,58 @@ func (q *Queries) GetSyncVector(ctx context.Context, deviceID string) (SyncVecto
 	return i, err
 }
 
+const listLatestSyncFieldsForEntity = `-- name: ListLatestSyncFieldsForEntity :many
+SELECT c.revision, c.device_id, c.entity_type, c.entity_id, c.field, c.value_json, c.updated_at, c.created_at, c.hlc, c.seq, c.sig
+FROM sync_change c
+WHERE c.entity_type = ? AND c.entity_id = ?
+  AND c.revision = (
+    SELECT c2.revision FROM sync_change c2
+    WHERE c2.entity_type = c.entity_type AND c2.entity_id = c.entity_id AND c2.field = c.field
+    ORDER BY c2.hlc DESC, c2.revision DESC LIMIT 1
+  )
+ORDER BY c.field ASC
+`
+
+type ListLatestSyncFieldsForEntityParams struct {
+	EntityType string `json:"entity_type"`
+	EntityID   string `json:"entity_id"`
+}
+
+func (q *Queries) ListLatestSyncFieldsForEntity(ctx context.Context, arg ListLatestSyncFieldsForEntityParams) ([]SyncChange, error) {
+	rows, err := q.db.QueryContext(ctx, listLatestSyncFieldsForEntity, arg.EntityType, arg.EntityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SyncChange
+	for rows.Next() {
+		var i SyncChange
+		if err := rows.Scan(
+			&i.Revision,
+			&i.DeviceID,
+			&i.EntityType,
+			&i.EntityID,
+			&i.Field,
+			&i.ValueJson,
+			&i.UpdatedAt,
+			&i.CreatedAt,
+			&i.Hlc,
+			&i.Seq,
+			&i.Sig,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSyncChangesSince = `-- name: ListSyncChangesSince :many
 SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq, sig FROM sync_change WHERE revision > ? ORDER BY revision ASC LIMIT ?
 `
@@ -283,6 +335,33 @@ func (q *Queries) ListSyncChangesSinceHLC(ctx context.Context, arg ListSyncChang
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSyncEntityIDsByType = `-- name: ListSyncEntityIDsByType :many
+SELECT DISTINCT entity_id FROM sync_change WHERE entity_type = ?
+`
+
+func (q *Queries) ListSyncEntityIDsByType(ctx context.Context, entityType string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listSyncEntityIDsByType, entityType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var entity_id string
+		if err := rows.Scan(&entity_id); err != nil {
+			return nil, err
+		}
+		items = append(items, entity_id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

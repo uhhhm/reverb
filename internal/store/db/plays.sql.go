@@ -70,6 +70,25 @@ func (q *Queries) DistinctDurableCanonicalIDs(ctx context.Context, limit int64) 
 	return items, nil
 }
 
+const getPlay = `-- name: GetPlay :one
+SELECT id, user_id, catalog_id, played_at, ms_played, completed, created_at FROM plays WHERE id = ?
+`
+
+func (q *Queries) GetPlay(ctx context.Context, id string) (Play, error) {
+	row := q.db.QueryRowContext(ctx, getPlay, id)
+	var i Play
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.CatalogID,
+		&i.PlayedAt,
+		&i.MsPlayed,
+		&i.Completed,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const insertPlay = `-- name: InsertPlay :exec
 INSERT INTO plays (id, user_id, catalog_id, played_at, ms_played, completed, created_at)
 VALUES (?,?,?,?,?,?,?)
@@ -96,6 +115,69 @@ func (q *Queries) InsertPlay(ctx context.Context, arg InsertPlayParams) error {
 		arg.CreatedAt,
 	)
 	return err
+}
+
+const insertPlayIfAbsent = `-- name: InsertPlayIfAbsent :exec
+INSERT OR IGNORE INTO plays (id, user_id, catalog_id, played_at, ms_played, completed, created_at)
+VALUES (?,?,?,?,?,?,?)
+`
+
+type InsertPlayIfAbsentParams struct {
+	ID        string `json:"id"`
+	UserID    string `json:"user_id"`
+	CatalogID string `json:"catalog_id"`
+	PlayedAt  int64  `json:"played_at"`
+	MsPlayed  int64  `json:"ms_played"`
+	Completed int64  `json:"completed"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+func (q *Queries) InsertPlayIfAbsent(ctx context.Context, arg InsertPlayIfAbsentParams) error {
+	_, err := q.db.ExecContext(ctx, insertPlayIfAbsent,
+		arg.ID,
+		arg.UserID,
+		arg.CatalogID,
+		arg.PlayedAt,
+		arg.MsPlayed,
+		arg.Completed,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const listAllPlays = `-- name: ListAllPlays :many
+SELECT id, user_id, catalog_id, played_at, ms_played, completed, created_at FROM plays ORDER BY played_at ASC
+`
+
+func (q *Queries) ListAllPlays(ctx context.Context) ([]Play, error) {
+	rows, err := q.db.QueryContext(ctx, listAllPlays)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Play
+	for rows.Next() {
+		var i Play
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.CatalogID,
+			&i.PlayedAt,
+			&i.MsPlayed,
+			&i.Completed,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listRecentPlays = `-- name: ListRecentPlays :many

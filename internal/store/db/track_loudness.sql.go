@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 )
 
 const deleteTrackLoudness = `-- name: DeleteTrackLoudness :exec
@@ -19,14 +20,67 @@ func (q *Queries) DeleteTrackLoudness(ctx context.Context, trackID string) error
 }
 
 const getTrackLoudness = `-- name: GetTrackLoudness :one
-SELECT track_id, gain_db, updated_at FROM track_loudness WHERE track_id = ?
+SELECT track_id, gain_db, updated_at, catalog_id FROM track_loudness WHERE track_id = ?
 `
 
 func (q *Queries) GetTrackLoudness(ctx context.Context, trackID string) (TrackLoudness, error) {
 	row := q.db.QueryRowContext(ctx, getTrackLoudness, trackID)
 	var i TrackLoudness
-	err := row.Scan(&i.TrackID, &i.GainDb, &i.UpdatedAt)
+	err := row.Scan(
+		&i.TrackID,
+		&i.GainDb,
+		&i.UpdatedAt,
+		&i.CatalogID,
+	)
 	return i, err
+}
+
+const getTrackLoudnessByCatalogID = `-- name: GetTrackLoudnessByCatalogID :one
+SELECT track_id, gain_db, updated_at, catalog_id FROM track_loudness WHERE catalog_id = ?
+`
+
+func (q *Queries) GetTrackLoudnessByCatalogID(ctx context.Context, catalogID sql.NullString) (TrackLoudness, error) {
+	row := q.db.QueryRowContext(ctx, getTrackLoudnessByCatalogID, catalogID)
+	var i TrackLoudness
+	err := row.Scan(
+		&i.TrackID,
+		&i.GainDb,
+		&i.UpdatedAt,
+		&i.CatalogID,
+	)
+	return i, err
+}
+
+const listTrackLoudness = `-- name: ListTrackLoudness :many
+SELECT track_id, gain_db, updated_at, catalog_id FROM track_loudness
+`
+
+func (q *Queries) ListTrackLoudness(ctx context.Context) ([]TrackLoudness, error) {
+	rows, err := q.db.QueryContext(ctx, listTrackLoudness)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TrackLoudness
+	for rows.Next() {
+		var i TrackLoudness
+		if err := rows.Scan(
+			&i.TrackID,
+			&i.GainDb,
+			&i.UpdatedAt,
+			&i.CatalogID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const upsertTrackLoudness = `-- name: UpsertTrackLoudness :exec
@@ -45,5 +99,31 @@ type UpsertTrackLoudnessParams struct {
 
 func (q *Queries) UpsertTrackLoudness(ctx context.Context, arg UpsertTrackLoudnessParams) error {
 	_, err := q.db.ExecContext(ctx, upsertTrackLoudness, arg.TrackID, arg.GainDb, arg.UpdatedAt)
+	return err
+}
+
+const upsertTrackLoudnessByCatalogID = `-- name: UpsertTrackLoudnessByCatalogID :exec
+INSERT INTO track_loudness (track_id, gain_db, updated_at, catalog_id)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(track_id) DO UPDATE SET
+  gain_db = excluded.gain_db,
+  updated_at = excluded.updated_at,
+  catalog_id = excluded.catalog_id
+`
+
+type UpsertTrackLoudnessByCatalogIDParams struct {
+	TrackID   string         `json:"track_id"`
+	GainDb    float64        `json:"gain_db"`
+	UpdatedAt int64          `json:"updated_at"`
+	CatalogID sql.NullString `json:"catalog_id"`
+}
+
+func (q *Queries) UpsertTrackLoudnessByCatalogID(ctx context.Context, arg UpsertTrackLoudnessByCatalogIDParams) error {
+	_, err := q.db.ExecContext(ctx, upsertTrackLoudnessByCatalogID,
+		arg.TrackID,
+		arg.GainDb,
+		arg.UpdatedAt,
+		arg.CatalogID,
+	)
 	return err
 }

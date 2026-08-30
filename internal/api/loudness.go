@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"database/sql"
 	"log"
 	"net/http"
 	"time"
@@ -43,14 +45,42 @@ func (s *Server) handleTrackGain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.deps.Loudness != nil {
-		if err := s.deps.Loudness.UpsertTrackLoudness(r.Context(), db.UpsertTrackLoudnessParams{
-			TrackID:   id,
-			GainDb:    gain,
-			UpdatedAt: time.Now().Unix(),
-		}); err != nil {
+		if err := s.storeTrackGain(r.Context(), id, gain); err != nil {
 			// A cache write failure only costs a re-measure next time.
 			log.Printf("WARNING: could not cache track loudness for %s: %v", id, err)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"gainDb": gain})
+}
+
+// storeTrackGain caches a measured gain and shares it with paired devices.
+//
+// It is stored under the catalog id as well as the backend track id: the gain
+// describes the recording, so a device that has the same track under a
+// different backend id can use the measurement instead of repeating it.
+func (s *Server) storeTrackGain(ctx context.Context, trackID string, gain float64) error {
+	catalogID := ""
+	if s.deps.Overrides != nil {
+		catalogID = s.deps.Overrides.CatalogIDForTrack(ctx, trackID)
+	}
+	var err error
+	if catalogID != "" {
+		err = s.deps.Loudness.UpsertTrackLoudnessByCatalogID(ctx, db.UpsertTrackLoudnessByCatalogIDParams{
+			TrackID:   trackID,
+			GainDb:    gain,
+			UpdatedAt: time.Now().Unix(),
+			CatalogID: sql.NullString{String: catalogID, Valid: true},
+		})
+	} else {
+		err = s.deps.Loudness.UpsertTrackLoudness(ctx, db.UpsertTrackLoudnessParams{
+			TrackID:   trackID,
+			GainDb:    gain,
+			UpdatedAt: time.Now().Unix(),
+		})
+	}
+	if err != nil {
+		return err
+	}
+	s.emitTrackLoudness(ctx, trackID, gain)
+	return nil
 }

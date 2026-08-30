@@ -7,6 +7,7 @@ import (
 
 	"github.com/uhhhm/reverb/internal/catalog"
 	"github.com/uhhhm/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/syncemit"
 	"github.com/uhhhm/reverb/internal/trackref"
 )
 
@@ -38,12 +39,27 @@ type CanonicalMinter interface {
 	Lookup(ctx context.Context, id catalog.Identity) (catalogID string, found bool, err error)
 }
 
+// Emitter publishes a recorded play to the sync log so paired devices share
+// one listening history. *syncemit.Service satisfies it.
+type Emitter interface {
+	EmitPlay(ctx context.Context, playID string, p syncemit.Play)
+}
+
 // Service records user play events.
 type Service struct {
 	q     Querier
 	cat   CanonicalMinter
 	now   func() time.Time
 	idgen func() string
+
+	// emitter replicates plays; nil when this device shares nothing.
+	emitter Emitter
+}
+
+// WithEmitter attaches the sync emitter. Nil-safe.
+func (s *Service) WithEmitter(e Emitter) *Service {
+	s.emitter = e
+	return s
 }
 
 // NewService constructs a Service.
@@ -86,15 +102,30 @@ func (s *Service) Record(ctx context.Context, userID string, in PlayInput) error
 		completed = 1
 	}
 
-	return s.q.InsertPlay(ctx, db.InsertPlayParams{
-		ID:        s.idgen(),
+	id := s.idgen()
+	createdAt := s.now().Unix()
+	if err := s.q.InsertPlay(ctx, db.InsertPlayParams{
+		ID:        id,
 		UserID:    userID,
 		CatalogID: cid,
 		PlayedAt:  played,
 		MsPlayed:  int64(in.MsPlayed),
 		Completed: completed,
-		CreatedAt: s.now().Unix(),
-	})
+		CreatedAt: createdAt,
+	}); err != nil {
+		return err
+	}
+	if s.emitter != nil {
+		s.emitter.EmitPlay(ctx, id, syncemit.Play{
+			UserID:    userID,
+			CatalogID: cid,
+			PlayedAt:  played,
+			MsPlayed:  in.MsPlayed,
+			Completed: in.Completed,
+			CreatedAt: createdAt,
+		})
+	}
+	return nil
 }
 
 // PlayCountQuery is a single track identity for which the caller wants a play

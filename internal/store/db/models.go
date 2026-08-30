@@ -272,9 +272,10 @@ type TrackCrop struct {
 }
 
 type TrackLoudness struct {
-	TrackID   string  `json:"track_id"`
-	GainDb    float64 `json:"gain_db"`
-	UpdatedAt int64   `json:"updated_at"`
+	TrackID   string         `json:"track_id"`
+	GainDb    float64        `json:"gain_db"`
+	UpdatedAt int64          `json:"updated_at"`
+	CatalogID sql.NullString `json:"catalog_id"`
 }
 
 type TrackOverride struct {
@@ -286,9 +287,10 @@ type TrackOverride struct {
 }
 
 type TrackQualityOverride struct {
-	TrackID   string `json:"track_id"`
-	Quality   string `json:"quality"`
-	UpdatedAt int64  `json:"updated_at"`
+	TrackID   string         `json:"track_id"`
+	Quality   string         `json:"quality"`
+	UpdatedAt int64          `json:"updated_at"`
+	CatalogID sql.NullString `json:"catalog_id"`
 }
 
 type User struct {

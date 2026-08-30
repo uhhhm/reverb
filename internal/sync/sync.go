@@ -77,3 +77,41 @@ type MergePolicy interface {
 type LWWPolicy struct {
 	IsServer func(string) bool
 }
+
+// Entity types carried by the change log. They are declared here, next to
+// SyncChange, because both the emitters and the projection have to agree on
+// them and neither owns the vocabulary.
+const (
+	// EntityCatalog replicates the catalog entity itself. Catalog ids are minted
+	// locally and are not derivable from the track, so a peer that receives a
+	// change keyed on trk_… has no idea what track it means until it has seen
+	// the entity. Everything else keyed on a catalog id depends on this.
+	EntityCatalog = "catalogEntity"
+	// EntityTrack carries per-track metadata under a catalog id.
+	EntityTrack = "track"
+	// EntityPlaylist carries a managed playlist under its playlist id.
+	EntityPlaylist = "playlist"
+	// EntityPlay carries one play event under its play id.
+	EntityPlay = "play"
+)
+
+// Field names carried by the change log. They are the wire format — renaming
+// one renames it for every paired device — and both the emitters and the
+// projection have to agree on them, so they live here rather than in either.
+const (
+	// FieldDeleted is the tombstone sentinel: the field name that means "this
+	// entity is gone", rather than a value of some field.
+	FieldDeleted = "__deleted"
+	// FieldIdentity carries a catalog entity's metadata, on EntityCatalog.
+	FieldIdentity = "identity"
+	// FieldRecord carries a whole play event, on EntityPlay.
+	FieldRecord = "record"
+
+	// Per-track fields, on EntityTrack under a catalog id.
+	FieldTitle          = "title"
+	FieldArtist         = "artist"
+	FieldCropStartMs    = "cropStartMs"
+	FieldCropEndMs      = "cropEndMs"
+	FieldQuality        = "quality"
+	FieldLoudnessGainDb = "loudnessGainDb"
+)

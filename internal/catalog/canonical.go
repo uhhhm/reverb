@@ -87,7 +87,7 @@ func (s *Service) CanonicalFor(ctx context.Context, id Identity) (string, error)
 		return "", err
 	}
 
-	for _, a := range aliases {
+	for _, a := range append(aliases, aliasKV{aliasKindCatalog, cid}) {
 		if err := s.q.InsertCatalogAlias(ctx, db.InsertCatalogAliasParams{
 			AliasKind:  a.kind,
 			AliasValue: a.value,
@@ -98,6 +98,7 @@ func (s *Service) CanonicalFor(ctx context.Context, id Identity) (string, error)
 		}
 	}
 
+	s.emitEntity(ctx, cid, id)
 	return cid, nil
 }
 

@@ -35,6 +35,7 @@ import (
 	"github.com/uhhhm/reverb/internal/override"
 	"github.com/uhhhm/reverb/internal/p2p"
 	"github.com/uhhhm/reverb/internal/play"
+	"github.com/uhhhm/reverb/internal/playlistcrdt"
 	"github.com/uhhhm/reverb/internal/playlistsync"
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/resolver"
@@ -44,6 +45,7 @@ import (
 	"github.com/uhhhm/reverb/internal/search/spotify"
 	"github.com/uhhhm/reverb/internal/store"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
+	"github.com/uhhhm/reverb/internal/syncemit"
 	"github.com/uhhhm/reverb/internal/wiring"
 )
 
@@ -83,6 +85,12 @@ type Runtime struct {
 	// P2PSyncer is the anti-entropy syncer, set once the host starts.
 	P2PSyncer *p2p.Syncer
 	Getenv    func(string) string
+
+	// SyncEmit publishes locally-made changes; Playlists projects playlists in
+	// both directions. StartBackground uses them for the one-time publish of
+	// the history this device had before it could replicate any of it.
+	SyncEmit  *syncemit.Service
+	Playlists *playlistcrdt.Service
 }
 
 // Build opens the store, runs migrations, constructs every service, and returns
@@ -281,12 +289,39 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	if deps.SyncStore == nil {
 		deps.SyncStore = reverbsync.NewSyncStore(st.Q())
 	}
-	// Without a materializer, per-track metadata would replicate into the change
-	// log and stay invisible: nothing would write a peer's rename or crop into
-	// the tables the app reads.
-	deps.SyncStore.SetMaterializer(materialize.New(deps.Overrides, deps.Crop))
+	// Everything replicated is keyed on an identity peers can agree on, and the
+	// device that authors a change has to be named. Both are resolved here, once,
+	// against the store, and handed to the emitters and the projection.
+	authorDevice := func(ctx context.Context) string {
+		id, err := reverbsync.AuthorDeviceID(ctx, st.Q())
+		if err != nil {
+			return ""
+		}
+		return id
+	}
+	emitter := syncemit.New(deps.SyncStore, catalogSvc, authorDevice)
+	catalogSvc.WithEmitter(emitter)
+	playSvc.WithEmitter(emitter)
+	deps.SyncEmit = emitter
+
+	playlistProjection := playlistcrdt.New(deps.SyncStore, wiring.NewSyncStore(st.Q()), authorDevice).
+		WithCatalogResolver(catalogSvc)
+	if bundle.Sync != nil {
+		bundle.Sync.WithEmitter(playlistProjection)
+	}
+
+	// Without a materializer, everything replicated would land in the change log
+	// and stay invisible: nothing would write a peer's rename, playlist or play
+	// into the tables the app reads.
+	newMaterializer := func() *materialize.Service {
+		return materialize.New(deps.Overrides, deps.Crop).
+			WithCatalog(catalogSvc).
+			WithPlaylists(playlistProjection).
+			WithTrackStore(st.Q())
+	}
+	deps.SyncStore.SetMaterializer(newMaterializer())
 	if syncStoreForLink != deps.SyncStore {
-		syncStoreForLink.SetMaterializer(materialize.New(deps.Overrides, deps.Crop))
+		syncStoreForLink.SetMaterializer(newMaterializer())
 	}
 	// Only set an interface field when the concrete service is present, or it
 	// becomes a non-nil interface wrapping a nil pointer.
@@ -327,6 +362,9 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		Scrobble: scrobbleSvc,
 		P2PPort:  opts.P2PPort,
 		Getenv:   opts.Getenv,
+
+		SyncEmit:  emitter,
+		Playlists: playlistProjection,
 	}
 	rt.Deps.P2P = func() *p2p.Host { return rt.P2P }
 	rt.Deps.P2PGuard = func() *p2p.Guard { return rt.P2PGuard }
@@ -429,6 +467,12 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 	// before Navidrome was up.
 	if r.Bundle.Supervisor != nil && r.Bundle.Manager != nil {
 		go WaitReadyThenBackfill(ctx, r.Bundle.Supervisor.Ready, r.Bundle.Manager.BackfillUnlinked)
+	}
+	// Replication only ever carried renames and crops before, so a library built
+	// up over months would reach a newly paired device empty. Publish what is
+	// already here, once, in the background — it reads the whole play history.
+	if r.SyncEmit != nil {
+		go r.SyncEmit.BackfillHistory(ctx, r.Store.Q(), r.Playlists)
 	}
 	if r.Bundle.Sync != nil {
 		go playlistsync.NewScheduler(r.Bundle.Sync, syncInterval).Run(ctx)

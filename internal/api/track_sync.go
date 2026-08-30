@@ -20,7 +20,16 @@ import (
 // Best-effort by design: a device that is not paired has nothing to publish to,
 // and a sync failure must never fail the user's edit.
 func (s *Server) emitTrackFieldChange(ctx context.Context, catalogID, field string, value any) {
-	if s.deps.SyncStore == nil || catalogID == "" {
+	if catalogID == "" {
+		return
+	}
+	// The emitter also publishes the catalog entity the id names. Without that a
+	// peer receives an edit to trk_… and has no way to tell which track it is.
+	if s.deps.SyncEmit != nil {
+		s.deps.SyncEmit.EmitTrackField(ctx, catalogID, field, value)
+		return
+	}
+	if s.deps.SyncStore == nil {
 		return
 	}
 	deviceID := s.resolveAuthorDeviceForSync(ctx)
@@ -36,6 +45,25 @@ func (s *Server) emitTrackFieldChange(ctx context.Context, catalogID, field stri
 	}); err != nil {
 		log.Printf("sync %s for track %q: %v", field, catalogID, err)
 	}
+}
+
+// emitTrackQuality publishes a per-track quality override. An empty tier is how
+// clearing one travels — there is no tombstone, because the track still exists.
+func (s *Server) emitTrackQuality(ctx context.Context, trackID, quality string) {
+	if s.deps.Overrides == nil {
+		return
+	}
+	s.emitTrackFieldChange(ctx, s.deps.Overrides.CatalogIDForTrack(ctx, trackID), materialize.FieldQuality, quality)
+}
+
+// emitTrackLoudness publishes a measured playback gain. It is a property of the
+// file rather than a preference, so sharing it spares every other device an
+// ffmpeg pass over a track it already has.
+func (s *Server) emitTrackLoudness(ctx context.Context, trackID string, gainDb float64) {
+	if s.deps.Overrides == nil {
+		return
+	}
+	s.emitTrackFieldChange(ctx, s.deps.Overrides.CatalogIDForTrack(ctx, trackID), materialize.FieldLoudnessGainDb, gainDb)
 }
 
 // emitTrackRename publishes a rename. Title and artist are separate LWW fields,

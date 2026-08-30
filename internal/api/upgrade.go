@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"errors"
 	"net/http"
 	"strings"
@@ -211,14 +212,40 @@ func (s *Server) setTrackQuality(r *http.Request, libraryTrackID string, q core.
 	if s.deps.TrackQuality == nil {
 		return errNoTrackQualityStore
 	}
-	if !q.Valid() {
-		return s.deps.TrackQuality.DeleteTrackQualityOverride(r.Context(), libraryTrackID)
+	ctx := r.Context()
+	// The catalog id is what peers agree on; the backend track id is local to
+	// one library backend. Store both, so the read path still finds the row by
+	// track id and the override survives a backend swap.
+	catalogID := ""
+	if s.deps.Overrides != nil {
+		catalogID = s.deps.Overrides.CatalogIDForTrack(ctx, libraryTrackID)
 	}
-	return s.deps.TrackQuality.UpsertTrackQualityOverride(r.Context(), db.UpsertTrackQualityOverrideParams{
-		TrackID:   libraryTrackID,
-		Quality:   string(q),
-		UpdatedAt: time.Now().Unix(),
-	})
+	var err error
+	switch {
+	case !q.Valid():
+		err = s.deps.TrackQuality.DeleteTrackQualityOverride(ctx, libraryTrackID)
+		if err == nil && catalogID != "" {
+			err = s.deps.TrackQuality.DeleteTrackQualityOverrideByCatalogID(ctx, sql.NullString{String: catalogID, Valid: true})
+		}
+	case catalogID != "":
+		err = s.deps.TrackQuality.UpsertTrackQualityOverrideByCatalogID(ctx, db.UpsertTrackQualityOverrideByCatalogIDParams{
+			TrackID:   libraryTrackID,
+			Quality:   string(q),
+			UpdatedAt: time.Now().Unix(),
+			CatalogID: sql.NullString{String: catalogID, Valid: true},
+		})
+	default:
+		err = s.deps.TrackQuality.UpsertTrackQualityOverride(ctx, db.UpsertTrackQualityOverrideParams{
+			TrackID:   libraryTrackID,
+			Quality:   string(q),
+			UpdatedAt: time.Now().Unix(),
+		})
+	}
+	if err != nil {
+		return err
+	}
+	s.emitTrackQuality(ctx, libraryTrackID, string(q))
+	return nil
 }
 
 // handleGetTrackQuality reports a track's standing quality: its override when

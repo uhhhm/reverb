@@ -869,7 +869,20 @@ func (s *SyncStore) materialize(ctx context.Context, accepted []SyncChange) {
 	if s.materializer == nil || len(accepted) == 0 {
 		return
 	}
+	// Catalog entities first: a play or a rename names a track by its catalog
+	// id, so the entity has to exist before the row that points at it.
+	ordered := make([]SyncChange, 0, len(accepted))
 	for _, ch := range accepted {
+		if ch.EntityType == EntityCatalog {
+			ordered = append(ordered, ch)
+		}
+	}
+	for _, ch := range accepted {
+		if ch.EntityType != EntityCatalog {
+			ordered = append(ordered, ch)
+		}
+	}
+	for _, ch := range ordered {
 		if err := s.materializer.Apply(ctx, ch); err != nil {
 			log.Printf("sync: could not apply %s/%s %s: %v", ch.EntityType, ch.EntityID, ch.Field, err)
 		}

@@ -173,6 +173,10 @@ type Deps struct {
 	// precedence over the global download_quality setting. *db.Queries satisfies
 	// it. Nil disables per-track quality (handlers return 503).
 	TrackQuality TrackQualityStore
+
+	// SyncEmit publishes locally-made per-track changes to paired devices. Nil
+	// when this device replicates nothing.
+	SyncEmit TrackSyncEmitter
 	// Crop stores non-destructive playback boundaries and applies them on read.
 	// Nil disables cropping (handlers return 503).
 	Crop *crop.Service
@@ -222,18 +226,30 @@ type Deps struct {
 	MusicDir   string
 }
 
+// TrackSyncEmitter publishes a per-track field to the sync log under a catalog
+// id, making sure the catalog entity that id names has been published first.
+// *syncemit.Service satisfies it.
+type TrackSyncEmitter interface {
+	EmitTrackField(ctx context.Context, catalogID, field string, value any)
+}
+
 // TrackQualityStore persists per-track download-quality overrides.
 // *db.Queries satisfies it.
 type TrackQualityStore interface {
 	GetTrackQualityOverride(ctx context.Context, trackID string) (db.TrackQualityOverride, error)
 	UpsertTrackQualityOverride(ctx context.Context, arg db.UpsertTrackQualityOverrideParams) error
 	DeleteTrackQualityOverride(ctx context.Context, trackID string) error
+	// The by-catalog-id variants key the override on the identity peers agree
+	// on, so it survives a library-backend swap and can replicate.
+	UpsertTrackQualityOverrideByCatalogID(ctx context.Context, arg db.UpsertTrackQualityOverrideByCatalogIDParams) error
+	DeleteTrackQualityOverrideByCatalogID(ctx context.Context, catalogID sql.NullString) error
 }
 
 // LoudnessStore caches measured per-track playback gain. *db.Queries satisfies it.
 type LoudnessStore interface {
 	GetTrackLoudness(ctx context.Context, trackID string) (db.TrackLoudness, error)
 	UpsertTrackLoudness(ctx context.Context, arg db.UpsertTrackLoudnessParams) error
+	UpsertTrackLoudnessByCatalogID(ctx context.Context, arg db.UpsertTrackLoudnessByCatalogIDParams) error
 }
 
 // FileManifestStore backs p2p file manifest listing. *db.Queries satisfies it.

@@ -9,16 +9,19 @@ import (
 
 // Identity holds all the metadata a caller knows about a library entity.
 // Fields ISRC, MBID, Source, and ExternalID are optional.
+// The JSON tags are part of the wire format: an Identity is what a peer is sent
+// so it can make sense of a catalog id, so renaming a field renames it for
+// every device.
 type Identity struct {
-	Kind       string // "track", "album", "artist"
-	Title      string
-	Artist     string
-	Album      string
-	ISRC       string
-	MBID       string
-	Source     string
-	ExternalID string
-	DurationMs int
+	Kind       string `json:"kind"` // "track", "album", "artist"
+	Title      string `json:"title"`
+	Artist     string `json:"artist"`
+	Album      string `json:"album"`
+	ISRC       string `json:"isrc,omitempty"`
+	MBID       string `json:"mbid,omitempty"`
+	Source     string `json:"source,omitempty"`
+	ExternalID string `json:"externalId,omitempty"`
+	DurationMs int    `json:"durationMs"`
 }
 
 // Querier is the slice of generated *db.Queries methods that catalog needs.
@@ -51,6 +54,10 @@ type Service struct {
 	q     Querier
 	now   func() time.Time
 	idgen func() string // returns a uuid-ish token (no prefix)
+
+	// emitter publishes newly minted entities to the sync log; nil when this
+	// device replicates nothing.
+	emitter Emitter
 }
 
 // NewService constructs a Service.

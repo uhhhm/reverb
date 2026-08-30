@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 )
 
 const deleteTrackQualityOverride = `-- name: DeleteTrackQualityOverride :exec
@@ -18,19 +19,49 @@ func (q *Queries) DeleteTrackQualityOverride(ctx context.Context, trackID string
 	return err
 }
 
+const deleteTrackQualityOverrideByCatalogID = `-- name: DeleteTrackQualityOverrideByCatalogID :exec
+DELETE FROM track_quality_override WHERE catalog_id = ?
+`
+
+func (q *Queries) DeleteTrackQualityOverrideByCatalogID(ctx context.Context, catalogID sql.NullString) error {
+	_, err := q.db.ExecContext(ctx, deleteTrackQualityOverrideByCatalogID, catalogID)
+	return err
+}
+
 const getTrackQualityOverride = `-- name: GetTrackQualityOverride :one
-SELECT track_id, quality, updated_at FROM track_quality_override WHERE track_id = ?
+SELECT track_id, quality, updated_at, catalog_id FROM track_quality_override WHERE track_id = ?
 `
 
 func (q *Queries) GetTrackQualityOverride(ctx context.Context, trackID string) (TrackQualityOverride, error) {
 	row := q.db.QueryRowContext(ctx, getTrackQualityOverride, trackID)
 	var i TrackQualityOverride
-	err := row.Scan(&i.TrackID, &i.Quality, &i.UpdatedAt)
+	err := row.Scan(
+		&i.TrackID,
+		&i.Quality,
+		&i.UpdatedAt,
+		&i.CatalogID,
+	)
+	return i, err
+}
+
+const getTrackQualityOverrideByCatalogID = `-- name: GetTrackQualityOverrideByCatalogID :one
+SELECT track_id, quality, updated_at, catalog_id FROM track_quality_override WHERE catalog_id = ?
+`
+
+func (q *Queries) GetTrackQualityOverrideByCatalogID(ctx context.Context, catalogID sql.NullString) (TrackQualityOverride, error) {
+	row := q.db.QueryRowContext(ctx, getTrackQualityOverrideByCatalogID, catalogID)
+	var i TrackQualityOverride
+	err := row.Scan(
+		&i.TrackID,
+		&i.Quality,
+		&i.UpdatedAt,
+		&i.CatalogID,
+	)
 	return i, err
 }
 
 const listTrackQualityOverrides = `-- name: ListTrackQualityOverrides :many
-SELECT track_id, quality, updated_at FROM track_quality_override
+SELECT track_id, quality, updated_at, catalog_id FROM track_quality_override
 `
 
 func (q *Queries) ListTrackQualityOverrides(ctx context.Context) ([]TrackQualityOverride, error) {
@@ -42,7 +73,12 @@ func (q *Queries) ListTrackQualityOverrides(ctx context.Context) ([]TrackQuality
 	var items []TrackQualityOverride
 	for rows.Next() {
 		var i TrackQualityOverride
-		if err := rows.Scan(&i.TrackID, &i.Quality, &i.UpdatedAt); err != nil {
+		if err := rows.Scan(
+			&i.TrackID,
+			&i.Quality,
+			&i.UpdatedAt,
+			&i.CatalogID,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -72,5 +108,31 @@ type UpsertTrackQualityOverrideParams struct {
 
 func (q *Queries) UpsertTrackQualityOverride(ctx context.Context, arg UpsertTrackQualityOverrideParams) error {
 	_, err := q.db.ExecContext(ctx, upsertTrackQualityOverride, arg.TrackID, arg.Quality, arg.UpdatedAt)
+	return err
+}
+
+const upsertTrackQualityOverrideByCatalogID = `-- name: UpsertTrackQualityOverrideByCatalogID :exec
+INSERT INTO track_quality_override (track_id, quality, updated_at, catalog_id)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(track_id) DO UPDATE SET
+  quality = excluded.quality,
+  updated_at = excluded.updated_at,
+  catalog_id = excluded.catalog_id
+`
+
+type UpsertTrackQualityOverrideByCatalogIDParams struct {
+	TrackID   string         `json:"track_id"`
+	Quality   string         `json:"quality"`
+	UpdatedAt int64          `json:"updated_at"`
+	CatalogID sql.NullString `json:"catalog_id"`
+}
+
+func (q *Queries) UpsertTrackQualityOverrideByCatalogID(ctx context.Context, arg UpsertTrackQualityOverrideByCatalogIDParams) error {
+	_, err := q.db.ExecContext(ctx, upsertTrackQualityOverrideByCatalogID,
+		arg.TrackID,
+		arg.Quality,
+		arg.UpdatedAt,
+		arg.CatalogID,
+	)
 	return err
 }

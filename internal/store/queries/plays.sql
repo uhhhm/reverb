@@ -172,3 +172,13 @@ LIMIT ?;
 
 -- name: CountPlaysByCatalog :one
 SELECT COUNT(*) FROM plays WHERE user_id = ? AND catalog_id = ?;
+
+-- name: InsertPlayIfAbsent :exec
+INSERT OR IGNORE INTO plays (id, user_id, catalog_id, played_at, ms_played, completed, created_at)
+VALUES (?,?,?,?,?,?,?);
+
+-- name: GetPlay :one
+SELECT * FROM plays WHERE id = ?;
+
+-- name: ListAllPlays :many
+SELECT * FROM plays ORDER BY played_at ASC;
