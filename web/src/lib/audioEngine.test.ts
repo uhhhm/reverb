@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest'
+import { describe, expect, it, afterEach, beforeEach, vi } from 'vitest'
 import { AudioEngine, type AudioElement } from './audioEngine'
 import type { Track } from './types'
 
@@ -23,6 +23,8 @@ function track(id: string): Track {
 // fakeAudio is a minimal AudioElement stub: records play/pause, fires ended on demand.
 class FakeAudio implements AudioElement {
   src = ''
+  readyState = 4
+  error: { code: number } | null = null
   currentTime = 0
   duration = 0
   volume = 1
@@ -253,10 +255,12 @@ describe('AudioEngine stream-error recovery', () => {
     expect(engine.getState().index).toBe(indexBefore)
   })
 
-  it('repeat!==one + active error: skips to next track', () => {
+  it('repeat!==one + active error: re-attaches once, then skips to next track', () => {
     engine.playTrackList(list, 0)
     expect(engine.getState().repeat).toBe('off')
 
+    audios[0].fire('error') // first failure re-attaches the same track
+    expect(engine.getState().index).toBe(0)
     audios[0].fire('error')
 
     expect(engine.getState().index).toBe(1)
@@ -265,8 +269,11 @@ describe('AudioEngine stream-error recovery', () => {
   it('three consecutive active errors (no successful play between): engine stops instead of skipping indefinitely', () => {
     engine.playTrackList(list, 0)
 
+    audios[0].fire('error') // re-attach attempt on index 0
     audios[0].fire('error') // consecutiveErrors=1, skips to index 1
+    audios[0].fire('error') // re-attach attempt on index 1
     audios[0].fire('error') // consecutiveErrors=2, skips to index 2
+    audios[0].fire('error') // re-attach attempt on index 2
     audios[0].fire('error') // consecutiveErrors=3, should STOP
 
     expect(engine.getState().playing).toBe(false)
@@ -276,14 +283,17 @@ describe('AudioEngine stream-error recovery', () => {
     const longList = [track('a'), track('b'), track('c'), track('d'), track('e')]
     engine.playTrackList(longList, 0)
 
+    audios[0].fire('error') // re-attach, then
     audios[0].fire('error') // consecutiveErrors=1, skips → index 1
+    audios[0].fire('error') // re-attach, then
     audios[0].fire('error') // consecutiveErrors=2, skips → index 2
 
     // successful play resets counter
     audios[0].paused = false
     audios[0].fire('play')
 
-    // one more error → consecutiveErrors=1, should skip not stop
+    // one more error → re-attach, then consecutiveErrors=1, should skip not stop
+    audios[0].fire('error')
     audios[0].fire('error')
 
     // should have advanced (not stopped) since counter reset
@@ -343,10 +353,14 @@ describe('AudioEngine loading state', () => {
     expect(engine.getState().loading).toBe(false)
   })
 
-  // A resolve that fails must not leave the spinner up forever.
-  it('clears loading when the source errors', () => {
+  // A resolve that fails must not leave the spinner up forever. The first
+  // failure re-attaches the source, which is itself a load; the second is the
+  // one that gives up.
+  it('clears loading once a source has failed for good', () => {
     const { engine, audios } = newEngine()
     engine.playTrackList([track('1')], 0)
+    expect(engine.getState().loading).toBe(true)
+    audios[0].fire('error')
     expect(engine.getState().loading).toBe(true)
     audios[0].fire('error')
     expect(engine.getState().loading).toBe(false)
@@ -840,5 +854,191 @@ describe('AudioEngine volume', () => {
     engine.setVolume(0.5)
     engine.playTrackList(list, 0)
     expect(audios[1].volume).toBe(0.5)
+  })
+})
+
+// A track played from a search result is proxied from an upstream URL that
+// expires, and a media element left paused for hours can have its resource
+// dropped by the browser. Either way pressing play again must resume the track,
+// not sit silent at 0:00.
+describe('AudioEngine stale source recovery', () => {
+  function external(id: string): Track {
+    return { ...track(id), externalStream: { source: 'deezer', externalId: id } }
+  }
+
+  it('re-attaches and resumes when the element lost its resource while paused', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([external('x')], 0)
+    const a = audios[0]
+
+    // play through to 60s, then pause
+    a.currentTime = 60
+    a.fire('timeupdate')
+    engine.pause()
+    expect(engine.getState().currentTimeMs).toBe(60000)
+
+    // hours later: the browser has released the media resource
+    a.readyState = 0
+    a.currentTime = 0
+    const srcBefore = a.src
+    a.src = ''
+    a.src = srcBefore
+
+    engine.play()
+
+    expect(engine.getState().playing).toBe(true)
+    expect(a.paused).toBe(false)
+    expect(engine.getState().currentTimeMs).toBe(60000)
+
+    // the position is applied once the fresh source can accept it
+    a.readyState = 4
+    a.fire('canplay')
+    expect(a.currentTime).toBe(60)
+  })
+
+  it('recovers a mid-track error by re-attaching at the same position', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([external('x')], 0)
+    const a = audios[0]
+    a.currentTime = 30
+    a.fire('timeupdate')
+
+    a.fire('error')
+
+    expect(engine.getState().index).toBe(0)
+    expect(engine.getState().playing).toBe(true)
+    expect(engine.getState().currentTimeMs).toBe(30000)
+  })
+
+  it('stops rather than staying "playing" when a lone dead track cannot be skipped', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([external('x')], 0)
+    audios[0].fire('error') // re-attach
+    audios[0].fire('error') // give up
+    expect(engine.getState().playing).toBe(false)
+  })
+})
+
+// Wi-Fi dropping out is not the track's fault: the player must wait it out and
+// pick the track back up, whether the outage lasts seconds or hours.
+describe('AudioEngine network interruptions', () => {
+  function external(id: string): Track {
+    return { ...track(id), externalStream: { source: 'deezer', externalId: id } }
+  }
+  function setOnline(v: boolean) {
+    Object.defineProperty(globalThis.navigator, 'onLine', { value: v, configurable: true })
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    setOnline(true)
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    setOnline(true)
+  })
+
+  it('retries the same track instead of skipping while offline, however long it lasts', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([external('x'), external('y')], 0)
+    const a = audios[0]
+    a.currentTime = 40
+    a.fire('timeupdate')
+
+    setOnline(false)
+    a.fire('error')
+    a.fire('error')
+    a.fire('error')
+
+    // hours of retries, still on the same track and still trying
+    vi.advanceTimersByTime(4 * 60 * 60 * 1000)
+    expect(engine.getState().index).toBe(0)
+    expect(engine.getState().playing).toBe(true)
+    expect(engine.getState().loading).toBe(true)
+
+    // the network returns
+    setOnline(true)
+    globalThis.dispatchEvent(new Event('online'))
+    vi.advanceTimersByTime(10)
+    expect(a.paused).toBe(false)
+    expect(engine.getState().currentTimeMs).toBe(40000)
+  })
+
+  it('backs off and resumes across a short online blip', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([external('x'), external('y')], 0)
+    const a = audios[0]
+    a.currentTime = 10
+    a.fire('timeupdate')
+
+    a.error = { code: 2 } // MEDIA_ERR_NETWORK
+    a.fire('error')
+    expect(engine.getState().index).toBe(0)
+
+    vi.advanceTimersByTime(1000)
+    expect(a.paused).toBe(false)
+
+    // audio flows again
+    a.error = null
+    a.currentTime = 10.5
+    a.fire('timeupdate')
+    expect(engine.getState().index).toBe(0)
+    expect(engine.getState().loading).toBe(false)
+  })
+
+  it('gives up on a track whose network errors never stop, once online', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([external('x'), external('y')], 0)
+    const a = audios[0]
+    a.error = { code: 2 }
+
+    for (let i = 0; i < 8; i++) {
+      a.fire('error')
+      vi.advanceTimersByTime(60000)
+    }
+
+    expect(engine.getState().index).toBe(1)
+  })
+
+  it('does not retry a decode error forever — that is the file, not the network', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([external('x'), external('y')], 0)
+    const a = audios[0]
+    a.error = { code: 3 } // MEDIA_ERR_DECODE
+
+    a.fire('error') // one re-attach
+    a.fire('error')
+
+    expect(engine.getState().index).toBe(1)
+  })
+
+  it('recovers a source that goes silent without erroring', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([external('x')], 0)
+    const a = audios[0]
+    a.currentTime = 20
+    a.fire('timeupdate')
+    a.fire('waiting')
+    a.paused = true
+
+    vi.advanceTimersByTime(20000) // stall watchdog
+    vi.advanceTimersByTime(1000) // first backoff
+
+    expect(engine.getState().index).toBe(0)
+    expect(a.paused).toBe(false)
+    expect(engine.getState().currentTimeMs).toBe(20000)
+  })
+
+  it('pausing cancels a pending retry', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList([external('x')], 0)
+    const a = audios[0]
+    a.error = { code: 2 }
+    a.fire('error')
+    engine.pause()
+
+    vi.advanceTimersByTime(60000)
+    expect(a.paused).toBe(true)
+    expect(engine.getState().playing).toBe(false)
   })
 })
