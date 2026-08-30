@@ -15,6 +15,12 @@ export interface AudioElement {
   pause(): void
   load(): void
   buffered: { length: number; end(i: number): number; start(i: number): number }
+  /**
+   * HTMLMediaElement.readyState / .error. Optional so a test stub need not
+   * model them; see sourceLost, which is the only reader.
+   */
+  readyState?: number
+  error?: unknown
   addEventListener(type: string, cb: () => void): void
   removeEventListener(type: string, cb: () => void): void
 }
@@ -55,6 +61,22 @@ const UP_NEXT_LIMIT = 20
 // 'timeupdate' fires about every 250 ms; a stalled stream can stretch that, so
 // this leaves room for a slow tick without admitting a seek.
 const CONTINUOUS_TICK_MS = 2000
+
+// How long a source that has failed is left before it is re-attached. A dropped
+// connection is usually back within seconds, so the first retries are quick and
+// then space out; the last delay repeats for as long as retrying continues.
+const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000, 30000]
+
+// How many times a failing source is re-attached before the track is given up
+// on and skipped. Only counts while the browser believes it is online — an
+// offline device retries for as long as it takes, since there is nothing wrong
+// with the track.
+const MAX_ONLINE_RETRIES = 5
+
+// How long a playing track may make no progress at all before its source is
+// treated as failed. A connection dropping mid-stream frequently produces no
+// 'error' event: the element fires 'waiting' and then waits forever.
+const STALL_TIMEOUT_MS = 20000
 
 export class AudioEngine {
   private factory: () => AudioElement
@@ -127,7 +149,22 @@ export class AudioEngine {
 
   // stream-error recovery
   private consecutiveErrors = 0
-  private repeatOneReloadAttempted = false
+  // Whether the loaded source has already been re-attached once. One attempt
+  // per load: a source that fails again after a fresh URL is genuinely dead.
+  private reattachAttempted = false
+  // A file position to apply once the re-attached source can accept it. Setting
+  // currentTime on an element that has not loaded metadata yet is dropped.
+  private pendingSeekMs = -1
+  // How many times the loaded track's source has been re-attached, and the
+  // timer for the next attempt. Reset by a load and by playback resuming.
+  private retryAttempt = 0
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
+  // True while a retry is being held back until the device is online again.
+  // Playback intent is kept, so the track resumes by itself when the network
+  // returns — after seconds or after hours.
+  private awaitingNetwork = false
+  // Watchdog for a source that stops producing audio without erroring.
+  private stallTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     factory: () => AudioElement = realAudioFactory,
@@ -143,6 +180,33 @@ export class AudioEngine {
     this.preload = this.factory()
     this.applyVolume()
     this.bindActive()
+    this.bindNetwork()
+  }
+
+  /**
+   * Resumes a held-back retry as soon as the device is online again. Without
+   * this an offline stretch longer than the backoff would leave the track
+   * paused until the listener noticed and pressed play.
+   */
+  private bindNetwork() {
+    const target = globalThis as unknown as {
+      addEventListener?: (t: string, cb: () => void) => void
+    }
+    if (typeof target.addEventListener !== 'function') return
+    target.addEventListener('online', this.onOnline)
+  }
+
+  private onOnline = () => {
+    if (!this.awaitingNetwork) return
+    this.awaitingNetwork = false
+    this.retryAttempt = 0
+    this.scheduleRetry(0)
+  }
+
+  /** Whether the device reports itself offline. Unknown counts as online. */
+  private offline(): boolean {
+    const nav = (globalThis as unknown as { navigator?: { onLine?: boolean } }).navigator
+    return nav?.onLine === false
   }
 
   private bindActive() {
@@ -254,7 +318,14 @@ export class AudioEngine {
     // advancing clock is what clears the spinner.
     if (rawMs !== this.lastRawMs) {
       this.lastRawMs = rawMs
-      if (!this.active.paused) this.setLoading(false)
+      // Audio is flowing: the source is healthy, so the stall watchdog stands
+      // down and the next interruption starts its backoff from the top.
+      this.clearStall()
+      if (!this.active.paused) {
+        this.retryAttempt = 0
+        this.awaitingNetwork = false
+        this.setLoading(false)
+      }
     }
 
     this.currentTimeMs = Math.max(0, rawMs - start)
@@ -286,12 +357,90 @@ export class AudioEngine {
 
   private onWaiting = () => {
     this.setLoading(true)
+    this.armStall()
+  }
+
+  /**
+   * (Re)starts the no-progress watchdog. Armed whenever the element says it is
+   * waiting for data and cleared by the clock advancing, so it only ever fires
+   * on a source that has genuinely stopped.
+   */
+  private armStall() {
+    this.clearStall()
+    if (!this.playing) return
+    this.stallTimer = setTimeout(() => {
+      this.stallTimer = null
+      if (!this.playing) return
+      if (!this.recover()) this.abandonTrack()
+    }, STALL_TIMEOUT_MS)
+  }
+
+  private clearStall() {
+    if (this.stallTimer !== null) {
+      clearTimeout(this.stallTimer)
+      this.stallTimer = null
+    }
+  }
+
+  private clearRetry() {
+    if (this.retryTimer !== null) {
+      clearTimeout(this.retryTimer)
+      this.retryTimer = null
+    }
+    this.awaitingNetwork = false
+  }
+
+  /**
+   * Re-attaches the current source after `delay`, keeping the spinner up in the
+   * meantime — a connection coming back is a wait, not a failure.
+   */
+  private scheduleRetry(delay: number) {
+    this.clearStall()
+    if (this.retryTimer !== null) clearTimeout(this.retryTimer)
+    this.setLoading(true)
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null
+      this.reattach(this.currentTimeMs, this.playing)
+    }, delay)
+  }
+
+  /**
+   * Handles a source that has stopped producing audio, whether it said so with
+   * an 'error' or simply went quiet.
+   *
+   * Offline, the track is not at fault and there is nothing to skip to that
+   * would fare any better, so the retry waits for the network however long that
+   * takes. Online, it backs off through a few attempts — enough to ride out a
+   * connection that drops for seconds or minutes — and only then treats the
+   * track as dead and lets the caller skip it.
+   *
+   * Returns true when a retry has been arranged and the caller should stop.
+   */
+  private recover(): boolean {
+    if (this.offline()) {
+      // Retried on a timer as well as on the event: a device can come back
+      // online without the event ever firing.
+      this.scheduleRetry(RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1])
+      this.awaitingNetwork = true
+      return true
+    }
+    if (this.retryAttempt >= MAX_ONLINE_RETRIES) return false
+    const delay = RETRY_DELAYS_MS[Math.min(this.retryAttempt, RETRY_DELAYS_MS.length - 1)]
+    this.retryAttempt++
+    this.scheduleRetry(delay)
+    return true
   }
 
   private onLoaded = () => {
     // A newly attached source can come up at the element's own default rather
     // than the level the slider shows; re-assert it.
     this.applyVolume()
+    // Cleared before the assignment: this handler also runs on 'seeked'.
+    if (this.pendingSeekMs >= 0) {
+      const target = this.pendingSeekMs
+      this.pendingSeekMs = -1
+      this.active.currentTime = target / 1000
+    }
     this.setLoading(false)
   }
 
@@ -306,27 +455,61 @@ export class AudioEngine {
     if (!this.active.paused) {
       // Successful play: reset error counters so isolated dead tracks don't accumulate
       this.consecutiveErrors = 0
-      this.repeatOneReloadAttempted = false
+      this.reattachAttempted = false
+      this.retryAttempt = 0
     }
     this.emit()
   }
 
   private onError = () => {
     // Whatever the recovery, this source produced no audio: clear the spinner so
-    // a failed track never leaves the UI stuck on "loading". A reload or a skip
-    // sets it again through loadCurrent.
+    // a failed track never leaves the UI stuck on "loading". A retry or a skip
+    // sets it again.
     this.loading = false
+    const current = this.getState().current
+    if (!current) {
+      this.abandonTrack()
+      return
+    }
+
+    // A network failure says nothing about the track, so it is waited out
+    // rather than skipped past — skipping would just fail on the next track and
+    // walk the queue while the connection is down.
+    if ((this.offline() || this.networkError()) && this.recover()) return
+
+    // Otherwise: re-attach the source once before giving up on the track. The
+    // usual cause is not a dead track but a stale source — a proxied external
+    // stream whose upstream URL has expired, or an element the browser dropped
+    // while it sat paused — and re-attaching resolves a fresh URL and carries
+    // the position over, so a resume is still a resume.
+    if (!this.reattachAttempted) {
+      this.reattachAttempted = true
+      this.reattach(this.currentTimeMs, this.playing || this.repeat === 'one')
+      return
+    }
+
+    this.abandonTrack()
+  }
+
+  /** Whether the element's failure was the network rather than the media. */
+  private networkError(): boolean {
+    const err = this.active.error as { code?: number } | null | undefined
+    // MEDIA_ERR_NETWORK. A decode or unsupported-source error is the file's
+    // problem and retrying it forever would be a loop.
+    return err?.code === 2
+  }
+
+  /**
+   * Gives up on the current track: skips to the next one, or stops. Reached
+   * only once recovery has been tried and the source is taken to be dead.
+   */
+  private abandonTrack() {
+    this.clearRetry()
+    this.clearStall()
+    this.loading = false
+
     if (this.repeat === 'one') {
-      // Attempt ONE reload on the pinned track. If the reload itself fires another error,
-      // stop — never skip off the pinned track under repeat-one.
-      if (!this.repeatOneReloadAttempted) {
-        this.repeatOneReloadAttempted = true
-        this.active.currentTime = 0
-        void this.active.play()
-        // playing stays true; let the next error (if any) fall through to the stop branch
-        return
-      }
-      // Second failure: stop, do not advance
+      // Never skip off the pinned track: stop instead.
       this.playing = false
       this.emit()
       return
@@ -341,8 +524,14 @@ export class AudioEngine {
       return
     }
 
-    // Skip the dead track and autoplay the next one
+    // Skip the dead track and autoplay the next one. With nothing to skip to,
+    // stop — leaving `playing` true would show a playing track that is silent.
+    const before = this.index
     this.advance(1, true)
+    if (this.index === before && this.playing) {
+      this.playing = false
+      this.emit()
+    }
   }
 
   private onEnded = () => {
@@ -537,6 +726,9 @@ export class AudioEngine {
       this.emit()
       return
     }
+    this.clearRetry()
+    this.clearStall()
+    this.retryAttempt = 0
     this.active.src = this.resolveSrc(t, 0)
     this.active.load()
     this.applyVolume()
@@ -554,6 +746,8 @@ export class AudioEngine {
     this.playedToMs = 0
     this.seekedSinceLoad = false
     this.seekBaseMs = 0
+    this.pendingSeekMs = -1
+    this.reattachAttempted = false
     this.measuredEndMs = 0
     this.durationMs = Math.max(0, knownEnd - cropStart)
     void this.applyMeasuredDurationFor(t)
@@ -580,16 +774,85 @@ export class AudioEngine {
   play() {
     if (this.index < 0 && this.queue.length) this.index = 0
     if (this.getState().current) {
+      const retrying = this.retryTimer !== null || this.awaitingNetwork
       if (!this.active.src) this.loadCurrent(true)
+      else if (retrying || this.sourceLost()) {
+        // Pressing play is a request to try now, whatever the backoff says.
+        this.clearRetry()
+        this.reattach(this.currentTimeMs, true)
+      }
       else {
-        void this.active.play()
         this.playing = true
+        const started = this.active.play() as unknown as Promise<void> | undefined
+        if (started && typeof started.catch === 'function') {
+          started.catch((err: unknown) => {
+            // A browser refusing to autoplay is not a broken source; anything
+            // else means this element will not produce audio again.
+            if ((err as { name?: string })?.name === 'NotAllowedError') return
+            if (this.playing) this.reattach(this.currentTimeMs, true)
+          })
+        }
       }
     }
     this.emit()
   }
 
+  /**
+   * Whether the element is holding a source it can no longer play.
+   *
+   * A media element that has sat paused for hours can have its resource
+   * released by the browser — it keeps the src but drops back to HAVE_NOTHING,
+   * so pressing play leaves it silent at 0:00 with no error to react to. An
+   * element carrying a MediaError is the same situation, reported.
+   */
+  private sourceLost(): boolean {
+    if (this.active.error) return true
+    return this.active.readyState === 0
+  }
+
+  /**
+   * Re-attaches the current track's source and continues from `ms` (measured
+   * from the crop start).
+   *
+   * The source is resolved again rather than reused, which is what matters for
+   * an external track: its audio is proxied from an upstream URL that expires
+   * on its own schedule, so the fresh resolve is the whole point of the reload.
+   */
+  private reattach(ms: number, autoplay: boolean) {
+    const t = this.getState().current
+    if (!t) return
+    this.clearStall()
+    const at = Math.max(0, ms)
+    const target = this.cropWindow().start + at
+    const backendSeek = target > 0 && needsBackendSeek(t)
+    this.active.src = this.resolveSrc(t, backendSeek ? target : 0)
+    this.active.load()
+    this.applyVolume()
+    this.seekBaseMs = backendSeek ? target : 0
+    // A browser-seekable source is put back by position once it has metadata;
+    // assigning now would be dropped.
+    this.pendingSeekMs = backendSeek || target === 0 ? -1 : target
+    this.currentTimeMs = at
+    this.lastRawMs = -1
+    this.playedToMs = 0
+    // Resuming partway in is a seek: what the element reports about its length
+    // from here is read from the seek target, not from the file.
+    this.seekedSinceLoad = at > 0
+    this.loading = true
+    if (autoplay) {
+      void this.active.play()
+      this.playing = true
+      // A source that comes up silent and never errors is caught by this.
+      this.armStall()
+    }
+    this.emit()
+  }
+
   pause() {
+    // A retry scheduled for a track the listener has just paused would restart
+    // it under them; play() arranges a fresh one.
+    this.clearRetry()
+    this.clearStall()
     this.active.pause()
     this.playing = false
     this.emit()
