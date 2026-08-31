@@ -29,6 +29,49 @@ export function useTrackQuality(trackId: string | undefined) {
   })
 }
 
+/**
+ * Every per-track override in one read, plus the tier an untouched track falls
+ * back to. The Manage tracks page shows a standing quality on every row, which
+ * one request per track would turn into an N+1.
+ */
+export interface TrackQualityIndex {
+  default: AudioQuality
+  /** Only overridden tracks appear, keyed by library track id. */
+  overrides: Record<string, AudioQuality>
+}
+
+export function getTrackQualityIndex(): Promise<TrackQualityIndex> {
+  return api.get<TrackQualityIndex>('/library/track-quality')
+}
+
+export function useTrackQualityIndex() {
+  return useQuery({ queryKey: ['track-quality', 'index'], queryFn: getTrackQualityIndex })
+}
+
+export interface BatchQualityResult {
+  applied: number
+  errors?: Record<string, string>
+}
+
+/** An empty quality clears the override on every id. */
+export function setTrackQualityBatch(
+  trackIds: string[],
+  quality: AudioQuality | '',
+): Promise<BatchQualityResult> {
+  return api.post<BatchQualityResult>('/library/quality/batch', { trackIds, quality })
+}
+
+export function useSetTrackQualityBatch() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ trackIds, quality }: { trackIds: string[]; quality: AudioQuality | '' }) =>
+      setTrackQualityBatch(trackIds, quality),
+    // Every per-track query shares the 'track-quality' prefix, so one
+    // invalidation covers the index and any single-track reads on screen.
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['track-quality'] }),
+  })
+}
+
 export function useSetTrackQuality() {
   const qc = useQueryClient()
   return useMutation({
@@ -36,6 +79,7 @@ export function useSetTrackQuality() {
       setTrackQuality(trackId, quality),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: ['track-quality', vars.trackId] })
+      void qc.invalidateQueries({ queryKey: ['track-quality', 'index'] })
     },
   })
 }

@@ -60,6 +60,59 @@ export function useRefetchable() {
   })
 }
 
+/**
+ * Finds the re-fetchable entry for a library track.
+ *
+ * A row that knows its library track id is matched on that. Older download
+ * history predates the column, so artist and title are the fallback — the same
+ * pair the download itself was keyed on. Availability deliberately does not come
+ * from the track's bitrate: the sources behind both downloaders serve ~130-160
+ * kbps, so a low-bitrate file usually is not evidence that a better one exists.
+ */
+export function findRefetchable(
+  rows: UpgradableTrack[] | undefined,
+  track: { id: string; artist: string; title: string },
+): UpgradableTrack | undefined {
+  if (!track.id || !Array.isArray(rows)) return undefined
+  const byId = rows.find((u) => !!u.libraryTrackId && u.libraryTrackId === track.id)
+  if (byId) return byId
+  const wantArtist = track.artist.trim().toLowerCase()
+  const wantTitle = track.title.trim().toLowerCase()
+  return rows.find(
+    (u) => u.artist.trim().toLowerCase() === wantArtist && u.title.trim().toLowerCase() === wantTitle,
+  )
+}
+
+/**
+ * The same match as findRefetchable, prepared once for a whole page. A list of
+ * hundreds of tracks against hundreds of history rows is a quadratic scan
+ * otherwise.
+ */
+export function buildRefetchIndex(rows: UpgradableTrack[] | undefined): Map<string, UpgradableTrack> {
+  const idx = new Map<string, UpgradableTrack>()
+  if (!Array.isArray(rows)) return idx
+  for (const u of rows) {
+    // Name keys are inserted first so an id key always wins the collision.
+    const name = `n:${u.artist.trim().toLowerCase()}\u001f${u.title.trim().toLowerCase()}`
+    if (!idx.has(name)) idx.set(name, u)
+  }
+  for (const u of rows) {
+    if (u.libraryTrackId) idx.set(`i:${u.libraryTrackId}`, u)
+  }
+  return idx
+}
+
+/** Looks one track up in a buildRefetchIndex map. */
+export function refetchFor(
+  idx: Map<string, UpgradableTrack>,
+  track: { id: string; artist: string; title: string },
+): UpgradableTrack | undefined {
+  return (
+    idx.get(`i:${track.id}`) ??
+    idx.get(`n:${track.artist.trim().toLowerCase()}\u001f${track.title.trim().toLowerCase()}`)
+  )
+}
+
 export function useUpgradeDownload() {
   const queryClient = useQueryClient()
   return useMutation({

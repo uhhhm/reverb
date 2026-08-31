@@ -1,6 +1,5 @@
 import { useSettings } from './settingsApi'
-import { useRefetchable, useUpgradeDownload } from './upgradeApi'
-import type { UpgradableTrack } from './upgradeApi'
+import { findRefetchable, useRefetchable, useUpgradeDownload } from './upgradeApi'
 import { useToastStore } from './toastStore'
 import { DEFAULT_AUDIO_QUALITY, qualityLabel } from './audioQuality'
 import type { AudioQuality } from './audioQuality'
@@ -39,17 +38,7 @@ export function useTrackUpgrade(track: Track): TrackUpgrade {
   const upgrade = useUpgradeDownload()
   const pushToast = useToastStore((s) => s.push)
 
-  let entry: UpgradableTrack | undefined
-  if (track.id && Array.isArray(upgradable)) {
-    entry = upgradable.find((u) => u.libraryTrackId != null && u.libraryTrackId !== '' && u.libraryTrackId === track.id)
-    if (!entry) {
-      const wantArtist = track.artist.trim().toLowerCase()
-      const wantTitle = track.title.trim().toLowerCase()
-      entry = upgradable.find(
-        (u) => u.artist.trim().toLowerCase() === wantArtist && u.title.trim().toLowerCase() === wantTitle,
-      )
-    }
-  }
+  const entry = findRefetchable(upgradable, track)
 
   function submit(quality: AudioQuality, setOverride?: boolean) {
     if (!entry) return

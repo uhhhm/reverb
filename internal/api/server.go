@@ -252,6 +252,9 @@ type TrackSyncEmitter interface {
 // *db.Queries satisfies it.
 type TrackQualityStore interface {
 	GetTrackQualityOverride(ctx context.Context, trackID string) (db.TrackQualityOverride, error)
+	// ListTrackQualityOverrides backs the Manage tracks page, which shows a
+	// standing quality per row and cannot afford one query per track.
+	ListTrackQualityOverrides(ctx context.Context) ([]db.TrackQualityOverride, error)
 	UpsertTrackQualityOverride(ctx context.Context, arg db.UpsertTrackQualityOverrideParams) error
 	DeleteTrackQualityOverride(ctx context.Context, trackID string) error
 	// The by-catalog-id variants key the override on the identity peers agree
@@ -418,6 +421,8 @@ func (s *Server) routes() {
 			pr.Get("/library/track/{id}/crop", s.handleGetTrackCrop)
 			pr.Put("/library/track/{id}/crop", s.handleSetTrackCrop)
 			pr.Delete("/library/track/{id}/crop", s.handleDeleteTrackCrop)
+			pr.Get("/library/track-quality", s.handleListTrackQuality)
+			pr.Post("/library/quality/batch", s.handleBatchTrackQuality)
 			pr.Get("/library/track/{id}/quality", s.handleGetTrackQuality)
 			pr.Put("/library/track/{id}/quality", s.handleSetTrackQuality)
 			pr.Get("/downloads/upgradable", s.handleListUpgradable)

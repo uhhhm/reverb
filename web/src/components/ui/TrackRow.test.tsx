@@ -28,7 +28,8 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
 vi.mock('../../lib/settingsApi', () => ({
   useSettings: () => ({ data: { downloadQuality: 'high' } }),
 }))
-vi.mock('../../lib/upgradeApi', () => ({
+vi.mock('../../lib/upgradeApi', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/upgradeApi')>()),
   useUpgradable: () => ({ data: [] }),
   useRefetchable: () => ({ data: [] }),
   useUpgradeDownload: () => ({ mutate: vi.fn(), isPending: false }),

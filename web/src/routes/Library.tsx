@@ -3,15 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { useAlbums, useArtists, useLibraryStatus, useSongs } from '../lib/libraryApi'
 import { UploadTracksButton } from '../components/UploadTracksButton'
 import { useSyncedPlaylists } from '../lib/syncedPlaylistApi'
-import { Checkbox, Chip, MediaCard, Skeleton, EmptyState, Button, TrackRow } from '../components/ui'
+import { Chip, MediaCard, Skeleton, EmptyState, Button, TrackRow } from '../components/ui'
 import { ImportPlaylistDialog } from '../components/ImportPlaylistDialog'
 import { RenameTrackDialog } from '../components/RenameTrackDialog'
-import { BatchEditBar } from '../components/BatchEditBar'
-import { BatchRenameDialog, type RenameSubject } from '../components/BatchRenameDialog'
-import { CoverUploadDialog } from '../components/CoverUploadDialog'
-import { SelectableCard } from '../components/SelectableCard'
-import { useSelection } from '../lib/useSelection'
-import type { CoverTarget } from '../lib/libraryEditApi'
 import { usePlayer } from '../lib/playerStore'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
 import type { Track } from '../lib/types'
@@ -83,12 +77,6 @@ export default function Library() {
   const [filter, setFilter] = useState<Filter>('songs')
   const [importOpen, setImportOpen] = useState(false)
   const [renaming, setRenaming] = useState<Track | null>(null)
-  // Selection is per filter: the ids in a song selection mean nothing on the
-  // albums tab, so switching tabs drops it.
-  const [selecting, setSelecting] = useState(false)
-  const selection = useSelection()
-  const [batchSubject, setBatchSubject] = useState<RenameSubject | null>(null)
-  const [coverTargets, setCoverTargets] = useState<CoverTarget[] | null>(null)
   const navigate = useNavigate()
   const playTrackList = usePlayer((s) => s.playTrackList)
   const currentTrack = usePlayer((s) => s.current)
@@ -99,38 +87,6 @@ export default function Library() {
   const artists = useArtists()
   const syncedPlaylists = useSyncedPlaylists()
   const libStatus = useLibraryStatus()
-
-  const selectableTab = filter === 'songs' || filter === 'albums' || filter === 'artists'
-  const songList = songs.data ?? []
-  const albumList = albums.data ?? []
-  const artistList = artists.data ?? []
-
-  function leaveSelection() {
-    selection.clear()
-    setSelecting(false)
-  }
-
-  function switchFilter(next: Filter) {
-    setFilter(next)
-    leaveSelection()
-  }
-
-  /** The current tab's items, so one bar can serve all three grids. */
-  function currentSubject(): RenameSubject {
-    if (filter === 'albums') return { kind: 'albums', items: selection.selectedFrom(albumList) }
-    if (filter === 'artists') return { kind: 'artists', items: selection.selectedFrom(artistList) }
-    return { kind: 'tracks', items: selection.selectedFrom(songList) }
-  }
-
-  function currentCoverTargets(): CoverTarget[] {
-    const kind = filter === 'albums' ? 'album' : 'track'
-    return [...selection.ids].map((id) => ({ kind, id }) as CoverTarget)
-  }
-
-  function selectAllOnTab() {
-    const all = filter === 'albums' ? albumList : filter === 'artists' ? artistList : songList
-    selection.selectAll(all.map((i) => i.id))
-  }
 
   return (
     <div className="space-y-6">
@@ -163,16 +119,6 @@ export default function Library() {
           {/* Uploading writes into the managed music directory, which only
               exists with the built-in library. */}
           {libStatus.data?.mode === 'built-in' && <UploadTracksButton />}
-          {selectableTab && (
-            <Button
-              size="sm"
-              variant="ghost"
-              aria-label={selecting ? 'Leave selection mode' : 'Select multiple items'}
-              onClick={() => (selecting ? leaveSelection() : setSelecting(true))}
-            >
-              {selecting ? 'Done' : 'Select'}
-            </Button>
-          )}
           <Button
             size="sm"
             variant="secondary"
@@ -190,7 +136,7 @@ export default function Library() {
           <Chip
             key={key}
             selected={filter === key}
-            onClick={() => switchFilter(key)}
+            onClick={() => setFilter(key)}
           >
             {label}
           </Chip>
@@ -212,26 +158,16 @@ export default function Library() {
             />
           ) : (
             <div>
-              {songList.map((t, i) => (
-                <div key={t.id} className="flex items-center gap-3">
-                  {selecting && (
-                    <Checkbox
-                      checked={selection.has(t.id)}
-                      onChange={() => selection.toggle(t.id)}
-                      label={`Select ${t.title}`}
-                    />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <TrackRow
-                      track={t}
-                      index={i}
-                      active={currentTrack?.id === t.id}
-                      playing={currentTrack?.id === t.id ? isPlaying : undefined}
-                      onPlay={() => playTrackList(songList, i)}
-                      onRename={setRenaming}
-                    />
-                  </div>
-                </div>
+              {(songs.data ?? []).map((t, i) => (
+                <TrackRow
+                  key={t.id}
+                  track={t}
+                  index={i}
+                  active={currentTrack?.id === t.id}
+                  playing={currentTrack?.id === t.id ? isPlaying : undefined}
+                  onPlay={() => playTrackList(songs.data ?? [], i)}
+                  onRename={setRenaming}
+                />
               ))}
             </div>
           )}
@@ -253,22 +189,15 @@ export default function Library() {
             />
           ) : (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-              {albumList.map((al) => (
-                <SelectableCard
+              {(albums.data ?? []).map((al) => (
+                <MediaCard
                   key={al.id}
-                  selecting={selecting}
-                  selected={selection.has(al.id)}
-                  onToggle={() => selection.toggle(al.id)}
-                  label={al.name}
-                >
-                  <MediaCard
-                    title={al.name}
-                    subtitle={al.artist}
-                    coverId={al.coverArtId || undefined}
-                    rounded="md"
-                    onClick={() => navigate(`/album/library/${al.id}`)}
-                  />
-                </SelectableCard>
+                  title={al.name}
+                  subtitle={al.artist}
+                  coverId={al.coverArtId || undefined}
+                  rounded="md"
+                  onClick={() => navigate(`/album/library/${al.id}`)}
+                />
               ))}
             </div>
           )}
@@ -290,21 +219,14 @@ export default function Library() {
             />
           ) : (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-              {artistList.map((ar) => (
-                <SelectableCard
+              {(artists.data ?? []).map((ar) => (
+                <MediaCard
                   key={ar.id}
-                  selecting={selecting}
-                  selected={selection.has(ar.id)}
-                  onToggle={() => selection.toggle(ar.id)}
-                  label={ar.name}
-                >
-                  <MediaCard
-                    title={ar.name}
-                    coverId={ar.coverArtId || undefined}
-                    rounded="full"
-                    onClick={() => navigate(`/artist/library/${ar.id}`)}
-                  />
-                </SelectableCard>
+                  title={ar.name}
+                  coverId={ar.coverArtId || undefined}
+                  rounded="full"
+                  onClick={() => navigate(`/artist/library/${ar.id}`)}
+                />
               ))}
             </div>
           )}
@@ -341,32 +263,8 @@ export default function Library() {
         </>
       )}
 
-      {selecting && (
-        <BatchEditBar
-          count={selection.count}
-          canSetCover={filter !== 'artists'}
-          onRename={() => setBatchSubject(currentSubject())}
-          onSetCover={() => setCoverTargets(currentCoverTargets())}
-          onSelectAll={selectAllOnTab}
-          onClear={selection.clear}
-        />
-      )}
-
       <ImportPlaylistDialog open={importOpen} onClose={() => setImportOpen(false)} />
       <RenameTrackDialog track={renaming} onClose={() => setRenaming(null)} />
-      <BatchRenameDialog
-        subject={batchSubject}
-        onClose={() => setBatchSubject(null)}
-        onApplied={leaveSelection}
-      />
-      {/* Mounted only while open, so its file choice starts fresh each time. */}
-      {coverTargets && (
-        <CoverUploadDialog
-          targets={coverTargets}
-          onClose={() => setCoverTargets(null)}
-          onApplied={leaveSelection}
-        />
-      )}
     </div>
   )
 }

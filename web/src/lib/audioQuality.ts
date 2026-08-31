@@ -6,17 +6,39 @@
  */
 export type AudioQuality = 'low' | 'medium' | 'high' | 'best'
 
-export const AUDIO_QUALITIES: { value: AudioQuality; label: string; hint: string }[] = [
-  { value: 'low', label: 'Low', hint: 'Up to 128 kbps mp3 — smallest files' },
-  { value: 'medium', label: 'Medium', hint: 'Up to 192 kbps mp3' },
-  { value: 'high', label: 'High', hint: 'Up to 320 kbps mp3, capped by what the source serves' },
-  { value: 'best', label: 'Best', hint: 'Keep the source audio as-is, never re-encoded' },
+export const AUDIO_QUALITIES: {
+  value: AudioQuality
+  label: string
+  hint: string
+  /** The tier's bitrate ceiling in kbps; null for "best", which never re-encodes. */
+  kbps: number | null
+}[] = [
+  { value: 'low', label: 'Low', hint: 'Smallest files', kbps: 128 },
+  { value: 'medium', label: 'Medium', hint: 'A middle ground', kbps: 192 },
+  { value: 'high', label: 'High', hint: 'Capped by what the source actually serves', kbps: 320 },
+  { value: 'best', label: 'Best', hint: 'Keeps the source audio exactly as it came', kbps: null },
 ]
 
 export const DEFAULT_AUDIO_QUALITY: AudioQuality = 'high'
 
 export function qualityLabel(q: string): string {
   return AUDIO_QUALITIES.find((x) => x.value === q)?.label ?? q
+}
+
+/**
+ * The label a picker shows, carrying the tier's ceiling: "High (up to 320 kbps)".
+ * A tier name alone does not say what it will produce, and the numbers are what
+ * a user actually reasons about when trading quality against disk.
+ */
+export function qualityOptionLabel(q: string): string {
+  const tier = AUDIO_QUALITIES.find((x) => x.value === q)
+  if (!tier) return q
+  return tier.kbps === null ? `${tier.label} (no re-encode)` : `${tier.label} (up to ${tier.kbps} kbps)`
+}
+
+/** A file's measured bitrate, or "" when the library does not report one. */
+export function formatBitrate(kbps: number | undefined): string {
+  return kbps && kbps > 0 ? `${Math.round(kbps)} kbps` : ''
 }
 
 /** The lowest tier that could have produced a file at this bitrate. */

@@ -349,7 +349,7 @@ describe('AddFromLink audio quality', () => {
     wrap()
     const select = screen.getByLabelText(/audio quality/i) as HTMLSelectElement
     expect(select.value).toBe('high')
-    expect(screen.getByText(/capped by what the source serves/i)).toBeInTheDocument()
+    expect(screen.getByText(/capped by what the source actually serves/i)).toBeInTheDocument()
   })
 
   it('passes a per-download quality override to batch', async () => {

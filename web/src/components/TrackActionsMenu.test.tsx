@@ -11,7 +11,10 @@ let upgradable: UpgradableTrack[] = []
 vi.mock('../lib/settingsApi', () => ({
   useSettings: () => ({ data: { downloadQuality: 'high' } }),
 }))
-vi.mock('../lib/upgradeApi', () => ({
+// Only the hooks are stubbed; findRefetchable is the real matching logic these
+// tests are exercising, so it comes from the actual module.
+vi.mock('../lib/upgradeApi', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/upgradeApi')>()),
   useUpgradable: () => ({ data: upgradable }),
   useRefetchable: () => ({ data: upgradable }),
   useUpgradeDownload: () => ({ mutate: mockMutate, isPending: false }),
