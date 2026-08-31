@@ -30,7 +30,7 @@ func (q *Queries) DeleteTrackOverrideByCatalogID(ctx context.Context, catalogID 
 }
 
 const getTrackOverride = `-- name: GetTrackOverride :one
-SELECT track_id, title, artist, updated_at, catalog_id FROM track_override WHERE track_id = ?
+SELECT track_id, title, artist, updated_at, catalog_id, album FROM track_override WHERE track_id = ?
 `
 
 func (q *Queries) GetTrackOverride(ctx context.Context, trackID string) (TrackOverride, error) {
@@ -42,12 +42,13 @@ func (q *Queries) GetTrackOverride(ctx context.Context, trackID string) (TrackOv
 		&i.Artist,
 		&i.UpdatedAt,
 		&i.CatalogID,
+		&i.Album,
 	)
 	return i, err
 }
 
 const getTrackOverrideByCatalogID = `-- name: GetTrackOverrideByCatalogID :one
-SELECT track_id, title, artist, updated_at, catalog_id FROM track_override WHERE catalog_id = ?
+SELECT track_id, title, artist, updated_at, catalog_id, album FROM track_override WHERE catalog_id = ?
 `
 
 func (q *Queries) GetTrackOverrideByCatalogID(ctx context.Context, catalogID sql.NullString) (TrackOverride, error) {
@@ -59,12 +60,13 @@ func (q *Queries) GetTrackOverrideByCatalogID(ctx context.Context, catalogID sql
 		&i.Artist,
 		&i.UpdatedAt,
 		&i.CatalogID,
+		&i.Album,
 	)
 	return i, err
 }
 
 const listTrackOverrides = `-- name: ListTrackOverrides :many
-SELECT track_id, title, artist, updated_at, catalog_id FROM track_override
+SELECT track_id, title, artist, updated_at, catalog_id, album FROM track_override
 `
 
 func (q *Queries) ListTrackOverrides(ctx context.Context) ([]TrackOverride, error) {
@@ -82,6 +84,7 @@ func (q *Queries) ListTrackOverrides(ctx context.Context) ([]TrackOverride, erro
 			&i.Artist,
 			&i.UpdatedAt,
 			&i.CatalogID,
+			&i.Album,
 		); err != nil {
 			return nil, err
 		}
@@ -97,7 +100,7 @@ func (q *Queries) ListTrackOverrides(ctx context.Context) ([]TrackOverride, erro
 }
 
 const listTrackOverridesByCatalogIDs = `-- name: ListTrackOverridesByCatalogIDs :many
-SELECT track_id, title, artist, updated_at, catalog_id FROM track_override WHERE catalog_id IN (/*SLICE:catalog_ids*/?)
+SELECT track_id, title, artist, updated_at, catalog_id, album FROM track_override WHERE catalog_id IN (/*SLICE:catalog_ids*/?)
 `
 
 func (q *Queries) ListTrackOverridesByCatalogIDs(ctx context.Context, catalogIds []sql.NullString) ([]TrackOverride, error) {
@@ -125,6 +128,7 @@ func (q *Queries) ListTrackOverridesByCatalogIDs(ctx context.Context, catalogIds
 			&i.Artist,
 			&i.UpdatedAt,
 			&i.CatalogID,
+			&i.Album,
 		); err != nil {
 			return nil, err
 		}
@@ -140,11 +144,12 @@ func (q *Queries) ListTrackOverridesByCatalogIDs(ctx context.Context, catalogIds
 }
 
 const upsertTrackOverride = `-- name: UpsertTrackOverride :exec
-INSERT INTO track_override (track_id, title, artist, updated_at)
-VALUES (?, ?, ?, ?)
+INSERT INTO track_override (track_id, title, artist, album, updated_at)
+VALUES (?, ?, ?, ?, ?)
 ON CONFLICT(track_id) DO UPDATE SET
   title = excluded.title,
   artist = excluded.artist,
+  album = excluded.album,
   updated_at = excluded.updated_at
 `
 
@@ -152,6 +157,7 @@ type UpsertTrackOverrideParams struct {
 	TrackID   string `json:"track_id"`
 	Title     string `json:"title"`
 	Artist    string `json:"artist"`
+	Album     string `json:"album"`
 	UpdatedAt int64  `json:"updated_at"`
 }
 
@@ -160,19 +166,21 @@ func (q *Queries) UpsertTrackOverride(ctx context.Context, arg UpsertTrackOverri
 		arg.TrackID,
 		arg.Title,
 		arg.Artist,
+		arg.Album,
 		arg.UpdatedAt,
 	)
 	return err
 }
 
 const upsertTrackOverrideByCatalogID = `-- name: UpsertTrackOverrideByCatalogID :exec
-INSERT INTO track_override (track_id, title, artist, updated_at, catalog_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT(track_id) DO UPDATE SET title = excluded.title, artist = excluded.artist, updated_at = excluded.updated_at, catalog_id = excluded.catalog_id
+INSERT INTO track_override (track_id, title, artist, album, updated_at, catalog_id) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(track_id) DO UPDATE SET title = excluded.title, artist = excluded.artist, album = excluded.album, updated_at = excluded.updated_at, catalog_id = excluded.catalog_id
 `
 
 type UpsertTrackOverrideByCatalogIDParams struct {
 	TrackID   string         `json:"track_id"`
 	Title     string         `json:"title"`
 	Artist    string         `json:"artist"`
+	Album     string         `json:"album"`
 	UpdatedAt int64          `json:"updated_at"`
 	CatalogID sql.NullString `json:"catalog_id"`
 }
@@ -182,6 +190,7 @@ func (q *Queries) UpsertTrackOverrideByCatalogID(ctx context.Context, arg Upsert
 		arg.TrackID,
 		arg.Title,
 		arg.Artist,
+		arg.Album,
 		arg.UpdatedAt,
 		arg.CatalogID,
 	)

@@ -21,6 +21,7 @@ import (
 type Name struct {
 	Title  string `json:"title"`
 	Artist string `json:"artist"`
+	Album  string `json:"album"`
 }
 
 type Service struct {
@@ -39,7 +40,8 @@ func (s *Service) Set(ctx context.Context, trackID string, n Name) error {
 	}
 	title := strings.TrimSpace(n.Title)
 	artist := strings.TrimSpace(n.Artist)
-	if title == "" && artist == "" {
+	album := strings.TrimSpace(n.Album)
+	if title == "" && artist == "" && album == "" {
 		return s.q.DeleteTrackOverride(ctx, trackID)
 	}
 	// Try to resolve catalog_id for P2P stability.
@@ -49,6 +51,7 @@ func (s *Service) Set(ctx context.Context, trackID string, n Name) error {
 			TrackID:   trackID,
 			Title:     title,
 			Artist:    artist,
+			Album:     album,
 			UpdatedAt: time.Now().Unix(),
 			CatalogID: sql.NullString{String: catalogID, Valid: true},
 		})
@@ -57,6 +60,7 @@ func (s *Service) Set(ctx context.Context, trackID string, n Name) error {
 		TrackID:   trackID,
 		Title:     title,
 		Artist:    artist,
+		Album:     album,
 		UpdatedAt: time.Now().Unix(),
 	})
 }
@@ -71,11 +75,12 @@ func (s *Service) SetByCatalogID(ctx context.Context, catalogID string, n Name) 
 	}
 	title := strings.TrimSpace(n.Title)
 	artist := strings.TrimSpace(n.Artist)
+	album := strings.TrimSpace(n.Album)
 	trackID := catalogID
 	if id, err := s.q.GetBackendIDByCatalogID(ctx, catalogID); err == nil && id != "" {
 		trackID = id
 	}
-	if title == "" && artist == "" {
+	if title == "" && artist == "" && album == "" {
 		if err := s.q.DeleteTrackOverrideByCatalogID(ctx, sql.NullString{String: catalogID, Valid: true}); err != nil {
 			return err
 		}
@@ -85,6 +90,7 @@ func (s *Service) SetByCatalogID(ctx context.Context, catalogID string, n Name) 
 		TrackID:   trackID,
 		Title:     title,
 		Artist:    artist,
+		Album:     album,
 		UpdatedAt: time.Now().Unix(),
 		CatalogID: sql.NullString{String: catalogID, Valid: true},
 	})
@@ -102,7 +108,7 @@ func (s *Service) GetByCatalogID(ctx context.Context, catalogID string) (Name, e
 	if err != nil {
 		return Name{}, err
 	}
-	return Name{Title: row.Title, Artist: row.Artist}, nil
+	return Name{Title: row.Title, Artist: row.Artist, Album: row.Album}, nil
 }
 
 // CatalogIDForTrack resolves the stable catalog id a backend track is bound to,
@@ -135,7 +141,7 @@ func (s *Service) Get(ctx context.Context, trackID string) (Name, error) {
 	}
 	if cid := s.catalogIDForTrack(ctx, trackID); cid != "" {
 		if row, err := s.q.GetTrackOverrideByCatalogID(ctx, sql.NullString{String: cid, Valid: true}); err == nil {
-			return Name{Title: row.Title, Artist: row.Artist}, nil
+			return Name{Title: row.Title, Artist: row.Artist, Album: row.Album}, nil
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return Name{}, err
 		}
@@ -147,7 +153,7 @@ func (s *Service) Get(ctx context.Context, trackID string) (Name, error) {
 	if err != nil {
 		return Name{}, err
 	}
-	return Name{Title: row.Title, Artist: row.Artist}, nil
+	return Name{Title: row.Title, Artist: row.Artist, Album: row.Album}, nil
 }
 
 // all loads every override keyed by track id and by catalog_id.
@@ -161,12 +167,21 @@ func (s *Service) all(ctx context.Context) (map[string]Name, error) {
 	}
 	out := make(map[string]Name, len(rows)*2)
 	for _, r := range rows {
-		out[r.TrackID] = Name{Title: r.Title, Artist: r.Artist}
+		out[r.TrackID] = Name{Title: r.Title, Artist: r.Artist, Album: r.Album}
 		if r.CatalogID.Valid && r.CatalogID.String != "" {
-			out[r.CatalogID.String] = Name{Title: r.Title, Artist: r.Artist}
+			out[r.CatalogID.String] = Name{Title: r.Title, Artist: r.Artist, Album: r.Album}
 		}
 	}
 	return out, nil
+}
+
+// CatalogIDsForTracks resolves the stable catalog id for a batch of backend
+// track ids, skipping the ones with no binding yet.
+func (s *Service) CatalogIDsForTracks(ctx context.Context, trackIDs []string) map[string]string {
+	if s == nil || s.q == nil {
+		return map[string]string{}
+	}
+	return s.catalogIDsForTracks(ctx, trackIDs)
 }
 
 // catalogIDsForTracks resolves catalog_ids for a batch of backend trackIDs via backend_binding.
@@ -212,7 +227,7 @@ func (s *Service) ApplyTracks(ctx context.Context, tracks []core.Track) {
 	catalogMap := s.catalogIDsForTracks(ctx, trackIDs)
 	for i := range tracks {
 		if cid, ok := catalogMap[tracks[i].ID]; ok {
-			if n, ok := m[cid]; ok && (n.Title != "" || n.Artist != "") {
+			if n, ok := m[cid]; ok && !n.empty() {
 				applyTo(&tracks[i], n)
 				continue
 			}
@@ -233,12 +248,18 @@ func (s *Service) ApplyTrack(ctx context.Context, t *core.Track) {
 	applyTo(t, n)
 }
 
+// empty reports whether a Name says nothing, meaning the library's own names stand.
+func (n Name) empty() bool { return n.Title == "" && n.Artist == "" && n.Album == "" }
+
 func applyTo(t *core.Track, n Name) {
 	if n.Title != "" {
 		t.Title = n.Title
 	}
 	if n.Artist != "" {
 		t.Artist = n.Artist
+	}
+	if n.Album != "" {
+		t.Album = n.Album
 	}
 }
 

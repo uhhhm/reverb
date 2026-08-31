@@ -16,6 +16,8 @@ import * as statsApi from '../lib/statsApi'
 import type { EntityStats, PlayCountTrack } from '../lib/statsApi'
 import { presetRange, msToHuman } from '../lib/range'
 import { RenameTrackDialog } from '../components/RenameTrackDialog'
+import { RenameEntityDialog } from '../components/RenameEntityDialog'
+import { CoverUploadDialog } from '../components/CoverUploadDialog'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
 
 // ── Local helpers ─────────────────────────────────────────────────────────────
@@ -70,6 +72,10 @@ export default function Album() {
   const palette = useAlbumPalette(album?.coverArtId ? coverUrl(album.coverArtId, 300) : album?.coverUrl)
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
   const [renaming, setRenaming] = useState<Track | null>(null)
+  // Album-level editing only means anything for an album Reverb actually has;
+  // a Spotify album page is describing something in someone else's catalogue.
+  const [renamingAlbum, setRenamingAlbum] = useState(false)
+  const [settingCover, setSettingCover] = useState(false)
 
   // ── Listening-history stats ──────────────────────────────────────────────────
   // Hooks must run on every render (before the loading/error early returns), so
@@ -248,6 +254,26 @@ export default function Album() {
                 }}
                 disabled={ownedTracks.length === 0}
               />
+              {source === 'library' && id && (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="md"
+                    onClick={() => setRenamingAlbum(true)}
+                    aria-label={`Rename ${album.name}`}
+                  >
+                    Rename
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="md"
+                    onClick={() => setSettingCover(true)}
+                    aria-label={`Set cover art for ${album.name}`}
+                  >
+                    Set cover
+                  </Button>
+                </>
+              )}
               {/* Acquisition action — one-click download of the missing tracks. */}
               {hasMissing && (
                 <Button
@@ -328,6 +354,20 @@ export default function Album() {
       </div>
 
       <RenameTrackDialog track={renaming} onClose={() => setRenaming(null)} />
+      {renamingAlbum && (
+        <RenameEntityDialog
+          kind="album"
+          id={id}
+          currentName={album.name}
+          onClose={() => setRenamingAlbum(false)}
+        />
+      )}
+      {settingCover && (
+        <CoverUploadDialog
+          targets={[{ kind: 'album', id }]}
+          onClose={() => setSettingCover(false)}
+        />
+      )}
     </div>
   )
 }

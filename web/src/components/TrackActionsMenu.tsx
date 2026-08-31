@@ -6,6 +6,7 @@ import { AddToPlaylistMenu } from './AddToPlaylistMenu'
 import { useTrackUpgrade } from '../lib/useTrackUpgrade'
 import { TrackQualityDialog } from './TrackQualityDialog'
 import { TrackCropDialog } from './TrackCropDialog'
+import { CoverUploadDialog } from './CoverUploadDialog'
 import { qualityLabel } from '../lib/audioQuality'
 import type { Track } from '../lib/types'
 
@@ -47,6 +48,7 @@ export function TrackActionsMenu({ track, onRename }: TrackActionsMenuProps) {
   const [playlistOpen, setPlaylistOpen] = useState(false)
   const [qualityOpen, setQualityOpen] = useState(false)
   const [cropOpen, setCropOpen] = useState(false)
+  const [coverOpen, setCoverOpen] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
   const upgrade = useTrackUpgrade(track)
 
@@ -76,6 +78,12 @@ export function TrackActionsMenu({ track, onRename }: TrackActionsMenuProps) {
     label: 'Add to playlist',
     description: 'Put this track in one of your playlists',
     onSelect: () => setPlaylistOpen(true),
+  })
+  items.push({
+    icon: 'camera',
+    label: 'Cover art',
+    description: 'Use your own image for this track — the file is never modified',
+    onSelect: () => setCoverOpen(true),
   })
   items.push({
     icon: 'scissors',
@@ -198,6 +206,12 @@ export function TrackActionsMenu({ track, onRename }: TrackActionsMenuProps) {
       {playlistOpen && <AddToPlaylistMenu track={track} onClose={() => setPlaylistOpen(false)} />}
       {qualityOpen && <TrackQualityDialog track={track} onClose={() => setQualityOpen(false)} />}
       {cropOpen && <TrackCropDialog track={track} onClose={() => setCropOpen(false)} />}
+      {coverOpen && (
+        <CoverUploadDialog
+          targets={[{ kind: 'track', id: track.id }]}
+          onClose={() => setCoverOpen(false)}
+        />
+      )}
     </>
   )
 }

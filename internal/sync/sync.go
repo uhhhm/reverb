@@ -93,6 +93,12 @@ const (
 	EntityPlaylist = "playlist"
 	// EntityPlay carries one play event under its play id.
 	EntityPlay = "play"
+	// EntityAlbum carries album-level metadata — a rename, an uploaded cover —
+	// under a stable album key rather than a backend album id, which belongs to
+	// one library backend and means nothing on another device.
+	EntityAlbum = "album"
+	// EntityArtist carries artist-level metadata under a stable artist key.
+	EntityArtist = "artist"
 )
 
 // Field names carried by the change log. They are the wire format — renaming
@@ -114,4 +120,16 @@ const (
 	FieldCropEndMs      = "cropEndMs"
 	FieldQuality        = "quality"
 	FieldLoudnessGainDb = "loudnessGainDb"
+	// FieldAlbum is the album name shown for a track. It is per-track like the
+	// title: renaming the album itself travels on EntityAlbum instead.
+	FieldAlbum = "album"
+
+	// FieldName is the display name of an album or artist, on EntityAlbum and
+	// EntityArtist.
+	FieldName = "name"
+	// FieldCover is an uploaded cover, as "<sha256>.<ext>", on EntityAlbum and
+	// EntityTrack. Empty means the upload was removed and the library backend's
+	// own art applies again. Only the address travels in the log; the bytes are
+	// fetched from the peer that has them.
+	FieldCover = "cover"
 )

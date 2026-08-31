@@ -8,6 +8,7 @@ import { coverUrl } from '../lib/libraryApi'
 import { Cover, Skeleton, EmptyState, MediaCard } from '../components/ui'
 import { Chip } from '../components/ui/Chip'
 import { Button } from '../components/ui/Button'
+import { RenameEntityDialog } from '../components/RenameEntityDialog'
 import type { AlbumCoverage, DiscographyAlbum } from '../lib/types'
 import { useAlbumPalette } from '../lib/useAlbumPalette'
 import { rgbToCss } from '../lib/palette'
@@ -101,6 +102,9 @@ export default function Artist() {
   const navigate = useNavigate()
   const [filter, setFilter] = useState<KindFilter>('all')
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
+  // Renaming only means anything for an artist in this library; a Spotify
+  // artist page is describing someone else's catalogue.
+  const [renamingArtist, setRenamingArtist] = useState(false)
 
   // Per-entity listening stats — fetched once detail.name is known
   // DEFERRED: album-page strip needs backend entity kind="album"; per-track "played N×"
@@ -257,6 +261,19 @@ export default function Artist() {
               </p>
             )}
 
+            {source === 'library' && id && (
+              <div className="mt-4 flex items-center gap-3">
+                <Button
+                  variant="ghost"
+                  size="md"
+                  onClick={() => setRenamingArtist(true)}
+                  aria-label={`Rename ${detail.name}`}
+                >
+                  Rename
+                </Button>
+              </div>
+            )}
+
             {/* Acquisition action row — "Download all missing" (guarded by a
                 confirm so a stray click can't enqueue a large batch). */}
             {detail.resolved && allMissingTracks.length > 0 && (
@@ -343,6 +360,15 @@ export default function Artist() {
           <EmptyState icon="browse" title="No albums" />
         )}
       </section>
+
+      {renamingArtist && (
+        <RenameEntityDialog
+          kind="artist"
+          id={id}
+          currentName={detail.name}
+          onClose={() => setRenamingArtist(false)}
+        />
+      )}
     </div>
   )
 }

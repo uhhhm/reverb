@@ -10,6 +10,7 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // Puller replicates files from paired peers. Every round it asks each trusted
@@ -26,6 +27,25 @@ type Puller struct {
 	musicDir    string
 	interval    time.Duration
 	maxPerRound int
+
+	// covers and coverDir are the artwork half of a pull. The sync log carries
+	// only a cover's content hash, so a device that accepted a peer's cover
+	// change has a row pointing at bytes it does not hold until this fetches
+	// them. Both nil/empty leaves cover pulling off.
+	covers   CoverRefLister
+	coverDir string
+}
+
+// CoverRefLister reads the covers this device knows about, whether or not it
+// holds their bytes. *db.Queries satisfies it.
+type CoverRefLister interface {
+	ListEntityCovers(ctx context.Context) ([]db.EntityCover, error)
+}
+
+// WithCovers attaches artwork pulling.
+func (p *Puller) WithCovers(c CoverRefLister, coverDir string) *Puller {
+	p.covers, p.coverDir = c, coverDir
+	return p
 }
 
 func NewPuller(h host.Host, store FileStore, files *FileSyncer, guard *Guard, localDeviceID, musicDir string) *Puller {
@@ -138,8 +158,53 @@ func (p *Puller) pullPeer(ctx context.Context, pid peer.ID) error {
 	if fetched > 0 {
 		log.Printf("p2p pull: fetched %d file(s) from %s", fetched, pid)
 	}
+	p.pullCovers(ctx, pid)
 	p.guard.Touch(ctx, pid)
 	return nil
+}
+
+// pullCovers fetches the bytes behind any cover this device has a row for but
+// no image. A peer that does not have one either simply fails that fetch; the
+// row stays, and the library backend's own art shows until some round succeeds.
+func (p *Puller) pullCovers(ctx context.Context, pid peer.ID) {
+	if p.covers == nil || p.coverDir == "" {
+		return
+	}
+	rows, err := p.covers.ListEntityCovers(ctx)
+	if err != nil {
+		return
+	}
+	seen := make(map[string]bool, len(rows))
+	fetched, tried := 0, 0
+	for _, r := range rows {
+		// Bounded like the file lane: a peer that answers slowly must not make
+		// one round run for as long as there are missing covers.
+		if tried >= p.maxPerRound {
+			break
+		}
+		if err := ctx.Err(); err != nil {
+			return
+		}
+		ref := r.Sha256 + "." + r.Ext
+		// One blob can back many entities; fetch it once.
+		if seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		if _, err := os.Stat(coverBlobPath(p.coverDir, r.Sha256, r.Ext)); err == nil {
+			continue
+		}
+		tried++
+		fetchCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		err := FetchCover(fetchCtx, p.host, p.coverDir, pid.String(), r.Sha256, r.Ext)
+		cancel()
+		if err == nil {
+			fetched++
+		}
+	}
+	if fetched > 0 {
+		log.Printf("p2p pull: fetched %d cover(s) from %s", fetched, pid)
+	}
 }
 
 func (p *Puller) localManifests(ctx context.Context) ([]FileManifest, error) {

@@ -5,7 +5,9 @@ import (
 	"log"
 	"time"
 
+	"github.com/uhhhm/reverb/internal/cover"
 	"github.com/uhhhm/reverb/internal/materialize"
+	"github.com/uhhhm/reverb/internal/override"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
 
@@ -66,15 +68,16 @@ func (s *Server) emitTrackLoudness(ctx context.Context, trackID string, gainDb f
 	s.emitTrackFieldChange(ctx, s.deps.Overrides.CatalogIDForTrack(ctx, trackID), materialize.FieldLoudnessGainDb, gainDb)
 }
 
-// emitTrackRename publishes a rename. Title and artist are separate LWW fields,
-// so both are sent — clearing one is as much a change as setting it.
-func (s *Server) emitTrackRename(ctx context.Context, trackID, title, artist string) {
+// emitTrackRename publishes a rename. Title, artist, and album are separate LWW
+// fields, so all three are sent — clearing one is as much a change as setting it.
+func (s *Server) emitTrackRename(ctx context.Context, trackID string, n override.Name) {
 	if s.deps.Overrides == nil {
 		return
 	}
 	catalogID := s.deps.Overrides.CatalogIDForTrack(ctx, trackID)
-	s.emitTrackFieldChange(ctx, catalogID, materialize.FieldTitle, title)
-	s.emitTrackFieldChange(ctx, catalogID, materialize.FieldArtist, artist)
+	s.emitTrackFieldChange(ctx, catalogID, materialize.FieldTitle, n.Title)
+	s.emitTrackFieldChange(ctx, catalogID, materialize.FieldArtist, n.Artist)
+	s.emitTrackFieldChange(ctx, catalogID, materialize.FieldAlbum, n.Album)
 }
 
 // emitTrackCrop publishes crop boundaries. Zero on both is how an uncrop
@@ -87,4 +90,63 @@ func (s *Server) emitTrackCrop(ctx context.Context, trackID string, startMs, end
 	catalogID := s.deps.Crop.CatalogIDForTrack(ctx, trackID)
 	s.emitTrackFieldChange(ctx, catalogID, materialize.FieldCropStartMs, startMs)
 	s.emitTrackFieldChange(ctx, catalogID, materialize.FieldCropEndMs, endMs)
+}
+
+// emitEntityRename publishes an album or artist rename. The entity id is the
+// stable key derived from the library's own names: backend album and artist ids
+// belong to one library backend, so no two devices would agree on them. Without
+// a key the rename stays local, which is the same rule per-track renames follow
+// for a track with no catalog binding.
+func (s *Server) emitEntityRename(ctx context.Context, kind, key, name string) {
+	entityType := reverbsync.EntityAlbum
+	if kind == override.KindArtist {
+		entityType = reverbsync.EntityArtist
+	}
+	s.emitEntityFieldChange(ctx, entityType, key, materialize.FieldName, name)
+}
+
+// emitEntityCover publishes an uploaded cover. Only the address travels; the
+// bytes are fetched from the peer that has them. An empty sha is how removing a
+// cover travels — the entity still exists, so there is no tombstone.
+func (s *Server) emitEntityCover(ctx context.Context, kind, key, sha, ext string) {
+	ref := ""
+	if sha != "" && ext != "" {
+		ref = sha + "." + ext
+	}
+	if kind == cover.KindTrack {
+		s.emitTrackFieldChange(ctx, key, materialize.FieldCover, ref)
+		return
+	}
+	s.emitEntityFieldChange(ctx, reverbsync.EntityAlbum, key, materialize.FieldCover, ref)
+}
+
+// emitEntityFieldChange is emitTrackFieldChange for entities that have no
+// catalog entity behind them, so nothing has to be published first.
+//
+// Best-effort by design: a device that is not paired has nothing to publish to,
+// and a sync failure must never fail the user's edit.
+func (s *Server) emitEntityFieldChange(ctx context.Context, entityType, key, field string, value any) {
+	if key == "" {
+		return
+	}
+	if s.deps.SyncEmit != nil {
+		s.deps.SyncEmit.EmitEntityField(ctx, entityType, key, field, value)
+		return
+	}
+	if s.deps.SyncStore == nil {
+		return
+	}
+	deviceID := s.resolveAuthorDeviceForSync(ctx)
+	if deviceID == "" {
+		return
+	}
+	if _, err := s.deps.SyncStore.AppendChange(ctx, deviceID, reverbsync.SyncChange{
+		EntityType: entityType,
+		EntityID:   key,
+		Field:      field,
+		Value:      value,
+		UpdatedAt:  time.Now().UnixMilli(),
+	}); err != nil {
+		log.Printf("sync %s for %s %q: %v", field, entityType, key, err)
+	}
 }

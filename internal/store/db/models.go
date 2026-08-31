@@ -114,6 +114,23 @@ type DownloadJob struct {
 	CanonicalID    string         `json:"canonical_id"`
 }
 
+type EntityCover struct {
+	EntityType string `json:"entity_type"`
+	EntityID   string `json:"entity_id"`
+	EntityKey  string `json:"entity_key"`
+	Sha256     string `json:"sha256"`
+	Ext        string `json:"ext"`
+	UpdatedAt  int64  `json:"updated_at"`
+}
+
+type EntityOverride struct {
+	EntityType string `json:"entity_type"`
+	EntityID   string `json:"entity_id"`
+	EntityKey  string `json:"entity_key"`
+	Name       string `json:"name"`
+	UpdatedAt  int64  `json:"updated_at"`
+}
+
 type ExtstreamResolve struct {
 	Source       string `json:"source"`
 	ExternalID   string `json:"external_id"`
@@ -290,6 +307,7 @@ type TrackOverride struct {
 	Artist    string         `json:"artist"`
 	UpdatedAt int64          `json:"updated_at"`
 	CatalogID sql.NullString `json:"catalog_id"`
+	Album     string         `json:"album"`
 }
 
 type TrackQualityOverride struct {
