@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { batchRename, clearCovers, uploadCovers } from './libraryEditApi'
 
 describe('libraryEditApi', () => {
@@ -6,7 +6,7 @@ describe('libraryEditApi', () => {
 
   describe('batchRename', () => {
     it('POSTs to /api/v1/library/rename/batch with JSON body', async () => {
-      const fetchMock = vi.fn(async () =>
+      const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
         new Response(JSON.stringify({ applied: 2 }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -20,14 +20,14 @@ describe('libraryEditApi', () => {
         '/api/v1/library/rename/batch',
         expect.objectContaining({ method: 'POST' }),
       )
-      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-      expect(JSON.parse(init.body as string)).toEqual({ tracks: [{ id: 't1', title: 'New' }] })
+      const [, init] = fetchMock.mock.calls[0]
+      expect(JSON.parse(init?.body as string)).toEqual({ tracks: [{ id: 't1', title: 'New' }] })
     })
   })
 
   describe('clearCovers', () => {
     it('issues DELETE to /api/v1/library/covers with {"targets":["album:a1"]}', async () => {
-      const fetchMock = vi.fn(async () =>
+      const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
         new Response(JSON.stringify({ applied: 1 }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -40,12 +40,12 @@ describe('libraryEditApi', () => {
         '/api/v1/library/covers',
         expect.objectContaining({ method: 'DELETE' }),
       )
-      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-      expect(JSON.parse(init.body as string)).toEqual({ targets: ['album:a1'] })
+      const [, init] = fetchMock.mock.calls[0]
+      expect(JSON.parse(init?.body as string)).toEqual({ targets: ['album:a1'] })
     })
 
     it('formats multiple targets as kind:id', async () => {
-      const fetchMock = vi.fn(async () =>
+      const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
         new Response(JSON.stringify({ applied: 2 }), { status: 200 }),
       )
       vi.stubGlobal('fetch', fetchMock)
@@ -54,16 +54,12 @@ describe('libraryEditApi', () => {
         { kind: 'album', id: 'a1' },
         { kind: 'track', id: 't1' },
       ])
-      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-      expect(JSON.parse(init.body as string)).toEqual({ targets: ['album:a1', 'track:t1'] })
+      const [, init] = fetchMock.mock.calls[0]
+      expect(JSON.parse(init?.body as string)).toEqual({ targets: ['album:a1', 'track:t1'] })
     })
   })
 
   describe('uploadCovers', () => {
-    beforeEach(() => {
-      // jsdom has no File in some Node env globals — ensure it exists
-    })
-
     it('POSTs multipart FormData with image and target entries', async () => {
       let capturedForm: FormData | null = null
       const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
