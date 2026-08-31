@@ -4,7 +4,8 @@ import { useAlbums, useArtists, useSongs, coverUrl } from '../lib/libraryApi'
 import { useTrackQualityIndex } from '../lib/trackQualityApi'
 import { buildRefetchIndex, refetchFor, useRefetchable } from '../lib/upgradeApi'
 import { formatBitrate, qualityForBitrate, qualityLabel } from '../lib/audioQuality'
-import { useSelection } from '../lib/useSelection'
+import { selectionHandlers, useSelection, type Selection } from '../lib/useSelection'
+import { useSyncedPlaylist, useSyncedPlaylists } from '../lib/syncedPlaylistApi'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
 import { Checkbox, Chip, Cover, EmptyState, Skeleton, MediaCard } from '../components/ui'
 import { SelectableCard } from '../components/SelectableCard'
@@ -42,6 +43,7 @@ export default function ManageTracks() {
   const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('tracks')
   const [query, setQuery] = useState('')
+  const [playlistId, setPlaylistId] = useState('')
   const selection = useSelection()
 
   const [renameSubject, setRenameSubject] = useState<RenameSubject | null>(null)
@@ -53,6 +55,23 @@ export default function ManageTracks() {
   const artists = useArtists()
   const quality = useTrackQualityIndex()
   const refetchable = useRefetchable()
+  const playlists = useSyncedPlaylists()
+  const playlist = useSyncedPlaylist(playlistId)
+
+  // A playlist names its tracks; the albums and artists it covers are whatever
+  // those tracks belong to. Only owned entries carry a library track — the rest
+  // describe something the library does not have, so there is nothing to manage.
+  const playlistScope = useMemo(() => {
+    if (!playlistId) return null
+    const tracks = (playlist.data?.tracks ?? [])
+      .map((row) => row.libraryTrack)
+      .filter((t): t is Track => !!t?.id)
+    return {
+      trackIds: new Set(tracks.map((t) => t.id)),
+      albumIds: new Set(tracks.map((t) => t.albumId).filter(Boolean)),
+      artistIds: new Set(tracks.map((t) => t.artistId).filter(Boolean)),
+    }
+  }, [playlistId, playlist.data])
 
   // One pass over the download history, reused by every row.
   const refetchIndex = useMemo(() => buildRefetchIndex(refetchable.data), [refetchable.data])
@@ -61,19 +80,31 @@ export default function ManageTracks() {
   // selection is by id, so it survives the filter narrowing under it.
   const needle = query.trim().toLowerCase()
   const shownTracks = useMemo(() => {
-    const all = songs.data ?? []
+    let all = songs.data ?? []
+    if (playlistScope) all = all.filter((t) => playlistScope.trackIds.has(t.id))
     return needle
       ? all.filter((t) => `${t.title} ${t.artist} ${t.album}`.toLowerCase().includes(needle))
       : all
-  }, [songs.data, needle])
+  }, [songs.data, needle, playlistScope])
   const shownAlbums = useMemo(() => {
-    const all = albums.data ?? []
+    let all = albums.data ?? []
+    if (playlistScope) all = all.filter((a) => playlistScope.albumIds.has(a.id))
     return needle ? all.filter((a) => `${a.name} ${a.artist}`.toLowerCase().includes(needle)) : all
-  }, [albums.data, needle])
+  }, [albums.data, needle, playlistScope])
   const shownArtists = useMemo(() => {
-    const all = artists.data ?? []
+    let all = artists.data ?? []
+    if (playlistScope) all = all.filter((a) => playlistScope.artistIds.has(a.id))
     return needle ? all.filter((a) => a.name.toLowerCase().includes(needle)) : all
-  }, [artists.data, needle])
+  }, [artists.data, needle, playlistScope])
+
+  // Ranges and sweeps need the order the user sees, which is the filtered list.
+  const orderedIds = useMemo(
+    () =>
+      (tab === 'albums' ? shownAlbums : tab === 'artists' ? shownArtists : shownTracks).map(
+        (i) => i.id,
+      ),
+    [tab, shownTracks, shownAlbums, shownArtists],
+  )
 
   function switchTab(next: Tab) {
     // Ids from a track selection mean nothing on the albums tab.
@@ -127,6 +158,27 @@ export default function ManageTracks() {
           ))}
         </div>
         <div className="flex-1" />
+        <label htmlFor="playlist-filter" className="text-sm text-text-secondary">
+          Playlist
+        </label>
+        <select
+          id="playlist-filter"
+          value={playlistId}
+          onChange={(e) => {
+            // The narrowed list is a different set of rows, so a selection made
+            // against the old one no longer describes what is on screen.
+            setPlaylistId(e.target.value)
+            selection.clear()
+          }}
+          className="rounded-lg border border-border-subtle bg-input px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          <option value="">All tracks</option>
+          {(playlists.data ?? []).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
         <input
           type="search"
           value={query}
@@ -147,7 +199,14 @@ export default function ManageTracks() {
             hint={needle ? 'Try a different filter.' : undefined}
           />
         ) : (
-          <div className="overflow-hidden rounded-lg border border-border-subtle bg-raised">
+          <div
+            className={[
+              'overflow-hidden rounded-lg border border-border-subtle bg-raised',
+              // A sweep is a drag, and without this the browser starts selecting
+              // the row text instead.
+              selection.dragging ? 'select-none' : '',
+            ].join(' ')}
+          >
             <ul>
               {shownTracks.map((t) => (
                 <TrackManageRow
@@ -155,6 +214,7 @@ export default function ManageTracks() {
                   track={t}
                   selected={selection.has(t.id)}
                   onToggle={() => selection.toggle(t.id)}
+                  gestures={selectionHandlers(selection, t.id, orderedIds)}
                   standing={quality.data?.overrides[t.id]}
                   fallback={quality.data?.default}
                   fetchedAt={refetchFor(refetchIndex, t)?.quality}
@@ -168,13 +228,14 @@ export default function ManageTracks() {
         shownAlbums.length === 0 ? (
           <EmptyState icon="browse" title={needle ? 'No albums match' : 'No albums'} />
         ) : (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+          <div className={gridClass(selection)}>
             {shownAlbums.map((al) => (
               <SelectableCard
                 key={al.id}
                 selecting
                 selected={selection.has(al.id)}
                 onToggle={() => selection.toggle(al.id)}
+                gestures={selectionHandlers(selection, al.id, orderedIds)}
                 label={al.name}
               >
                 <MediaCard
@@ -191,13 +252,14 @@ export default function ManageTracks() {
       ) : shownArtists.length === 0 ? (
         <EmptyState icon="browse" title={needle ? 'No artists match' : 'No artists'} />
       ) : (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+        <div className={gridClass(selection)}>
           {shownArtists.map((ar) => (
             <SelectableCard
               key={ar.id}
               selecting
               selected={selection.has(ar.id)}
               onToggle={() => selection.toggle(ar.id)}
+              gestures={selectionHandlers(selection, ar.id, orderedIds)}
               label={ar.name}
             >
               <MediaCard
@@ -244,10 +306,20 @@ export default function ManageTracks() {
   )
 }
 
+/** The card grid, with text selection suppressed while a sweep is in progress. */
+function gridClass(selection: Selection): string {
+  return [
+    'grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5',
+    selection.dragging ? 'select-none' : '',
+  ].join(' ')
+}
+
 interface TrackManageRowProps {
   track: Track
   selected: boolean
   onToggle: () => void
+  /** Range and sweep handlers from selectionHandlers, spread onto the row. */
+  gestures: ReturnType<typeof selectionHandlers>
   /** The per-track override, when the track has one. */
   standing?: string
   /** The global setting a track with no override falls back to. */
@@ -266,6 +338,7 @@ function TrackManageRow({
   track,
   selected,
   onToggle,
+  gestures,
   standing,
   fallback,
   fetchedAt,
@@ -278,7 +351,10 @@ function TrackManageRow({
   const next = standing || fallback
 
   return (
-    <li className="flex items-center gap-3 border-b border-border-subtle px-4 py-3 last:border-b-0">
+    <li
+      {...gestures}
+      className="flex items-center gap-3 border-b border-border-subtle px-4 py-3 last:border-b-0"
+    >
       <Checkbox checked={selected} onChange={onToggle} label={`Select ${track.title}`} />
       <Cover
         src={track.coverArtId ? coverUrl(track.coverArtId, 80) : undefined}

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import type React from 'react'
 import { Checkbox } from './ui'
 
 interface SelectableCardProps {
@@ -6,6 +7,16 @@ interface SelectableCardProps {
   /** When false the card behaves normally and no checkbox is drawn. */
   selecting: boolean
   onToggle: () => void
+  /**
+   * Optional range and sweep handlers from selectionHandlers. They go on the
+   * wrapper rather than the overlay button so a sweep entering the card is seen
+   * even though pointerenter does not bubble.
+   */
+  gestures?: {
+    onPointerDown: (e: React.PointerEvent) => void
+    onPointerEnter: () => void
+    onClickCapture: (e: React.MouseEvent) => void
+  }
   label: string
   children: ReactNode
 }
@@ -20,12 +31,13 @@ export function SelectableCard({
   selected,
   selecting,
   onToggle,
+  gestures,
   label,
   children,
 }: SelectableCardProps) {
   if (!selecting) return <>{children}</>
   return (
-    <div className="relative">
+    <div className="relative" {...gestures}>
       <div
         className={[
           'rounded-lg transition-shadow',

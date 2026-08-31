@@ -5,6 +5,25 @@ import { MemoryRouter } from 'react-router-dom'
 import ManageTracks from './ManageTracks'
 import type { Track } from '../lib/types'
 
+function song(id: string, title: string, over: Partial<Track> = {}): Track {
+  return {
+    id,
+    title,
+    albumId: 'al1',
+    album: 'First Album',
+    artistId: 'ar1',
+    artist: 'Alpha',
+    coverArtId: '',
+    trackNumber: 1,
+    discNumber: 1,
+    durationMs: 200000,
+    bitRate: 200,
+    suffix: 'mp3',
+    contentType: 'audio/mpeg',
+    ...over,
+  }
+}
+
 const songs: Track[] = [
   {
     id: 't1',
@@ -36,6 +55,9 @@ const songs: Track[] = [
     suffix: 'mp3',
     contentType: 'audio/mpeg',
   },
+  song('t3', 'Third'),
+  song('t4', 'Fourth'),
+  song('t5', 'Fifth'),
 ]
 
 vi.mock('../lib/libraryApi', () => ({
@@ -65,6 +87,22 @@ vi.mock('../lib/upgradeApi', async (importOriginal) => ({
         libraryTrackId: 't1',
       },
     ],
+  }),
+}))
+
+vi.mock('../lib/syncedPlaylistApi', () => ({
+  useSyncedPlaylists: () => ({ data: [{ id: 'p1', name: 'Road trip' }] }),
+  // The playlist holds t1 and t4, plus one entry the library does not have.
+  useSyncedPlaylist: (id: string) => ({
+    data: id
+      ? {
+          tracks: [
+            { libraryTrack: songs[0] },
+            { libraryTrack: songs.find((s) => s.id === 't4') },
+            { title: 'Not owned' },
+          ],
+        }
+      : undefined,
   }),
 }))
 
@@ -168,5 +206,156 @@ describe('ManageTracks', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select Ripped Song' }))
     fireEvent.click(screen.getByRole('button', { name: 'Quality…' }))
     expect(screen.getByTestId('quality-dialog')).toHaveTextContent('2')
+  })
+
+  describe('selection gestures', () => {
+    // A real mouse click carries detail >= 1; testing-library's default of 0 is
+    // what a keyboard-generated click looks like, and the two take different
+    // paths through the row handlers.
+    const mouseClick = (el: HTMLElement, init: MouseEventInit = {}) =>
+      fireEvent.click(el, { detail: 1, ...init })
+
+    function press(title: string) {
+      fireEvent.pointerDown(rowFor(title), { button: 0 })
+    }
+
+    it('shift-clicking takes everything between it and the last row picked', () => {
+      renderPage()
+      press('Ripped Song')
+      mouseClick(rowFor('Fourth'), { shiftKey: true })
+
+      expect(screen.getByText('3 selected')).toBeInTheDocument()
+      for (const t of ['Ripped Song', 'Third', 'Fourth']) {
+        expect(screen.getByRole('checkbox', { name: `Select ${t}` })).toBeChecked()
+      }
+      expect(screen.getByRole('checkbox', { name: 'Select Downloaded Song' })).not.toBeChecked()
+    })
+
+    it('shift-clicking uses the order on screen, not the underlying list', () => {
+      renderPage()
+      // "Fourth" and "Fifth" are adjacent once the list is filtered; "Third" is
+      // between them in the unfiltered one and must not be caught.
+      fireEvent.change(screen.getByLabelText('Filter tracks'), { target: { value: 'f' } })
+      press('Fourth')
+      mouseClick(rowFor('Fifth'), { shiftKey: true })
+      expect(screen.getByText('2 selected')).toBeInTheDocument()
+    })
+
+    it('pressing and sweeping selects the rows crossed', () => {
+      renderPage()
+      press('Downloaded Song')
+      fireEvent.pointerEnter(rowFor('Ripped Song'))
+      fireEvent.pointerEnter(rowFor('Third'))
+      expect(screen.getByText('3 selected')).toBeInTheDocument()
+
+      // Sweeping back releases what it passed, because each move replays from
+      // the selection as it was when the press began.
+      fireEvent.pointerEnter(rowFor('Ripped Song'))
+      expect(screen.getByText('2 selected')).toBeInTheDocument()
+    })
+
+    it('a sweep that starts on a selected row removes instead of adds', () => {
+      renderPage()
+      // The edit bar only appears once something is selected, and "Select all"
+      // lives on it.
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Downloaded Song' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Select all' }))
+      expect(screen.getByText('5 selected')).toBeInTheDocument()
+
+      press('Ripped Song')
+      fireEvent.pointerEnter(rowFor('Third'))
+      expect(screen.getByText('3 selected')).toBeInTheDocument()
+      expect(screen.getByRole('checkbox', { name: 'Select Ripped Song' })).not.toBeChecked()
+    })
+
+    it('stops sweeping once the button is released', () => {
+      renderPage()
+      press('Downloaded Song')
+      fireEvent.pointerUp(window)
+      fireEvent.pointerEnter(rowFor('Third'))
+      expect(screen.getByText('1 selected')).toBeInTheDocument()
+    })
+
+    it('does not double-toggle: the pointer selects and the click is swallowed', () => {
+      renderPage()
+      const row = rowFor('Downloaded Song')
+      fireEvent.pointerDown(row, { button: 0 })
+      mouseClick(row)
+      expect(screen.getByRole('checkbox', { name: 'Select Downloaded Song' })).toBeChecked()
+      expect(screen.getByText('1 selected')).toBeInTheDocument()
+    })
+
+    it('leaves the keyboard path on the checkbox working', () => {
+      renderPage()
+      // No pointerdown, and detail 0 — what Space on a focused checkbox produces.
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Third' }))
+      expect(screen.getByRole('checkbox', { name: 'Select Third' })).toBeChecked()
+    })
+
+    it('ignores a press with a non-primary button', () => {
+      renderPage()
+      fireEvent.pointerDown(rowFor('Downloaded Song'), { button: 2 })
+      expect(screen.queryByText('1 selected')).not.toBeInTheDocument()
+    })
+
+    it('sweeps across album cards too', () => {
+      renderPage()
+      fireEvent.click(screen.getByRole('button', { name: 'Albums' }))
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Select First Album' }), {
+        button: 0,
+      })
+      expect(screen.getByText('1 selected')).toBeInTheDocument()
+    })
+  })
+
+  describe('playlist filter', () => {
+    it('narrows the track list to the playlist, ignoring entries not in the library', () => {
+      renderPage()
+      fireEvent.change(screen.getByLabelText('Playlist'), { target: { value: 'p1' } })
+
+      expect(screen.getByText('Downloaded Song')).toBeInTheDocument()
+      expect(screen.getByText('Fourth')).toBeInTheDocument()
+      expect(screen.queryByText('Ripped Song')).not.toBeInTheDocument()
+      // The playlist's third entry has no library track, so there is nothing to
+      // manage and no row for it.
+      expect(screen.queryByText('Not owned')).not.toBeInTheDocument()
+    })
+
+    it('narrows albums and artists to the ones the playlist covers', () => {
+      renderPage()
+      fireEvent.change(screen.getByLabelText('Playlist'), { target: { value: 'p1' } })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Albums' }))
+      // Both playlist tracks sit on al1.
+      expect(screen.getByText('First Album')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Artists' }))
+      expect(screen.getByText('Alpha')).toBeInTheDocument()
+    })
+
+    it('combines with the text filter', () => {
+      renderPage()
+      fireEvent.change(screen.getByLabelText('Playlist'), { target: { value: 'p1' } })
+      fireEvent.change(screen.getByLabelText('Filter tracks'), { target: { value: 'fourth' } })
+      expect(screen.getByText('Fourth')).toBeInTheDocument()
+      expect(screen.queryByText('Downloaded Song')).not.toBeInTheDocument()
+    })
+
+    it('drops the selection when the playlist changes, since the rows change with it', () => {
+      renderPage()
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Ripped Song' }))
+      expect(screen.getByText('1 selected')).toBeInTheDocument()
+
+      fireEvent.change(screen.getByLabelText('Playlist'), { target: { value: 'p1' } })
+      expect(screen.queryByText('1 selected')).not.toBeInTheDocument()
+    })
+
+    it('goes back to the whole library when the filter is cleared', () => {
+      renderPage()
+      fireEvent.change(screen.getByLabelText('Playlist'), { target: { value: 'p1' } })
+      expect(screen.queryByText('Ripped Song')).not.toBeInTheDocument()
+
+      fireEvent.change(screen.getByLabelText('Playlist'), { target: { value: '' } })
+      expect(screen.getByText('Ripped Song')).toBeInTheDocument()
+    })
   })
 })

@@ -76,3 +76,107 @@ describe('useSelection', () => {
     expect(result.current.count).toBe(0)
   })
 })
+
+describe('useSelection range and sweep gestures', () => {
+  const ordered = ['a', 'b', 'c', 'd', 'e']
+  const selected = (r: { has: (id: string) => boolean }) => ordered.filter((id) => r.has(id))
+
+  it('shift-extends from the last item picked on its own', () => {
+    const { result } = renderHook(() => useSelection())
+    act(() => result.current.toggle('b'))
+    act(() => result.current.extendTo('d', ordered))
+    expect(selected(result.current)).toEqual(['b', 'c', 'd'])
+  })
+
+  it('extends backwards too', () => {
+    const { result } = renderHook(() => useSelection())
+    act(() => result.current.toggle('d'))
+    act(() => result.current.extendTo('b', ordered))
+    expect(selected(result.current)).toEqual(['b', 'c', 'd'])
+  })
+
+  it('keeps the anchor put, so a second shift-click redraws rather than walks', () => {
+    const { result } = renderHook(() => useSelection())
+    act(() => result.current.toggle('b'))
+    act(() => result.current.extendTo('d', ordered))
+    act(() => result.current.extendTo('c', ordered))
+    // Still anchored at b: the range is b..c, and c..d stays from the first
+    // extend because a range adds to the selection rather than replacing it.
+    expect(result.current.has('b')).toBe(true)
+    expect(result.current.has('c')).toBe(true)
+  })
+
+  it('adds a range on top of an existing selection', () => {
+    const { result } = renderHook(() => useSelection())
+    act(() => result.current.toggle('a'))
+    act(() => result.current.toggle('c'))
+    act(() => result.current.extendTo('e', ordered))
+    expect(selected(result.current)).toEqual(['a', 'c', 'd', 'e'])
+  })
+
+  it('falls back to picking one when there is no anchor yet', () => {
+    const { result } = renderHook(() => useSelection())
+    act(() => result.current.extendTo('c', ordered))
+    expect(selected(result.current)).toEqual(['c'])
+  })
+
+  it('sweeping from an unselected row selects everything it crosses', () => {
+    const { result } = renderHook(() => useSelection())
+    act(() => result.current.dragStart('b'))
+    expect(result.current.dragging).toBe(true)
+    act(() => result.current.dragOver('d', ordered))
+    expect(selected(result.current)).toEqual(['b', 'c', 'd'])
+  })
+
+  it('sweeping from a selected row removes everything it crosses', () => {
+    const { result } = renderHook(() => useSelection())
+    act(() => result.current.selectAll(ordered))
+    act(() => result.current.dragStart('b'))
+    act(() => result.current.dragOver('d', ordered))
+    expect(selected(result.current)).toEqual(['a', 'e'])
+  })
+
+  it('reverses cleanly when the sweep comes back, because it replays from a snapshot', () => {
+    const { result } = renderHook(() => useSelection())
+    act(() => result.current.dragStart('b'))
+    act(() => result.current.dragOver('e', ordered))
+    expect(selected(result.current)).toEqual(['b', 'c', 'd', 'e'])
+
+    act(() => result.current.dragOver('c', ordered))
+    expect(selected(result.current)).toEqual(['b', 'c'])
+
+    // Back where it started: only the row under the press remains.
+    act(() => result.current.dragOver('b', ordered))
+    expect(selected(result.current)).toEqual(['b'])
+  })
+
+  it('leaves an existing selection outside the swept range alone', () => {
+    const { result } = renderHook(() => useSelection())
+    act(() => result.current.toggle('a'))
+    act(() => result.current.dragStart('c'))
+    act(() => result.current.dragOver('d', ordered))
+    expect(selected(result.current)).toEqual(['a', 'c', 'd'])
+  })
+
+  it('ends the sweep on pointerup anywhere, including outside the list', () => {
+    const { result } = renderHook(() => useSelection())
+    act(() => result.current.dragStart('b'))
+    expect(result.current.dragging).toBe(true)
+
+    act(() => {
+      window.dispatchEvent(new Event('pointerup'))
+    })
+    expect(result.current.dragging).toBe(false)
+
+    // A move after the release is not part of any sweep.
+    act(() => result.current.dragOver('e', ordered))
+    expect(selected(result.current)).toEqual(['b'])
+  })
+
+  it('ignores a range whose endpoint is not in the visible order', () => {
+    const { result } = renderHook(() => useSelection())
+    act(() => result.current.toggle('b'))
+    act(() => result.current.extendTo('zzz', ordered))
+    expect(selected(result.current)).toEqual(['b'])
+  })
+})
