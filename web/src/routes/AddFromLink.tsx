@@ -11,7 +11,7 @@ import { useToastStore } from '../lib/toastStore'
 import { Button } from '../components/ui/Button'
 import { Checkbox } from '../components/ui/Checkbox'
 import { useSettings } from '../lib/settingsApi'
-import { AUDIO_QUALITIES, DEFAULT_AUDIO_QUALITY, type AudioQuality } from '../lib/audioQuality'
+import { AUDIO_QUALITIES, DEFAULT_AUDIO_QUALITY, qualityOptionLabel, type AudioQuality } from '../lib/audioQuality'
 
 interface LinkPreview {
   url: string
@@ -326,7 +326,7 @@ export default function AddFromLink() {
               >
                 {AUDIO_QUALITIES.map((q) => (
                   <option key={q.value} value={q.value}>
-                    {q.label}
+                    {qualityOptionLabel(q.value)}
                   </option>
                 ))}
               </select>

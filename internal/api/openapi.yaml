@@ -354,6 +354,54 @@ paths:
         "400": { description: invalid form or no files field }
         "422": { description: nothing was accepted }
         "503": { description: uploads need the built-in library }
+  /library/track-quality:
+    get:
+      summary: >-
+        Every per-track quality override in one read, plus the tier a track
+        without one falls back to. The Manage tracks page shows a standing
+        quality per row and cannot afford a request per track.
+      responses:
+        "200":
+          description: the override table
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  default: { type: string, enum: [low, medium, high, best] }
+                  overrides:
+                    type: object
+                    description: Only overridden tracks appear, keyed by library track id
+                    additionalProperties: { type: string, enum: [low, medium, high, best] }
+  /library/quality/batch:
+    post:
+      summary: >-
+        Apply one quality tier across many tracks. A blank quality clears the
+        override on every id. At most 500 ids per request; one failing item does
+        not discard the rest.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                trackIds: { type: array, items: { type: string } }
+                quality: { type: string, description: 'One of low, medium, high, best; blank clears' }
+      responses:
+        "200":
+          description: how many landed, plus per-item errors
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  applied: { type: integer }
+                  errors:
+                    type: object
+                    additionalProperties: { type: string }
+        "400": { description: no ids, over the 500-item limit, or an unknown quality }
+        "503": { description: per-track quality unavailable }
   /library/track/{id}/quality:
     get:
       summary: A track's standing download quality (its override, else the global setting)

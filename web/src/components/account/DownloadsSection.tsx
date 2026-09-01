@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Select } from '../ui'
 import { useSettings, useUpdateSettings } from '../../lib/settingsApi'
-import { AUDIO_QUALITIES, DEFAULT_AUDIO_QUALITY, type AudioQuality } from '../../lib/audioQuality'
+import { AUDIO_QUALITIES, DEFAULT_AUDIO_QUALITY, qualityOptionLabel, type AudioQuality } from '../../lib/audioQuality'
 
 /** Downloads tab panel — default audio quality for every new download. */
 export function DownloadsSection() {
@@ -26,7 +26,7 @@ export function DownloadsSection() {
           <Select
             label="Default audio quality"
             value={current}
-            options={AUDIO_QUALITIES.map((q) => ({ value: q.value, label: q.label }))}
+            options={AUDIO_QUALITIES.map((q) => ({ value: q.value, label: qualityOptionLabel(q.value) }))}
             onChange={(v) => updateSettings.mutate({ downloadQuality: v as AudioQuality })}
           />
         </div>
@@ -34,19 +34,20 @@ export function DownloadsSection() {
 
       <div className="flex items-start gap-5 py-5">
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-bold text-text-primary">Change quality of existing downloads</div>
+          <div className="text-sm font-bold text-text-primary">Manage tracks</div>
           <div className="mt-0.5 text-xs text-text-secondary">
-            Re-download tracks whose tier differs from the one you pick, replacing the existing
-            files. The tier can be lower than what you have — a downgrade to save space works the
-            same way.
+            See every track's real bitrate and the tier it will be fetched at next, and change
+            quality, names, or cover art across a selection. Re-downloading replaces the existing
+            file, and the tier can be lower than what you have — a downgrade to save space works
+            the same way.
           </div>
         </div>
         <div className="flex-none">
           <Link
-            to="/upgrade-quality"
+            to="/manage-tracks"
             className="inline-flex items-center rounded-md border border-border-subtle bg-input px-3 py-2 text-sm font-semibold text-text-primary hover:bg-raised-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
-            Review tracks
+            Manage tracks
           </Link>
         </div>
       </div>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Button, Icon, Checkbox } from './ui'
-import { AUDIO_QUALITIES, qualityLabel, type AudioQuality } from '../lib/audioQuality'
+import { AUDIO_QUALITIES, qualityLabel, qualityOptionLabel, type AudioQuality } from '../lib/audioQuality'
 import { useTrackQuality, useSetTrackQuality } from '../lib/trackQualityApi'
 import { useTrackUpgrade } from '../lib/useTrackUpgrade'
 import { useToastStore } from '../lib/toastStore'
@@ -117,7 +117,7 @@ export function TrackQualityDialog({ track, onClose }: Props) {
                   className="mt-1"
                 />
                 <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-text-primary">{q.label}</span>
+                  <span className="block text-sm font-semibold text-text-primary">{qualityOptionLabel(q.value)}</span>
                   <span className="block text-xs leading-snug text-text-muted">{q.hint}</span>
                 </span>
               </label>

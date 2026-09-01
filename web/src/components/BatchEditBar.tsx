@@ -4,8 +4,11 @@ interface BatchEditBarProps {
   count: number
   /** Hidden when nothing supports artwork, e.g. an artist selection. */
   canSetCover?: boolean
+  /** Hidden for albums and artists, which have no quality of their own. */
+  canSetQuality?: boolean
   onRename: () => void
   onSetCover?: () => void
+  onSetQuality?: () => void
   onSelectAll: () => void
   onClear: () => void
 }
@@ -17,8 +20,10 @@ interface BatchEditBarProps {
 export function BatchEditBar({
   count,
   canSetCover = false,
+  canSetQuality = false,
   onRename,
   onSetCover,
+  onSetQuality,
   onSelectAll,
   onClear,
 }: BatchEditBarProps) {
@@ -37,6 +42,11 @@ export function BatchEditBar({
       {canSetCover && onSetCover && (
         <Button size="sm" variant="secondary" onClick={onSetCover}>
           Set cover…
+        </Button>
+      )}
+      {canSetQuality && onSetQuality && (
+        <Button size="sm" variant="secondary" onClick={onSetQuality}>
+          Quality…
         </Button>
       )}
       <Button size="sm" variant="ghost" onClick={onSelectAll}>
