@@ -181,7 +181,7 @@ func TestIsNewerSemver(t *testing.T) {
 	}
 }
 
-func TestCheckAndEmit(t *testing.T) {
+func TestCheckNowReportsAvailability(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]any{
 			"tag_name": "v2.0.0",
@@ -196,28 +196,20 @@ func TestCheckAndEmit(t *testing.T) {
 	githubAPIBase = srv.URL
 	defer func() { githubAPIBase = origBase }()
 
-	// Older current -> available
-	ok, tag := CheckAndEmit(context.Background(), DefaultRepo, "v1.0.0")
-	if !ok || tag != "v2.0.0" {
-		t.Fatalf("CheckAndEmit old -> ok=%v tag=%q want true v2.0.0", ok, tag)
+	check := func(current string) State {
+		svc := New(Options{Repo: DefaultRepo, CurrentVersion: current, DataDir: t.TempDir()})
+		return svc.CheckNow(context.Background())
 	}
 
-	// Same version -> not available
-	ok, tag = CheckAndEmit(context.Background(), DefaultRepo, "v2.0.0")
-	if ok || tag != "" {
-		t.Fatalf("CheckAndEmit same -> ok=%v tag=%q want false", ok, tag)
+	// Older current -> available. The release carries no asset for this
+	// platform, so nothing stages; availability is still reported.
+	if st := check("v1.0.0"); st.Available != "v2.0.0" {
+		t.Fatalf("old current -> Available=%q want v2.0.0", st.Available)
 	}
-
-	// Newer current -> not available
-	ok, tag = CheckAndEmit(context.Background(), DefaultRepo, "v3.0.0")
-	if ok {
-		t.Fatalf("CheckAndEmit newer current -> ok=%v want false", ok)
-	}
-
-	// dev -> not available
-	ok, tag = CheckAndEmit(context.Background(), DefaultRepo, "dev")
-	if ok {
-		t.Fatalf("CheckAndEmit dev -> ok=%v want false", ok)
+	for _, current := range []string{"v2.0.0", "v3.0.0", "dev"} {
+		if st := check(current); st.Available != "" {
+			t.Fatalf("current %s -> Available=%q want empty", current, st.Available)
+		}
 	}
 }
 

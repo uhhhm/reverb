@@ -27,6 +27,56 @@ paths:
               schema:
                 type: object
                 properties: { version: { type: string }, updateRepo: { type: string } }
+  /update:
+    get:
+      summary: Desktop self-update state
+      description: >-
+        Reports the running version, any newer release, download progress, and
+        whether a build is downloaded and waiting for a restart. 503 on builds
+        with no updater (the server/Docker binary).
+      responses:
+        "200":
+          description: update state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdateState" }
+        "503": { description: updates unavailable in this build }
+  /update/check:
+    post:
+      summary: Re-read the release feed now
+      description: >-
+        Starts a check, and a background download if a newer release exists.
+        Returns as soon as the check is queued; progress arrives on the
+        update:state WebSocket topic.
+      responses:
+        "202":
+          description: check started; body is the state at the time of the call
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdateState" }
+        "503": { description: updates unavailable in this build }
+  /update/install:
+    post:
+      summary: Install the staged update and restart
+      description: >-
+        The only endpoint that replaces the binary. It swaps in the build
+        already downloaded and verified, spawns it, and shuts this instance
+        down; the response may not arrive.
+      responses:
+        "200": { description: restarting }
+        "409": { description: nothing staged, or the swap failed }
+        "503": { description: updates unavailable in this build }
+  /update/dismiss:
+    post:
+      summary: Stop prompting for the offered version
+      description: The download is kept, so it can still be installed later.
+      responses:
+        "200":
+          description: update state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdateState" }
+        "503": { description: updates unavailable in this build }
   /openapi.yaml:
     get:
       summary: This OpenAPI document
@@ -1055,3 +1105,22 @@ paths:
         "400": { description: peerId, relPath and contentHash are required }
         "500": { description: fetch failed or hash mismatch }
         "503": { description: p2p unavailable, file store unavailable, or local device not initialized }
+
+components:
+  schemas:
+    UpdateState:
+      type: object
+      description: >-
+        Mirrors desktop/updater.State. The backend owns polling, downloading and
+        version comparison; the UI only reflects this and decides when to ask.
+      properties:
+        currentVersion: { type: string, description: 'Running build ("dev" is never outdated)' }
+        repo: { type: string, description: GitHub owner/name polled; "" when updates are disabled }
+        checking: { type: boolean }
+        available: { type: string, description: Newer tag on offer; "" when current }
+        notes: { type: string, description: Release body for `available` }
+        downloading: { type: boolean }
+        progress: { type: number, description: 0..1 while downloading }
+        staged: { type: string, description: Tag downloaded and verified, waiting for a restart }
+        error: { type: string, description: Last failure; cleared by the next successful step }
+        lastCheck: { type: string, format: date-time }

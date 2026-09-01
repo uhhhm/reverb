@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { fetchVersionInfo, fetchLatestRelease } from './updateApi'
+import { fetchVersionInfo, fetchUpdateState, installUpdate } from './updateApi'
 
 function stubJson(body: unknown) {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })))
@@ -18,13 +18,21 @@ describe('updateApi', () => {
     expect((await fetchVersionInfo()).updateRepo).toBe('')
   })
 
-  it('fetchLatestRelease queries the given repo', async () => {
-    stubJson({ tag_name: 'v2.0.0', body: 'notes', assets: [] })
-    const rel = await fetchLatestRelease('me/fork')
+  it('fetchUpdateState fills in the fields the server omits', async () => {
+    stubJson({ currentVersion: 'v1.0.0', staged: 'v2.0.0' })
+    const st = await fetchUpdateState()
+    expect(fetch).toHaveBeenCalledWith('/api/v1/update', expect.objectContaining({ method: 'GET' }))
+    expect(st.staged).toBe('v2.0.0')
+    expect(st.downloading).toBe(false)
+    expect(st.progress).toBe(0)
+  })
+
+  it('installUpdate posts to the install endpoint', async () => {
+    stubJson({ status: 'restarting' })
+    await installUpdate()
     expect(fetch).toHaveBeenCalledWith(
-      'https://api.github.com/repos/me/fork/releases/latest',
-      expect.anything(),
+      '/api/v1/update/install',
+      expect.objectContaining({ method: 'POST' }),
     )
-    expect(rel.tag).toBe('v2.0.0')
   })
 })

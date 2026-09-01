@@ -21,6 +21,7 @@ var wsTopics = []string{
 	download.TopicLibraryUpdate,
 	download.TopicQueueState,
 	download.TopicRemoved,
+	events.TopicUpdate,
 	p2p.TopicSyncStarted,
 	p2p.TopicSyncFinished,
 }

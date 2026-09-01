@@ -4,6 +4,8 @@ import { RealtimeConnection, type WebSocketLike } from './realtime'
 import { useDownloads } from './downloadStore'
 import { useSyncStore } from './syncStore'
 import { useLibraryRevision } from './libraryRevisionStore'
+import { useUpdateStore } from './updateStore'
+import { EMPTY_UPDATE_STATE, type UpdateState } from './updateApi'
 import { getDownloads, getQueueState } from './downloadApi'
 import type { DownloadEvent, DownloadRemovedEvent, LibraryUpdatedEvent, QueueStateEvent, RealtimeEvent } from './types'
 
@@ -63,6 +65,15 @@ export function useRealtime(makeSocket?: (url: string) => WebSocketLike): void {
         }
         case 'sync.finished': {
           useSyncStore.getState().setSyncing(false)
+          break
+        }
+        case 'update:state': {
+          // The updater publishes its whole state on every transition, so the
+          // prompt appears the moment a download finishes without polling.
+          useUpdateStore.getState().setState({
+            ...EMPTY_UPDATE_STATE,
+            ...(frame.payload as Partial<UpdateState>),
+          })
           break
         }
         case 'download.removed': {

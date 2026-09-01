@@ -3,9 +3,22 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"time"
 )
+
+// quitApp stops the fallback server, which ends runApp and the process with
+// it. The native build closes the window instead.
+func quitApp(app *App) {
+	if app == nil || app.srv == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_ = app.srv.Shutdown(ctx)
+}
 
 // runApp serves plain HTTP when built without the desktop tag (no Wails, no
 // cgo). Open the printed URL in a browser.

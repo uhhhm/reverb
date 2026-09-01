@@ -3,8 +3,8 @@ package updater
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -198,57 +198,6 @@ func IsNewer(current, latest string) bool {
 	return lat > cur
 }
 
-// CheckAndEmit checks repo for a release newer than currentVersion.
-// If a newer tag is found it returns (true, tag). Channel is stable only.
-// An empty repo means update checks are disabled.
-func CheckAndEmit(ctx context.Context, repo, currentVersion string) (bool, string) {
-	if repo == "" {
-		return false, ""
-	}
-	rel, err := LatestRelease(ctx, repo)
-	if err != nil {
-		log.Printf("updater: check failed: %v", err)
-		return false, ""
-	}
-	if IsNewer(currentVersion, rel.Tag) {
-		// TODO: selfupdate Apply placeholder — actual binary replacement via
-		// github.com/creativeprojects/go-selfupdate is deferred to avoid CGO dep.
-		// For now we just report availability; future App wiring will call
-		// Apply(asset) and emit wails event "update:available".
-		log.Printf("updater: update available %s -> %s", currentVersion, rel.Tag)
-		return true, rel.Tag
-	}
-	return false, ""
-}
-
-// StartPollers launches background goroutines that periodically check for app
-// updates (every 6h) and yt-dlp upgrades (every 24h). It returns immediately.
-// Context cancellation stops both pollers.
-// An empty repo disables the release poller; yt-dlp upgrades still run.
-func StartPollers(ctx context.Context, repo, currentVersion string) {
-	go pollUpdates(ctx, repo, currentVersion)
-	go pollYtDlp(ctx)
-}
-
-func pollUpdates(ctx context.Context, repo, currentVersion string) {
-	if repo == "" {
-		return
-	}
-	// Immediate check on start.
-	_, _ = CheckAndEmit(ctx, repo, currentVersion)
-
-	ticker := time.NewTicker(6 * time.Hour)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			_, _ = CheckAndEmit(ctx, repo, currentVersion)
-		}
-	}
-}
-
 func pollYtDlp(ctx context.Context) {
 	// Immediate attempt best-effort (log only).
 	_ = UpgradeYtDlp(ctx, "")
@@ -264,3 +213,12 @@ func pollYtDlp(ctx context.Context) {
 		}
 	}
 }
+
+// downloadClient fetches release assets. Separate from httpClient: an asset is
+// tens of megabytes, so it gets no overall timeout — cancellation is the
+// caller's context, and the transport still bounds connect and idle time.
+var downloadClient = &http.Client{}
+
+// errNothingStaged is returned when an install is requested with no verified
+// payload waiting.
+var errNothingStaged = errors.New("no update is ready to install")

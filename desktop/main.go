@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uhhhm/reverb/desktop/updater"
 	"github.com/uhhhm/reverb/internal/api"
 	"github.com/uhhhm/reverb/internal/app"
 	"github.com/uhhhm/reverb/internal/config"
@@ -55,6 +56,11 @@ func boot(args []string) (*App, error) {
 	_ = os.MkdirAll(dataDir, 0755)
 	_ = os.MkdirAll(downloadDir, 0755)
 
+	// When this process was spawned by an instance installing an update, wait
+	// for that instance to exit before anything opens the database or starts
+	// the bundled Navidrome, which binds a fixed port.
+	updater.WaitForPredecessor(dataDir, 30*time.Second)
+
 	// Point the services at the bundled navidrome/spotdl/yt-dlp/ffmpeg before
 	// config.Load and wiring read the environment.
 	ApplyBundledToolEnv()
@@ -89,6 +95,14 @@ func boot(args []string) (*App, error) {
 	}
 	deps := rt.Deps
 
+	// The updater needs to quit the app once it has spawned the successor, and
+	// the App it quits does not exist yet — hence the indirection.
+	var appRef *App
+	upd := newUpdater(cfg.UpdateRepo, dataDir, rt.Bus, func() { quitApp(appRef) })
+	if upd != nil {
+		deps.Update = updateAdapter{svc: upd}
+	}
+
 	// net.Listen on 127.0.0.1:port and http.Server with api.NewServer(deps).Handler()
 	addr := fmt.Sprintf("127.0.0.1:%d", cfg.Port)
 	ln, err := net.Listen("tcp", addr)
@@ -112,6 +126,9 @@ func boot(args []string) (*App, error) {
 	}
 
 	a := NewApp()
+	a.dataDir = dataDir
+	a.updater = upd
+	appRef = a
 	a.ln = ln
 	a.srv = srv
 	a.runtime = rt
@@ -128,4 +145,12 @@ func boot(args []string) (*App, error) {
 // the fixed 4533 port.
 func (a *App) StartServices() {
 	a.runtime.StartBackground(context.Background())
+	if a.updater != nil {
+		// Discard the binary and payload the previous version left behind
+		// before polling for the next one.
+		if exe, err := os.Executable(); err == nil {
+			updater.CleanupAfterUpdate(a.dataDir, exe, version)
+		}
+		a.updater.Start(a.ctx)
+	}
 }

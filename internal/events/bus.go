@@ -52,3 +52,8 @@ func (b *Bus) Publish(ev Event) {
 		}
 	}
 }
+
+// TopicUpdate carries desktop self-update state. It is declared here rather
+// than in the updater so the API can stream it without the internal packages
+// depending on the desktop tree.
+const TopicUpdate = "update:state"
