@@ -25,6 +25,8 @@ import { AddToPlaylistMenu } from '../AddToPlaylistMenu'
 import { ProgressRing } from '../ui/ProgressRing'
 import { useWaveformPeaks } from '../../lib/peaksApi'
 import { useLyrics } from '../../lib/lyricsApi'
+import { useQueryClient } from '@tanstack/react-query'
+import { artistPath } from '../../lib/artistNav'
 
 /**
  * Gates a transient flag behind a delay. A library track is playable in well
@@ -189,6 +191,7 @@ export function PlayerBar() {
   const hasLyrics = lyricsData != null
 
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [addMenuOpen, setAddMenuOpen] = useState(false)
   const previousVolume = useRef(volume || 1)
 
@@ -236,11 +239,17 @@ export function PlayerBar() {
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault()
         seekMs(Math.max(0, currentTimeMs - 5000))
+      } else if (e.key.toLowerCase() === 'l' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        // L opens the lyrics view for what is playing, matching the bar's
+        // lyrics button — which is only offered when lyrics actually exist.
+        if (!hasLyrics) return
+        e.preventDefault()
+        toggleLyrics()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [current, toggle, next, prev, seekMs, currentTimeMs])
+  }, [current, toggle, next, prev, seekMs, currentTimeMs, hasLyrics, toggleLyrics])
 
   const coverSrc = current ? trackCoverUrl(current, 80) || undefined : undefined
 
@@ -275,22 +284,20 @@ export function PlayerBar() {
           <div className={['truncate text-sm font-semibold', palette ? '' : 'text-text-primary'].filter(Boolean).join(' ')}>
             {current ? current.title : 'Nothing playing'}
           </div>
-          {current?.artist && (current.artistExternalId || current.artistId) ? (
+          {current?.artist ? (
             <button
               type="button"
-              onClick={() =>
-                current.artistExternalId
-                  ? navigate(`/artist/spotify/${current.artistExternalId}`)
-                  : navigate(`/artist/library/${current.artistId}`)
-              }
+              onClick={() => {
+                void artistPath(queryClient, current).then((path) => {
+                  if (path) navigate(path)
+                })
+              }}
               className={['block max-w-full truncate text-left text-xs hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent', palette ? 'opacity-70 hover:opacity-100' : 'text-text-secondary hover:text-text-primary'].filter(Boolean).join(' ')}
             >
               {current.artist}
             </button>
           ) : (
-            <div className={['truncate text-xs', palette ? 'opacity-70' : 'text-text-secondary'].filter(Boolean).join(' ')}>
-              {current?.artist ?? ''}
-            </div>
+            <div className={['truncate text-xs', palette ? 'opacity-70' : 'text-text-secondary'].filter(Boolean).join(' ')} />
           )}
           {current && loading && <div className="text-xs text-text-muted">Loading…</div>}
         </div>
