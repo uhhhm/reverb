@@ -9,7 +9,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/library"
-	"github.com/uhhhm/reverb/internal/override"
 )
 
 // optional browse interfaces (implemented by the subsonic adapter).
@@ -57,8 +56,9 @@ func (s *Server) handleLibrarySearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
-	s.deps.Overrides.ApplyTracks(r.Context(), res.Tracks)
-	s.deps.Crop.ApplyTracks(r.Context(), res.Tracks)
+	s.decorateTracks(r.Context(), res.Tracks)
+	s.decorateAlbums(r.Context(), res.Albums)
+	s.decorateArtists(r.Context(), res.Artists)
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -72,6 +72,7 @@ func (s *Server) handleLibraryArtist(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
+	s.decorateArtist(r.Context(), &ar)
 	writeJSON(w, http.StatusOK, ar)
 }
 
@@ -85,8 +86,9 @@ func (s *Server) handleLibraryAlbum(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
-	s.deps.Overrides.ApplyTracks(r.Context(), al.Tracks)
-	s.deps.Crop.ApplyTracks(r.Context(), al.Tracks)
+	// decorateAlbum already cascades into al.Tracks, so decorating them again
+	// would only repeat every read it just did.
+	s.decorateAlbum(r.Context(), &al)
 	writeJSON(w, http.StatusOK, al)
 }
 
@@ -105,6 +107,7 @@ func (s *Server) handleLibraryArtists(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
+	s.decorateArtists(r.Context(), arts)
 	writeJSON(w, http.StatusOK, arts)
 }
 
@@ -125,6 +128,7 @@ func (s *Server) handleLibraryAlbums(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
+	s.decorateAlbums(r.Context(), albs)
 	writeJSON(w, http.StatusOK, albs)
 }
 
@@ -151,14 +155,14 @@ func (s *Server) handleLibrarySongs(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
-	s.deps.Overrides.ApplyTracks(r.Context(), songs)
-	s.deps.Crop.ApplyTracks(r.Context(), songs)
+	s.decorateTracks(r.Context(), songs)
 	writeJSON(w, http.StatusOK, songs)
 }
 
 // handleRenameTrack records a user-supplied display name for a library track.
 // Reverb never rewrites file tags — the override is applied when tracks are
-// read back out. Sending both fields empty clears the rename.
+// read back out. A field left out of the body keeps what the track already has;
+// sending it blank clears it.
 func (s *Server) handleRenameTrack(w http.ResponseWriter, r *http.Request) {
 	if s.deps.Overrides == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "renaming unavailable"})
@@ -169,20 +173,15 @@ func (s *Server) handleRenameTrack(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing track id"})
 		return
 	}
-	var body override.Name
+	var body trackNamePatch
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-	if err := s.deps.Overrides.Set(r.Context(), id, body); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	name, err := s.deps.Overrides.Get(r.Context(), id)
+	name, err := s.applyTrackRename(r.Context(), id, body)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	s.emitTrackRename(r.Context(), id, name.Title, name.Artist)
 	writeJSON(w, http.StatusOK, name)
 }

@@ -184,11 +184,143 @@ paths:
             schema:
               type: object
               properties:
-                title: { type: string, description: Blank keeps the library's own title }
-                artist: { type: string, description: Blank keeps the library's own artist }
+                title: { type: string, description: Omitted keeps the stored title; blank clears it back to the library's own }
+                artist: { type: string, description: Omitted keeps the stored artist; blank clears it back to the library's own }
+                album: { type: string, description: Omitted keeps the stored album; blank clears it back to the library's own }
       responses:
         "200": { description: the stored override }
         "503": { description: renaming unavailable }
+  /library/album/{id}/name:
+    put:
+      summary: Rename a library album (display override; cascades to its tracks, file tags are never rewritten)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, description: Blank clears the rename }
+      responses:
+        "200": { description: the stored override }
+        "503": { description: renaming unavailable }
+  /library/artist/{id}/name:
+    put:
+      summary: Rename a library artist (display override; file tags are never rewritten)
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, description: Blank clears the rename }
+      responses:
+        "200": { description: the stored override }
+        "503": { description: renaming unavailable }
+  /library/rename/batch:
+    post:
+      summary: >-
+        Apply many renames at once. The client sends the resulting names, never
+        a pattern, so what the user approved is what is stored. A track field
+        left out of an item keeps what that track already has, so renaming one
+        field does not clear the others. At most 500 items per request; one
+        failing item does not discard the rest.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tracks:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      title: { type: string }
+                      artist: { type: string }
+                      album: { type: string }
+                albums:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      name: { type: string }
+                artists:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      name: { type: string }
+      responses:
+        "200":
+          description: how many landed, plus per-item errors
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  applied: { type: integer }
+                  errors:
+                    type: object
+                    additionalProperties: { type: string }
+        "400": { description: invalid body or over the 500-item limit }
+        "503": { description: renaming unavailable }
+  /library/covers:
+    post:
+      summary: >-
+        Upload one image and use it as the cover for one or many albums and
+        tracks. Blobs are addressed by content hash, so one image applied to
+        many entities is stored once. Audio files are never modified.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                image: { type: string, format: binary, description: JPEG, PNG, or WebP, up to 5 MB }
+                target:
+                  type: array
+                  description: 'One or more "album:<id>" or "track:<id>" values'
+                  items: { type: string }
+      responses:
+        "200":
+          description: the id the image is now served under, plus how many targets took it
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  coverArtId: { type: string, description: 'Of the form custom:<sha256>.<ext>' }
+                  applied: { type: integer }
+                  errors:
+                    type: object
+                    additionalProperties: { type: string }
+        "400": { description: unsupported image type, oversized image, or no valid target }
+        "503": { description: cover uploads unavailable }
+    delete:
+      summary: Remove uploaded cover art, so the library backend's own art shows again
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                targets:
+                  type: array
+                  items: { type: string, description: '"album:<id>" or "track:<id>"' }
+      responses:
+        "200": { description: how many were cleared }
+        "400": { description: invalid body or no valid target }
+        "503": { description: cover uploads unavailable }
   /library/upload:
     post:
       summary: Upload audio files into the managed music directory (built-in library only)
@@ -447,7 +579,10 @@ paths:
         "503": { description: external streaming unavailable (no search source configured) }
   /cover/{id}:
     get:
-      summary: Cover art proxy by id
+      summary: >-
+        Cover art by id. An id of the form custom:<sha256>.<ext> names a
+        user-uploaded image and is served from disk; anything else is proxied
+        from the library backend.
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
         - { name: size, in: query, required: false, schema: { type: integer } }

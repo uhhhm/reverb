@@ -143,6 +143,8 @@ export function useSongs(size?: number) {
 export interface TrackName {
   title: string
   artist: string
+  /** Omitted keeps whatever album rename the track already has; blank clears it. */
+  album?: string
 }
 
 /**

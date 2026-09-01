@@ -11,15 +11,22 @@ interface CheckboxProps {
   label: string
   id?: string
   disabled?: boolean
+  /**
+   * Set to -1 where the checkbox is decorative and another control carries the
+   * interaction, so Tab does not land on something the caller has hidden from
+   * the accessibility tree.
+   */
+  tabIndex?: number
 }
 
-export function Checkbox({ checked, onChange, label, id, disabled = false }: CheckboxProps) {
+export function Checkbox({ checked, onChange, label, id, disabled = false, tabIndex }: CheckboxProps) {
   return (
     <span className="relative inline-flex h-4 w-4 flex-none items-center justify-center">
       <input
         id={id}
         type="checkbox"
         aria-label={label}
+        tabIndex={tabIndex}
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}

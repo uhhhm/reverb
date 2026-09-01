@@ -88,6 +88,7 @@ func NewHost(ctx context.Context, priv crypto.PrivKey, port int) (*Host, error) 
 	h.SetStreamHandler("/reverb/sync/1.0.0", func(s network.Stream) { s.Close() })
 	h.SetStreamHandler("/reverb/pair/1.0.0", func(s network.Stream) { s.Close() })
 	h.SetStreamHandler("/reverb/file/1.0.0", func(s network.Stream) { s.Close() })
+	h.SetStreamHandler(coverProtocol, func(s network.Stream) { s.Close() })
 
 	return &Host{h: h, d: d, mdns: ser}, nil
 }

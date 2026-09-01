@@ -5,11 +5,13 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/cover"
 	"github.com/uhhhm/reverb/internal/library"
 	"github.com/uhhhm/reverb/internal/trackref"
 )
@@ -87,14 +89,19 @@ func seekOptsFor(r *http.Request) (core.StreamOpts, bool) {
 
 // handleCover proxies cover art from the library adapter.
 //
-// For canonical ids (trk_/alb_/art_) the resolver is consulted first to obtain
+// An id carrying the custom: prefix names a user-uploaded image and is served
+// straight off disk — that path needs no library at all, so it is checked
+// first. For canonical ids (trk_/alb_/art_) the resolver is consulted to obtain
 // the current backend cover art id; raw backend ids pass through directly.
 func (s *Server) handleCover(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if s.serveUploadedCover(w, id) {
+		return
+	}
 	lib, ok := s.libraryReady(w)
 	if !ok {
 		return
 	}
-	id := chi.URLParam(r, "id")
 	size, _ := strconv.Atoi(r.URL.Query().Get("size"))
 	if isCanonicalID(id) {
 		if s.deps.Resolver == nil {
@@ -111,8 +118,42 @@ func (s *Server) handleCover(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		id = addr.CoverArtID
+		// A canonical id addresses the track, so an upload made against the
+		// backend track id has to be picked up here rather than by the prefix
+		// check above.
+		if custom := s.deps.Covers.Get(r.Context(), cover.KindTrack, addr.BackendID); custom != "" && s.serveUploadedCover(w, custom) {
+			return
+		}
 	}
 	s.serveCover(w, r, lib, id, size)
+}
+
+// serveUploadedCover writes a user-uploaded image and reports whether it did.
+// False means the id names no upload this device holds, and the caller falls
+// back to the library backend — which is also what happens for a cover a peer
+// assigned whose bytes have not arrived yet.
+func (s *Server) serveUploadedCover(w http.ResponseWriter, id string) bool {
+	data, ct, ok := s.deps.Covers.Open(id)
+	if !ok {
+		// The frontend percent-encodes cover ids, and chi routes on the raw
+		// path, so the colon in "custom:" arrives as %3A. Decoding is tried
+		// only after the raw id has failed, which leaves a backend id that
+		// genuinely contains a percent sign alone.
+		dec, err := url.PathUnescape(id)
+		if err != nil || dec == id {
+			return false
+		}
+		if data, ct, ok = s.deps.Covers.Open(dec); !ok {
+			return false
+		}
+	}
+	w.Header().Set("Content-Type", ct)
+	// The hash is in the id, so a replaced cover is a different URL and this
+	// can be cached hard.
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+	return true
 }
 
 // serveStream is the shared adapter-calling body for handleStream and its

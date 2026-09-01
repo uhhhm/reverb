@@ -20,6 +20,7 @@ import (
 	"github.com/uhhhm/reverb/internal/api"
 	"github.com/uhhhm/reverb/internal/auth"
 	"github.com/uhhhm/reverb/internal/catalog"
+	"github.com/uhhhm/reverb/internal/cover"
 	"github.com/uhhhm/reverb/internal/crop"
 	"github.com/uhhhm/reverb/internal/download"
 	"github.com/uhhhm/reverb/internal/download/lidarr"
@@ -230,6 +231,11 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		}),
 	)
 
+	// Uploaded album and track art lives beside the database rather than in the
+	// music library, which Reverb never writes to. Blobs are addressed by content
+	// hash, so one image applied to many albums is stored once.
+	coverSvc := cover.New(st.Q(), cover.Dir(filepath.Dir(opts.DBPath)))
+
 	deps := api.Deps{
 		Auth:          authSvc,
 		Library:       bundle.Library,
@@ -261,6 +267,8 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 			extstream.WithStore(st.Q()),
 		),
 		Overrides:    override.New(st.Q()),
+		Entities:     override.NewEntities(st.Q()),
+		Covers:       coverSvc,
 		TrackQuality: st.Q(),
 		Crop:         crop.New(st.Q()),
 		Loudness:     st.Q(),
@@ -284,6 +292,10 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		LinkAdd:      linkAddSvc,
 		FileStore:    st.Q(),
 	}
+	// Track covers are keyed on the catalog id so they survive a library-backend
+	// swap and can name the same track on a paired device.
+	coverSvc.SetCatalogResolver(deps.Overrides.CatalogIDsForTracks)
+
 	if deps.Pairing == nil {
 		deps.Pairing = reverbsync.NewPairingService(st.Q())
 	}
@@ -317,7 +329,9 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		return materialize.New(deps.Overrides, deps.Crop).
 			WithCatalog(catalogSvc).
 			WithPlaylists(playlistProjection).
-			WithTrackStore(st.Q())
+			WithTrackStore(st.Q()).
+			WithEntities(deps.Entities).
+			WithCovers(coverSvc)
 	}
 	deps.SyncStore.SetMaterializer(newMaterializer())
 	if syncStoreForLink != deps.SyncStore {
@@ -407,8 +421,10 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 				getenv = func(string) string { return "" }
 			}
 			musicDir := embedded.MusicDir(getenv)
+			coverDir := cover.Dir(r.Deps.DataDir)
 			if h.LibHost() != nil {
 				p2p.RegisterFileHandler(h.LibHost(), musicDir, guard)
+				p2p.RegisterCoverHandler(h.LibHost(), coverDir, guard)
 			}
 			localID, lerr := reverbsync.LocalDeviceID(ctx, r.Store.Q())
 			if lerr != nil || localID == "" {
@@ -443,7 +459,8 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 				// Advertise what we hold and pull what paired peers hold.
 				if h.LibHost() != nil {
 					p2p.RegisterManifestHandler(h.LibHost(), r.Store.Q(), localID, guard)
-					puller := p2p.NewPuller(h.LibHost(), r.Store.Q(), fs, guard, localID, musicDir)
+					puller := p2p.NewPuller(h.LibHost(), r.Store.Q(), fs, guard, localID, musicDir).
+						WithCovers(r.Store.Q(), coverDir)
 					p2p.SafeGo("file pull", func() { puller.Run(ctx) })
 				}
 				// P2P anti-entropy for sync changes over libp2p.

@@ -13,9 +13,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/uhhhm/reverb/internal/catalog"
+	"github.com/uhhhm/reverb/internal/cover"
 	"github.com/uhhhm/reverb/internal/crop"
 	"github.com/uhhhm/reverb/internal/override"
 	"github.com/uhhhm/reverb/internal/store/db"
@@ -39,12 +41,27 @@ const (
 	FieldLoudnessGainDb = reverbsync.FieldLoudnessGainDb
 	// FieldDeleted is the tombstone sentinel, owned by the deletion path.
 	FieldDeleted = reverbsync.FieldDeleted
+	// FieldAlbum is the album name shown for a track, alongside title and artist.
+	FieldAlbum = reverbsync.FieldAlbum
+	// FieldName is the display name of an album or artist.
+	FieldName = reverbsync.FieldName
+	// FieldCover addresses an uploaded image as "<sha256>.<ext>", or is empty
+	// when the upload was removed.
+	FieldCover = reverbsync.FieldCover
 )
 
 // EntityTrack is the entity type track metadata syncs under. The id is the
 // catalog id: backend track ids are local to one library backend, so two
 // devices would never agree on them.
 const EntityTrack = reverbsync.EntityTrack
+
+// EntityAlbum and EntityArtist are the entity types album- and artist-level
+// metadata syncs under. The id is the stable key derived from the names, since
+// backend album and artist ids belong to one library backend.
+const (
+	EntityAlbum  = reverbsync.EntityAlbum
+	EntityArtist = reverbsync.EntityArtist
+)
 
 // Catalog adopts entities a peer minted and translates the ids they were minted
 // under. *catalog.Service satisfies it.
@@ -74,7 +91,16 @@ type Service struct {
 	catalog   Catalog
 	playlists Playlists
 	tracks    TrackStore
+	entities  *override.Entities
+	covers    *cover.Service
 }
+
+// WithEntities attaches album and artist renames. Without it those changes stay
+// in the log and are projected after an upgrade that supplies one.
+func (s *Service) WithEntities(e *override.Entities) *Service { s.entities = e; return s }
+
+// WithCovers attaches uploaded artwork.
+func (s *Service) WithCovers(c *cover.Service) *Service { s.covers = c; return s }
 
 func New(overrides *override.Service, crops *crop.Service) *Service {
 	return &Service{overrides: overrides, crops: crops}
@@ -111,6 +137,8 @@ func (s *Service) Apply(ctx context.Context, ch reverbsync.SyncChange) error {
 		return s.applyPlay(ctx, ch)
 	case EntityTrack:
 		return s.applyTrack(ctx, ch)
+	case EntityAlbum, EntityArtist:
+		return s.applyEntity(ctx, ch)
 	default:
 		return nil
 	}
@@ -121,8 +149,10 @@ func (s *Service) applyTrack(ctx context.Context, ch reverbsync.SyncChange) erro
 	// lets an edit made on one device land on the right track on another.
 	ch.EntityID = s.resolveCatalogID(ctx, ch.EntityID)
 	switch ch.Field {
-	case FieldTitle, FieldArtist:
+	case FieldTitle, FieldArtist, FieldAlbum:
 		return s.applyName(ctx, ch)
+	case FieldCover:
+		return s.applyTrackCover(ctx, ch)
 	case FieldCropStartMs, FieldCropEndMs:
 		return s.applyCrop(ctx, ch)
 	case FieldQuality:
@@ -249,12 +279,68 @@ func (s *Service) applyName(ctx context.Context, ch reverbsync.SyncChange) error
 	if err != nil {
 		return err
 	}
-	if ch.Field == FieldTitle {
+	switch ch.Field {
+	case FieldTitle:
 		current.Title = value
-	} else {
+	case FieldArtist:
 		current.Artist = value
+	case FieldAlbum:
+		current.Album = value
 	}
 	return s.overrides.SetByCatalogID(ctx, ch.EntityID, current)
+}
+
+// applyEntity projects an album or artist change. The entity id is the stable
+// key both devices derive from the library's own names, so it binds to whatever
+// backend id this device happens to have — or waits under the key until one
+// exists.
+func (s *Service) applyEntity(ctx context.Context, ch reverbsync.SyncChange) error {
+	kind := override.KindAlbum
+	if ch.EntityType == EntityArtist {
+		kind = override.KindArtist
+	}
+	value, err := stringValue(ch.Value)
+	if err != nil {
+		return err
+	}
+	switch ch.Field {
+	case FieldName:
+		if s.entities == nil {
+			return nil
+		}
+		return s.entities.SetByKey(ctx, kind, ch.EntityID, value)
+	case FieldCover:
+		if s.covers == nil || kind != override.KindAlbum {
+			return nil
+		}
+		sha, ext := splitCoverRef(value)
+		return s.covers.AssignByKey(ctx, cover.KindAlbum, ch.EntityID, sha, ext)
+	default:
+		return nil
+	}
+}
+
+// applyTrackCover projects an uploaded track cover, keyed on the catalog id.
+func (s *Service) applyTrackCover(ctx context.Context, ch reverbsync.SyncChange) error {
+	if s.covers == nil {
+		return nil
+	}
+	value, err := stringValue(ch.Value)
+	if err != nil {
+		return err
+	}
+	sha, ext := splitCoverRef(value)
+	return s.covers.AssignByKey(ctx, cover.KindTrack, ch.EntityID, sha, ext)
+}
+
+// splitCoverRef parses the "<sha256>.<ext>" address a cover travels as. An
+// empty or malformed value means "no cover", which is how a removal travels.
+func splitCoverRef(v string) (sha, ext string) {
+	sha, ext, ok := strings.Cut(v, ".")
+	if !ok {
+		return "", ""
+	}
+	return sha, ext
 }
 
 func (s *Service) applyCrop(ctx context.Context, ch reverbsync.SyncChange) error {

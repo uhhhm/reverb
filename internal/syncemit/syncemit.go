@@ -140,6 +140,20 @@ func (s *Service) EmitTrackField(ctx context.Context, catalogID, field string, v
 	s.append(ctx, device, reverbsync.EntityTrack, catalogID, field, value)
 }
 
+// EmitEntityField publishes one album- or artist-level field. The entity id is
+// the stable key derived from the library's own names — there is no catalog
+// entity behind it, so nothing has to be published first.
+func (s *Service) EmitEntityField(ctx context.Context, entityType, key, field string, value any) {
+	if !s.ready() || key == "" {
+		return
+	}
+	device := s.device(ctx)
+	if device == "" {
+		return
+	}
+	s.append(ctx, device, entityType, key, field, value)
+}
+
 func (s *Service) append(ctx context.Context, device, entityType, entityID, field string, value any) {
 	if _, err := s.log.AppendChange(ctx, device, reverbsync.SyncChange{
 		EntityType: entityType,

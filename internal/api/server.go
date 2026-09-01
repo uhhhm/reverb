@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/uhhhm/reverb/internal/auth"
 	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/cover"
 	"github.com/uhhhm/reverb/internal/crop"
 	"github.com/uhhhm/reverb/internal/events"
 	"github.com/uhhhm/reverb/internal/library"
@@ -172,6 +173,14 @@ type Deps struct {
 	// Overrides applies user-supplied track renames on read and records them on
 	// write. Nil disables renaming (handlers return 503).
 	Overrides *override.Service
+
+	// Entities applies user-supplied album and artist renames on read and
+	// records them on write. An album rename cascades onto its tracks.
+	Entities *override.Entities
+
+	// Covers applies user-uploaded album and track artwork on read and stores
+	// it on write.
+	Covers *cover.Service
 	// TrackQuality persists per-track download-quality overrides, which take
 	// precedence over the global download_quality setting. *db.Queries satisfies
 	// it. Nil disables per-track quality (handlers return 503).
@@ -237,6 +246,9 @@ type Deps struct {
 // *syncemit.Service satisfies it.
 type TrackSyncEmitter interface {
 	EmitTrackField(ctx context.Context, catalogID, field string, value any)
+	// EmitEntityField publishes album- and artist-level changes, which are
+	// keyed on a stable name-derived key rather than a catalog id.
+	EmitEntityField(ctx context.Context, entityType, key, field string, value any)
 }
 
 // TrackQualityStore persists per-track download-quality overrides.
@@ -404,6 +416,11 @@ func (s *Server) routes() {
 			pr.Get("/library/albums", s.handleLibraryAlbums)
 			pr.Get("/library/songs", s.handleLibrarySongs)
 			pr.Put("/library/track/{id}/name", s.handleRenameTrack)
+			pr.Put("/library/album/{id}/name", s.handleRenameAlbum)
+			pr.Put("/library/artist/{id}/name", s.handleRenameArtist)
+			pr.Post("/library/rename/batch", s.handleBatchRename)
+			pr.Post("/library/covers", s.handleUploadCovers)
+			pr.Delete("/library/covers", s.handleDeleteCovers)
 			pr.Get("/library/track/{id}/gain", s.handleTrackGain)
 			pr.Get("/library/track/{id}/crop", s.handleGetTrackCrop)
 			pr.Put("/library/track/{id}/crop", s.handleSetTrackCrop)
