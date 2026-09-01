@@ -1,5 +1,6 @@
 export type ThemeId =
   | 'default-dark'
+  | 'light'
   | 'catppuccin-mocha'
   | 'catppuccin-macchiato'
   | 'catppuccin-frappe'
@@ -20,6 +21,12 @@ export const THEMES: ThemeMeta[] = [
     label: 'Default Dark',
     description: 'Pure black — original',
     preview: { base: '#000000', surface: '#121212', raised: '#181818', text: '#ffffff' },
+  },
+  {
+    id: 'light',
+    label: 'Light',
+    description: 'Clean & bright',
+    preview: { base: '#e7e7ec', surface: '#f4f4f7', raised: '#ffffff', text: '#17171c' },
   },
   {
     id: 'catppuccin-mocha',

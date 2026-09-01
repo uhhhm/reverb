@@ -50,9 +50,9 @@ export default {
         sans: ['"Figtree Variable"', 'Figtree', 'system-ui', '-apple-system', 'sans-serif'],
       },
       boxShadow: {
-        cover: '0 8px 18px -8px rgba(0,0,0,.6)',
-        float: '0 8px 16px rgba(0,0,0,.35)',
-        pop: '0 24px 60px rgba(0,0,0,.6)',
+        cover: '0 8px 18px -8px var(--shadow-cover)',
+        float: '0 8px 16px var(--shadow-float)',
+        pop: '0 24px 60px var(--shadow-pop)',
       },
     },
   },

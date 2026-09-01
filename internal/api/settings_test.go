@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/uhhhm/reverb/internal/store"
@@ -214,5 +215,34 @@ func TestPutSettingsDownloadQualityRejectsUnknownTier(t *testing.T) {
 	rec := do(t, srv, cookie, http.MethodPut, "/api/v1/settings", `{"downloadQuality":"lossless"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestPutSettingsTheme(t *testing.T) {
+	srv, cookie := adapterTestServer(t, adapterServerOpts{dirty: &testDirty{}})
+
+	if rec := do(t, srv, cookie, http.MethodPut, "/api/v1/settings", `{"theme":"light"}`); rec.Code != http.StatusOK {
+		t.Fatalf("setting the light theme = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	rec := do(t, srv, cookie, http.MethodGet, "/api/v1/settings", "")
+	var body struct {
+		Theme string `json:"theme"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Theme != "light" {
+		t.Fatalf("theme = %q, want light", body.Theme)
+	}
+}
+
+func TestPutSettingsRejectsUnknownTheme(t *testing.T) {
+	srv, cookie := adapterTestServer(t, adapterServerOpts{dirty: &testDirty{}})
+	rec := do(t, srv, cookie, http.MethodPut, "/api/v1/settings", `{"theme":"solarized"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("unknown theme = %d, want 400", rec.Code)
+	}
+	// The rejection lists what is actually allowed, so it cannot go stale when
+	// a theme is added.
+	if !strings.Contains(rec.Body.String(), "light") {
+		t.Fatalf("rejection did not list the available themes: %s", rec.Body.String())
 	}
 }

@@ -130,8 +130,8 @@ paths:
                   description: Default audio quality tier for new downloads (a ceiling, never an upscale).
                 theme:
                   type: string
-                  enum: [default-dark, catppuccin-mocha, catppuccin-macchiato, catppuccin-frappe]
-                  description: UI theme — all dark, Catppuccin-inspired.
+                  enum: [default-dark, light, catppuccin-mocha, catppuccin-macchiato, catppuccin-frappe]
+                  description: UI theme. All dark but `light`.
                 audioNormalization:
                   type: boolean
                   description: Apply a per-track playback gain so tracks sound level. Files are never re-encoded.

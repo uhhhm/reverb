@@ -3,8 +3,8 @@
 @tailwind utilities;
 
 :root {
-  /* Dark-only app: makes native controls (select popups, scrollbars, date
-     pickers) render dark instead of inheriting the OS light theme. */
+  /* Makes native controls (select popups, scrollbars, date pickers) match the
+     theme instead of inheriting the OS one. Overridden by the light theme. */
   color-scheme: dark;
 
   /* accent — configurable; default red #F0354B as space-separated RGB channels */
@@ -33,6 +33,12 @@
 
   /* dynamic album wash — set live by the palette service; defaults to surface (invisible) */
   --album-wash: 18 18 18;
+
+  /* elevation — themed, because a shadow tuned for black panels is a smudge on
+     white ones. Consumed by the shadow-* utilities in tailwind.config.js. */
+  --shadow-cover: rgba(0, 0, 0, .6);
+  --shadow-float: rgba(0, 0, 0, .35);
+  --shadow-pop: rgba(0, 0, 0, .6);
 }
 
 /* ── Themes ──────────────────────────────────────────────────────────── */
@@ -48,6 +54,32 @@
   --text-secondary: #b3b3b3;
   --text-muted: #8a8a8a;
   --album-wash: 18 18 18;
+}
+
+/* Light — the only theme that is not dark, so it carries the tokens the others
+   inherit from :root: color-scheme, the status colours (the dark ones are too
+   pale to read on white) and softer elevation. */
+[data-theme='light'] {
+  color-scheme: light;
+
+  --bg-base: #e7e7ec;        /* gaps */
+  --bg-surface: #f4f4f7;     /* panels */
+  --bg-raised: #ffffff;      /* cards */
+  --bg-raised-hover: #ededf2;
+  --bg-input: #ffffff;
+  --border-subtle: #d7d7de;
+  --text-primary: #17171c;
+  --text-secondary: #45454f;
+  --text-muted: #6c6c78;
+  --album-wash: 244 244 247;
+
+  --status-success: 15 138 62;   /* #0f8a3e */
+  --status-warning: 155 93 6;    /* #9b5d06 */
+  --status-error: 199 30 30;     /* #c71e1e */
+
+  --shadow-cover: rgba(15, 15, 25, .18);
+  --shadow-float: rgba(15, 15, 25, .12);
+  --shadow-pop: rgba(15, 15, 25, .18);
 }
 
 /* Catppuccin Mocha — Base #1e1e2e / Mantle #181825 / Crust #11111b */
