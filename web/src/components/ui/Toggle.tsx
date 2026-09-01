@@ -21,8 +21,10 @@ export function Toggle({ checked, onChange, label }: ToggleProps) {
     >
       <span
         className={[
-          'absolute top-[3px] w-[18px] h-[18px] rounded-full bg-on-accent transition-transform',
-          checked ? 'translate-x-[22px]' : 'translate-x-[3px]',
+          'absolute top-[3px] w-[18px] h-[18px] rounded-full transition-transform',
+          // On the accent fill the knob takes --on-accent; off the fill it has
+          // to invert with the theme instead, or it vanishes into the track.
+          checked ? 'bg-on-accent translate-x-[22px]' : 'bg-text-primary translate-x-[3px]',
         ].join(' ')}
       />
     </button>

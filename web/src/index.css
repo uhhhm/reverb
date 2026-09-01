@@ -136,9 +136,11 @@ body { @apply bg-canvas text-text-secondary font-sans; margin: 0; -webkit-font-s
   }
 }
 
-/* Range slider (e.g. volume): a flat track with a visible, draggable white
-   thumb. The filled portion is painted via an inline linear-gradient on the
-   element's background so it tracks the value. */
+/* Range slider (e.g. volume): a flat track with a visible, draggable thumb.
+   The thumb takes --text-primary so it inverts with the theme — a hard-coded
+   white thumb disappears on the light theme's white track. The filled portion
+   is painted via an inline linear-gradient on the element's background so it
+   tracks the value. */
 input[type='range'].rvb-range {
   -webkit-appearance: none;
   appearance: none;
@@ -150,13 +152,20 @@ input[type='range'].rvb-range::-webkit-slider-thumb {
   height: 12px;
   width: 12px;
   border-radius: 9999px;
-  background: #ffffff;
+  background: var(--text-primary);
   border: none;
 }
 input[type='range'].rvb-range::-moz-range-thumb {
   height: 12px;
   width: 12px;
   border-radius: 9999px;
-  background: #ffffff;
+  background: var(--text-primary);
   border: none;
 }
+
+/* Logo mark: fixed-colour assets, so swap the variant per theme rather than
+   recolouring. Light theme gets the dark-stroke mark; every other theme is
+   dark and gets the white-stroke one. */
+.rvb-logo-on-light { display: none; }
+[data-theme='light'] .rvb-logo-on-dark { display: none; }
+[data-theme='light'] .rvb-logo-on-light { display: inline-block; }
