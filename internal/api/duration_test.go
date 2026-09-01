@@ -23,7 +23,7 @@ func durationServer(t *testing.T, lib *pagedLibrary) (*Server, *store.Store, *ht
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{Auth: authSvc, Library: lib, Duration: st.Q()})
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts, Auth: authSvc, Library: lib, Duration: st.Q()})
 	return srv, st, &http.Cookie{Name: sessionCookie, Value: tok}
 }
 

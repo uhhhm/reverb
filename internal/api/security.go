@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -89,8 +90,7 @@ func (s *Server) csrfGuard(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		// Bearer sync tokens are not cookie-authenticated, so CSRF does not apply — but only for sync endpoints.
-		if strings.HasPrefix(r.URL.Path, "/api/v1/sync") && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+		if isBearerSync(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -113,4 +113,104 @@ func sameHost(rawURL, host string) bool {
 		return false
 	}
 	return strings.EqualFold(u.Host, host)
+}
+
+// isBearerSync reports whether r is a paired device calling the sync API with a
+// Bearer token rather than a browser riding the ambient loopback credential.
+//
+// Both browser guards exempt it for the same reason: a web page cannot attach
+// an Authorization header to a cross-origin request without a CORS preflight,
+// and Reverb sends no CORS headers, so a request in this shape cannot have been
+// driven by a hostile page. The path match is exact (or a sub-path) rather than
+// a bare prefix so a future route like /api/v1/sync-anything does not inherit
+// the exemption by name alone.
+func isBearerSync(r *http.Request) bool {
+	p := r.URL.Path
+	if p != "/api/v1/sync" && !strings.HasPrefix(p, "/api/v1/sync/") {
+		return false
+	}
+	return strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ")
+}
+
+// isLoopbackHost reports whether host (with or without a port, IPv6 bracketed
+// or not) names the loopback interface.
+func isLoopbackHost(host string) bool {
+	h := host
+	if hh, _, err := net.SplitHostPort(host); err == nil {
+		h = hh
+	}
+	h = strings.Trim(h, "[]")
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// hostGuard rejects state-changing requests whose Host header names something
+// other than loopback or a host the operator configured.
+//
+// This is the DNS-rebinding defence, and it is what csrfGuard cannot do alone.
+// csrfGuard compares Origin against Host, but under rebinding the attacker
+// controls both and makes them agree: a page on evil.example whose DNS record
+// flips to 127.0.0.1 sends Origin: http://evil.example and Host: evil.example,
+// they match, and the request is served as the household owner. Checking Host
+// against a fixed allowlist breaks that, because the one thing the attacker
+// cannot do is make the browser send a Host it does not believe it is talking
+// to.
+//
+// The payoff being denied is concrete: POST /api/v1/adapters/test runs the
+// binary named by binary_path, so without this guard a visited web page could
+// execute a local program.
+//
+// Reads are exempt for the same reason they are exempt from CSRF, and dev mode
+// is skipped because the Vite dev server issues requests under whatever host
+// the developer is browsing.
+func (s *Server) hostGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.deps.Dev || !isStateChanging(r.Method) || isBearerSync(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !s.hostAllowed(r.Host) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "host not allowed"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// hostAllowed reports whether host may be used to reach the API.
+func (s *Server) hostAllowed(host string) bool {
+	// An empty Host is not reachable from a browser -- Go's HTTP/1.1 server
+	// rejects a request without one and HTTP/2 always carries :authority -- but
+	// a deny-list check should not treat "absent" as "permitted".
+	if host == "" {
+		return false
+	}
+	if isLoopbackHost(host) {
+		return true
+	}
+	bare := host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		bare = h
+	}
+	bare = strings.Trim(bare, "[]")
+	for _, allowed := range s.deps.AllowedHosts {
+		allowed = strings.Trim(strings.TrimSpace(allowed), "[]")
+		if allowed == "" {
+			continue
+		}
+		// Compare on the bare host: the port a proxy forwards on is its own
+		// business and is not knowable when the allowlist is written.
+		if a, _, err := net.SplitHostPort(allowed); err == nil {
+			allowed = strings.Trim(a, "[]")
+		}
+		if strings.EqualFold(allowed, bare) {
+			return true
+		}
+	}
+	return false
 }

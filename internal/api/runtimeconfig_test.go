@@ -8,7 +8,7 @@ import (
 )
 
 func TestRuntimeConfigPublishesPortWhenSet(t *testing.T) {
-	srv := NewServer(Deps{Desktop: true, LocalAPIPort: 41234})
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts, Desktop: true, LocalAPIPort: 41234})
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runtime-config.js", nil))
 
@@ -26,7 +26,7 @@ func TestRuntimeConfigPublishesPortWhenSet(t *testing.T) {
 func TestRuntimeConfigIsInertWhenPortUnset(t *testing.T) {
 	// Same-origin deployments (Docker, dev) must not get a port injected — the
 	// SPA derives its URLs from location there.
-	srv := NewServer(Deps{})
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts})
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runtime-config.js", nil))
 
@@ -40,7 +40,7 @@ func TestRuntimeConfigIsInertWhenPortUnset(t *testing.T) {
 
 func TestRuntimeConfigNeedsNoSession(t *testing.T) {
 	// It must load before a session exists, so it cannot sit behind auth.
-	srv := NewServer(Deps{Desktop: true, LocalAPIPort: 9999})
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts, Desktop: true, LocalAPIPort: 9999})
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runtime-config.js", nil))
 	if rec.Code == http.StatusUnauthorized {

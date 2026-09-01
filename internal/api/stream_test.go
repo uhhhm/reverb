@@ -192,7 +192,7 @@ func stubLibTestServer(t *testing.T, lib library.LibraryAdapter) (*Server, *http
 	if err := authSvc.EnsureSeed(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Library:    lib,
 		Search:     registry.NewRegistry("search"),
@@ -274,7 +274,7 @@ func stubLibTestServerWithResolver(t *testing.T, lib library.LibraryAdapter, res
 	if err := authSvc.EnsureSeed(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Library:    lib,
 		Search:     registry.NewRegistry("search"),
@@ -440,7 +440,7 @@ func canonicalStreamServer(t *testing.T, cat CatalogLookup, ext ExternalStreamRe
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:           authSvc,
 		Library:        &fakeLibrary{},
 		Search:         registry.NewRegistry("search"),
@@ -555,7 +555,7 @@ func TestPeaksResolvesACanonicalIDBeforeAskingTheLibraryForAFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Library:    lib,
 		Search:     registry.NewRegistry("search"),

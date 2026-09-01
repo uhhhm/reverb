@@ -44,7 +44,7 @@ func searchTestServer(t *testing.T, agg Streamer) (*Server, *http.Cookie) {
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:             authSvc,
 		SearchAggregator: agg,
 		Search:           registry.NewRegistry("search"),

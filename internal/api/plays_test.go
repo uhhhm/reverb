@@ -44,7 +44,7 @@ func playsTestServer(t *testing.T) (*Server, *http.Cookie, string, *store.Store)
 	catalogSvc := catalog.NewService(q, time.Now, idgen)
 	playSvc := play.NewService(q, catalogSvc, time.Now, idgen)
 
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Search:     registry.NewRegistry("search"),
 		Downloader: registry.NewRegistry("downloader"),
@@ -228,7 +228,7 @@ func TestHandleDeletePlay_NilServiceReturns503(t *testing.T) {
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Search:     registry.NewRegistry("search"),
 		Downloader: registry.NewRegistry("downloader"),
@@ -253,7 +253,7 @@ func TestHandlePlay_NilServiceReturns503(t *testing.T) {
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Search:     registry.NewRegistry("search"),
 		Downloader: registry.NewRegistry("downloader"),

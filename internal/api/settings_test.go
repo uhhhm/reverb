@@ -138,7 +138,7 @@ func TestLibraryBackendModeSetting(t *testing.T) {
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{Auth: authSvc, Adapters: st.Q()})
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts, Auth: authSvc, Adapters: st.Q()})
 	cookie := &http.Cookie{Name: sessionCookie, Value: tok}
 
 	put := func(body string) int {

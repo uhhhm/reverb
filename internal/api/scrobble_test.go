@@ -88,7 +88,7 @@ func scrobbleTestServer(t *testing.T, sc scrobble.Scrobbler, cfg func() scrobble
 	catalogSvc := catalog.NewService(st.Q(), time.Now, playIDgen)
 	playSvc := play.NewService(st.Q(), catalogSvc, time.Now, playIDgen)
 
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Search:     registry.NewRegistry("search"),
 		Downloader: registry.NewRegistry("downloader"),
@@ -262,7 +262,7 @@ func TestScrobbleLinks_NilDep503(t *testing.T) {
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Search:     registry.NewRegistry("search"),
 		Downloader: registry.NewRegistry("downloader"),
@@ -356,7 +356,7 @@ func TestAuthURL_NilDep503(t *testing.T) {
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Search:     registry.NewRegistry("search"),
 		Downloader: registry.NewRegistry("downloader"),
@@ -470,7 +470,7 @@ func TestNowPlaying_NilDep503(t *testing.T) {
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Search:     registry.NewRegistry("search"),
 		Downloader: registry.NewRegistry("downloader"),

@@ -13,7 +13,7 @@ import (
 func TestLibraryStatus_ReportsSupervisorState(t *testing.T) {
 	srv, cookie := libTestServer(t, &fakeLibrary{})
 	// Rebuild with LibraryStatus closure, reusing auth from libTestServer.
-	srv2 := NewServer(Deps{
+	srv2 := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:          srv.deps.Auth,
 		Library:       &fakeLibrary{},
 		Search:        srv.deps.Search,
@@ -61,7 +61,7 @@ func TestLibraryStatus_FallbackNoLibrary(t *testing.T) {
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Library:    nil,
 		Search:     registry.NewRegistry("search"),

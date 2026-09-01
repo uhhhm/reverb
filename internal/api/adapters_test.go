@@ -34,7 +34,7 @@ func downloaderTestServer(t *testing.T) (*Server, *http.Cookie) {
 	dlReg.Register("spotdl", func() registry.Plugin { return spotdl.New() })
 	dlReg.Register("lidarr", func() registry.Plugin { return lidarr.New() })
 
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Adapters:   st.Q(),
 		Search:     registry.NewRegistry("search"),

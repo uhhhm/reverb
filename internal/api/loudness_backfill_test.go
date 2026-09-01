@@ -51,7 +51,7 @@ func backfillServer(t *testing.T, lib *pagedLibrary) (*Server, *store.Store, *ht
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:     authSvc,
 		Library:  lib,
 		Loudness: st.Q(),
@@ -147,7 +147,7 @@ func TestBackfillUnavailableWithoutLocalFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{Auth: authSvc, Library: &fakeLibrary{}, Loudness: st.Q()})
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts, Auth: authSvc, Library: &fakeLibrary{}, Loudness: st.Q()})
 	cookie := &http.Cookie{Name: sessionCookie, Value: tok}
 
 	if rec := do(t, srv, cookie, http.MethodPost, "/api/v1/library/loudness/backfill", ""); rec.Code != http.StatusServiceUnavailable {

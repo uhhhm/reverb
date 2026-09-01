@@ -37,7 +37,7 @@ func libTestServerWithEntitiesAndCovers(t *testing.T, lib library.LibraryAdapter
 	}
 	authSvc, tok := seededAuthToken(t, st)
 	coverDir := t.TempDir()
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Library:    lib,
 		Search:     registry.NewRegistry("search"),
@@ -390,7 +390,7 @@ func TestBatchRenamePartialFailure(t *testing.T) {
 			"ar1": {ID: "ar1", Name: "Artist"},
 		},
 	}
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Library:    lib,
 		Search:     registry.NewRegistry("search"),
@@ -491,7 +491,7 @@ func TestRenameEndpointsReturn503WhenUnavailable(t *testing.T) {
 	t.Cleanup(func() { st.Close() })
 	_ = st.Migrate()
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Library:    &batchLib{},
 		Search:     registry.NewRegistry("search"),
@@ -520,7 +520,7 @@ func TestRenameEndpointsReturn503WhenUnavailable(t *testing.T) {
 	}
 
 	// Nil Overrides also -> 503
-	srv2 := NewServer(Deps{
+	srv2 := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Library:    &batchLib{},
 		Search:     registry.NewRegistry("search"),
@@ -542,7 +542,7 @@ func TestCoverEndpointsReturn503WhenUnavailable(t *testing.T) {
 	t.Cleanup(func() { st.Close() })
 	_ = st.Migrate()
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Library:    &batchLib{},
 		Search:     registry.NewRegistry("search"),
@@ -836,7 +836,7 @@ func TestCoverServeWithNoCoversConfiguredFallsThrough(t *testing.T) {
 	t.Cleanup(func() { st.Close() })
 	_ = st.Migrate()
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Library:    &batchLib{},
 		Search:     registry.NewRegistry("search"),

@@ -68,7 +68,7 @@ func adapterTestServer(t *testing.T, opts adapterServerOpts) (*Server, *http.Coo
 		return &fakeAdapter{typ: "search", name: "fake", testErr: opts.testErr}
 	})
 
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:        authSvc,
 		Adapters:    st.Q(),
 		Search:      searchReg,
@@ -93,6 +93,12 @@ func seededAuthToken(t *testing.T, st *store.Store) (*auth.Service, string) {
 }
 
 // newTestServer builds a minimal Server backed by a fresh migrated+seeded store.
+// testAllowedHosts lets test requests past hostGuard: httptest.NewRequest
+// defaults Host to example.com, which the guard rejects on every mutation.
+// hostguard_test.go covers the guard itself; everywhere else it just needs to
+// stay out of the way.
+var testAllowedHosts = []string{"example.com"}
+
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	st, err := store.Open(t.TempDir() + "/api.db")
@@ -107,7 +113,7 @@ func newTestServer(t *testing.T) *Server {
 	if err := authSvc.EnsureSeed(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	return NewServer(Deps{
+	return NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Search:     registry.NewRegistry("search"),
 		Downloader: registry.NewRegistry("downloader"),

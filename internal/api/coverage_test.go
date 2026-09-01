@@ -111,7 +111,7 @@ func coverageTestServer(t *testing.T, cov CoverageService, mgr DownloadManager) 
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Coverage:   cov,
 		Downloads:  mgr,

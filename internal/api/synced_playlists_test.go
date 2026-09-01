@@ -149,7 +149,7 @@ func syncTestServerWithDataDir(t *testing.T, svc SyncService, dataDir string) (*
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:          authSvc,
 		Sync:          svc,
 		PlaylistOwner: st.Q(),
@@ -180,7 +180,7 @@ func realSyncServer(t *testing.T) *Server {
 	now := func() int64 { return time.Now().Unix() }
 	// src/match/dl/lib are nil: CreateManaged + List only touch the store.
 	svc := playlistsync.NewService(nil, nil, nil, syncStore, nil, now, uuid.NewString, nil)
-	return NewServer(Deps{
+	return NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:          authSvc,
 		Sync:          svc,
 		PlaylistOwner: st.Q(),

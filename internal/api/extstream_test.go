@@ -54,7 +54,7 @@ func extStreamServer(t *testing.T, ext ExternalStreamResolver) (*Server, *http.C
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:           authSvc,
 		Search:         registry.NewRegistry("search"),
 		Downloader:     registry.NewRegistry("downloader"),

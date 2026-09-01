@@ -137,6 +137,10 @@ type Deps struct {
 	Reload        ServiceReloader
 	Dev           bool
 	Desktop       bool
+	// AllowedHosts are the extra Host values hostGuard accepts beyond loopback.
+	// A reverse proxy forwards its own public hostname, which is not loopback
+	// and cannot be inferred from the bind address, so it has to be named here.
+	AllowedHosts []string
 	// LocalAPIPort is the port of the plain 127.0.0.1 HTTP listener, published to
 	// the SPA as window.__REVERB_PORT__. Set it only when the page is served over
 	// a transport that cannot carry a WebSocket (the Wails AssetServer); 0 means
@@ -376,6 +380,7 @@ func (s *Server) Handler() http.Handler { return s.router }
 func (s *Server) routes() {
 	s.router.Use(middleware.Recoverer)
 	s.router.Use(s.securityHeaders)
+	s.router.Use(s.hostGuard)
 
 	s.router.Route("/api/v1", func(r chi.Router) {
 		// Reject cross-origin state-changing requests. The browser UI is implicitly

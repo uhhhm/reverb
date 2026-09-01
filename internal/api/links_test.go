@@ -46,7 +46,7 @@ func linkTestServer(t *testing.T, mgr DownloadManager) (*Server, *store.Store, *
 	linkAddSvc := linkadd.New(st.Q(), syncStore, mgr, linkadd.WithDeviceID(func(ctx context.Context) (string, error) {
 		return reverbsync.ServerDeviceID(ctx, st.Q())
 	}))
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:          authSvc,
 		Downloads:     mgr,
 		Search:        registry.NewRegistry("search"),

@@ -35,7 +35,7 @@ func trackSyncServer(t *testing.T) (*Server, *store.Store, *http.Cookie) {
 		t.Fatal(err)
 	}
 	_, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:         authSvc,
 		Search:       registry.NewRegistry("search"),
 		Downloader:   registry.NewRegistry("downloader"),

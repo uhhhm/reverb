@@ -30,7 +30,7 @@ func TestMe(t *testing.T) {
 }
 
 func TestHealth(t *testing.T) {
-	srv := NewServer(Deps{})
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
 	srv.Handler().ServeHTTP(rec, req)

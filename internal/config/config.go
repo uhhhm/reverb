@@ -29,7 +29,13 @@ type Config struct {
 	// access boundary, and widening it must be a deliberate act rather than a
 	// default someone inherits.
 	AllowNetworkAccess bool
-	Dev                bool
+	// AllowedHosts are extra Host header values the API accepts beyond
+	// loopback. Reverb rejects a state-changing request whose Host is neither,
+	// which is what stops a DNS-rebinding page from driving the API as the
+	// owner. A reverse proxy forwards its own public hostname, so that name has
+	// to be listed here for the proxied deployment to work.
+	AllowedHosts []string
+	Dev          bool
 	// UpdateRepo is the GitHub "owner/name" polled for releases. Empty
 	// disables update checks entirely (REVERB_UPDATE_REPO=off).
 	UpdateRepo string
@@ -72,6 +78,9 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	if v := getenv("REVERB_ALLOW_NETWORK_ACCESS"); v == "1" || strings.EqualFold(v, "true") {
 		c.AllowNetworkAccess = true
 	}
+	if v := getenv("REVERB_ALLOWED_HOSTS"); v != "" {
+		c.AllowedHosts = splitHosts(v)
+	}
 	if getenv("REVERB_DEV") == "1" {
 		c.Dev = true
 	}
@@ -87,11 +96,14 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	fs.IntVar(&c.P2PPort, "p2p-port", c.P2PPort, "libp2p listen port (0 picks a random port)")
 	fs.BoolVar(&c.AllowNetworkAccess, "allow-network-access", c.AllowNetworkAccess,
 		"permit a non-loopback --bind, accepting that the API has no authentication")
+	hosts := fs.String("allowed-hosts", strings.Join(c.AllowedHosts, ","),
+		"comma-separated Host values to accept besides loopback (for a reverse proxy's public hostname)")
 	fs.BoolVar(&c.Dev, "dev", c.Dev, "dev mode (proxy Vite)")
 	fs.StringVar(&c.UpdateRepo, "update-repo", c.UpdateRepo, `GitHub owner/name to check for updates ("off" disables)`)
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
+	c.AllowedHosts = splitHosts(*hosts)
 	if c.UpdateRepo == "off" {
 		c.UpdateRepo = ""
 	}
@@ -108,4 +120,15 @@ func normalizeBindAddr(addr string) string {
 		return addr[1 : len(addr)-1]
 	}
 	return addr
+}
+
+// splitHosts parses a comma-separated host list, dropping empties and spaces.
+func splitHosts(v string) []string {
+	var out []string
+	for _, h := range strings.Split(v, ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			out = append(out, h)
+		}
+	}
+	return out
 }

@@ -38,6 +38,15 @@ type wsEnvelope struct {
 // single local user). It returns (unsubscribing + closing) when the client
 // disconnects or ctx is done.
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
+	// The upgrade is a GET, so hostGuard does not see it, but coder/websocket's
+	// same-origin check has the same blind spot csrfGuard does: under DNS
+	// rebinding Origin and Host agree and the check passes. Without this a
+	// visited page could read the live event stream. Dev and the desktop window
+	// are cross-origin by construction and handled below.
+	if !s.deps.Dev && !s.hostAllowed(r.Host) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "host not allowed"})
+		return
+	}
 	if s.deps.Events == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "events unavailable"})
 		return

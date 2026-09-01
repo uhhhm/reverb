@@ -114,6 +114,14 @@ mapping is the real exposure decision.
 Syncing between your own devices does not need a widened bind: it runs over
 libp2p on its own port (`--p2p-port`) and admits only paired peers.
 
+Binding to loopback is not on its own enough, because a web page the user visits
+can reach loopback too: with DNS rebinding, a page on `evil.example` can point
+that name at `127.0.0.1` and send requests whose `Origin` and `Host` agree, which
+is all the same-origin check compares. Reverb therefore also rejects any
+state-changing request whose `Host` is neither loopback nor named in
+`--allowed-hosts`. Behind a reverse proxy, set `--allowed-hosts` to the public
+hostname the proxy forwards, or writes through the proxy return 403.
+
 ## Configuration reference
 
 Reverb is configured by flags, environment variables, and the in-app Settings UI.
@@ -129,6 +137,7 @@ Reverb is configured by flags, environment variables, and the in-app Settings UI
 | `--bind` | `127.0.0.1` | Interface to bind; `0.0.0.0` exposes Reverb to the network (see the warning under `REVERB_BIND`) |
 | `--p2p-port` | `4331` | libp2p listen port for device-to-device sync; `0` picks a random one |
 | `--allow-network-access` | `false` | Permit a non-loopback `--bind`. Without it Reverb refuses to start on one |
+| `--allowed-hosts` | *(empty)* | Comma-separated `Host` values to accept besides loopback. Required when a reverse proxy forwards its own public hostname |
 | `--update-repo` | `uhhhm/reverb` | GitHub `owner/name` checked for new releases; `off` disables update checks |
 
 ### Environment variables
@@ -138,6 +147,7 @@ Reverb is configured by flags, environment variables, and the in-app Settings UI
 | `REVERB_PORT` | HTTP listen port (same as `--port`); defaults to `8090` |
 | `REVERB_BIND` | Interface to bind (same as `--bind`); defaults to `127.0.0.1`. Reverb authenticates every request as the household owner, so a listener reachable from the network hands that identity to anyone who can route to it. Widen it only behind an authenticating proxy. The Docker image sets `0.0.0.0` because the container's port mapping is the real exposure decision. |
 | `REVERB_P2P_PORT` | libp2p listen port (same as `--p2p-port`); defaults to `4331`. Fixed rather than random so a peer address entered on another device stays valid across restarts. If the port is taken, Reverb logs a warning and falls back to a random port. Unlike the HTTP API this listener is meant to be reachable from your other devices; it admits only peers that have completed a pairing exchange. |
+| `REVERB_ALLOWED_HOSTS` | Comma-separated `Host` header values the API accepts besides loopback (same as `--allowed-hosts`). Reverb rejects a state-changing request whose `Host` is neither loopback nor listed, which is what stops a DNS-rebinding page from driving the API as the owner. Set this to the public hostname when a reverse proxy fronts Reverb, or proxied writes return 403. A non-loopback `--bind` is accepted automatically and does not need listing. |
 | `REVERB_ALLOW_NETWORK_ACCESS=1` | Permit a non-loopback `REVERB_BIND` (same as `--allow-network-access`). Reverb refuses to start on a non-loopback bind without it. Set it only when an authenticating proxy fronts the API, or in a container where the port mapping is the real boundary. |
 | `REVERB_DB` | SQLite path (same as `--db`); the Docker image defaults this to `/data/reverb.db` |
 | `REVERB_DEV=1` | Enable dev mode |

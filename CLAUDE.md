@@ -90,7 +90,7 @@ Library modes (`internal/library/embedded`): **built-in** bundles Navidrome as a
 - `internal/api` — chi handlers, OpenAPI at `/api/v1/openapi.yaml` (keep in sync), `embed.go` embeds SPA.
 - `internal/auth` + `internal/api/roles.go` — a single household owner (`local`, holding every capability) is the intended end state, not a stopgap. There are no accounts, no login and no sessions: the HTTP API is loopback-only (Reverb refuses a non-loopback bind without `--allow-network-access`) and the transport is the access boundary, so `requireAuth` fabricating the owner for every request is correct. Paired devices authenticate separately — Bearer tokens on `/sync`, libp2p peer identity on P2P. The capability gates (`can_manage_library`, etc.) are therefore never denials in practice; they document intent. Per-user columns from migration 0013 are inert by design.
 
-  `csrfGuard` (`internal/api/security.go`) stays: with no session cookie it is tempting to think CSRF is impossible, but reaching the loopback port *is* the ambient credential, so a page in the user's browser could otherwise POST to Reverb as the owner. The Origin check is the only thing stopping it.
+  `csrfGuard` (`internal/api/security.go`) stays: with no session cookie it is tempting to think CSRF is impossible, but reaching the loopback port *is* the ambient credential, so a page in the user's browser could otherwise POST to Reverb as the owner. `hostGuard` sits beside it because the Origin check alone cannot see a DNS-rebinding page, which controls `Origin` and `Host` together and makes them agree; it rejects a mutation whose `Host` is neither loopback nor in `Deps.AllowedHosts`. Both exempt Bearer-token `/sync` calls, which no page can forge without CORS.
 
 ### Frontend (`web/`)
 

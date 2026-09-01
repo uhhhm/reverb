@@ -169,3 +169,51 @@ func TestP2PPortDefaultsFixed(t *testing.T) {
 		t.Errorf("P2PPort = %d, want 0", c.P2PPort)
 	}
 }
+
+func TestAllowedHostsDefaultsEmpty(t *testing.T) {
+	c, err := Load(nil, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.AllowedHosts) != 0 {
+		t.Errorf("AllowedHosts = %v, want empty; loopback is allowed without configuration", c.AllowedHosts)
+	}
+}
+
+func TestAllowedHostsFlagAndEnv(t *testing.T) {
+	c, err := Load([]string{"--allowed-hosts", "music.example.com, reverb.local "}, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.AllowedHosts) != 2 || c.AllowedHosts[0] != "music.example.com" || c.AllowedHosts[1] != "reverb.local" {
+		t.Errorf("AllowedHosts = %v, want the two hosts trimmed", c.AllowedHosts)
+	}
+
+	c, err = Load(nil, func(k string) string {
+		if k == "REVERB_ALLOWED_HOSTS" {
+			return "a.example,b.example"
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.AllowedHosts) != 2 {
+		t.Errorf("REVERB_ALLOWED_HOSTS = %v, want 2 hosts", c.AllowedHosts)
+	}
+}
+
+func TestAllowedHostsFlagWinsOverEnv(t *testing.T) {
+	c, err := Load([]string{"--allowed-hosts", "flag.example"}, func(k string) string {
+		if k == "REVERB_ALLOWED_HOSTS" {
+			return "env.example"
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.AllowedHosts) != 1 || c.AllowedHosts[0] != "flag.example" {
+		t.Errorf("AllowedHosts = %v, want [flag.example]", c.AllowedHosts)
+	}
+}

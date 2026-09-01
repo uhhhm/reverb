@@ -44,7 +44,7 @@ func statsTestServer(t *testing.T) (*Server, *http.Cookie, string, *play.Service
 	playSvc := play.NewService(q, catalogSvc, time.Now, idgen)
 	statsSvc := play.NewStats(q)
 
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Search:     registry.NewRegistry("search"),
 		Downloader: registry.NewRegistry("downloader"),
@@ -575,7 +575,7 @@ func TestStatsNilServiceReturns503(t *testing.T) {
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Search:     registry.NewRegistry("search"),
 		Downloader: registry.NewRegistry("downloader"),

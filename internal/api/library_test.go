@@ -100,7 +100,7 @@ func libTestServer(t *testing.T, lib *fakeLibrary) (*Server, *http.Cookie) {
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Library:    lib,
 		Search:     registry.NewRegistry("search"),
@@ -217,7 +217,7 @@ func TestCreatePlaylistHandlerNoSyncService(t *testing.T) {
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Search:     registry.NewRegistry("search"),
 		Downloader: registry.NewRegistry("downloader"),
@@ -236,7 +236,7 @@ func TestPlaylistMutationsReturn503WhenNoLibrary(t *testing.T) {
 	_ = st.Migrate()
 	authSvc, tok := seededAuthToken(t, st)
 	// No sync service — POST /playlists returns 503 (sync unavailable).
-	srv := NewServer(Deps{Auth: authSvc, Library: nil,
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts, Auth: authSvc, Library: nil,
 		Search: registry.NewRegistry("search"), Downloader: registry.NewRegistry("downloader")})
 	cookie := &http.Cookie{Name: sessionCookie, Value: tok}
 
@@ -251,7 +251,7 @@ func TestLibraryNilAdapterReturns503(t *testing.T) {
 	t.Cleanup(func() { st.Close() })
 	_ = st.Migrate()
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{Auth: authSvc, Library: nil,
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts, Auth: authSvc, Library: nil,
 		Search: registry.NewRegistry("search"), Downloader: registry.NewRegistry("downloader")})
 	rec := doAuthed(t, srv, http.MethodGet, "/api/v1/library/search?q=x", &http.Cookie{Name: sessionCookie, Value: tok})
 	if rec.Code != http.StatusServiceUnavailable {
@@ -295,7 +295,7 @@ func libTestServerWithOverrides(t *testing.T, lib *fakeLibrary) (*Server, *http.
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Library:    lib,
 		Search:     registry.NewRegistry("search"),

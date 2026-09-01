@@ -36,7 +36,7 @@ func newSyncTestServer(t *testing.T) (*Server, *store.Store, string) {
 	}
 	pairing := syncpkg.NewPairingService(st.Q())
 	syncStore := syncpkg.NewSyncStore(st.Q())
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:         authSvc,
 		Search:       registry.NewRegistry("search"),
 		Downloader:   registry.NewRegistry("downloader"),
@@ -357,7 +357,7 @@ func TestSyncAPI(t *testing.T) {
 		_ = st.Migrate()
 		authSvc := auth.NewService(st.Q(), time.Now)
 		_ = authSvc.EnsureSeed(context.Background())
-		srv := NewServer(Deps{
+		srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 			Auth:       authSvc,
 			Search:     registry.NewRegistry("search"),
 			Downloader: registry.NewRegistry("downloader"),

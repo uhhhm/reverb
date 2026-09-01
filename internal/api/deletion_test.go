@@ -46,7 +46,7 @@ func newDeletionServer(t *testing.T) (*Server, *store.Store) {
 	syncWStore := wiring.NewSyncStore(st.Q())
 	svc := playlistsync.NewService(nil, nil, nil, syncWStore, nil, func() int64 { return time.Now().Unix() }, uuid.NewString, nil)
 	deletionSvc := syncpkg.NewDeletionService(syncStore, st.Q())
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:          authSvc,
 		Sync:          svc,
 		PlaylistOwner: st.Q(),

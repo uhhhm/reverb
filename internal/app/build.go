@@ -62,6 +62,9 @@ type Options struct {
 	// entered on another device survives a restart; 0 picks a random port.
 	P2PPort int
 	Dev     bool
+	// AllowedHosts are extra Host header values the API accepts beyond
+	// loopback; see api.Deps.AllowedHosts.
+	AllowedHosts []string
 	// Desktop marks the Wails build, which the SPA uses to enable desktop-only
 	// affordances.
 	Desktop bool
@@ -248,6 +251,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		ConfigDirty:   dirty,
 		Reload:        reloader,
 		Dev:           opts.Dev,
+		AllowedHosts:  opts.AllowedHosts,
 		Desktop:       opts.Desktop,
 		Version:       opts.Version,
 		UpdateRepo:    opts.UpdateRepo,

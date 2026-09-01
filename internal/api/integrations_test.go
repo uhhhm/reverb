@@ -22,7 +22,7 @@ func buildIntegrationServer(t *testing.T) (*Server, *http.Cookie, *store.Store) 
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:     authSvc,
 		Adapters: st.Q(),
 	})

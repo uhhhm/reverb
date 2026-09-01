@@ -40,7 +40,7 @@ func newOfflineServer(t *testing.T) (*Server, *store.Store) {
 	}
 	_ = st.Q().UpsertSetting(context.Background(), db.UpsertSettingParams{Key: "server_device_id", Value: "dev_server"})
 
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Search:     registry.NewRegistry("search"),
 		Downloader: registry.NewRegistry("downloader"),
@@ -311,7 +311,7 @@ func TestOfflineSetDeviceFallback(t *testing.T) {
 	// intentionally NOT setting server_device_id
 	createPlaylistAPI(t, st, "pl1", "Fallback Playlist")
 
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Search:     registry.NewRegistry("search"),
 		Downloader: registry.NewRegistry("downloader"),

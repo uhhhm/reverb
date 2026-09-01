@@ -20,6 +20,12 @@ services:
       # has no authentication of its own. In a container the bind is not the
       # boundary -- the port mapping is -- so the acknowledgement belongs here.
       REVERB_ALLOW_NETWORK_ACCESS: "1"
+      # Hostnames you browse Reverb by. Reverb accepts a state-changing request
+      # only when its Host is loopback or listed here, which is what stops a
+      # DNS-rebinding page from driving the API. Browsing by localhost works
+      # unlisted; anything else (a LAN name, a proxy's public hostname) must be
+      # added or writes return 403.
+      # REVERB_ALLOWED_HOSTS: "nas.local,music.example.com"
       REVERB_ADMIN_PASSWORD: ${REVERB_ADMIN_PASSWORD:-}
       REVERB_SPOTIFY_CLIENT_ID: ${REVERB_SPOTIFY_CLIENT_ID:-}
       REVERB_SPOTIFY_CLIENT_SECRET: ${REVERB_SPOTIFY_CLIENT_SECRET:-}

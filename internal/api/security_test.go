@@ -24,7 +24,7 @@ func postWithOrigin(t *testing.T, srv *Server, path, origin, host, body string) 
 
 func TestCSRFBlocksCrossOrigin(t *testing.T) {
 	srv := newTestServer(t)
-	rr := postWithOrigin(t, srv, "/api/v1/downloads/pause", "http://evil.example", "reverb.local", "")
+	rr := postWithOrigin(t, srv, "/api/v1/downloads/pause", "http://evil.example", "example.com", "")
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("cross-origin POST = %d, want 403", rr.Code)
 	}
@@ -35,7 +35,7 @@ func TestCSRFAllowsSameOrigin(t *testing.T) {
 	// Same host in Origin and Host → passes the guard; the handler then runs
 	// (with no download manager wired it errors), so anything but 403 means the
 	// request was not blocked at the guard.
-	rr := postWithOrigin(t, srv, "/api/v1/downloads/pause", "http://reverb.local", "reverb.local", "")
+	rr := postWithOrigin(t, srv, "/api/v1/downloads/pause", "http://example.com", "example.com", "")
 	if rr.Code == http.StatusForbidden {
 		t.Fatalf("same-origin POST was blocked (%d); should reach the handler", rr.Code)
 	}
@@ -44,7 +44,7 @@ func TestCSRFAllowsSameOrigin(t *testing.T) {
 func TestCSRFAllowsMissingOrigin(t *testing.T) {
 	srv := newTestServer(t)
 	// No Origin/Referer (curl / native client) → not a CSRF vector → allowed through.
-	rr := postWithOrigin(t, srv, "/api/v1/downloads/pause", "", "reverb.local", "")
+	rr := postWithOrigin(t, srv, "/api/v1/downloads/pause", "", "example.com", "")
 	if rr.Code == http.StatusForbidden {
 		t.Fatalf("origin-less POST was blocked (%d); should reach the handler", rr.Code)
 	}

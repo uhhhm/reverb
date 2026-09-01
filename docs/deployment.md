@@ -137,6 +137,7 @@ server {
 Before you expose Reverb beyond a trusted LAN:
 
 - **Put a TLS-terminating reverse proxy in front of it.** Reverb serves plain HTTP. The browser UI on the server is implicitly authenticated as the single household owner (`local`) with no password; never expose port 8090 directly. Paired devices authenticate separately: `/sync` via Bearer sync tokens issued from one-time pairing codes (`POST /pairing/code` → `POST /pairing/redeem`, `XXXX-XXXX`, 10 min TTL, single-use) and P2P via libp2p peer IDs bound at pairing (`p2p_peer` trust set, Ed25519 keys). Treat pairing codes and sync tokens like passwords — they grant full sync and `can_manage_library` access.
+- **Set `REVERB_ALLOWED_HOSTS` to the hostname the proxy forwards** (e.g. `music.example.com`). Reverb accepts a state-changing request only when its `Host` is loopback or listed here — the check that stops a DNS-rebinding page in the owner's browser from driving the API. Without it, every write through the proxy returns 403 `host not allowed` while reads keep working.
 - **The proxy must set/overwrite `X-Forwarded-Proto`** so Reverb knows the original request was HTTPS. Caddy does this automatically; the nginx config above sets it explicitly (`proxy_set_header X-Forwarded-Proto $scheme;`).
 - Keep the data volume sensitive — see [Secrets at rest](#secrets-at-rest).
 

@@ -184,7 +184,7 @@ func trackQualityServer(t *testing.T, mgr DownloadManager) (*Server, *http.Cooki
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:         authSvc,
 		Downloads:    mgr,
 		Search:       registry.NewRegistry("search"),

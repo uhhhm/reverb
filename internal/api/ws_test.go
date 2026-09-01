@@ -29,7 +29,7 @@ func wsTestServer(t *testing.T) (*httptest.Server, *events.Bus, string) {
 	}
 	authSvc, tok := seededAuthToken(t, st)
 	bus := events.New()
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Events:     bus,
 		Search:     registry.NewRegistry("search"),
@@ -130,7 +130,7 @@ func wsDesktopServer(t *testing.T) *httptest.Server {
 		t.Fatal(err)
 	}
 	authSvc, _ := seededAuthToken(t, st)
-	srv := NewServer(Deps{
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,
 		Events:     events.New(),
 		Search:     registry.NewRegistry("search"),

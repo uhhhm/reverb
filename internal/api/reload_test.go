@@ -43,7 +43,7 @@ func TestReloadSwapsDownloadsAndStopsOld(t *testing.T) {
 	newSnc := &fakeSync{}
 
 	rl := &fakeReloader{dl: newMgr, cov: newCov, snc: newSnc}
-	srv := NewServer(Deps{Downloads: oldMgr, Reload: rl})
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts, Downloads: oldMgr, Reload: rl})
 
 	if srv.downloads() != DownloadManager(oldMgr) {
 		t.Fatal("expected the old manager before reload")
@@ -77,7 +77,7 @@ func TestReloadNilDownloadsDoesNotPanic(t *testing.T) {
 	// live downloads becomes a genuine nil interface (handlers see 503/empty).
 	oldMgr := newStoppableManager()
 	rl := &fakeReloader{dl: nil}
-	srv := NewServer(Deps{Downloads: oldMgr, Reload: rl})
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts, Downloads: oldMgr, Reload: rl})
 
 	if err := srv.reload(context.Background()); err != nil {
 		t.Fatal(err)
@@ -92,7 +92,7 @@ func TestReloadNilDownloadsDoesNotPanic(t *testing.T) {
 
 func TestReloadNoReloaderIsNoop(t *testing.T) {
 	oldMgr := newStoppableManager()
-	srv := NewServer(Deps{Downloads: oldMgr})
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts, Downloads: oldMgr})
 	if err := srv.reload(context.Background()); err != nil {
 		t.Fatal(err)
 	}

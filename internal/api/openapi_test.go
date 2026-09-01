@@ -8,7 +8,7 @@ import (
 )
 
 func TestServesOpenAPI(t *testing.T) {
-	srv := NewServer(Deps{})
+	srv := NewServer(Deps{AllowedHosts: testAllowedHosts})
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/openapi.yaml", nil))
 	if rec.Code != http.StatusOK {

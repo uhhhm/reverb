@@ -45,9 +45,9 @@ func doUpdateReq(t *testing.T, srv *Server, method, path string) *httptest.Respo
 	t.Helper()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(method, path, strings.NewReader(""))
-	req.Host = "reverb.local"
+	req.Host = "example.com"
 	if method != http.MethodGet {
-		req.Header.Set("Origin", "http://reverb.local")
+		req.Header.Set("Origin", "http://example.com")
 	}
 	srv.Handler().ServeHTTP(rec, req)
 	return rec
