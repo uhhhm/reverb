@@ -899,6 +899,31 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 			return nil, 0, nil, nil, err
 		}
 	}
+	// Refuse changes whose HLC is too far ahead of local wall time before
+	// anything observes or stores them. A stored row keeps the HLC the peer
+	// sent -- it is covered by the signature, so it cannot be rewritten on the
+	// way in -- and PickWinner compares stored HLCs, so accepting one row from
+	// a device with a broken clock would let it win every later conflict on
+	// that field permanently. Rejecting costs that one edit; accepting costs
+	// the field.
+	s.ensureHLC(ctx)
+	kept := make([]SyncChange, 0, len(inbound))
+	var drifted int
+	for _, inc := range inbound {
+		if inc.HLC != 0 && !s.hlc.withinDrift(inc.HLC) {
+			rejected = append(rejected, inc)
+			drifted++
+			continue
+		}
+		kept = append(kept, inc)
+	}
+	if drifted > 0 {
+		// Say so loudly: the edits are dropped, and the cause is a clock on the
+		// sending device rather than anything the user did here.
+		log.Printf("WARNING: sync: refused %d change(s) from %q dated more than %s ahead of "+
+			"local time; check that device's clock", drifted, deviceID, maxHLCDrift)
+	}
+	inbound = kept
 	// Observe inbound HLCs to advance clock (P2P). Single pass before processing.
 	for _, inc := range inbound {
 		if inc.HLC != 0 {
