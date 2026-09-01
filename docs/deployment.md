@@ -234,6 +234,14 @@ The app is unsigned. On first launch right-click the `.app` / `.zip` → **Open*
 
 ### Auto-update
 
-The desktop polls GitHub Releases (`GET /repos/<owner>/<name>/releases/latest`) on startup and every 6 h (stable channel only). The repository defaults to `uhhhm/reverb` and is set with `REVERB_UPDATE_REPO` / `--update-repo`; `off` disables the check (both the desktop poller and the web UI banner — `/api/v1/version` then reports an empty `updateRepo`). When a newer semver tag is found the UI shows an update banner; confirming replaces the binary in-place via `go-selfupdate` and restarts. `yt-dlp` is hot-upgraded separately every 24 h via `pip install --upgrade yt-dlp` without an app restart.
+The desktop polls GitHub Releases (`GET /repos/<owner>/<name>/releases/latest`) on startup and every 6 h (stable channel only). The repository defaults to `uhhhm/reverb` and is set with `REVERB_UPDATE_REPO` / `--update-repo`; `off` disables the check entirely. The request is unauthenticated, so the repository must be public.
+
+When a newer semver tag is found, the asset for this `GOOS/GOARCH` is downloaded to `<dataDir>/updates/` in the background and left there. Nothing is installed at that point: the app shows a prompt offering **Restart now** or **Later**, and "Later" keeps the download so accepting it afterwards is instant. A staged update survives restarts — it is offered again until it is installed or a newer one replaces it.
+
+`POST /api/v1/update/install` is the only path that touches the binary. It renames the running executable to `<exe>.old`, moves the downloaded build into place, spawns it, and quits — the successor waits for the old process to exit (via `<dataDir>/updates/relaunch`) before opening the database or starting the bundled Navidrome, and clears the leftovers once it is up. Before any of that, the payload is re-hashed against the digest recorded at download time and checked for a plausible executable header, so a truncated or corrupted download cannot be swapped over a working binary. A `.deb` asset is refused: installing one needs root.
+
+Transport security is HTTPS to GitHub plus that digest; release artifacts are not signed, and replacing the binary inside a macOS `.app` invalidates the bundle's code signature.
+
+Server/Docker builds wire no updater — the update endpoints report 503 there, and the image tag is the update mechanism. `yt-dlp` is hot-upgraded separately every 24 h via `pip install --upgrade yt-dlp` without an app restart.
 
 CI builds `reverb-desktop-$VERSION-$GOOS-$GOARCH.{zip,deb,AppImage}` via `.github/workflows/desktop.yml` (matrix `macos-14` + `ubuntu-22.04` × `amd64`/`arm64`, `wails build -platform $GOOS/$GOARCH -ldflags "-X main.version=$TAG"`).

@@ -146,6 +146,9 @@ type Deps struct {
 	// UpdateRepo is the GitHub "owner/name" the UI polls for releases.
 	// Empty disables the in-app update banner.
 	UpdateRepo string
+	// Update backs the desktop self-update endpoints. Nil in server builds,
+	// where the endpoints report that updates are unavailable.
+	Update UpdateService
 	// DataDir is the directory where Reverb persists app data (same dir as the
 	// SQLite DB). Used by the playlist-cover upload handler. When empty, cover
 	// uploads are unavailable.
@@ -385,6 +388,10 @@ func (s *Server) routes() {
 		r.Get("/health", s.handleHealth)
 		r.Get("/openapi.yaml", s.handleOpenAPI)
 		r.Get("/version", s.handleVersion)
+		r.Get("/update", s.handleUpdateStatus)
+		r.Post("/update/check", s.handleUpdateCheck)
+		r.Post("/update/install", s.handleUpdateInstall)
+		r.Post("/update/dismiss", s.handleUpdateDismiss)
 
 		// pairing redeem is public (no auth) — laptop not yet paired.
 		r.Post("/pairing/redeem", s.handlePairingRedeem)

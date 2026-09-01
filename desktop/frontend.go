@@ -6,7 +6,17 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+// quitApp closes the window, which runs OnShutdown and exits the process. The
+// updater calls it after spawning the successor.
+func quitApp(app *App) {
+	if app == nil || app.ctx == nil {
+		return
+	}
+	wailsruntime.Quit(app.ctx)
+}
 
 // runApp opens the native window. The webview is served by the same
 // api.Server handler as the local HTTP listener, so the SPA and /api/v1 are

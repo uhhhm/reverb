@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/uhhhm/reverb/internal/core"
@@ -33,11 +34,25 @@ type settingsDTO struct {
 	AudioNormalization bool `json:"audioNormalization"`
 }
 
+// allowedThemes mirrors THEMES in web/src/lib/themes.ts. Each id needs a
+// matching [data-theme] block in web/src/index.css to have any effect.
 var allowedThemes = map[string]bool{
 	"default-dark":         true,
+	"light":                true,
 	"catppuccin-mocha":     true,
 	"catppuccin-macchiato": true,
 	"catppuccin-frappe":    true,
+}
+
+// themeChoices renders allowedThemes for the rejection message, so adding a
+// theme cannot leave the error listing a stale set.
+func themeChoices() string {
+	ids := make([]string, 0, len(allowedThemes))
+	for id := range allowedThemes {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return strings.Join(ids, ", ")
 }
 
 func (s *Server) currentSettings(r *http.Request) settingsDTO {
@@ -152,7 +167,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	if body.Theme != nil {
 		t := strings.TrimSpace(*body.Theme)
 		if !allowedThemes[t] {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "theme must be one of: default-dark, catppuccin-mocha, catppuccin-macchiato, catppuccin-frappe"})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "theme must be one of: " + themeChoices()})
 			return
 		}
 		if err := s.deps.Adapters.UpsertSetting(r.Context(), db.UpsertSettingParams{Key: keyTheme, Value: t}); err != nil {

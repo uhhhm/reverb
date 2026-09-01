@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/uhhhm/reverb/desktop/updater"
 	"github.com/uhhhm/reverb/internal/api"
 	"github.com/uhhhm/reverb/internal/app"
 )
@@ -24,6 +25,10 @@ type App struct {
 	// it via internal/app — the same construction the server binary uses — and
 	// hands ownership here; OnShutdown closes it.
 	runtime *app.Runtime
+	// updater polls for releases and installs them on request; nil when the
+	// running binary could not be located. dataDir is where it stages them.
+	updater *updater.Service
+	dataDir string
 }
 
 // NewApp creates a new desktop App.

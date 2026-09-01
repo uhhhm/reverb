@@ -13,6 +13,7 @@ import { CinemaView } from './CinemaView'
 import { LyricsView } from './lyrics/LyricsView'
 import { CommandPalette } from './CommandPalette'
 import { Toaster } from './ui/Toaster'
+import { UpdatePrompt } from './UpdatePrompt'
 import { Skeleton } from './ui/Skeleton'
 import { useRealtime } from '../lib/realtimeWiring'
 import { usePlayer, engine } from '../lib/playerStore'
@@ -170,6 +171,7 @@ export function AppShell() {
       <CinemaView />
       <LyricsView />
       <CommandPalette />
+      <UpdatePrompt />
       <Toaster />
     </div>
   )
