@@ -1,5 +1,7 @@
 import { describe, expect, it, beforeEach, vi, afterEach } from 'vitest'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { render as rtlRender, screen, fireEvent, act, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { api } from '../../lib/api'
 import { PlayerBar } from './PlayerBar'
 import { usePlayer, engine } from '../../lib/playerStore'
 import { useUI } from '../../lib/uiStore'
@@ -16,6 +18,13 @@ vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>()
   return { ...actual, useNavigate: () => mockNavigate }
 })
+
+// PlayerBar resolves the artist link through the query cache, so every render
+// needs a client. Retries off so a failed lookup surfaces immediately.
+function render(ui: React.ReactElement) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>)
+}
 
 function track(id: string): Track {
   return {
@@ -40,6 +49,7 @@ describe('PlayerBar (shell)', () => {
     act(() => {
       usePlayer.getState().playTrackList([track('1'), track('2')], 0)
       useUI.getState().closePanel()
+      useUI.getState().closeLyrics()
     })
   })
 
@@ -79,14 +89,44 @@ describe('PlayerBar (shell)', () => {
     expect(screen.getAllByText('Artist').length).toBeGreaterThan(0)
   })
 
-  it('clicking the artist name navigates to the source-qualified artist route', () => {
+  it('clicking the artist name navigates to the source-qualified artist route', async () => {
     mockNavigate.mockClear()
     render(<PlayerBar />)
     fireEvent.click(screen.getByRole('button', { name: 'Artist' }))
-    expect(mockNavigate).toHaveBeenCalledWith('/artist/library/ar')
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/artist/library/ar'))
   })
 
-  it('artist button navigates to /artist/spotify/:id when artistExternalId is set', () => {
+  // A track synthesised from a download job or a recently-played row carries the
+  // artist's name and no id, which used to leave the artist unlinked for most of
+  // what actually plays. The name is matched against the library's artist list.
+  it('artist button resolves an id-less artist by name against the library', async () => {
+    const idless: Track = { ...track('1'), artistId: '', artist: 'Boygenius' }
+    vi.spyOn(api, 'get').mockResolvedValue([
+      { id: 'ar-7', name: 'boygenius', coverArtId: '', albumCount: 2 },
+    ])
+    act(() => {
+      usePlayer.getState().playTrackList([idless], 0)
+    })
+    mockNavigate.mockClear()
+    render(<PlayerBar />)
+    fireEvent.click(screen.getByRole('button', { name: 'Boygenius' }))
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/artist/library/ar-7'))
+  })
+
+  it('artist button does not navigate when the name matches no library artist', async () => {
+    const idless: Track = { ...track('1'), artistId: '', artist: 'Nobody' }
+    vi.spyOn(api, 'get').mockResolvedValue([])
+    act(() => {
+      usePlayer.getState().playTrackList([idless], 0)
+    })
+    mockNavigate.mockClear()
+    render(<PlayerBar />)
+    fireEvent.click(screen.getByRole('button', { name: 'Nobody' }))
+    await new Promise((r) => setTimeout(r, 0))
+    expect(mockNavigate).not.toHaveBeenCalled()
+  })
+
+  it('artist button navigates to /artist/spotify/:id when artistExternalId is set', async () => {
     const trackWithExtId: Track = { ...track('1'), artistExternalId: 'ext-99' }
     act(() => {
       usePlayer.getState().playTrackList([trackWithExtId], 0)
@@ -94,17 +134,17 @@ describe('PlayerBar (shell)', () => {
     mockNavigate.mockClear()
     render(<PlayerBar />)
     fireEvent.click(screen.getByRole('button', { name: 'Artist' }))
-    expect(mockNavigate).toHaveBeenCalledWith('/artist/spotify/ext-99')
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/artist/spotify/ext-99'))
   })
 
-  it('artist button navigates to /artist/library/:id when no artistExternalId', () => {
+  it('artist button navigates to /artist/library/:id when no artistExternalId', async () => {
     act(() => {
       usePlayer.getState().playTrackList([track('1')], 0)
     })
     mockNavigate.mockClear()
     render(<PlayerBar />)
     fireEvent.click(screen.getByRole('button', { name: 'Artist' }))
-    expect(mockNavigate).toHaveBeenCalledWith('/artist/library/ar')
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/artist/library/ar'))
   })
 
   // --- transport button actions ---
@@ -189,6 +229,29 @@ describe('PlayerBar (shell)', () => {
     const button = screen.getByRole('button', { name: 'Lyrics' })
     fireEvent.click(button)
     expect(useUI.getState().lyricsOpen).toBe(true)
+  })
+
+  it('L toggles the lyrics view for the playing track', () => {
+    vi.mocked(useLyrics).mockReturnValue({ data: { synced: false, plain: 'la la la' } } as ReturnType<typeof useLyrics>)
+    render(<PlayerBar />)
+    fireEvent.keyDown(window, { key: 'l' })
+    expect(useUI.getState().lyricsOpen).toBe(true)
+    fireEvent.keyDown(window, { key: 'L' })
+    expect(useUI.getState().lyricsOpen).toBe(false)
+  })
+
+  // Cmd/Ctrl+L is the browser's address bar; the shortcut must not eat it.
+  it('L does nothing with a modifier held, or when the track has no lyrics', () => {
+    vi.mocked(useLyrics).mockReturnValue({ data: { synced: false, plain: 'la' } } as ReturnType<typeof useLyrics>)
+    const { unmount } = render(<PlayerBar />)
+    fireEvent.keyDown(window, { key: 'l', metaKey: true })
+    expect(useUI.getState().lyricsOpen).toBe(false)
+    unmount()
+
+    vi.mocked(useLyrics).mockReturnValue({ data: null } as ReturnType<typeof useLyrics>)
+    render(<PlayerBar />)
+    fireEvent.keyDown(window, { key: 'l' })
+    expect(useUI.getState().lyricsOpen).toBe(false)
   })
 
   it('hides the "Lyrics" button when useLyrics returns null', () => {
