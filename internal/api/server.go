@@ -368,9 +368,15 @@ func (s *Server) reload(ctx context.Context) error {
 	s.live.library, s.live.search, s.live.coverage, s.live.downloads, s.live.sync = lib, srch, cov, dl, snc
 	s.mu.Unlock()
 	// Stop the previous Manager only after the new one is swapped in, and never
-	// stop a nil or unchanged Manager.
+	// stop a nil or unchanged Manager. Stopping requeues whatever it was running,
+	// but the new Manager ran its recovery pass while the old one was still
+	// working, so nothing has re-dispatched those rows yet — hence the second
+	// pass here.
 	if old != nil && old != dl {
 		old.Stop()
+		if rd, ok := dl.(interface{ RedispatchQueued() }); ok {
+			rd.RedispatchQueued()
+		}
 	}
 	return nil
 }

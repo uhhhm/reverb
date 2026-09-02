@@ -3610,3 +3610,96 @@ func TestEnqueueSurvivesEnricherFailure(t *testing.T) {
 		t.Fatalf("job ISRC = %q, want empty", job.ISRC)
 	}
 }
+
+// Stop must not wait out the job timeout. A worker only checks stopCh between
+// jobs, so without cancelling the in-flight job Stop blocks for up to the
+// per-job timeout — a desktop quit that hangs with the single-instance lock
+// held, and an adapter save that hangs the HTTP request behind it.
+func TestStopCancelsInFlightDownloads(t *testing.T) {
+	dl := &fakeDL{name: "dl", canDownload: true, block: make(chan struct{})}
+	store := newMemStore()
+	m := NewManager(Config{Workers: 1, JobTimeout: time.Hour, DebounceWindow: time.Hour},
+		wrapDownloaders([]Downloader{dl}), store, events.New(), &fakeScanner{}, nil, nil, RealClock{}, nil, nil)
+	m.Start()
+
+	job, err := m.Enqueue(context.Background(), core.DownloadRequest{Source: "spotify", ExternalID: "e1", Artist: "A", Title: "T"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, store, job.ID, core.DownloadRunning)
+
+	done := make(chan struct{})
+	go func() { m.Stop(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop blocked on an in-flight download instead of cancelling it")
+	}
+
+	// The job did not fail and was not cancelled by the user: it goes back to
+	// queued so the next Manager's recovery pass re-dispatches it.
+	cur, _, _ := store.Get(context.Background(), job.ID)
+	if cur.Status != core.DownloadQueued {
+		t.Fatalf("job after shutdown = %q, want queued so it resumes", cur.Status)
+	}
+}
+
+// A user cancel is still a cancel — the shutdown path must not swallow it.
+func TestCancelStillMarksCanceled(t *testing.T) {
+	dl := &fakeDL{name: "dl", canDownload: true, block: make(chan struct{})}
+	store := newMemStore()
+	m := NewManager(Config{Workers: 1, JobTimeout: time.Hour, DebounceWindow: time.Hour},
+		wrapDownloaders([]Downloader{dl}), store, events.New(), &fakeScanner{}, nil, nil, RealClock{}, nil, nil)
+	t.Cleanup(m.Stop)
+	m.Start()
+
+	job, err := m.Enqueue(context.Background(), core.DownloadRequest{Source: "spotify", ExternalID: "e1", Artist: "A", Title: "T"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, store, job.ID, core.DownloadRunning)
+	if err := m.Cancel(context.Background(), job.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, store, job.ID, core.DownloadCanceled)
+}
+
+// The incoming Manager runs its recovery pass while the outgoing one is still
+// working, so the jobs Stop requeues need a second pass to reach a worker.
+func TestRedispatchQueuedResumesRequeuedJobs(t *testing.T) {
+	dl := &fakeDL{name: "dl", canDownload: true}
+	store := newMemStore()
+	m := NewManager(Config{Workers: 1, DebounceWindow: time.Hour},
+		wrapDownloaders([]Downloader{dl}), store, events.New(), &fakeScanner{}, nil, nil, RealClock{}, nil, nil)
+	t.Cleanup(m.Stop)
+
+	// A queued row left behind by the previous Manager, already past the point
+	// where this one's recovery pass would have seen it.
+	m.Start()
+	job := core.DownloadJob{ID: "left-over", Status: core.DownloadQueued, Source: "spotify",
+		ExternalID: "e1", Artist: "A", Title: "T", DownloaderName: "dl"}
+	req := core.DownloadRequest{Source: "spotify", ExternalID: "e1", Artist: "A", Title: "T"}
+	if err := store.Insert(context.Background(), job, req); err != nil {
+		t.Fatal(err)
+	}
+
+	m.RedispatchQueued()
+	waitForStatus(t, store, job.ID, core.DownloadCompleted)
+}
+
+func waitForStatus(t *testing.T, store JobStore, id string, want core.DownloadStatus) {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		cur, _, _ := store.Get(context.Background(), id)
+		if cur.Status == want {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("job %s never reached %q (last %q)", id, want, cur.Status)
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+}

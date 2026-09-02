@@ -248,6 +248,7 @@ type Manager struct {
 	wg       sync.WaitGroup
 	stopOnce sync.Once
 	stopCh   chan struct{}
+	stopping bool // set by Stop() before it cancels: a cancel from here is a shutdown, not the user
 	started  bool // set to true by Start(); guards Stop() against double-close on an unstarted Manager
 }
 
@@ -548,17 +549,40 @@ func (m *Manager) BackfillCanonicalIDs() {
 	}
 }
 
-// Stop signals workers to drain and waits for them. It ALSO cancels any pending
-// scan-debounce timer (and clears pending) so a real-clock test cannot have
-// runScan fire against fakes after the test ends. Idempotent.
+// stopGrace bounds how long Stop waits for cancelled workers to unwind.
+const stopGrace = 10 * time.Second
+
+// isStopping reports whether Stop has begun, so a cancelled job can tell a
+// shutdown from a user cancel.
+func (m *Manager) isStopping() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.stopping
+}
+
+// Stop signals workers to drain, aborts whatever is in flight, and waits for
+// them. It ALSO cancels any pending scan-debounce timer (and clears pending) so
+// a real-clock test cannot have runScan fire against fakes after the test ends.
+// Idempotent.
 //
-// Ordering rationale: close stopCh first so workers exit their select loops,
-// then wg.Wait() until every worker (and any scheduleScan it calls) has fully
-// finished, then cancel the debounce timer. This guarantees we cancel the
-// LAST timer armed by any worker — if we cancelled before Wait, a worker still
-// in process() could call scheduleScan() and re-arm a new timer after we
-// cleared it. No deadlock risk: wg.Wait() holds no lock, and workers only
-// acquire m.mu briefly inside callbacks (never blocking on Stop's lock).
+// Cancelling the in-flight jobs is what makes Stop finish: a worker only checks
+// stopCh between jobs, so waiting alone blocks until the running job's own
+// timeout — 15 minutes for a track, 2 hours for an album. That is a desktop quit
+// that hangs with the single-instance lock still held, and an adapter save that
+// hangs the HTTP request behind it. A job cancelled this way is persisted as
+// queued rather than canceled (see process), so the next manager re-dispatches it.
+//
+// Ordering rationale: close stopCh first so workers exit their select loops and
+// cancel in flight work, then wg.Wait() until every worker (and any scheduleScan
+// it calls) has fully finished, then cancel the debounce timer. This guarantees
+// we cancel the LAST timer armed by any worker — if we cancelled before Wait, a
+// worker still in process() could call scheduleScan() and re-arm a new timer
+// after we cleared it. No deadlock risk: wg.Wait() holds no lock, and workers
+// only acquire m.mu briefly inside callbacks (never blocking on Stop's lock).
+//
+// The wait is bounded: a downloader that ignores its context must not be able to
+// hold a quit open forever. Past the grace period we log and move on, and a
+// straggler's later store writes fail harmlessly against the closing DB.
 func (m *Manager) Stop() {
 	m.mu.Lock()
 	started := m.started
@@ -567,7 +591,26 @@ func (m *Manager) Stop() {
 		return // Start() was never called — no workers, no channel to drain
 	}
 	m.stopOnce.Do(func() { close(m.stopCh) })
-	m.wg.Wait()
+	m.mu.Lock()
+	m.stopping = true
+	cancels := make([]context.CancelFunc, 0, len(m.cancels))
+	for _, c := range m.cancels {
+		cancels = append(cancels, c)
+	}
+	m.mu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+	done := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(stopGrace):
+		log.Printf("download manager: %d worker(s) still running after %s; continuing shutdown", m.cfg.Workers, stopGrace)
+	}
 	m.mu.Lock()
 	if m.debounce != nil {
 		m.debounce() // stop the AfterFunc/clock timer
@@ -575,6 +618,35 @@ func (m *Manager) Stop() {
 	}
 	m.pending = false
 	m.mu.Unlock()
+}
+
+// RedispatchQueued puts every persisted queued job back on the worker channel.
+//
+// It exists for the reload path: the outgoing Manager requeues whatever it was
+// running when it was stopped, but by then the incoming Manager has already run
+// its own recovery pass, so without this those jobs sit queued until the next
+// boot. Dispatching a job that is already in flight is harmless — process()
+// drops it.
+func (m *Manager) RedispatchQueued() {
+	ctx := context.Background()
+	jobs, err := m.store.List(ctx)
+	if err != nil {
+		log.Printf("download redispatch: list jobs failed: %v", err)
+		return
+	}
+	for _, job := range jobs {
+		if job.Status != core.DownloadQueued {
+			continue
+		}
+		select {
+		case m.queue <- job.ID:
+			log.Printf("download redispatch: re-dispatched queued job %s", shortID(job.ID))
+		case <-m.stopCh:
+			return
+		default:
+			return // queue full; recovery on the next boot picks the rest up
+		}
+	}
 }
 
 // asyncFor returns the AsyncDownloader registered under name, or nil if that
@@ -1033,6 +1105,14 @@ func (m *Manager) process(id string) {
 		req = m.requestForJob(ctx, job)
 	}
 	m.mu.Lock()
+	if _, busy := m.cancels[id]; busy {
+		// Another worker already has this job. A queued row can reach the channel
+		// twice — recovery and RedispatchQueued both dispatch from the same
+		// persisted state — and running it twice would download the same track
+		// into two files.
+		m.mu.Unlock()
+		return
+	}
 	jobTmo := m.jobTimeout(req)
 	jctx, cancel := context.WithTimeout(ctx, jobTmo)
 	m.cancels[id] = cancel
@@ -1137,8 +1217,24 @@ func (m *Manager) process(id string) {
 			m.mu.Unlock()
 			return
 		case jctx.Err() == context.Canceled:
-			// Explicitly canceled — terminal, no fallback.
+			// Canceled — terminal, no fallback. Stop() cancels the same way the
+			// user does, so distinguish them: a job aborted by shutdown or an
+			// adapter reload goes back to queued, since nothing about it failed
+			// and the next manager's recovery pass re-dispatches queued rows.
+			// Marking it canceled (or leaving it running) would strand it.
 			cur, _, _ := m.store.Get(ctx, id)
+			if m.isStopping() {
+				cur.Status = core.DownloadQueued
+				cur.Progress = 0
+				cur.StartedAt = 0
+				_ = m.store.Update(ctx, cur)
+				m.publishEvent(TopicProgress, cur, "")
+				log.Printf("download requeued for shutdown: %q (job %s)", cur.Title, shortID(id))
+				m.mu.Lock()
+				delete(m.reqs, id)
+				m.mu.Unlock()
+				return
+			}
 			cur.Status = core.DownloadCanceled
 			cur.FinishedAt = m.clock.Now().Unix()
 			_ = m.store.Update(ctx, cur)
