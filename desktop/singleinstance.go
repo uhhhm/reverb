@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
+	"syscall"
 )
 
 var (
@@ -12,12 +14,22 @@ var (
 	singleHeld = map[string]*os.File{}
 )
 
-// AcquireSingleInstanceLock acquires a file lock on DataDir/lock.
-// It uses an O_CREATE|O_EXCL file plus an in-process map so that a
-// second call in the same process fails even if the kernel flock would
-// allow it. The returned release func closes and removes the lock file
-// and must be called to allow a later reacquire. Pure stdlib, no flock
-// dependency, portable across linux/mac.
+// AcquireSingleInstanceLock takes an exclusive lock on DataDir/lock.
+//
+// Two copies of the app on one machine mean two writers on one SQLite file, two
+// attempts to bind the fixed p2p port and two supervised Navidromes fighting
+// over 4533, so the second copy must not get that far.
+//
+// The lock is an advisory flock rather than the existence of the file: the
+// kernel drops a flock when the holding process dies, so a crash or a force
+// quit cannot leave a lock file behind that keeps the app from ever starting
+// again. The file itself is left in place on release — removing it would let
+// another process lock an unlinked inode and think it holds the lock. It holds
+// the owner's pid, which is only there to name the culprit in the error.
+//
+// An in-process map is kept alongside so a second call in the same process
+// fails too; flock is per open file description, so the same process would
+// otherwise re-lock its own file happily.
 func AcquireSingleInstanceLock(dataDir string) (func(), error) {
 	if dataDir == "" {
 		return nil, fmt.Errorf("dataDir empty")
@@ -34,12 +46,21 @@ func AcquireSingleInstanceLock(dataDir string) (func(), error) {
 		return nil, fmt.Errorf("another instance is running (lock %s)", lockPath)
 	}
 
-	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0644)
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
-		if os.IsExist(err) {
-			return nil, fmt.Errorf("another instance is running (lock %s): %w", lockPath, err)
-		}
 		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		owner := ""
+		if b, rerr := os.ReadFile(lockPath); rerr == nil && len(b) > 0 {
+			owner = fmt.Sprintf(" held by pid %s", string(b))
+		}
+		_ = f.Close()
+		return nil, fmt.Errorf("another instance is running (lock %s%s): %w", lockPath, owner, err)
+	}
+
+	if err := f.Truncate(0); err == nil {
+		_, _ = f.WriteAt([]byte(strconv.Itoa(os.Getpid())), 0)
 	}
 
 	singleHeld[lockPath] = f
@@ -47,14 +68,12 @@ func AcquireSingleInstanceLock(dataDir string) (func(), error) {
 	release := func() {
 		singleMu.Lock()
 		defer singleMu.Unlock()
-		if held, ok := singleHeld[lockPath]; ok && held == f {
-			_ = held.Close()
-			delete(singleHeld, lockPath)
-			_ = os.Remove(lockPath)
+		if held, ok := singleHeld[lockPath]; !ok || held != f {
 			return
 		}
+		delete(singleHeld, lockPath)
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 		_ = f.Close()
-		_ = os.Remove(lockPath)
 	}
 
 	return release, nil

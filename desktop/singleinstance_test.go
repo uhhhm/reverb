@@ -59,3 +59,18 @@ func TestSingleInstanceEmptyDir(t *testing.T) {
 		t.Fatal("expected error for empty dataDir")
 	}
 }
+
+// A force-quit leaves the lock file on disk with no process behind it. The next
+// launch must still start: an existence-based lock would refuse forever.
+func TestSingleInstanceStaleLockFileDoesNotBlock(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "lock"), []byte("999999"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	release, err := AcquireSingleInstanceLock(dir)
+	if err != nil {
+		t.Fatalf("acquire over a stale lock file failed: %v", err)
+	}
+	release()
+}

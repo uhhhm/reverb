@@ -61,12 +61,21 @@ func boot(args []string) (*App, error) {
 	// the bundled Navidrome, which binds a fixed port.
 	updater.WaitForPredecessor(dataDir, 30*time.Second)
 
+	// One app per data dir: a second copy would be a second writer on the same
+	// SQLite file, a second bind of the fixed p2p port and a second supervised
+	// Navidrome on 4533.
+	releaseLock, err := AcquireSingleInstanceLock(dataDir)
+	if err != nil {
+		return nil, err
+	}
+
 	// Point the services at the bundled navidrome/spotdl/yt-dlp/ffmpeg before
 	// config.Load and wiring read the environment.
 	ApplyBundledToolEnv()
 
 	cfg, err := config.Load(args, os.Getenv)
 	if err != nil {
+		releaseLock()
 		return nil, err
 	}
 	// Override Port=0 (random) unless --port arg or REVERB_PORT is set.
@@ -91,6 +100,7 @@ func boot(args []string) (*App, error) {
 		Getenv:     os.Getenv,
 	})
 	if err != nil {
+		releaseLock()
 		return nil, err
 	}
 	deps := rt.Deps
@@ -108,6 +118,7 @@ func boot(args []string) (*App, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		rt.Close()
+		releaseLock()
 		return nil, err
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
@@ -127,6 +138,7 @@ func boot(args []string) (*App, error) {
 
 	a := NewApp()
 	a.dataDir = dataDir
+	a.releaseLock = releaseLock
 	a.updater = upd
 	appRef = a
 	a.ln = ln

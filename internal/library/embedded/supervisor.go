@@ -6,6 +6,9 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -28,6 +31,9 @@ type Options struct {
 	ProbeEvery   time.Duration
 	RestartDelay time.Duration
 	MaxRestarts  int
+	// MinStableRun is how long a child must stay up before the run counts as
+	// healthy enough to earn a fresh restart budget.
+	MinStableRun time.Duration
 }
 
 type Supervisor struct {
@@ -49,6 +55,9 @@ func New(o Options) *Supervisor {
 	}
 	if o.MaxRestarts == 0 {
 		o.MaxRestarts = 5
+	}
+	if o.MinStableRun == 0 {
+		o.MinStableRun = 15 * time.Second
 	}
 	h := HealthStarting
 	if o.Mode != ModeBuiltIn {
@@ -79,7 +88,9 @@ func (s *Supervisor) Start() {
 func (s *Supervisor) supervise(ctx context.Context) {
 	defer close(s.done)
 	restarts := 0
+	var ranFor time.Duration
 	for {
+		ranFor = 0
 		proc, err := s.opts.Runner(ctx, s.opts.Env)
 		if err != nil {
 			log.Printf("navidrome: start failed: %v", err)
@@ -89,12 +100,14 @@ func (s *Supervisor) supervise(ctx context.Context) {
 			s.mu.Unlock()
 			readyCtx, stopReady := context.WithCancel(ctx)
 			go s.waitReady(readyCtx)
+			startedAt := time.Now()
 			werr := proc.Wait()
+			ranFor = time.Since(startedAt)
 			stopReady()
 			if ctx.Err() != nil {
 				return // shutting down
 			}
-			log.Printf("navidrome: exited: %v", werr)
+			log.Printf("navidrome: exited after %s: %v", ranFor.Round(time.Millisecond), werr)
 		}
 		if ctx.Err() != nil {
 			return
@@ -102,9 +115,20 @@ func (s *Supervisor) supervise(ctx context.Context) {
 		s.mu.Lock()
 		hadReady := s.sawReady
 		s.mu.Unlock()
-		if hadReady {
+		// The probe only asks whether the port answers, and after a force-quit
+		// the port may be answered by an orphaned navidrome from the previous
+		// run. Our own child then fails to bind and exits at once while the
+		// probe reports ready. Requiring the run to have lasted as well is what
+		// separates a healthy instance that crashed -- fresh budget -- from a
+		// child that never really started, which must spend the budget and end
+		// in degraded rather than respawning forever.
+		if hadReady && ranFor >= s.opts.MinStableRun {
 			restarts = 0 // a previously-healthy instance crashed: fresh budget
 		} else {
+			if hadReady {
+				log.Printf("navidrome: probe reported ready but the child exited after %s — "+
+					"another navidrome may already be serving that port", ranFor.Round(time.Millisecond))
+			}
 			restarts++
 		}
 		if restarts >= s.opts.MaxRestarts {
@@ -167,8 +191,16 @@ func (s *Supervisor) Shutdown(ctx context.Context) error {
 
 // ExecRunner runs the real navidrome binary. Context cancel sends SIGTERM (via
 // cmd.Cancel), then SIGKILL after WaitDelay — a graceful child shutdown.
-func ExecRunner(binaryPath string) Runner {
+//
+// pidPath records the child so the next run can find it. A force-quit of the
+// desktop app kills the parent without unwinding anything, and the child keeps
+// the fixed navidrome port; the relaunched app then probes that orphan, sees a
+// healthy port, and serves a library out of the stale process while its own
+// child fails to bind. Reaping before the start is what makes a relaunch after
+// a hard kill behave like a normal one. An empty pidPath disables both halves.
+func ExecRunner(binaryPath, pidPath string) Runner {
 	return func(ctx context.Context, env []string) (Process, error) {
+		reapOrphan(pidPath, binaryPath)
 		cmd := exec.CommandContext(ctx, binaryPath)
 		cmd.Env = env
 		cmd.Stdout = os.Stdout
@@ -178,8 +210,72 @@ func ExecRunner(binaryPath string) Runner {
 		if err := cmd.Start(); err != nil {
 			return nil, err
 		}
+		writePidFile(pidPath, cmd.Process.Pid)
 		return execProcess{cmd}, nil
 	}
+}
+
+func writePidFile(pidPath string, pid int) {
+	if pidPath == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(pidPath), 0o755); err != nil {
+		log.Printf("navidrome: pid file dir: %v", err)
+		return
+	}
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0o644); err != nil {
+		log.Printf("navidrome: write pid file: %v", err)
+	}
+}
+
+// reapOrphan terminates the navidrome recorded in pidPath if it is still
+// running. The pid is checked against the binary's own name first: pids are
+// reused, and a stale file must never let Reverb signal a process that merely
+// inherited the number.
+func reapOrphan(pidPath, binaryPath string) {
+	if pidPath == "" {
+		return
+	}
+	raw, err := os.ReadFile(pidPath)
+	if err != nil {
+		return
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || pid <= 1 {
+		_ = os.Remove(pidPath)
+		return
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil || proc.Signal(syscall.Signal(0)) != nil {
+		_ = os.Remove(pidPath) // already gone
+		return
+	}
+	if !processIsNamed(pid, filepath.Base(binaryPath)) {
+		_ = os.Remove(pidPath)
+		return
+	}
+	log.Printf("navidrome: reaping orphaned instance (pid %d) left by a previous run", pid)
+	_ = proc.Signal(syscall.SIGTERM)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if proc.Signal(syscall.Signal(0)) != nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if proc.Signal(syscall.Signal(0)) == nil {
+		_ = proc.Signal(syscall.SIGKILL)
+	}
+	_ = os.Remove(pidPath)
+}
+
+// processIsNamed reports whether pid's command name matches want.
+func processIsNamed(pid int, want string) bool {
+	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
+	if err != nil {
+		return false
+	}
+	return filepath.Base(strings.TrimSpace(string(out))) == want
 }
 
 type execProcess struct{ cmd *exec.Cmd }

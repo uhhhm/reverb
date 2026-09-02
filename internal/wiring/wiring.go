@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -702,7 +703,7 @@ func (b *Builder) Build(ctx context.Context) (ServiceBundle, error) {
 	bundle.Supervisor = embedded.New(embedded.Options{
 		Mode:   mode,
 		Env:    naviEnv,
-		Runner: embedded.ExecRunner(b.naviBin()),
+		Runner: embedded.ExecRunner(b.naviBin(), filepath.Join(b.dataDir, "navidrome", "navidrome.pid")),
 		Probe:  embedded.PingProbe(embedded.BaseURL(b.getenv), nil),
 	})
 

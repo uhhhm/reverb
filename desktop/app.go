@@ -29,6 +29,10 @@ type App struct {
 	// running binary could not be located. dataDir is where it stages them.
 	updater *updater.Service
 	dataDir string
+	// releaseLock drops the single-instance lock. It must run after the store
+	// is closed and the child Navidrome is down, or the successor of an update
+	// would start while this process still holds both.
+	releaseLock func()
 }
 
 // NewApp creates a new desktop App.
@@ -93,6 +97,10 @@ func (a *App) OnShutdown(ctx context.Context) {
 		}
 		// Stops the download manager and closes the store.
 		a.runtime.Close()
+	}
+	if a.releaseLock != nil {
+		a.releaseLock()
+		a.releaseLock = nil
 	}
 }
 
