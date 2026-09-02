@@ -82,6 +82,13 @@ func (s *Server) handleLinkResolve(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url is required"})
 		return
 	}
+	// Resolving reaches out to whatever host the caller names, so the host
+	// allowlist is the guard, not the individual parsers that happen to pin
+	// their own hosts today.
+	if !linkresolve.IsAllowedSourceURL(body.URL) {
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "unsupported URL"})
+		return
+	}
 	var res *linkresolve.ResolveResult
 	if s.deps.LinkAdd != nil {
 		res, err = s.deps.LinkAdd.Resolve(r.Context(), body.URL)
@@ -604,6 +611,7 @@ func (s *Server) handleLinkChapters(w http.ResponseWriter, r *http.Request) {
 	// ListChapters shells out to yt-dlp against this URL, so it is an outbound
 	// request to whatever host the caller names. Hold it to the same allowlist
 	// as /links/resolve rather than the downloader's pass-through normalizer.
+
 	if !linkresolve.IsAllowedSourceURL(body.URL) {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "unsupported URL"})
 		return

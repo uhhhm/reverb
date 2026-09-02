@@ -55,52 +55,33 @@ func ParseYouTubeURL(raw string) (kind, id string, ok bool) {
 		return "track", p, true
 	}
 
-	// Handle youtube domains: youtube.com variants and music.youtube.com
-	// Accept any host that contains "youtube.com" or equals music.youtube, but
-	// require exact youtube.com handling to avoid false positives.
-	isYouTubeHost := false
-	if host == "youtube.com" || host == "www.youtube.com" || host == "m.youtube.com" || host == "music.youtube.com" || host == "youtube-nocookie.com" || host == "www.youtube-nocookie.com" {
-		isYouTubeHost = true
-	} else if strings.HasSuffix(host, ".youtube.com") {
-		isYouTubeHost = true
-	} else if strings.HasSuffix(host, "music.youtube") {
-		// case "music.youtube" without .com as spec says "music.youtube"
-		isYouTubeHost = true
-	}
+	// Accept youtube.com and youtube-nocookie.com plus their subdomains. The
+	// suffix match is label-bounded so a host like "evilyoutube.com" does not
+	// pass as a subdomain.
+	isYouTubeHost := host == "youtube.com" ||
+		host == "youtube-nocookie.com" ||
+		strings.HasSuffix(host, ".youtube.com") ||
+		strings.HasSuffix(host, ".youtube-nocookie.com")
 
 	if !isYouTubeHost {
 		return "", "", false
 	}
 
-	// Normalize path to lower for comparison? IDs are case-sensitive, but path lower.
+	// IDs are case-sensitive; only the path is compared case-insensitively.
 	lowerPath := strings.ToLower(path)
 
 	if lowerPath == "/watch" {
 		v := query.Get("v")
-		if v == "" {
-			return "", "", false
-		}
 		if !youtubeIDRe.MatchString(v) {
-			// Still accept if contains other chars? Be permissive: if non-empty, accept.
-			// But spec expects strict; we allow any non-empty up to next validation.
-			// For acceptance, allow alphanumeric + - _
-			if v == "" {
-				return "", "", false
-			}
+			return "", "", false
 		}
 		return "track", v, true
 	}
 	if lowerPath == "/playlist" {
+		// Playlist IDs use the same alphabet as video IDs but vary in length.
 		list := query.Get("list")
-		if list == "" {
-			return "", "", false
-		}
-		// Playlist IDs often start with PL, OL, etc. Accept broader.
 		if !youtubeIDRe.MatchString(list) {
-			// Playlists may contain more chars; accept anyway if non-empty
-			if list == "" {
-				return "", "", false
-			}
+			return "", "", false
 		}
 		return "playlist", list, true
 	}
