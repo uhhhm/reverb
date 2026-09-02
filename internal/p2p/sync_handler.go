@@ -35,23 +35,23 @@ func RegisterSyncHandler(h host.Host, store *sync.SyncStore, guard *Guard, keys 
 			return
 		}
 		if boundDevice == "" {
-			_ = json.NewEncoder(s).Encode(map[string]string{"error": "peer has no device binding: re-pair required"})
+			_ = json.NewEncoder(s).Encode(sync.SyncResponse{Error: "peer has no device binding: re-pair required"})
 			return
 		}
 		var req sync.SyncRequest
 		if err := decodeLimited(s, maxSyncMessageBytes, &req); err != nil {
-			_ = json.NewEncoder(s).Encode(map[string]string{"error": err.Error()})
+			_ = json.NewEncoder(s).Encode(sync.SyncResponse{Error: err.Error()})
 			return
 		}
 		// The connection decides who this is. A mismatched claim is a forgery
 		// attempt, not a recoverable error.
 		if req.DeviceID != "" && req.DeviceID != boundDevice {
-			_ = json.NewEncoder(s).Encode(map[string]string{"error": "deviceId does not match paired identity"})
+			_ = json.NewEncoder(s).Encode(sync.SyncResponse{Error: "deviceId does not match paired identity"})
 			return
 		}
 		deviceID := boundDevice
 		if err := store.ValidateDevice(ctx, deviceID); err != nil {
-			_ = json.NewEncoder(s).Encode(map[string]string{"error": "unknown deviceId: pairing required"})
+			_ = json.NewEncoder(s).Encode(sync.SyncResponse{Error: "unknown deviceId: pairing required"})
 			return
 		}
 		// Learn any device keys the peer knows before verifying authorship, so
@@ -73,7 +73,7 @@ func RegisterSyncHandler(h host.Host, store *sync.SyncStore, guard *Guard, keys 
 
 		outbound, newRev, rejectedChanges, err := store.ReconcileBatched(ctx, deviceID, sinceRev, req.Changes)
 		if err != nil {
-			_ = json.NewEncoder(s).Encode(map[string]string{"error": err.Error()})
+			_ = json.NewEncoder(s).Encode(sync.SyncResponse{Error: err.Error()})
 			return
 		}
 		// Vector-based outbound: page via ListSinceVector so filtering does not
@@ -82,19 +82,19 @@ func RegisterSyncHandler(h host.Host, store *sync.SyncStore, guard *Guard, keys 
 		if len(peerVector) > 0 {
 			vecOutbound, vecErr := store.ListSinceVector(ctx, peerVector, 10000)
 			if vecErr != nil {
-				_ = json.NewEncoder(s).Encode(map[string]string{"error": vecErr.Error()})
+				_ = json.NewEncoder(s).Encode(sync.SyncResponse{Error: vecErr.Error()})
 				return
 			}
 			outbound = vecOutbound
 		}
 		newHLC, err := store.GetMaxHLC(ctx)
 		if err != nil {
-			_ = json.NewEncoder(s).Encode(map[string]string{"error": err.Error()})
+			_ = json.NewEncoder(s).Encode(sync.SyncResponse{Error: err.Error()})
 			return
 		}
 		seqMap, _, err := store.GetVectorMap(ctx)
 		if err != nil {
-			_ = json.NewEncoder(s).Encode(map[string]string{"error": err.Error()})
+			_ = json.NewEncoder(s).Encode(sync.SyncResponse{Error: err.Error()})
 			return
 		}
 		resp := sync.SyncResponse{

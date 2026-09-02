@@ -6,13 +6,16 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/uhhhm/reverb/internal/store/db"
+	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
 
 // newLinkedHosts returns two connected in-process libp2p hosts.
@@ -140,5 +143,28 @@ func TestFileHandlerRefusesSymlinkEscape(t *testing.T) {
 	got, _ := requestFile(t, client, server.ID(), "escape/secret.txt")
 	if string(got) == "TOP SECRET" {
 		t.Fatal("symlink escaped musicDir containment")
+	}
+}
+
+// The sync handler answers a failure with {"error": ...}. That has to arrive as
+// a failure: decoded into a SyncResponse with no error field it looked like a
+// successful empty round, so an unpaired device, a device-id mismatch or a
+// store error left no signal anywhere and the peer retried forever in silence.
+func TestSyncPeerSurfacesErrorReply(t *testing.T) {
+	server, client := newLinkedHosts(t)
+	server.SetStreamHandler("/reverb/sync/1.0.0", func(s network.Stream) {
+		defer s.Close()
+		_ = json.NewEncoder(s).Encode(reverbsync.SyncResponse{Error: "unknown deviceId: pairing required"})
+	})
+
+	q := newTrustStore(t)
+	syncer := NewSyncer(client, reverbsync.NewSyncStore(q), NewGuard(q), nil, "dev_local")
+
+	err := syncer.syncPeer(context.Background(), server.ID())
+	if err == nil {
+		t.Fatal("syncPeer returned nil: the peer's error reply was read as a successful empty sync")
+	}
+	if !strings.Contains(err.Error(), "pairing required") {
+		t.Fatalf("error = %v, want it to carry the peer's message", err)
 	}
 }

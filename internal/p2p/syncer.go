@@ -3,6 +3,7 @@ package p2p
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	stdsync "sync"
 	"time"
@@ -167,6 +168,13 @@ func (s *Syncer) syncPeer(ctx context.Context, pid peer.ID) error {
 	var resp reverbsync.SyncResponse
 	if err := decodeLimited(st, maxSyncMessageBytes, &resp); err != nil {
 		return err
+	}
+	// A refusal (unknown device, id mismatch, store failure) is not a quiet
+	// empty round: the peer will keep refusing every 30 seconds until someone
+	// re-pairs, so say what happened rather than logging nothing.
+	if resp.Error != "" {
+		log.Printf("p2p syncer: peer %s refused sync: %s", pid, resp.Error)
+		return fmt.Errorf("peer %s refused sync: %s", pid, resp.Error)
 	}
 	// The exchange succeeded, so this address is known-good; persist it for the
 	// next restart, when discovery may have nothing to offer.
