@@ -134,6 +134,18 @@ func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 // sync.started / sync.finished, since a round can take as long as the dial
 // timeout of the slowest peer.
 func (s *Server) handleSyncTrigger(w http.ResponseWriter, r *http.Request) {
+	// Authenticate like the other sync routes: a Bearer token that names a paired
+	// device, or a request that actually arrived over loopback. Without this the
+	// route was reachable by anything that got past the guards on header shape
+	// alone, with no token ever checked.
+	if _, err := s.authenticateSync(r); err != nil {
+		if errors.Is(err, sync.ErrInvalidToken) {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not resolve device"})
+		return
+	}
 	if s.deps.P2PSyncer == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "sync unavailable"})
 		return

@@ -530,11 +530,13 @@ func TestSyncStatusFromDesktopWindow(t *testing.T) {
 }
 
 // The same shape outside the desktop build is a genuinely non-local caller.
+// The Host is loopback here so the request reaches authenticateSync at all --
+// what is under test is that the transport address, not the Host, decides.
 func TestSyncStatusRejectsNonLoopbackInServerMode(t *testing.T) {
 	srv, _, _ := newSyncTestServer(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/sync/status", nil)
-	req.Host = "wails"
+	req.Host = "127.0.0.1:8090"
 	req.RemoteAddr = "192.0.2.1:1234"
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)

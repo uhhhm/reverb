@@ -1142,6 +1142,7 @@ paths:
       summary: Start one device-sync round now (progress arrives over the WebSocket)
       responses:
         "202": { description: sync started }
+        "401": { description: no valid pairing token and the request did not arrive over loopback }
         "503": { description: sync unavailable }
   /p2p/status:
     get:

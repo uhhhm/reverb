@@ -76,8 +76,8 @@ func isStateChanging(method string) bool {
 // by reaching the loopback listener, and that reachability is itself an ambient
 // credential every page in the user's browser holds. Without this check, any
 // site the user visits could POST to 127.0.0.1 and be served as the owner. The
-// Origin check is the only thing standing in the way. Paired-device /sync calls use Bearer tokens and are
-// exempted (see the sync prefix bypass below). A browser always attaches Origin
+// Origin check is the only thing standing in the way. Paired-device /sync pushes carry a
+// validated Bearer token and are exempted (see isBearerSync). A browser always attaches Origin
 // to a cross-site POST/PUT/DELETE, so a forged request is caught here.
 //
 // Requests that carry neither header (curl, native apps, server-to-server) are
@@ -90,7 +90,7 @@ func (s *Server) csrfGuard(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if isBearerSync(r) {
+		if s.isBearerSync(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -115,21 +115,32 @@ func sameHost(rawURL, host string) bool {
 	return strings.EqualFold(u.Host, host)
 }
 
-// isBearerSync reports whether r is a paired device calling the sync API with a
-// Bearer token rather than a browser riding the ambient loopback credential.
+// isBearerSync reports whether r is a paired device pushing to the sync
+// rendezvous with a valid pairing token, rather than a browser riding the
+// ambient loopback credential.
 //
-// Both browser guards exempt it for the same reason: a web page cannot attach
-// an Authorization header to a cross-origin request without a CORS preflight,
-// and Reverb sends no CORS headers, so a request in this shape cannot have been
-// driven by a hostile page. The path match is exact (or a sub-path) rather than
-// a bare prefix so a future route like /api/v1/sync-anything does not inherit
-// the exemption by name alone.
-func isBearerSync(r *http.Request) bool {
-	p := r.URL.Path
-	if p != "/api/v1/sync" && !strings.HasPrefix(p, "/api/v1/sync/") {
+// Both browser guards exempt it, so the exemption is as narrow as the thing it
+// has to allow: the exact /api/v1/sync path, and only once the token has
+// actually authenticated a device. A header shape alone is not enough — every
+// other route under /api/v1/sync/ is reachable by the local UI, so exempting
+// them by prefix handed any page that could set an Authorization header a way
+// past both guards with a token that was never checked.
+func (s *Server) isBearerSync(r *http.Request) bool {
+	if r.URL.Path != "/api/v1/sync" {
 		return false
 	}
-	return strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+		return false
+	}
+	if s.deps.Pairing == nil {
+		return false
+	}
+	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	if token == "" {
+		return false
+	}
+	_, err := s.deps.Pairing.AuthenticateByToken(r.Context(), token)
+	return err == nil
 }
 
 // isLoopbackHost reports whether host (with or without a port, IPv6 bracketed
@@ -200,12 +211,14 @@ func (s *Server) isDesktopWindowRequest(r *http.Request) bool {
 // binary named by binary_path, so without this guard a visited web page could
 // execute a local program.
 //
-// Reads are exempt for the same reason they are exempt from CSRF, and dev mode
-// is skipped because the Vite dev server issues requests under whatever host
-// the developer is browsing.
+// Reads are checked too, unlike in csrfGuard. A rebound page is same-origin as
+// far as the browser is concerned, so it reads every response it gets back: the
+// whole library, play history, pairing devices, P2P dial addresses, adapter URLs
+// and usernames, and the Last.fm API key. Dev mode is skipped because the Vite
+// dev server issues requests under whatever host the developer is browsing.
 func (s *Server) hostGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.deps.Dev || !isStateChanging(r.Method) || isBearerSync(r) {
+		if s.deps.Dev || s.isBearerSync(r) {
 			next.ServeHTTP(w, r)
 			return
 		}

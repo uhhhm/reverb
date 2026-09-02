@@ -62,14 +62,53 @@ func TestHostGuardAllowsConfiguredHost(t *testing.T) {
 	}
 }
 
-func TestHostGuardDoesNotBlockGET(t *testing.T) {
+// Reads are guarded too. A rebound page is same-origin as far as the browser is
+// concerned, so it reads every response it gets back -- the library, play
+// history, pairing devices, adapter URLs, the Last.fm key.
+func TestHostGuardBlocksGET(t *testing.T) {
+	srv := newTestServer(t)
+	for _, path := range []string{"/api/v1/version", "/api/v1/library/albums", "/api/v1/pairing/devices"} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = "evil.example"
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("GET %s with foreign Host = %d, want 403", path, rec.Code)
+		}
+	}
+}
+
+func TestHostGuardAllowsLoopbackGET(t *testing.T) {
 	srv := newTestServer(t)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/version", nil)
-	req.Host = "evil.example"
+	req.Host = "127.0.0.1:8090"
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("GET with foreign Host = %d, want 200", rec.Code)
+		t.Fatalf("GET from loopback = %d, want 200", rec.Code)
+	}
+}
+
+// An unvalidated Bearer header used to be a way past both guards on every route
+// under /api/v1/sync/, including /sync/trigger, which checked no token at all.
+func TestHostGuardBearerExemptionIsNarrow(t *testing.T) {
+	srv := newTestServer(t)
+	for _, tc := range []struct {
+		method, path string
+	}{
+		{http.MethodPost, "/api/v1/sync/trigger"},
+		{http.MethodGet, "/api/v1/sync/status"},
+		{http.MethodPost, "/api/v1/sync"},
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader("{}"))
+		req.Host = "evil.example"
+		req.Header.Set("Origin", "http://evil.example")
+		req.Header.Set("Authorization", "Bearer not-a-real-token")
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s %s with an unvalidated Bearer token = %d, want 403", tc.method, tc.path, rec.Code)
+		}
 	}
 }
 

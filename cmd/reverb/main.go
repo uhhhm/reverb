@@ -53,15 +53,13 @@ func main() {
 	}
 
 	// A wildcard bind names no hostname, so nothing here can guess what the
-	// user browses by. Without this warning the first symptom is writes
-	// returning 403 while reads keep working -- a confusing failure that gives
-	// no hint at its cause, and one nobody re-reads the docs to find.
+	// user browses by. Without this warning the first symptom is a blanket 403
+	// with no hint at its cause, and one nobody re-reads the docs to find.
 	if !isLoopbackAddr(cfg.BindAddr) && len(allowedHosts) == 0 {
 		log.Printf("WARNING: bound to %s with no --allowed-hosts (REVERB_ALLOWED_HOSTS). "+
-			"Reverb accepts writes only when the request's Host is loopback or listed, "+
+			"Reverb serves a request only when its Host is loopback or listed, "+
 			"so browsing by any other name (a LAN hostname, a proxy's public hostname) "+
-			"will show reads working and every change failing with 403. List the "+
-			"hostnames you reach Reverb by.", cfg.BindAddr)
+			"will fail with 403. List the hostnames you reach Reverb by.", cfg.BindAddr)
 	}
 
 	rt, err := app.Build(ctx, app.Options{

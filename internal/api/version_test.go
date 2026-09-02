@@ -22,7 +22,9 @@ func TestVersionEndpoint(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := NewServer(tt.deps)
 			rec := httptest.NewRecorder()
-			srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/version", nil))
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/version", nil)
+			req.Host = "127.0.0.1:8090" // hostGuard checks reads too
+			srv.Handler().ServeHTTP(rec, req)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200", rec.Code)
 			}
