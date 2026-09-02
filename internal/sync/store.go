@@ -779,13 +779,12 @@ func (s *SyncStore) prepareHLCVector(ctx context.Context, deviceID string, ch Sy
 		if vectorHLC < rowHLC {
 			vectorHLC = rowHLC
 		}
-		// Ensure row HLC is monotonic with vector to keep GetMaxHLC and
-		// PickWinner consistent. Without this, a stale peer HLC would be stored
-		// verbatim while vector advances, breaking HLC monotonicity and LWW.
-		if rowHLC < vectorHLC {
-			rowHLC = vectorHLC
-			s.hlc.Observe(rowHLC)
-		}
+		// rowHLC is left exactly as the peer sent it. The signature covers the
+		// HLC, so raising it to the local clock would make the row fail
+		// verification the moment this device relays it onward, and would make
+		// the author's own later edit look older than the copy stored here --
+		// the two devices would then disagree forever, each resending its
+		// version. Only the vector row advances.
 		if err := s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: vectorSeq, Hlc: vectorHLC}); err != nil {
 			return 0, 0, err
 		}
@@ -815,6 +814,11 @@ func (s *SyncStore) effectivePolicy(ctx context.Context) MergePolicy {
 	}
 	return base
 }
+
+// materializeTimeout bounds one batch's projection. It is generous: the work is
+// local writes, and the alternative to finishing is a row the log holds but no
+// screen ever shows.
+const materializeTimeout = 10 * time.Minute
 
 // MaxReconcileBatch is the largest inbound batch one Reconcile call accepts.
 // Both sync producers page well above it, so callers that hand over whatever a
@@ -908,6 +912,15 @@ func (s *SyncStore) materialize(ctx context.Context, accepted []SyncChange) {
 	if s.materializer == nil || len(accepted) == 0 {
 		return
 	}
+	// Projection outlives the caller's deadline. A sync round runs under a
+	// short network timeout; the log commits inside it, and the local vector
+	// advances, so no peer ever resends these rows. If every Apply then failed
+	// with the round's context error -- which is exactly what a first sync
+	// after BackfillHistory does, committing thousands of plays with the
+	// deadline already spent -- those changes would be permanently invisible
+	// on this device. Cancellation of the round must not reach here.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), materializeTimeout)
+	defer cancel()
 	// Catalog entities first: a play or a rename names a track by its catalog
 	// id, so the entity has to exist before the row that points at it.
 	ordered := make([]SyncChange, 0, len(accepted))
