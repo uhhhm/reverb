@@ -3,10 +3,22 @@ package desktop
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
+// requireXDG skips a test whose expectations are the Linux XDG layout.
+// os.UserConfigDir is platform-specific, so on macOS the same code correctly
+// returns ~/Library/Application Support.
+func requireXDG(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "linux" {
+		t.Skipf("XDG config layout is linux-specific; GOOS=%s", runtime.GOOS)
+	}
+}
+
 func TestResolveDesktopDB_XDGConfigDir(t *testing.T) {
+	requireXDG(t)
 	tmp := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmp)
 	t.Setenv("REVERB_DB", "")
@@ -22,6 +34,7 @@ func TestResolveDesktopDB_XDGConfigDir(t *testing.T) {
 }
 
 func TestResolveDesktopDB_XDGHomeFallback(t *testing.T) {
+	requireXDG(t)
 	home := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", home)
@@ -68,7 +81,11 @@ func TestResolveDesktopDataDir(t *testing.T) {
 	if dir != want {
 		t.Fatalf("ResolveDesktopDataDir: got %q want %q", dir, want)
 	}
-	// Also verify it's the reverb data dir.
+	// Also verify it's the reverb data dir. The parent is platform-specific,
+	// so only the XDG layout is pinned exactly.
+	if runtime.GOOS != "linux" {
+		return
+	}
 	if dir != filepath.Join(tmp, "reverb") {
 		t.Fatalf("data dir mismatch: got %q want %q", dir, filepath.Join(tmp, "reverb"))
 	}
