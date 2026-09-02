@@ -179,6 +179,29 @@ func (q *Queries) TouchDeviceLastSeen(ctx context.Context, id string) error {
 	return err
 }
 
+const upsertPairedDevice = `-- name: UpsertPairedDevice :exec
+INSERT INTO device (id, name, token_hash, is_server, created_at, last_seen)
+VALUES (?, ?, ?, 0, unixepoch(), unixepoch())
+ON CONFLICT(id) DO UPDATE SET
+  name = excluded.name,
+  token_hash = excluded.token_hash,
+  last_seen = unixepoch()
+`
+
+type UpsertPairedDeviceParams struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	TokenHash string `json:"token_hash"`
+}
+
+// Claims a device row for a pairing, under an ID the redeemer supplied. The row
+// may already exist: a peer's device is announced (with an empty token hash)
+// before it ever pairs, and re-pairing an existing device reissues its token.
+func (q *Queries) UpsertPairedDevice(ctx context.Context, arg UpsertPairedDeviceParams) error {
+	_, err := q.db.ExecContext(ctx, upsertPairedDevice, arg.ID, arg.Name, arg.TokenHash)
+	return err
+}
+
 const upsertPeerDevice = `-- name: UpsertPeerDevice :exec
 INSERT INTO device (id, name, token_hash, is_server, public_key, created_at, last_seen)
 VALUES (?, ?, ?, 0, ?, unixepoch(), unixepoch())

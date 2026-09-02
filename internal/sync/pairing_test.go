@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/uhhhm/reverb/internal/store"
 	"github.com/uhhhm/reverb/internal/store/db"
 	syncpkg "github.com/uhhhm/reverb/internal/sync"
@@ -298,5 +300,83 @@ func TestPairingEnsureServerDevice(t *testing.T) {
 	}
 	if serverCount != 1 {
 		t.Fatalf("server device count %d want 1", serverCount)
+	}
+}
+
+// A peer that already has a sync identity pairs into it, so the token and the
+// device the responder binds name the device that actually authors changes.
+func TestRedeemAsBindsSuppliedDeviceID(t *testing.T) {
+	st := newTestStorePairing(t)
+	svc := syncpkg.NewPairingService(st.Q())
+	ctx := context.Background()
+
+	code, _, err := svc.GenerateCode(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "dev_" + uuid.NewString()
+	got, token, err := svc.RedeemAs(ctx, code, "laptop", want)
+	if err != nil {
+		t.Fatalf("RedeemAs: %v", err)
+	}
+	if got != want {
+		t.Fatalf("redeemed as %q, want %q", got, want)
+	}
+	dev, err := st.Q().GetDeviceByID(ctx, want)
+	if err != nil {
+		t.Fatalf("device row missing: %v", err)
+	}
+	sum := sha256.Sum256([]byte(token))
+	if dev.TokenHash != hex.EncodeToString(sum[:]) {
+		t.Fatal("device row does not carry the token that was handed out")
+	}
+}
+
+// The row may already exist: a peer's device is announced before it pairs.
+// Re-claiming it reissues the token rather than failing on the primary key.
+func TestRedeemAsReclaimsExistingDeviceRow(t *testing.T) {
+	st := newTestStorePairing(t)
+	svc := syncpkg.NewPairingService(st.Q())
+	ctx := context.Background()
+
+	id := "dev_" + uuid.NewString()
+	if err := st.Q().CreateDevice(ctx, db.CreateDeviceParams{ID: id, Name: "announced", TokenHash: ""}); err != nil {
+		t.Fatal(err)
+	}
+	code, _, err := svc.GenerateCode(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, token, err := svc.RedeemAs(ctx, code, "laptop", id)
+	if err != nil {
+		t.Fatalf("RedeemAs onto an announced device: %v", err)
+	}
+	if got != id || token == "" {
+		t.Fatalf("got (%q, %q), want (%q, non-empty)", got, token, id)
+	}
+	dev, err := st.Q().GetDeviceByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dev.TokenHash == "" {
+		t.Fatal("re-claim did not issue a token")
+	}
+}
+
+// The ID becomes a row key and travels in the author field of every change, so
+// a peer cannot offer a free-form string.
+func TestRedeemAsRejectsMalformedDeviceID(t *testing.T) {
+	st := newTestStorePairing(t)
+	svc := syncpkg.NewPairingService(st.Q())
+	ctx := context.Background()
+
+	for _, id := range []string{"nope", "dev_", "dev_not-a-uuid", "'; DROP TABLE device;--"} {
+		code, _, err := svc.GenerateCode(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := svc.RedeemAs(ctx, code, "laptop", id); !errors.Is(err, syncpkg.ErrDeviceIDInvalid) {
+			t.Errorf("RedeemAs(%q) error = %v, want ErrDeviceIDInvalid", id, err)
+		}
 	}
 }

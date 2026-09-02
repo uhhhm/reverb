@@ -15,15 +15,21 @@ import (
 type stubPairing struct {
 	code     string
 	deviceID string
+	// gotDeviceID records the ID the redeemer offered, if any.
+	gotDeviceID string
 }
 
 func (s *stubPairing) GenerateCode(context.Context) (string, int64, error) {
 	return s.code, time.Now().Add(time.Minute).Unix(), nil
 }
 
-func (s *stubPairing) Redeem(_ context.Context, rawCode, _ string) (string, string, error) {
+func (s *stubPairing) RedeemAs(_ context.Context, rawCode, _, deviceID string) (string, string, error) {
 	if rawCode != s.code {
 		return "", "", errWrongCode
+	}
+	s.gotDeviceID = deviceID
+	if deviceID != "" {
+		return deviceID, "tok_" + deviceID, nil
 	}
 	return s.deviceID, "tok_" + s.deviceID, nil
 }
@@ -66,7 +72,7 @@ func TestRedeemViaPeerWithMultiaddrNoDiscovery(t *testing.T) {
 
 	dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	deviceID, token, err := RedeemViaPeer(dialCtx, client, clientGuard, nil, serverAddr, "AB12-CD34", "laptop")
+	deviceID, token, err := RedeemViaPeer(dialCtx, client, clientGuard, nil, serverAddr, "AB12-CD34", "laptop", "")
 	if err != nil {
 		t.Fatalf("RedeemViaPeer with multiaddr: %v", err)
 	}
@@ -93,7 +99,7 @@ func TestRedeemViaPeerBarePeerIDFailsWithoutDiscovery(t *testing.T) {
 
 	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	_, _, err := RedeemViaPeer(dialCtx, client, NewGuard(newTrustStore(t)), nil, server.ID().String(), "AB12-CD34", "laptop")
+	_, _, err := RedeemViaPeer(dialCtx, client, NewGuard(newTrustStore(t)), nil, server.ID().String(), "AB12-CD34", "laptop", "")
 	if err == nil {
 		t.Fatal("bare peer ID resolved without discovery; the multiaddr path is not being exercised")
 	}

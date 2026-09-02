@@ -38,11 +38,14 @@ func (s *Server) authenticateSync(r *http.Request) (string, error) {
 	// host that can reach a widened listener could author sync changes as the
 	// server device with no pairing token at all. Loopback keeps
 	// the built-in UI (desktop and locally-browsed server) working unpaired while
-	// remote paired devices must present a Bearer sync token.
+	// remote paired devices must present a Bearer sync token. The desktop window
+	// is local too, but its requests arrive through the Wails asset server, which
+	// fabricates a RemoteAddr in TEST-NET (192.0.2.0/24) — see
+	// isDesktopWindowRequest.
 	if _, ok := currentUser(r); !ok {
 		return "", sync.ErrInvalidToken
 	}
-	if !isLoopbackRequest(r) {
+	if !isLoopbackRequest(r) && !s.isDesktopWindowRequest(r) {
 		return "", sync.ErrInvalidToken
 	}
 	id, err := s.syncServerDeviceID(r.Context())

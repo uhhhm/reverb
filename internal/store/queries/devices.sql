@@ -32,3 +32,14 @@ ON CONFLICT(id) DO UPDATE SET
 
 -- name: ListDevicesWithKeys :many
 SELECT id, name, public_key FROM device WHERE public_key != '' ORDER BY created_at;
+
+-- name: UpsertPairedDevice :exec
+-- Claims a device row for a pairing, under an ID the redeemer supplied. The row
+-- may already exist: a peer's device is announced (with an empty token hash)
+-- before it ever pairs, and re-pairing an existing device reissues its token.
+INSERT INTO device (id, name, token_hash, is_server, created_at, last_seen)
+VALUES (?, ?, ?, 0, unixepoch(), unixepoch())
+ON CONFLICT(id) DO UPDATE SET
+  name = excluded.name,
+  token_hash = excluded.token_hash,
+  last_seen = unixepoch();

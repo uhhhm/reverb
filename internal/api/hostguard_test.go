@@ -121,3 +121,28 @@ func TestHostGuardRejectsEmptyHost(t *testing.T) {
 		t.Fatal("an absent Host was treated as allowed; a deny-list check must fail closed")
 	}
 }
+
+// The packaged desktop app serves the SPA through the Wails asset server, whose
+// requests carry Host "wails" (or "wails.localhost" on Windows). Without an
+// allowance for it every mutation from the window is rejected and the app is
+// read-only unless run with --dev.
+func TestHostGuardAllowsDesktopWindow(t *testing.T) {
+	srv := newTestServer(t)
+	srv.deps.Desktop = true
+	for _, host := range []string{"wails", "wails.localhost"} {
+		if rr := postWithHost(t, srv, host); rr.Code == http.StatusForbidden {
+			t.Errorf("Host=%q was blocked in the desktop build: %s", host, rr.Body.String())
+		}
+	}
+}
+
+// Only the desktop build serves that origin. In server mode "wails.localhost"
+// is a name a browser can resolve to loopback, so it stays untrusted.
+func TestHostGuardBlocksWailsHostInServerMode(t *testing.T) {
+	srv := newTestServer(t)
+	for _, host := range []string{"wails", "wails.localhost"} {
+		if rr := postWithHost(t, srv, host); rr.Code != http.StatusForbidden {
+			t.Errorf("Host=%q was allowed outside the desktop build (%d)", host, rr.Code)
+		}
+	}
+}

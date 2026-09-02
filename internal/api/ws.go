@@ -61,7 +61,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		// cannot carry a WebSocket upgrade — the SPA dials the 127.0.0.1 listener
 		// directly instead, so the upgrade is cross-origin by construction. Allow
 		// exactly those window origins, nothing broader.
-		opts.OriginPatterns = []string{"wails", "wails.localhost"}
+		opts.OriginPatterns = desktopWindowHosts
 	}
 	c, err := websocket.Accept(w, r, opts)
 	if err != nil {

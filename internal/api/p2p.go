@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net"
 	"net/http"
 
@@ -102,7 +103,7 @@ func (s *Server) handleP2PRedeem(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "peer trust store unavailable"})
 		return
 	}
-	deviceID, token, err := p2p.RedeemViaPeer(r.Context(), h.LibHost(), guard, s.deps.DeviceKeys, body.PeerID, body.Code, body.DeviceName)
+	deviceID, token, err := p2p.RedeemViaPeer(r.Context(), h.LibHost(), guard, s.deps.DeviceKeys, body.PeerID, body.Code, body.DeviceName, s.localSyncDeviceID(r.Context()))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -209,4 +210,25 @@ func pairingClientKey(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// localSyncDeviceID is the device ID this node authors sync changes under. It
+// is read from the syncer where possible, since that is the value that travels
+// on every sync round and therefore the one a peer must bind us to; the store
+// lookup is the same resolution the syncer itself was built from, for the case
+// where p2p is up but the syncer is not.
+func (s *Server) localSyncDeviceID(ctx context.Context) string {
+	if s.deps.P2PSyncer != nil {
+		if syncer := s.deps.P2PSyncer(); syncer != nil {
+			if id := syncer.LocalDeviceID(); id != "" {
+				return id
+			}
+		}
+	}
+	if s.deps.PairingStore != nil {
+		if id, err := reverbsync.LocalDeviceID(ctx, s.deps.PairingStore); err == nil {
+			return id
+		}
+	}
+	return ""
 }

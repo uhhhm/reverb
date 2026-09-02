@@ -60,6 +60,16 @@ func (s *Syncer) publish(topic string, payload any) {
 	s.bus.Publish(events.Event{Topic: topic, Payload: payload})
 }
 
+// LocalDeviceID is the identity this node authors and pushes changes under.
+// Pairing offers it to the responder so the peer binding names the device that
+// actually syncs.
+func (s *Syncer) LocalDeviceID() string {
+	if s == nil {
+		return ""
+	}
+	return s.localDeviceID
+}
+
 func NewSyncer(h host.Host, store *reverbsync.SyncStore, guard *Guard, keys DeviceKeyStore, localDeviceID string) *Syncer {
 	if h == nil {
 		return &Syncer{store: store, guard: guard, keys: keys, localDeviceID: localDeviceID, interval: 30 * time.Second, peerVectors: make(map[peer.ID]map[string]int64)}

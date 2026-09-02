@@ -263,3 +263,42 @@ func freePort(t *testing.T) int {
 	defer ln.Close()
 	return ln.Addr().(*net.TCPAddr).Port
 }
+
+// TestBootAcceptsMutationFromWailsAssetServer covers the desktop REST path
+// end-to-end. The window's fetch calls are relative, so they go through the
+// Wails AssetServer, which builds them from the wails:// URL: Host is "wails"
+// and the peer address is a fabricated TEST-NET one. Without an allowance for
+// that shape, every mutation from the packaged app is rejected and the app is
+// read-only outside --dev.
+func TestBootAcceptsMutationFromWailsAssetServer(t *testing.T) {
+	app := bootTestApp(t, false)
+	handler := api.NewServer(app.deps).Handler()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/downloads/pause", nil)
+	req.Host = "wails"
+	req.Header.Set("Origin", "wails://wails")
+	req.RemoteAddr = "192.0.2.1:1234"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusForbidden {
+		t.Fatalf("mutation from the desktop window was rejected: %s", rec.Body.String())
+	}
+}
+
+// The sync status the UI polls arrives in the same shape, and authenticates on
+// the request being local.
+func TestBootAuthenticatesSyncFromWailsAssetServer(t *testing.T) {
+	app := bootTestApp(t, false)
+	handler := api.NewServer(app.deps).Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sync/status", nil)
+	req.Host = "wails"
+	req.RemoteAddr = "192.0.2.1:1234"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sync status from the desktop window = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+}

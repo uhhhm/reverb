@@ -510,3 +510,35 @@ func TestSyncTriggerUnavailableWithoutSyncer(t *testing.T) {
 		t.Fatalf("sync trigger without syncer = %d, want 503 (body %s)", rec.Code, rec.Body.String())
 	}
 }
+
+// The desktop window reaches the API in-process through the Wails asset server,
+// which fabricates a TEST-NET RemoteAddr. Treating that as remote made every
+// unauthenticated sync call from the packaged app 401, including the status the
+// UI polls.
+func TestSyncStatusFromDesktopWindow(t *testing.T) {
+	srv, _, _ := newSyncTestServer(t)
+	srv.deps.Desktop = true
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sync/status", nil)
+	req.Host = "wails"
+	req.RemoteAddr = "192.0.2.1:1234"
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sync status from the desktop window = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The same shape outside the desktop build is a genuinely non-local caller.
+func TestSyncStatusRejectsNonLoopbackInServerMode(t *testing.T) {
+	srv, _, _ := newSyncTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sync/status", nil)
+	req.Host = "wails"
+	req.RemoteAddr = "192.0.2.1:1234"
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("sync status from a remote peer = %d, want 401", rec.Code)
+	}
+}

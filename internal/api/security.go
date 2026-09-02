@@ -149,6 +149,41 @@ func isLoopbackHost(host string) bool {
 	return false
 }
 
+// desktopWindowHosts are the Host values a request carries when it comes from
+// the Wails window rather than the network. The SPA there is served by the same
+// api.Server handler through the AssetServer under a custom scheme
+// (wails://wails, http://wails.localhost on Windows), so requests it makes to
+// /api/v1 arrive in-process with that scheme's host and no real peer address.
+// ws.go allows the same two values as WebSocket origins.
+var desktopWindowHosts = []string{"wails", "wails.localhost"}
+
+// isDesktopWindowHost reports whether host names the Wails asset server.
+func isDesktopWindowHost(host string) bool {
+	h := host
+	if hh, _, err := net.SplitHostPort(host); err == nil {
+		h = hh
+	}
+	h = strings.Trim(h, "[]")
+	for _, w := range desktopWindowHosts {
+		if strings.EqualFold(h, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// isDesktopWindowRequest reports whether r came from the desktop window's asset
+// server. Only the desktop build serves that origin, so the check is gated on
+// Desktop: in server mode "wails.localhost" is a name a browser can resolve to
+// loopback, and nothing should treat it as trusted there.
+//
+// A page in the user's browser cannot exploit this in the desktop build either:
+// csrfGuard still requires Origin to match Host, and a cross-site page sends its
+// own Origin.
+func (s *Server) isDesktopWindowRequest(r *http.Request) bool {
+	return s.deps.Desktop && isDesktopWindowHost(r.Host)
+}
+
 // hostGuard rejects state-changing requests whose Host header names something
 // other than loopback or a host the operator configured.
 //
@@ -191,6 +226,12 @@ func (s *Server) hostAllowed(host string) bool {
 		return false
 	}
 	if isLoopbackHost(host) {
+		return true
+	}
+	// The desktop window reaches the same handler in-process under the Wails
+	// scheme, so its Host is "wails" and never loopback. Without this every
+	// mutation from the packaged app is rejected.
+	if s.deps.Desktop && isDesktopWindowHost(host) {
 		return true
 	}
 	bare := host

@@ -17,13 +17,20 @@ import (
 // *sync.PairingService satisfies it.
 type PairingService interface {
 	GenerateCode(ctx context.Context) (string, int64, error)
-	Redeem(ctx context.Context, rawCode, deviceName string) (string, string, error)
+	// RedeemAs binds the pairing to the device ID the redeemer already authors
+	// under. An empty deviceID mints one.
+	RedeemAs(ctx context.Context, rawCode, deviceName, deviceID string) (string, string, error)
 }
 
 // pairRequest mirrors api.redeemRequest for libp2p.
 type pairRequest struct {
 	Code       string `json:"code"`
 	DeviceName string `json:"deviceName"`
+	// DeviceID is the redeemer's own device ID -- the identity it authors sync
+	// changes under. The responder binds the peer to it, so the sync handler's
+	// identity check matches what this peer will actually send. Empty from an
+	// older peer, which mints one instead.
+	DeviceID string `json:"deviceId,omitempty"`
 }
 
 type pairResponse struct {
@@ -64,7 +71,18 @@ func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, k
 			return
 		}
 		ctx := context.Background()
-		deviceID, token, err := pairing.Redeem(ctx, req.Code, req.DeviceName)
+		// A peer names the device it already authors under, but it may not name
+		// one that is spoken for: device IDs are not secret (they travel in the
+		// author field of every change), so a code holder could otherwise claim
+		// this node's own identity or another peer's and have its changes
+		// indistinguishable from theirs.
+		if req.DeviceID != "" {
+			if taken, why := deviceIDTaken(ctx, guard, localDeviceID, remote, req.DeviceID); taken {
+				_ = json.NewEncoder(s).Encode(pairResponse{Error: why})
+				return
+			}
+		}
+		deviceID, token, err := pairing.RedeemAs(ctx, req.Code, req.DeviceName, req.DeviceID)
 		if err != nil {
 			_ = json.NewEncoder(s).Encode(pairResponse{Error: err.Error()})
 			return
@@ -105,6 +123,29 @@ func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, k
 	}))
 }
 
+// deviceIDTaken reports whether want is an identity the redeeming peer must not
+// pair into: this node's own, or one already bound to a different peer.
+func deviceIDTaken(ctx context.Context, guard *Guard, localDeviceID func(context.Context) (string, error), remote peer.ID, want string) (bool, string) {
+	if localDeviceID != nil {
+		if id, err := localDeviceID(ctx); err == nil && id == want {
+			return true, "device id is already this node's own"
+		}
+	}
+	if guard == nil {
+		return false, ""
+	}
+	peers, err := guard.TrustedPeers(ctx)
+	if err != nil {
+		return false, ""
+	}
+	for pid, dev := range peers {
+		if dev == want && pid != remote {
+			return true, "device id already belongs to another paired peer"
+		}
+	}
+	return false, ""
+}
+
 // RedeemViaPeer dials target via the host and redeems a pairing code over
 // libp2p. It is the remote counterpart to HTTP POST /pairing/redeem.
 //
@@ -114,11 +155,15 @@ func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, k
 // multiaddr, since multicast does not cross the tunnel and the DHT advertises
 // addresses that are not routable there.
 //
+// localDeviceID is this node's own device ID, the one its syncer sends on every
+// round. The responder binds the peer connection to it, so pushes from here are
+// recognised rather than refused as a mismatched identity.
+//
 // On success the responding peer is added to the local trust set, bound to the
 // device ID it reported for itself, and its address is persisted so later
 // reconnects need no discovery. This is the redeemer half of the mutual binding
 // the pairing handler performs on the other side.
-func RedeemViaPeer(ctx context.Context, h host.Host, guard *Guard, keys DeviceKeyStore, target, code, deviceName string) (string, string, error) {
+func RedeemViaPeer(ctx context.Context, h host.Host, guard *Guard, keys DeviceKeyStore, target, code, deviceName, localDeviceID string) (string, string, error) {
 	if h == nil {
 		return "", "", fmt.Errorf("host is nil")
 	}
@@ -137,7 +182,7 @@ func RedeemViaPeer(ctx context.Context, h host.Host, guard *Guard, keys DeviceKe
 	}
 	defer s.Close()
 	_ = s.SetDeadline(time.Now().Add(10 * time.Second))
-	if err := json.NewEncoder(s).Encode(pairRequest{Code: code, DeviceName: deviceName}); err != nil {
+	if err := json.NewEncoder(s).Encode(pairRequest{Code: code, DeviceName: deviceName, DeviceID: localDeviceID}); err != nil {
 		return "", "", err
 	}
 	// Close write side to signal EOF for some transports.
