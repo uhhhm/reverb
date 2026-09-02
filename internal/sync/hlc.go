@@ -17,9 +17,9 @@ import (
 //
 // The window is wide enough to absorb ordinary skew between devices that are
 // merely unsynchronised, and narrow enough that a broken clock cannot run away.
-// Two mechanisms enforce it: withinDrift refuses an inbound change beyond the
-// bound, and Observe clamps how far a peer's value may push this device's own
-// clock.
+// Three mechanisms enforce it: withinDrift refuses an inbound change beyond the
+// bound, and Observe and Tick both clamp how far a value may push this device's
+// own clock.
 const maxHLCDrift = 5 * time.Minute
 
 // HLC is a hybrid logical clock: max(wallMillis, last+1).
@@ -55,9 +55,24 @@ func (h *HLC) withinDrift(seen int64) bool {
 	return seen <= h.wall()+maxHLCDrift.Milliseconds()
 }
 
+// clamp caps a value at maxHLCDrift ahead of local wall time. The ceiling moves
+// with the clock, so it dissolves on its own rather than pinning the value.
+func (h *HLC) clamp(v int64) int64 {
+	if bound := h.wall() + maxHLCDrift.Milliseconds(); v > bound {
+		return bound
+	}
+	return v
+}
+
 // Tick returns the next HLC value for wallMillis (UnixMilli from the caller).
 // It is safe for concurrent use.
+//
+// wallMillis is clamped: on the inbound path the caller is a peer's UpdatedAt
+// (a change with no HLC of its own), and an unclamped value there would poison
+// this device's clock permanently -- the same failure withinDrift and Observe
+// exist to prevent.
 func (h *HLC) Tick(wallMillis int64) int64 {
+	wallMillis = h.clamp(wallMillis)
 	for {
 		prev := h.last.Load()
 		next := wallMillis
@@ -80,9 +95,7 @@ func (h *HLC) Tick(wallMillis int64) int64 {
 // ceiling is relative to wall time rather than fixed, so it dissolves on its
 // own as the clock catches up.
 func (h *HLC) Observe(seen int64) {
-	if bound := h.wall() + maxHLCDrift.Milliseconds(); seen > bound {
-		seen = bound
-	}
+	seen = h.clamp(seen)
 	for {
 		prev := h.last.Load()
 		if seen <= prev {

@@ -83,3 +83,19 @@ func TestClockHealsAsWallTimeAdvances(t *testing.T) {
 		t.Fatalf("Tick() = %d, want > %d: clock failed to resume tracking wall time", got, clamped)
 	}
 }
+
+// Tick takes wall time from the caller, and on the inbound path that caller is
+// a peer's UpdatedAt. Observe clamps; Tick must too, or a legacy change is a
+// way around the drift bound.
+func TestTickClampsFarFutureWall(t *testing.T) {
+	now := time.Now()
+	h := NewHLC()
+	h.now = fixedNow(now)
+
+	got := h.Tick(now.Add(10 * 365 * 24 * time.Hour).UnixMilli())
+
+	bound := now.Add(time.Hour).UnixMilli()
+	if got > bound {
+		t.Fatalf("Tick() = %d, want <= %d: a far-future wall value poisoned the clock", got, bound)
+	}
+}

@@ -15,6 +15,10 @@ type SyncRequest struct {
 	Changes       []SyncChange     `json:"changes"`
 	// Devices announces verification keys the peer may not have yet.
 	Devices []DeviceAnnounce `json:"devices,omitempty"`
+	// Error carries a refusal (unknown device, id mismatch, store failure).
+	// Without it a failure reply decodes as a successful empty round and the
+	// caller retries forever with no signal on either side.
+	Error string `json:"error,omitempty"`
 }
 
 // SyncChange is a per-field mutation. Field=="__deleted" is the sentinel for deletion.
@@ -56,6 +60,10 @@ type SyncResponse struct {
 	Rejected    []SyncChange     `json:"rejected,omitempty"`
 	// Devices announces verification keys the peer may not have yet.
 	Devices []DeviceAnnounce `json:"devices,omitempty"`
+	// Error carries a refusal (unknown device, id mismatch, store failure).
+	// Without it a failure reply decodes as a successful empty round and the
+	// caller retries forever with no signal on either side.
+	Error string `json:"error,omitempty"`
 }
 
 // MergePolicy decides whether incoming wins over existing for same entity+field.

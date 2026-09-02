@@ -962,7 +962,13 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 	kept := make([]SyncChange, 0, len(inbound))
 	var drifted int
 	for _, inc := range inbound {
-		if inc.HLC != 0 && !s.hlc.withinDrift(inc.HLC) {
+		// A change with no HLC is a legacy row: PickWinner ranks it by
+		// UpdatedAt, so that is the clock the bound has to be applied to.
+		clock := inc.HLC
+		if clock == 0 {
+			clock = inc.UpdatedAt
+		}
+		if clock != 0 && !s.hlc.withinDrift(clock) {
 			rejected = append(rejected, inc)
 			drifted++
 			continue
