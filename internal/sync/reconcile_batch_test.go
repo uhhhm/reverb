@@ -74,3 +74,44 @@ func TestReconcileBatchedWithNoChangesStillReturnsOutbound(t *testing.T) {
 		t.Fatal("newRev 0, want the local revision")
 	}
 }
+
+// NoOutbound exists so the p2p syncer, which pulls separately, does not pay
+// for a full change-log read it discards.
+func TestReconcileNoOutboundSkipsOutbound(t *testing.T) {
+	st := newTestStoreSync(t)
+	ctx := context.Background()
+	ss := syncpkg.NewSyncStore(st.Q())
+	createDevice(t, st, "dev_local", "local", 1)
+	createDevice(t, st, "dev_peer", "peer", 0)
+
+	inbound := []syncpkg.SyncChange{{
+		EntityType: "track",
+		EntityID:   "cat_1",
+		Field:      "title",
+		Value:      "Song",
+		UpdatedAt:  1000,
+		DeviceID:   "dev_peer",
+	}}
+	if _, _, _, err := ss.ReconcileBatched(ctx, "dev_peer", 0, inbound); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	out, _, _, err := ss.Reconcile(ctx, "dev_peer", 0, nil)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if len(out) == 0 {
+		t.Fatal("expected outbound with sinceRev=0, got none")
+	}
+
+	out, rev, _, err := ss.Reconcile(ctx, "dev_peer", syncpkg.NoOutbound, nil)
+	if err != nil {
+		t.Fatalf("Reconcile NoOutbound: %v", err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("NoOutbound returned %d outbound change(s), want 0", len(out))
+	}
+	if rev == 0 {
+		t.Fatal("NoOutbound should still report the revision")
+	}
+}

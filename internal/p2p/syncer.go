@@ -203,7 +203,9 @@ func (s *Syncer) syncPeer(ctx context.Context, pid peer.ID) error {
 			byDevice[ch.DeviceID] = append(byDevice[ch.DeviceID], ch)
 		}
 		for did, batch := range byDevice {
-			if _, _, _, err := s.store.ReconcileBatched(ctx, did, 0, batch); err != nil {
+			// The syncer pulls in its own step, so the outbound half of a
+			// reconcile is read and thrown away; ask for none.
+			if _, _, _, err := s.store.ReconcileBatched(ctx, did, reverbsync.NoOutbound, batch); err != nil {
 				log.Printf("p2p syncer: Reconcile failed for device %s from %s: %v", did, pid, err)
 			}
 		}

@@ -849,12 +849,18 @@ func (s *SyncStore) ReconcileBatched(ctx context.Context, deviceID string, since
 	}
 }
 
+// NoOutbound is a sinceRev that asks Reconcile for no outbound changes. A
+// caller that pulls separately -- the p2p syncer does -- would otherwise pay
+// for a full change-log read per round only to discard it.
+const NoOutbound int64 = -1
+
 // Reconcile applies inbound changes per-field LWW with delete-wins and deterministic tie-breakers,
 // then returns outbound changes (revision > sinceRev) and new revision.
 // Delete-wins: a __deleted tombstone always wins over a concurrent field edit, irrespective of UpdatedAt.
 // When both sides are __deleted, LWW decides. Otherwise LWW via MergePolicy.
 // Tie on HLC/UpdatedAt -> server wins (deprecated), then deviceId lex order.
 // It is atomic when backed by *sql.DB: the inbound loop and cursor advance run in a single transaction.
+// Pass NoOutbound as sinceRev to skip computing outbound entirely.
 func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange) (outbound []SyncChange, newRev int64, rejected []SyncChange, err error) {
 	if len(inbound) > MaxReconcileBatch {
 		return nil, 0, nil, fmt.Errorf("too many changes: %d > %d", len(inbound), MaxReconcileBatch)
@@ -1028,9 +1034,11 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 		}
 	}
 
-	outbound, err = s.ListSince(ctx, sinceRev, 10000)
-	if err != nil {
-		return nil, 0, nil, nil, err
+	if sinceRev >= 0 {
+		outbound, err = s.ListSince(ctx, sinceRev, 10000)
+		if err != nil {
+			return nil, 0, nil, nil, err
+		}
 	}
 	newRev, err = s.GetMaxRevision(ctx)
 	if err != nil {
