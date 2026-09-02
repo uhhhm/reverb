@@ -125,8 +125,15 @@ func (p *Puller) pullPeer(ctx context.Context, pid peer.ID) error {
 	if err := p.guard.RememberAddrs(ctx, pid, ObservedAddrs(p.host, pid)); err != nil {
 		log.Printf("p2p pull: remember addrs for %s: %v", pid, err)
 	}
-	if len(resp.Files) == 0 {
+	// Covers are pulled on every round, whatever the file lane does. Two
+	// libraries in steady state have no missing files, and a cover uploaded on
+	// one device would otherwise never be fetched: its entity_cover row arrives
+	// through the sync log, but the bytes only ever followed a file transfer.
+	defer func() {
+		p.pullCovers(ctx, pid)
 		p.guard.Touch(ctx, pid)
+	}()
+	if len(resp.Files) == 0 {
 		return nil
 	}
 	local, err := p.localManifests(ctx)
@@ -135,7 +142,6 @@ func (p *Puller) pullPeer(ctx context.Context, pid peer.ID) error {
 	}
 	want := MissingFiles(local, resp.Files, p.musicDir)
 	if len(want) == 0 {
-		p.guard.Touch(ctx, pid)
 		return nil
 	}
 	if len(want) > p.maxPerRound {
@@ -158,8 +164,6 @@ func (p *Puller) pullPeer(ctx context.Context, pid peer.ID) error {
 	if fetched > 0 {
 		log.Printf("p2p pull: fetched %d file(s) from %s", fetched, pid)
 	}
-	p.pullCovers(ctx, pid)
-	p.guard.Touch(ctx, pid)
 	return nil
 }
 

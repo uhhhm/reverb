@@ -180,3 +180,65 @@ func TestManifestHandlerOnlyAdvertisesLocalDeviceFiles(t *testing.T) {
 		t.Fatalf("want only locally-authored rows, got %+v", resp.Files)
 	}
 }
+
+// Covers must be pulled every round, not only on a round that also moved a
+// file. Two libraries in steady state have nothing missing in the file lane, so
+// a cover uploaded on one device would otherwise never reach the other: the
+// entity_cover row arrives through the sync log, but the bytes never follow.
+func TestPullFetchesCoversWhenNoFilesAreMissing(t *testing.T) {
+	ctx := context.Background()
+	serverDir, clientDir := t.TempDir(), t.TempDir()
+	serverCovers, clientCovers := t.TempDir(), t.TempDir()
+
+	image := []byte("PNG BYTES")
+	sha := hashOf(image)
+	if err := os.WriteFile(filepath.Join(serverCovers, sha+".png"), image, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	serverQ, clientQ := newTrustStore(t), newTrustStore(t)
+	serverHost, clientHost := newLinkedHosts(t)
+	mkDevice(t, serverQ, "server-device")
+	mkDevice(t, clientQ, "client-device")
+
+	serverGuard := NewGuard(serverQ)
+	if err := serverGuard.Trust(ctx, clientHost.ID(), "", "client"); err != nil {
+		t.Fatal(err)
+	}
+	clientGuard := NewGuard(clientQ)
+	if err := clientGuard.Trust(ctx, serverHost.ID(), "", "server"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The server advertises no files at all: this is the steady state, where
+	// the file lane has nothing to do.
+	RegisterManifestHandler(serverHost, serverQ, "server-device", serverGuard)
+	RegisterFileHandler(serverHost, serverDir, serverGuard)
+	RegisterCoverHandler(serverHost, serverCovers, serverGuard)
+
+	// The client accepted the peer's cover change, so it holds the row that
+	// names the blob but not the blob itself.
+	if err := clientQ.UpsertEntityCover(ctx, db.UpsertEntityCoverParams{
+		EntityType: "album",
+		EntityID:   "album-1",
+		EntityKey:  "artist\x00album",
+		Sha256:     sha,
+		Ext:        "png",
+		UpdatedAt:  time.Now().Unix(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	clientFS := NewFileSyncer(clientQ, "client-device", clientDir)
+	puller := NewPuller(clientHost, clientQ, clientFS, clientGuard, "client-device", clientDir).
+		WithCovers(clientQ, clientCovers)
+	puller.pullAll(ctx)
+
+	got, err := os.ReadFile(filepath.Join(clientCovers, sha+".png"))
+	if err != nil {
+		t.Fatalf("cover blob was not pulled: %v", err)
+	}
+	if string(got) != string(image) {
+		t.Fatalf("pulled cover content mismatch: %q", got)
+	}
+}
