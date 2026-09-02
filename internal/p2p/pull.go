@@ -104,12 +104,14 @@ func (p *Puller) pullAll(ctx context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if !EnsureConnected(ctx, p.host, p.guard, pid) {
-				return
-			}
-			if err := p.pullPeer(ctx, pid); err != nil {
-				log.Printf("p2p pull: peer %s: %v", pid, err)
-			}
+			SafeRun("pull peer", func() {
+				if !EnsureConnected(ctx, p.host, p.guard, pid) {
+					return
+				}
+				if err := p.pullPeer(ctx, pid); err != nil {
+					log.Printf("p2p pull: peer %s: %v", pid, err)
+				}
+			})
 		}()
 	}
 	wg.Wait()

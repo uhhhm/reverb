@@ -3,6 +3,7 @@ package sync_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/uhhhm/reverb/internal/crop"
 	"github.com/uhhhm/reverb/internal/materialize"
@@ -142,5 +143,73 @@ func TestMaterializeIsNotBoundToTheCallersDeadline(t *testing.T) {
 		if err != nil {
 			t.Fatalf("projection %d ran under a canceled context: %v", i, err)
 		}
+	}
+}
+
+// blockingMaterializer holds up its first Apply until released, standing in for
+// a slow projection (a first sync after BackfillHistory projects thousands of
+// plays).
+type blockingMaterializer struct {
+	entered chan struct{}
+	release chan struct{}
+	once    bool
+}
+
+func (m *blockingMaterializer) Apply(context.Context, syncpkg.SyncChange) error {
+	if !m.once {
+		m.once = true
+		close(m.entered)
+		<-m.release
+	}
+	return nil
+}
+
+// Projection must run with the store mutex released. Every local write -- a
+// play, a rename, a playlist edit -- takes the same mutex, so holding it across
+// materialize would freeze the app for as long as the projection ran.
+func TestReconcileDoesNotHoldStoreLockDuringMaterialize(t *testing.T) {
+	st := newTestStoreSync(t)
+	ctx := context.Background()
+	createDevice(t, st, "dev_local", "This one", 1)
+	createDevice(t, st, "dev_peer", "The other one", 0)
+
+	m := &blockingMaterializer{entered: make(chan struct{}), release: make(chan struct{})}
+	ss := syncpkg.NewSyncStore(st.Q())
+	ss.SetMaterializer(m)
+
+	done := make(chan error, 1)
+	go func() {
+		_, _, _, err := ss.Reconcile(ctx, "dev_peer", 0, []syncpkg.SyncChange{
+			{EntityType: "track", EntityID: "cat_1", Field: "title", Value: "Peer Title", UpdatedAt: 2000, DeviceID: "dev_peer"},
+		})
+		done <- err
+	}()
+
+	select {
+	case <-m.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("materialize never ran")
+	}
+
+	appended := make(chan error, 1)
+	go func() {
+		_, err := ss.AppendChange(ctx, "dev_local", syncpkg.SyncChange{
+			EntityType: "track", EntityID: "cat_2", Field: "title", Value: "Local", UpdatedAt: 3000, DeviceID: "dev_local",
+		})
+		appended <- err
+	}()
+	select {
+	case err := <-appended:
+		if err != nil {
+			t.Fatalf("local write during materialize: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		close(m.release)
+		t.Fatal("a local write blocked while a peer's changes were being materialized")
+	}
+
+	close(m.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

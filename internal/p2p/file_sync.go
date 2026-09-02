@@ -214,7 +214,7 @@ func (f *FileSyncer) Run(ctx context.Context) {
 		_ = os.MkdirAll(f.musicDir, 0o755)
 		_ = watcher.Add(f.musicDir)
 		// Also watch subdirs as they appear; we add them on create.
-		go func() {
+		SafeGo("file watcher", func() {
 			debounce := time.NewTimer(0)
 			if !debounce.Stop() {
 				<-debounce.C
@@ -259,7 +259,7 @@ func (f *FileSyncer) Run(ctx context.Context) {
 					}
 				}
 			}
-		}()
+		})
 		// Recursively add existing subdirs to watcher.
 		_ = filepath.WalkDir(f.musicDir, func(path string, d os.DirEntry, err error) error {
 			if err != nil || !d.IsDir() {

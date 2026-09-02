@@ -459,20 +459,20 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 					}
 				}
 				fs := p2p.NewFileSyncer(r.Store.Q(), localID, musicDir)
-				p2p.SafeGo("file sync", func() { fs.Run(ctx) })
+				p2p.SafeGoLoop(ctx, "file sync", func() { fs.Run(ctx) })
 				// Advertise what we hold and pull what paired peers hold.
 				if h.LibHost() != nil {
 					p2p.RegisterManifestHandler(h.LibHost(), r.Store.Q(), localID, guard)
 					puller := p2p.NewPuller(h.LibHost(), r.Store.Q(), fs, guard, localID, musicDir).
 						WithCovers(r.Store.Q(), coverDir)
-					p2p.SafeGo("file pull", func() { puller.Run(ctx) })
+					p2p.SafeGoLoop(ctx, "file pull", func() { puller.Run(ctx) })
 				}
 				// P2P anti-entropy for sync changes over libp2p.
 				if r.Deps.SyncStore != nil && h.LibHost() != nil {
 					syncer := p2p.NewSyncer(h.LibHost(), r.Deps.SyncStore, guard, r.Store.Q(), localID)
 					syncer.SetBus(r.Bus)
 					r.P2PSyncer = syncer
-					p2p.SafeGo("syncer", func() { _ = syncer.Run(ctx) })
+					p2p.SafeGoLoop(ctx, "syncer", func() { _ = syncer.Run(ctx) })
 				}
 			}
 		}

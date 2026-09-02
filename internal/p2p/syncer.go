@@ -121,10 +121,15 @@ func (s *Syncer) syncAll(ctx context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if !EnsureConnected(ctx, s.host, s.guard, pid) {
-				return
-			}
-			_ = s.syncPeer(ctx, pid)
+			// Contained per peer: a round reconciles and materializes data
+			// the peer sent, so a panic here is reachable from peer input
+			// and must not take the process down with it.
+			SafeRun("sync peer", func() {
+				if !EnsureConnected(ctx, s.host, s.guard, pid) {
+					return
+				}
+				_ = s.syncPeer(ctx, pid)
+			})
 		}()
 	}
 	wg.Wait()

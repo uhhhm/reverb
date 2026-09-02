@@ -869,6 +869,20 @@ func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int
 	if len(inbound) > MaxReconcileBatch {
 		return nil, 0, nil, fmt.Errorf("too many changes: %d > %d", len(inbound), MaxReconcileBatch)
 	}
+	// Projection runs after the lock is released. It writes through the domain
+	// services, which is minutes of work on a first sync after BackfillHistory,
+	// and every local write -- a play, a rename, a playlist edit -- takes the
+	// same mutex. Holding it across materialize would stall the whole app for
+	// as long as the projection ran.
+	outbound, newRev, rejected, accepted, err := s.reconcileLocked(ctx, deviceID, sinceRev, inbound)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	s.materialize(ctx, accepted)
+	return outbound, newRev, rejected, nil
+}
+
+func (s *SyncStore) reconcileLocked(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange) (outbound []SyncChange, newRev int64, rejected []SyncChange, accepted []SyncChange, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	policy := s.effectivePolicy(ctx)
@@ -882,26 +896,19 @@ func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int
 				txQ := dbq.WithTx(tx)
 				txStore := &SyncStore{q: txQ, policy: s.policy, hlc: s.hlc}
 				txPolicy := txStore.effectivePolicy(ctx)
-				var accepted []SyncChange
 				outbound, newRev, rejected, accepted, err = txStore.reconcileInternal(ctx, deviceID, sinceRev, inbound, txPolicy)
 				if err != nil {
 					_ = tx.Rollback()
-					return nil, 0, nil, err
+					return nil, 0, nil, nil, err
 				}
 				if err := tx.Commit(); err != nil {
-					return nil, 0, nil, err
+					return nil, 0, nil, nil, err
 				}
-				s.materialize(ctx, accepted)
-				return outbound, newRev, rejected, nil
+				return outbound, newRev, rejected, accepted, nil
 			}
 		}
 	}
-	outbound, newRev, rejected, accepted, err := s.reconcileInternal(ctx, deviceID, sinceRev, inbound, policy)
-	if err != nil {
-		return nil, 0, nil, err
-	}
-	s.materialize(ctx, accepted)
-	return outbound, newRev, rejected, nil
+	return s.reconcileInternal(ctx, deviceID, sinceRev, inbound, policy)
 }
 
 // materialize projects accepted changes onto the tables they describe. It runs
@@ -909,7 +916,10 @@ func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int
 // failure is logged and left for the next change to correct rather than
 // discarding a change every peer has already accepted.
 func (s *SyncStore) materialize(ctx context.Context, accepted []SyncChange) {
-	if s.materializer == nil || len(accepted) == 0 {
+	s.mu.Lock()
+	m := s.materializer
+	s.mu.Unlock()
+	if m == nil || len(accepted) == 0 {
 		return
 	}
 	// Projection outlives the caller's deadline. A sync round runs under a
@@ -935,7 +945,7 @@ func (s *SyncStore) materialize(ctx context.Context, accepted []SyncChange) {
 		}
 	}
 	for _, ch := range ordered {
-		if err := s.materializer.Apply(ctx, ch); err != nil {
+		if err := m.Apply(ctx, ch); err != nil {
 			log.Printf("sync: could not apply %s/%s %s: %v", ch.EntityType, ch.EntityID, ch.Field, err)
 		}
 	}

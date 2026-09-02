@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/multiformats/go-multiaddr"
@@ -101,10 +102,18 @@ func SeedAddrs(h host.Host, pi peer.AddrInfo) {
 	h.Peerstore().AddAddrs(pi.ID, pi.Addrs, peerstore.PermanentAddrTTL)
 }
 
-// ObservedAddrs returns the addresses of the live connections to pid, as full
-// dial strings including /p2p/<peerID>. These are what gets persisted after a
-// successful pairing or sync round, so the peer stays reachable once discovery
-// is gone.
+// ObservedAddrs returns dialable addresses for the live connections to pid, as
+// full dial strings including /p2p/<peerID>. These are what gets persisted
+// after a successful pairing or sync round, so the peer stays reachable once
+// discovery is gone.
+//
+// Only outbound connections are read from. On an inbound connection the remote
+// multiaddr carries the peer's *source* port, which is ephemeral and gone the
+// moment that connection closes; storing it would fill the peer's address list
+// with addresses that can never be dialed and push the one working address off
+// the end of the bounded list. For an inbound connection the peer's advertised
+// listen addresses are used instead -- identify supplies them, and those are
+// the ports it actually accepts on.
 func ObservedAddrs(h host.Host, pid peer.ID) []string {
 	if h == nil {
 		return nil
@@ -113,13 +122,34 @@ func ObservedAddrs(h host.Host, pid peer.ID) []string {
 	if err != nil {
 		return nil
 	}
-	out := make([]string, 0, 2)
+	var outbound []multiaddr.Multiaddr
+	hasOutbound := false
 	for _, c := range h.Network().ConnsToPeer(pid) {
-		ra := c.RemoteMultiaddr()
-		if ra == nil || !isDialableAddr(ra) {
+		if c.Stat().Direction != network.DirOutbound {
 			continue
 		}
-		out = append(out, ra.Encapsulate(suffix).String())
+		hasOutbound = true
+		if ra := c.RemoteMultiaddr(); ra != nil {
+			outbound = append(outbound, ra)
+		}
+	}
+	return selectObservedAddrs(outbound, hasOutbound, h.Peerstore().Addrs(pid), suffix)
+}
+
+// selectObservedAddrs picks the addresses worth persisting: the remote ends of
+// outbound connections, or -- when every connection to the peer is inbound --
+// the listen addresses the peerstore holds for it.
+func selectObservedAddrs(outbound []multiaddr.Multiaddr, hasOutbound bool, fallback []multiaddr.Multiaddr, suffix multiaddr.Multiaddr) []string {
+	src := outbound
+	if !hasOutbound {
+		src = fallback
+	}
+	out := make([]string, 0, len(src))
+	for _, a := range src {
+		if a == nil || !isDialableAddr(a) {
+			continue
+		}
+		out = append(out, a.Encapsulate(suffix).String())
 	}
 	return dedupeAddrs(out)
 }
