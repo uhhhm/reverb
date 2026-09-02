@@ -95,6 +95,20 @@ func (q *Queries) ListTrackCrops(ctx context.Context) ([]TrackCrop, error) {
 	return items, nil
 }
 
+const repointTrackCropCatalog = `-- name: RepointTrackCropCatalog :exec
+UPDATE track_crop SET catalog_id = ? WHERE catalog_id = ?
+`
+
+type RepointTrackCropCatalogParams struct {
+	CatalogID   sql.NullString `json:"catalog_id"`
+	CatalogID_2 sql.NullString `json:"catalog_id_2"`
+}
+
+func (q *Queries) RepointTrackCropCatalog(ctx context.Context, arg RepointTrackCropCatalogParams) error {
+	_, err := q.db.ExecContext(ctx, repointTrackCropCatalog, arg.CatalogID, arg.CatalogID_2)
+	return err
+}
+
 const upsertTrackCrop = `-- name: UpsertTrackCrop :exec
 INSERT INTO track_crop (track_id, start_ms, end_ms, updated_at)
 VALUES (?, ?, ?, ?)

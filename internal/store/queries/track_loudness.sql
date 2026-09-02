@@ -24,3 +24,6 @@ SELECT * FROM track_loudness WHERE catalog_id = ?;
 
 -- name: ListTrackLoudness :many
 SELECT * FROM track_loudness;
+
+-- name: RepointTrackLoudnessCatalog :exec
+UPDATE track_loudness SET catalog_id = ? WHERE catalog_id = ?;

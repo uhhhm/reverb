@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
+	"github.com/uhhhm/reverb/internal/cover"
 	"github.com/uhhhm/reverb/internal/matching"
 	"github.com/uhhhm/reverb/internal/store/db"
 )
@@ -64,7 +65,48 @@ func (s *Service) repointCanonicalRefs(ctx context.Context, winner, loser string
 		return err
 	}
 
+	// 5. Repoint the per-track state that is keyed on the catalog id: renames,
+	//    crops, quality, measured loudness and uploaded art. Left behind, every
+	//    one of them becomes unreachable the moment the loser entity is deleted,
+	//    and nothing errors to say so.
+	if err := s.repointTrackState(ctx, winner, loser); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// repointTrackState moves the catalog-keyed per-track rows from loser → winner.
+// These rows are keyed on the backend track_id, so both entities' rows survive
+// a merge and only the catalog key moves. An uploaded track cover carries the
+// catalog id as its entity_key rather than a column, so it moves by key.
+func (s *Service) repointTrackState(ctx context.Context, winner, loser string) error {
+	w := sql.NullString{String: winner, Valid: true}
+	l := sql.NullString{String: loser, Valid: true}
+
+	if err := s.q.RepointTrackOverrideCatalog(ctx, db.RepointTrackOverrideCatalogParams{
+		CatalogID: w, CatalogID_2: l,
+	}); err != nil {
+		return err
+	}
+	if err := s.q.RepointTrackCropCatalog(ctx, db.RepointTrackCropCatalogParams{
+		CatalogID: w, CatalogID_2: l,
+	}); err != nil {
+		return err
+	}
+	if err := s.q.RepointTrackQualityOverrideCatalog(ctx, db.RepointTrackQualityOverrideCatalogParams{
+		CatalogID: w, CatalogID_2: l,
+	}); err != nil {
+		return err
+	}
+	if err := s.q.RepointTrackLoudnessCatalog(ctx, db.RepointTrackLoudnessCatalogParams{
+		CatalogID: w, CatalogID_2: l,
+	}); err != nil {
+		return err
+	}
+	return s.q.RepointEntityCoverKey(ctx, db.RepointEntityCoverKeyParams{
+		EntityKey: winner, EntityType: cover.KindTrack, EntityKey_2: loser,
+	})
 }
 
 // merge consolidates the loser entity into the winner in one logical operation:

@@ -29,3 +29,6 @@ ON CONFLICT(track_id) DO UPDATE SET
 
 -- name: DeleteTrackCropByCatalogID :exec
 DELETE FROM track_crop WHERE catalog_id = ?;
+
+-- name: RepointTrackCropCatalog :exec
+UPDATE track_crop SET catalog_id = ? WHERE catalog_id = ?;

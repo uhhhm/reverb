@@ -47,3 +47,6 @@ DELETE FROM entity_cover WHERE entity_type = ? AND entity_key = ?;
 
 -- name: CountEntityCoverRefs :one
 SELECT COUNT(*) FROM entity_cover WHERE sha256 = ?;
+
+-- name: RepointEntityCoverKey :exec
+UPDATE entity_cover SET entity_key = ? WHERE entity_type = ? AND entity_key = ?;

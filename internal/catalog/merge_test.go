@@ -2,10 +2,13 @@ package catalog
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/uhhhm/reverb/internal/cover"
 	"github.com/uhhhm/reverb/internal/store"
 	"github.com/uhhhm/reverb/internal/store/db"
 )
@@ -404,5 +407,73 @@ func TestMerge_RepointsDownloadJobCanonicalID(t *testing.T) {
 	// Loser entity is gone.
 	if _, err := q.GetCatalogEntity(ctx, loser); err == nil {
 		t.Fatal("loser entity should be deleted after merge")
+	}
+}
+
+// TestMerge_CarriesPerTrackState is the data-loss guard: renames, crops,
+// quality, loudness and uploaded art are stored under the catalog id, so a
+// merge that leaves them behind makes them unreachable once the loser entity
+// is deleted — silently, since nothing errors.
+func TestMerge_CarriesPerTrackState(t *testing.T) {
+	s, q := newTestServiceWithQueries(t)
+	ctx := context.Background()
+
+	winner, err := s.CanonicalFor(ctx, Identity{Kind: "track", Title: "Winner Track", Artist: "A", Album: "B", DurationMs: 180000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loser, err := s.CanonicalFor(ctx, Identity{Kind: "track", Title: "Loser Track", Artist: "A", Album: "B", DurationMs: 180000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loserCat := sql.NullString{String: loser, Valid: true}
+	const trackID = "navidrome-song-777"
+
+	if err := q.UpsertTrackOverrideByCatalogID(ctx, db.UpsertTrackOverrideByCatalogIDParams{
+		TrackID: trackID, Title: "Renamed", Artist: "A", Album: "B", UpdatedAt: 1, CatalogID: loserCat,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.UpsertTrackCropByCatalogID(ctx, db.UpsertTrackCropByCatalogIDParams{
+		TrackID: trackID, StartMs: 5000, EndMs: sql.NullInt64{Int64: 120000, Valid: true}, UpdatedAt: 1, CatalogID: loserCat,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.UpsertTrackQualityOverrideByCatalogID(ctx, db.UpsertTrackQualityOverrideByCatalogIDParams{
+		TrackID: trackID, Quality: "lossless", UpdatedAt: 1, CatalogID: loserCat,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.UpsertTrackLoudnessByCatalogID(ctx, db.UpsertTrackLoudnessByCatalogIDParams{
+		TrackID: trackID, GainDb: -3.5, UpdatedAt: 1, CatalogID: loserCat,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sha := strings.Repeat("a", 64)
+	if err := q.UpsertEntityCover(ctx, db.UpsertEntityCoverParams{
+		EntityType: cover.KindTrack, EntityID: trackID, EntityKey: loser, Sha256: sha, Ext: "jpg", UpdatedAt: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.merge(ctx, loser, winner); err != nil {
+		t.Fatalf("merge failed: %v", err)
+	}
+
+	winnerCat := sql.NullString{String: winner, Valid: true}
+	if got, err := q.GetTrackOverrideByCatalogID(ctx, winnerCat); err != nil || got.Title != "Renamed" {
+		t.Fatalf("rename lost by merge: %+v (%v)", got, err)
+	}
+	if got, err := q.GetTrackCropByCatalogID(ctx, winnerCat); err != nil || got.StartMs != 5000 {
+		t.Fatalf("crop lost by merge: %+v (%v)", got, err)
+	}
+	if got, err := q.GetTrackQualityOverrideByCatalogID(ctx, winnerCat); err != nil || got.Quality != "lossless" {
+		t.Fatalf("quality override lost by merge: %+v (%v)", got, err)
+	}
+	if got, err := q.GetTrackLoudnessByCatalogID(ctx, winnerCat); err != nil || got.GainDb != -3.5 {
+		t.Fatalf("loudness lost by merge: %+v (%v)", got, err)
+	}
+	if got, err := q.GetEntityCoverByKey(ctx, db.GetEntityCoverByKeyParams{EntityType: cover.KindTrack, EntityKey: winner}); err != nil || got.Sha256 != sha {
+		t.Fatalf("uploaded cover lost by merge: %+v (%v)", got, err)
 	}
 }

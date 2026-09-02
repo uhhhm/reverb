@@ -233,6 +233,21 @@ func (q *Queries) ListEntityOverrides(ctx context.Context, entityType string) ([
 	return items, nil
 }
 
+const repointEntityCoverKey = `-- name: RepointEntityCoverKey :exec
+UPDATE entity_cover SET entity_key = ? WHERE entity_type = ? AND entity_key = ?
+`
+
+type RepointEntityCoverKeyParams struct {
+	EntityKey   string `json:"entity_key"`
+	EntityType  string `json:"entity_type"`
+	EntityKey_2 string `json:"entity_key_2"`
+}
+
+func (q *Queries) RepointEntityCoverKey(ctx context.Context, arg RepointEntityCoverKeyParams) error {
+	_, err := q.db.ExecContext(ctx, repointEntityCoverKey, arg.EntityKey, arg.EntityType, arg.EntityKey_2)
+	return err
+}
+
 const upsertEntityCover = `-- name: UpsertEntityCover :exec
 INSERT INTO entity_cover (entity_type, entity_id, entity_key, sha256, ext, updated_at)
 VALUES (?, ?, ?, ?, ?, ?)

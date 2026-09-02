@@ -27,3 +27,6 @@ SELECT * FROM track_override WHERE catalog_id IN (sqlc.slice('catalog_ids'));
 
 -- name: DeleteTrackOverrideByCatalogID :exec
 DELETE FROM track_override WHERE catalog_id = ?;
+
+-- name: RepointTrackOverrideCatalog :exec
+UPDATE track_override SET catalog_id = ? WHERE catalog_id = ?;

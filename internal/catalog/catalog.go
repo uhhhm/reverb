@@ -47,6 +47,14 @@ type Querier interface {
 	// RepointDownloadJobs repoints download_jobs.canonical_id from loser → winner
 	// so that job covers continue to resolve after a catalog merge (Task 3).
 	RepointDownloadJobs(ctx context.Context, arg db.RepointDownloadJobsParams) error
+	// Per-track state is keyed on the catalog id, so a merge has to carry it
+	// over or the loser's renames, crops, quality, loudness and uploaded art
+	// become unreachable.
+	RepointTrackOverrideCatalog(ctx context.Context, arg db.RepointTrackOverrideCatalogParams) error
+	RepointTrackCropCatalog(ctx context.Context, arg db.RepointTrackCropCatalogParams) error
+	RepointTrackQualityOverrideCatalog(ctx context.Context, arg db.RepointTrackQualityOverrideCatalogParams) error
+	RepointTrackLoudnessCatalog(ctx context.Context, arg db.RepointTrackLoudnessCatalogParams) error
+	RepointEntityCoverKey(ctx context.Context, arg db.RepointEntityCoverKeyParams) error
 }
 
 // Service mints and resolves catalog IDs.

@@ -143,6 +143,20 @@ func (q *Queries) ListTrackOverridesByCatalogIDs(ctx context.Context, catalogIds
 	return items, nil
 }
 
+const repointTrackOverrideCatalog = `-- name: RepointTrackOverrideCatalog :exec
+UPDATE track_override SET catalog_id = ? WHERE catalog_id = ?
+`
+
+type RepointTrackOverrideCatalogParams struct {
+	CatalogID   sql.NullString `json:"catalog_id"`
+	CatalogID_2 sql.NullString `json:"catalog_id_2"`
+}
+
+func (q *Queries) RepointTrackOverrideCatalog(ctx context.Context, arg RepointTrackOverrideCatalogParams) error {
+	_, err := q.db.ExecContext(ctx, repointTrackOverrideCatalog, arg.CatalogID, arg.CatalogID_2)
+	return err
+}
+
 const upsertTrackOverride = `-- name: UpsertTrackOverride :exec
 INSERT INTO track_override (track_id, title, artist, album, updated_at)
 VALUES (?, ?, ?, ?, ?)

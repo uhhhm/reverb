@@ -92,6 +92,20 @@ func (q *Queries) ListTrackQualityOverrides(ctx context.Context) ([]TrackQuality
 	return items, nil
 }
 
+const repointTrackQualityOverrideCatalog = `-- name: RepointTrackQualityOverrideCatalog :exec
+UPDATE track_quality_override SET catalog_id = ? WHERE catalog_id = ?
+`
+
+type RepointTrackQualityOverrideCatalogParams struct {
+	CatalogID   sql.NullString `json:"catalog_id"`
+	CatalogID_2 sql.NullString `json:"catalog_id_2"`
+}
+
+func (q *Queries) RepointTrackQualityOverrideCatalog(ctx context.Context, arg RepointTrackQualityOverrideCatalogParams) error {
+	_, err := q.db.ExecContext(ctx, repointTrackQualityOverrideCatalog, arg.CatalogID, arg.CatalogID_2)
+	return err
+}
+
 const upsertTrackQualityOverride = `-- name: UpsertTrackQualityOverride :exec
 INSERT INTO track_quality_override (track_id, quality, updated_at)
 VALUES (?, ?, ?)

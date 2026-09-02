@@ -27,3 +27,6 @@ SELECT * FROM track_quality_override WHERE catalog_id = ?;
 
 -- name: DeleteTrackQualityOverrideByCatalogID :exec
 DELETE FROM track_quality_override WHERE catalog_id = ?;
+
+-- name: RepointTrackQualityOverrideCatalog :exec
+UPDATE track_quality_override SET catalog_id = ? WHERE catalog_id = ?;

@@ -83,6 +83,20 @@ func (q *Queries) ListTrackLoudness(ctx context.Context) ([]TrackLoudness, error
 	return items, nil
 }
 
+const repointTrackLoudnessCatalog = `-- name: RepointTrackLoudnessCatalog :exec
+UPDATE track_loudness SET catalog_id = ? WHERE catalog_id = ?
+`
+
+type RepointTrackLoudnessCatalogParams struct {
+	CatalogID   sql.NullString `json:"catalog_id"`
+	CatalogID_2 sql.NullString `json:"catalog_id_2"`
+}
+
+func (q *Queries) RepointTrackLoudnessCatalog(ctx context.Context, arg RepointTrackLoudnessCatalogParams) error {
+	_, err := q.db.ExecContext(ctx, repointTrackLoudnessCatalog, arg.CatalogID, arg.CatalogID_2)
+	return err
+}
+
 const upsertTrackLoudness = `-- name: UpsertTrackLoudness :exec
 INSERT INTO track_loudness (track_id, gain_db, updated_at)
 VALUES (?, ?, ?)
