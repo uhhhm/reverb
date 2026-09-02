@@ -40,6 +40,9 @@ func (s *Server) handlePairingCode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	// The owner is pairing right now; give the new code a full attempt budget
+	// rather than whatever a stranger left of it.
+	p2p.RearmPairAttempts()
 	writeJSON(w, http.StatusOK, codeResponse{Code: code, ExpiresAt: expiresAt})
 }
 

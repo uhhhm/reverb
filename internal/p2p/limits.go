@@ -123,11 +123,32 @@ func (l *attemptLimiter) Allow(key string) bool {
 }
 
 // Reset clears the counter for key, called after a successful pairing so a
-// paired device is not left throttled.
+// paired device is not left throttled. The attempts it recorded are dropped
+// from the global window too: peer IDs are free to mint, so leaving them there
+// would let failed pairings from anyone burn a budget that a legitimate device
+// then cannot spend for a full window.
 func (l *attemptLimiter) Reset(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if key == pairLimiterGlobalKey {
+		return
+	}
+	w, ok := l.windows[key]
+	if !ok {
+		return
+	}
 	delete(l.windows, key)
+	gw, ok := l.windows[pairLimiterGlobalKey]
+	if !ok {
+		return
+	}
+	// Remove one global stamp per attempt this key contributed. Stamps carry no
+	// key, so drop the oldest, which is the most likely to fall out anyway.
+	drop := len(w.stamps)
+	if drop > len(gw.stamps) {
+		drop = len(gw.stamps)
+	}
+	gw.stamps = append(gw.stamps[:0], gw.stamps[drop:]...)
 }
 
 // AllowPairAttempt records a pairing attempt for key (a peer ID or client IP)
@@ -137,3 +158,19 @@ func AllowPairAttempt(key string) bool { return pairLimiter.Allow(key) }
 
 // ResetPairAttempts clears the counter for key after a successful pairing.
 func ResetPairAttempts(key string) { pairLimiter.Reset(key) }
+
+// ClearAll drops every window, global included.
+func (l *attemptLimiter) ClearAll() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.windows = make(map[string]*attemptWindow)
+}
+
+// RearmPairAttempts clears the whole attempt budget, called when the owner
+// generates a pairing code on this device. Peer IDs are free to mint, so
+// without this any unpaired peer that can reach the host could exhaust the
+// global budget and lock legitimate pairing out for a full window. Generating
+// a code is a local, authenticated action, and the code's own 10-minute TTL
+// over a 2^40 keyspace is what bounds guessing -- the counter only has to
+// cover the window that one code is live.
+func RearmPairAttempts() { pairLimiter.ClearAll() }
