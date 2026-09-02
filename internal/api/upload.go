@@ -208,8 +208,13 @@ func safeUploadName(raw string) string {
 	}, name)
 	name = strings.TrimSpace(strings.Trim(name, "."))
 	if len(name) > 200 {
-		ext := filepath.Ext(name)
-		name = name[:200-len(ext)] + ext
+		// The extension can be longer than the whole budget, so keeping the
+		// stem plus the extension is not always possible; take the head then.
+		if ext := filepath.Ext(name); len(ext) < 200 {
+			name = name[:200-len(ext)] + ext
+		} else {
+			name = name[:200]
+		}
 	}
 	return name
 }

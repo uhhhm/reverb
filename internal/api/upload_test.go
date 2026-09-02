@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/uhhhm/reverb/internal/registry"
@@ -145,5 +146,28 @@ func TestUploadReportsWhatItAccepted(t *testing.T) {
 	}
 	if resp.Rejected["bad.exe"] == "" {
 		t.Fatalf("rejected = %+v", resp.Rejected)
+	}
+}
+
+func TestUploadNameSurvivesAnOversizedExtension(t *testing.T) {
+	// A "name" that is almost all extension used to slice past the start of the
+	// string when clamping to 200 bytes.
+	name := "a." + strings.Repeat("x", 300)
+	got := safeUploadName(name)
+	if len(got) > 200 {
+		t.Fatalf("safeUploadName kept %d bytes, want <= 200", len(got))
+	}
+	if got == "" {
+		t.Fatal("safeUploadName dropped the name entirely")
+	}
+}
+
+func TestUploadRejectsAnOversizedExtension(t *testing.T) {
+	srv, cookie := uploadServer(t, t.TempDir(), "built-in")
+	rec := doUpload(t, srv, cookie, map[string][]byte{
+		"a." + strings.Repeat("x", 300): []byte("data"),
+	})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422: %s", rec.Code, rec.Body.String())
 	}
 }
