@@ -294,6 +294,53 @@ func TestPairingAPI(t *testing.T) {
 		}
 	})
 
+	t.Run("delete_device_that_has_synced", func(t *testing.T) {
+		srv, st := newPairingTestServer(t)
+		rec := doPostJSON(t, srv, "/api/v1/pairing/code", `{}`, nil)
+		var cr map[string]any
+		_ = json.Unmarshal(rec.Body.Bytes(), &cr)
+		code := cr["code"].(string)
+		rec = doPostJSON(t, srv, "/api/v1/pairing/redeem", `{"code":"`+code+`","deviceName":"synced"}`, nil)
+		var rr map[string]string
+		_ = json.Unmarshal(rec.Body.Bytes(), &rr)
+		devID := rr["deviceId"]
+		if devID == "" {
+			t.Fatal("no deviceId")
+		}
+		// A peer owns a sync_vector row from its first accepted change and a
+		// file_manifest row from its first manifest; both reference device(id)
+		// without a cascade, so a delete that ignores them fails the FK.
+		ctx := context.Background()
+		if _, err := st.DB().ExecContext(ctx,
+			`INSERT INTO sync_vector (device_id, seq, hlc) VALUES (?, 7, 700)`, devID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.DB().ExecContext(ctx,
+			`INSERT INTO file_manifest (canonical_id, content_hash, size, rel_path, mtime, device_id)
+			 VALUES ('cat_x', 'abc', 1, 'a/b.mp3', 0, ?)`, devID); err != nil {
+			t.Fatal(err)
+		}
+		rec = doDeleteDevice(t, srv, devID, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("DELETE synced device = %d: %s", rec.Code, rec.Body.String())
+		}
+		if _, err := st.Q().GetDeviceByID(ctx, devID); err == nil {
+			t.Fatalf("device still exists after delete")
+		}
+		for _, q := range []string{
+			`SELECT COUNT(*) FROM sync_vector WHERE device_id = ?`,
+			`SELECT COUNT(*) FROM file_manifest WHERE device_id = ?`,
+		} {
+			var n int
+			if err := st.DB().QueryRowContext(ctx, q, devID).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			if n != 0 {
+				t.Fatalf("%s left %d row(s)", q, n)
+			}
+		}
+	})
+
 	t.Run("pairing_unavailable", func(t *testing.T) {
 		st, err := store.Open(t.TempDir() + "/unavailable.db")
 		if err != nil {

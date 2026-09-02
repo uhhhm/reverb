@@ -460,7 +460,7 @@ func (s *SyncStore) AppendChange(ctx context.Context, deviceID string, ch SyncCh
 	if err != nil {
 		return 0, err
 	}
-	rowHLC, rowSeq, err := s.prepareHLCVector(ctx, deviceID, ch)
+	rowHLC, rowSeq, err := s.prepareHLCVector(ctx, deviceID, ch, true)
 	if err != nil {
 		return 0, err
 	}
@@ -482,7 +482,7 @@ func (s *SyncStore) appendChangeLocked(ctx context.Context, deviceID string, ch 
 	if err != nil {
 		return 0, err
 	}
-	rowHLC, rowSeq, err := s.prepareHLCVector(ctx, deviceID, ch)
+	rowHLC, rowSeq, err := s.prepareHLCVector(ctx, deviceID, ch, false)
 	if err != nil {
 		return 0, err
 	}
@@ -729,11 +729,16 @@ func (s *SyncStore) isServer(ctx context.Context, deviceID string) bool {
 
 // prepareHLCVector computes rowHLC/rowSeq and upserts the sync vector for deviceID.
 // It handles both locally-generated (ch.Seq==0, assign next seq) and replayed
-// (ch.Seq!=0, advance vector if needed) cases. Caller must hold s.mu or be in
-// a transaction's isolated txStore. It ensures HLC is seeded and advances it
-// as needed, then upserts sync_vector. Returns the final rowHLC and rowSeq to
-// be persisted with the change.
-func (s *SyncStore) prepareHLCVector(ctx context.Context, deviceID string, ch SyncChange) (int64, int64, error) {
+// (ch.Seq!=0) cases. Caller must hold s.mu or be in a transaction's isolated
+// txStore. It ensures HLC is seeded and advances it as needed, then upserts
+// sync_vector. Returns the final rowHLC and rowSeq to be persisted with the
+// change.
+//
+// advanceSeq says whether a replayed change may raise the vector's seq on its
+// own. A batch reconcile passes false and advances the vector once at the end
+// (advanceVectorSeq), because a batch is applied out of seq order and one
+// high-seq row must not declare every lower seq received.
+func (s *SyncStore) prepareHLCVector(ctx context.Context, deviceID string, ch SyncChange, advanceSeq bool) (int64, int64, error) {
 	s.ensureHLC(ctx)
 	var rowHLC int64
 	if ch.HLC != 0 {
@@ -775,7 +780,7 @@ func (s *SyncStore) prepareHLCVector(ctx context.Context, deviceID string, ch Sy
 			s.hlc.Observe(curHLC)
 		}
 		vectorSeq = curSeq
-		if rowSeq > curSeq {
+		if advanceSeq && rowSeq > curSeq {
 			vectorSeq = rowSeq
 		}
 		vectorHLC = s.hlc.Current()
@@ -839,8 +844,10 @@ const MaxReconcileBatch = 5000
 // round. Refusing the round would append nothing, leave the vector where it
 // was, and produce the identical oversized round on the next tick forever, so
 // the batch is split rather than declined. Slices commit one at a time; a
-// failure part-way leaves the earlier ones applied, which the next round
-// resumes from, since every change is idempotent per field.
+// failure part-way leaves the earlier ones applied and the vector at the
+// highest seq with nothing outstanding below it (advanceVectorSeq), so the
+// next round resends the rest -- including anything a committed slice applied
+// ahead of the gap, which is idempotent per field.
 func (s *SyncStore) ReconcileBatched(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange) (outbound []SyncChange, newRev int64, rejected []SyncChange, err error) {
 	return s.reconcileBatched(ctx, deviceID, sinceRev, inbound, false)
 }
@@ -1017,6 +1024,88 @@ func (s *SyncStore) materialize(ctx context.Context, accepted []SyncChange) {
 	}
 }
 
+// advanceVectorSeq raises deviceID's vector to the highest seq below which
+// nothing from that device is still outstanding: every seq up to it has either
+// been handled in this call (applied or refused) or already sits in the log.
+//
+// A batch does not arrive in seq order -- catalog entities are hoisted ahead of
+// the rows that name them, an oversized batch is sliced, and the p2p syncer
+// reconciles catalog entities in a phase of their own -- so letting one row
+// carry the vector to its own seq would claim receipt of every lower seq too.
+// If a later slice or phase then failed, the peer would filter those changes
+// out of its next round (ListSinceVector sends seq > ours) and they would be
+// lost for good.
+func (s *SyncStore) advanceVectorSeq(ctx context.Context, deviceID string, handled map[int64]bool) error {
+	if deviceID == "" || len(handled) == 0 {
+		return nil
+	}
+	if err := s.ValidateDevice(ctx, deviceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	curSeq, curHLC, err := s.GetVector(ctx, deviceID)
+	if err != nil {
+		return err
+	}
+	var maxSeq int64
+	for seq := range handled {
+		if seq > maxSeq {
+			maxSeq = seq
+		}
+	}
+	if maxSeq <= curSeq {
+		return nil
+	}
+	logged, err := s.logSeqs(ctx, deviceID, curSeq)
+	if err != nil {
+		return err
+	}
+	next := curSeq
+	for handled[next+1] || logged[next+1] {
+		next++
+	}
+	if next == curSeq {
+		return nil
+	}
+	hlc := s.hlc.Current()
+	if hlc < curHLC {
+		hlc = curHLC
+	}
+	return s.upsertSyncVector(ctx, db.UpsertSyncVectorParams{DeviceID: deviceID, Seq: next, Hlc: hlc})
+}
+
+// logSeqs returns the seqs deviceID already has in the log above low. A change
+// applied by an earlier slice or phase counts as received even though the
+// current call never saw it.
+func (s *SyncStore) logSeqs(ctx context.Context, deviceID string, low int64) (map[int64]bool, error) {
+	dbq, ok := any(s.q).(*db.Queries)
+	if !ok {
+		return nil, nil
+	}
+	conn := dbq.UnderlyingDB()
+	if conn == nil {
+		return nil, nil
+	}
+	rows, err := conn.QueryContext(ctx,
+		`SELECT seq FROM sync_change WHERE device_id = ? AND seq > ?`,
+		deviceID, low)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[int64]bool)
+	for rows.Next() {
+		var seq int64
+		if err := rows.Scan(&seq); err != nil {
+			return nil, err
+		}
+		out[seq] = true
+	}
+	return out, rows.Err()
+}
+
 func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange, policy MergePolicy) (outbound []SyncChange, newRev int64, rejected []SyncChange, accepted []SyncChange, err error) {
 	// Validate sender exists (defense in depth; p2p handler also validates).
 	if deviceID != "" {
@@ -1037,6 +1126,23 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 	s.ensureHLC(ctx)
 	kept := make([]SyncChange, 0, len(inbound))
 	var drifted int
+	// Seqs this call has settled, per author: the vector advances over them
+	// once at the end rather than per change. A refusal counts as settled --
+	// the peer is not going to send anything better -- or the gap it leaves
+	// would hold the vector back forever.
+	handled := make(map[string]map[int64]bool)
+	settle := func(author string, seq int64) {
+		if author == "" {
+			author = deviceID
+		}
+		if author == "" || seq == 0 {
+			return
+		}
+		if handled[author] == nil {
+			handled[author] = make(map[int64]bool)
+		}
+		handled[author][seq] = true
+	}
 	for _, inc := range inbound {
 		// A change with no HLC is a legacy row: PickWinner ranks it by
 		// UpdatedAt, so that is the clock the bound has to be applied to.
@@ -1046,6 +1152,7 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 		}
 		if clock != 0 && !s.hlc.withinDrift(clock) {
 			rejected = append(rejected, inc)
+			settle(inc.DeviceID, inc.Seq)
 			drifted++
 			continue
 		}
@@ -1081,6 +1188,7 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 			}
 			return nil, 0, nil, nil, err
 		}
+		settle(effectiveID, inc.Seq)
 
 		if inc.Field != "__deleted" {
 			tomb, terr := s.GetLatestForField(ctx, inc.EntityType, inc.EntityID, "__deleted")
@@ -1126,6 +1234,12 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 			accepted = append(accepted, inc)
 		} else {
 			rejected = append(rejected, inc)
+		}
+	}
+
+	for author, seqs := range handled {
+		if err := s.advanceVectorSeq(ctx, author, seqs); err != nil {
+			return nil, 0, nil, nil, err
 		}
 	}
 

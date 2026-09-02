@@ -115,3 +115,68 @@ func TestReconcileNoOutboundSkipsOutbound(t *testing.T) {
 		t.Fatal("NoOutbound should still report the revision")
 	}
 }
+
+// The vector says "everything below this seq has been received", so it may only
+// cross a seq that has actually been settled. Batches are applied out of seq
+// order -- catalog entities are hoisted, oversized batches are sliced, and the
+// p2p syncer reconciles catalog entities in their own phase -- and a vector
+// that jumped to a hoisted entity's seq would filter every lower seq out of the
+// peer's next round, losing changes a failed later phase never applied.
+func TestVectorOnlyAdvancesOverSettledSeqs(t *testing.T) {
+	st := newTestStoreSync(t)
+	ctx := context.Background()
+	ss := syncpkg.NewSyncStore(st.Q())
+	createDevice(t, st, "dev_local", "local", 1)
+	createDevice(t, st, "dev_peer", "peer", 0)
+
+	change := func(seq int64, entityType, id string) syncpkg.SyncChange {
+		return syncpkg.SyncChange{
+			EntityType: entityType,
+			EntityID:   id,
+			Field:      "title",
+			Value:      "Song",
+			UpdatedAt:  1000 + seq,
+			HLC:        1000 + seq,
+			Seq:        seq,
+			DeviceID:   "dev_peer",
+		}
+	}
+	// Phase one of a round: the peer's catalog entity, seq 5 of 1..5.
+	catalog := []syncpkg.SyncChange{change(5, syncpkg.EntityCatalog, "cat_5")}
+	if _, _, _, err := ss.ReconcileBatched(ctx, "dev_peer", syncpkg.NoOutbound, catalog); err != nil {
+		t.Fatalf("catalog phase: %v", err)
+	}
+	seq, _, err := ss.GetVector(ctx, "dev_peer")
+	if err != nil {
+		t.Fatalf("GetVector: %v", err)
+	}
+	if seq != 0 {
+		t.Fatalf("vector at %d after only seq 5 landed; seqs 1-4 would never be resent", seq)
+	}
+	still, err := ss.ListSinceVector(ctx, map[string]int64{"dev_peer": seq}, 100)
+	if err != nil {
+		t.Fatalf("ListSinceVector: %v", err)
+	}
+	if len(still) == 0 {
+		t.Fatal("peer would resend nothing, so the missing changes are lost")
+	}
+
+	// Phase two lands the rest. The vector may now cross seq 5, which the log
+	// already holds, and reach the end of the run.
+	rest := []syncpkg.SyncChange{
+		change(1, "track", "cat_1"),
+		change(2, "track", "cat_2"),
+		change(3, "track", "cat_3"),
+		change(4, "track", "cat_4"),
+	}
+	if _, _, _, err := ss.ReconcileBatched(ctx, "dev_peer", syncpkg.NoOutbound, rest); err != nil {
+		t.Fatalf("second phase: %v", err)
+	}
+	seq, _, err = ss.GetVector(ctx, "dev_peer")
+	if err != nil {
+		t.Fatalf("GetVector: %v", err)
+	}
+	if seq != 5 {
+		t.Fatalf("vector at %d after the whole run landed, want 5", seq)
+	}
+}

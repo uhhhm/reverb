@@ -163,27 +163,7 @@ func (s *Server) handlePairingDeviceDelete(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		defer func() { _ = tx.Rollback() }()
-		if _, err := tx.ExecContext(r.Context(), `DELETE FROM sync_cursor WHERE device_id = ?`, id); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if _, err := tx.ExecContext(r.Context(), `DELETE FROM pairing_code WHERE used_by_device_id = ?`, id); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if _, err := tx.ExecContext(r.Context(), `DELETE FROM sync_change WHERE device_id = ?`, id); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if _, err := tx.ExecContext(r.Context(), `DELETE FROM offline_set WHERE device_id = ?`, id); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if _, err := tx.ExecContext(r.Context(), `DELETE FROM p2p_peer WHERE device_id = ?`, id); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if _, err := tx.ExecContext(r.Context(), `DELETE FROM device WHERE id = ?`, id); err != nil {
+		if err := deleteDeviceRows(r.Context(), tx, id); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
@@ -216,27 +196,7 @@ func (s *Server) handlePairingDeviceDelete(w http.ResponseWriter, r *http.Reques
 		}); ok {
 			if tx, err := beginner.BeginTx(r.Context(), nil); err == nil {
 				defer func() { _ = tx.Rollback() }()
-				if _, err := tx.ExecContext(r.Context(), `DELETE FROM sync_cursor WHERE device_id = ?`, id); err != nil {
-					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-					return
-				}
-				if _, err := tx.ExecContext(r.Context(), `DELETE FROM pairing_code WHERE used_by_device_id = ?`, id); err != nil {
-					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-					return
-				}
-				if _, err := tx.ExecContext(r.Context(), `DELETE FROM sync_change WHERE device_id = ?`, id); err != nil {
-					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-					return
-				}
-				if _, err := tx.ExecContext(r.Context(), `DELETE FROM offline_set WHERE device_id = ?`, id); err != nil {
-					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-					return
-				}
-				if _, err := tx.ExecContext(r.Context(), `DELETE FROM p2p_peer WHERE device_id = ?`, id); err != nil {
-					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-					return
-				}
-				if _, err := tx.ExecContext(r.Context(), `DELETE FROM device WHERE id = ?`, id); err != nil {
+				if err := deleteDeviceRows(r.Context(), tx, id); err != nil {
 					writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 					return
 				}
@@ -255,27 +215,8 @@ func (s *Server) handlePairingDeviceDelete(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	// FK cleanup: pairing_code and sync_change reference device. Clear them before
-	// deleting the device so the delete does not hit FOREIGN KEY constraint.
 	if execHandle != nil {
-		if _, err := execHandle.ExecContext(r.Context(), `DELETE FROM pairing_code WHERE used_by_device_id = ?`, id); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if _, err := execHandle.ExecContext(r.Context(), `DELETE FROM sync_change WHERE device_id = ?`, id); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if _, err := execHandle.ExecContext(r.Context(), `DELETE FROM sync_cursor WHERE device_id = ?`, id); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		// offline_set also references device, but deviceId+playlistId is composite; clean if present.
-		if _, err := execHandle.ExecContext(r.Context(), `DELETE FROM offline_set WHERE device_id = ?`, id); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if _, err := execHandle.ExecContext(r.Context(), `DELETE FROM p2p_peer WHERE device_id = ?`, id); err != nil {
+		if err := deleteDeviceReferences(r.Context(), execHandle, id); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
@@ -286,4 +227,40 @@ func (s *Server) handlePairingDeviceDelete(w http.ResponseWriter, r *http.Reques
 	}
 	s.invalidateP2PTrust()
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// deviceReferenceDeletes clears every row that references device(id). Only
+// p2p_peer cascades, so each of the others has to be cleared by hand or the
+// device delete fails the foreign key -- which is what "remove device" did for
+// any peer that had ever synced, since sync_vector and file_manifest own a row
+// per peer from its first accepted change.
+var deviceReferenceDeletes = []string{
+	`DELETE FROM sync_cursor WHERE device_id = ?`,
+	`DELETE FROM pairing_code WHERE used_by_device_id = ?`,
+	`DELETE FROM sync_change WHERE device_id = ?`,
+	`DELETE FROM sync_vector WHERE device_id = ?`,
+	`DELETE FROM file_manifest WHERE device_id = ?`,
+	`DELETE FROM offline_set WHERE device_id = ?`,
+	`DELETE FROM p2p_peer WHERE device_id = ?`,
+}
+
+type execer interface {
+	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+}
+
+func deleteDeviceReferences(ctx context.Context, ex execer, id string) error {
+	for _, stmt := range deviceReferenceDeletes {
+		if _, err := ex.ExecContext(ctx, stmt, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func deleteDeviceRows(ctx context.Context, ex execer, id string) error {
+	if err := deleteDeviceReferences(ctx, ex, id); err != nil {
+		return err
+	}
+	_, err := ex.ExecContext(ctx, `DELETE FROM device WHERE id = ?`, id)
+	return err
 }
