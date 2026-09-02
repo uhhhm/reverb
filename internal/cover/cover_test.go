@@ -659,3 +659,69 @@ func TestCoverStoreNilService(t *testing.T) {
 		t.Fatal("expected error for nil service Store")
 	}
 }
+
+// A cover address off the sync log is as untrusted as one off a URL: gc deletes
+// the path a stored ref builds, so a peer that assigns "x./../../reverb.db" and
+// then clears it would delete a file outside the cover directory.
+func TestAssignByKeyRejectsRefsThatEscapeTheCoverDir(t *testing.T) {
+	ctx := context.Background()
+	svc, dir := openService(t)
+
+	dataDir := filepath.Dir(dir)
+	victim := filepath.Join(dataDir, "reverb.db")
+	if err := os.WriteFile(victim, []byte("not a cover"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	key := override.AlbumKey("Artist", "Album")
+
+	// This is exactly what materialize hands over for the value
+	// "x./../../reverb.db": split at the first dot, both halves unchecked.
+	hostile := []struct{ sha, ext string }{
+		// The exact value from the report, split at the first dot the way
+		// materialize splits it: this resolves to <dataDir>/reverb.db.
+		{"x", "/../../reverb.db"},
+		{"x", "../reverb.db"},
+		{strings.Repeat("a", 64), "png/../../reverb.db"},
+		{"../" + strings.Repeat("a", 61), "png"},
+		{strings.Repeat("z", 64), "png"}, // 64 chars, not hex
+		{strings.Repeat("a", 63), "png"},
+		{strings.Repeat("a", 64), "exe"},
+	}
+	for _, h := range hostile {
+		if err := svc.AssignByKey(ctx, KindAlbum, key, h.sha, h.ext); err == nil {
+			t.Fatalf("AssignByKey accepted malformed ref %q.%q", h.sha, h.ext)
+		}
+		if err := svc.Assign(ctx, KindAlbum, "album-1", key, h.sha, h.ext); err == nil {
+			t.Fatalf("Assign accepted malformed ref %q.%q", h.sha, h.ext)
+		}
+	}
+
+	// Nothing was stored, so nothing can be cleared, and the file outside the
+	// cover directory is untouched.
+	if err := svc.ClearByKey(ctx, KindAlbum, key); err != nil {
+		t.Fatalf("ClearByKey: %v", err)
+	}
+	if _, err := os.Stat(victim); err != nil {
+		t.Fatalf("file outside the cover directory was removed: %v", err)
+	}
+}
+
+// A well-formed assignment still works, and still gc's its own blob.
+func TestAssignByKeyAcceptsWellFormedRef(t *testing.T) {
+	ctx := context.Background()
+	svc, dir := openService(t)
+	sha, ext, err := svc.Store(tinyPNG(t, color.RGBA{4, 5, 6, 255}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := override.AlbumKey("Artist", "Album")
+	if err := svc.AssignByKey(ctx, KindAlbum, key, sha, ext); err != nil {
+		t.Fatalf("AssignByKey: %v", err)
+	}
+	if err := svc.ClearByKey(ctx, KindAlbum, key); err != nil {
+		t.Fatalf("ClearByKey: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, sha+"."+ext)); err == nil {
+		t.Fatal("blob should be gone after clear")
+	}
+}

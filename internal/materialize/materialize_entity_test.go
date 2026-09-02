@@ -270,3 +270,33 @@ func TestApplyEntityWithoutDepsIsNoop(t *testing.T) {
 		t.Fatalf("without Covers track cover should be noop, got %v", err)
 	}
 }
+
+// A cover address off the sync log is untrusted input. It is split at the first
+// dot and both halves become a file name, so a peer must not be able to send
+// one that names a file outside the cover directory.
+func TestApplyRejectsCoverRefsThatEscapeTheCoverDir(t *testing.T) {
+	svc, _, _, covers := newEntityService(t)
+	ctx := context.Background()
+	key := override.AlbumKey("Artist", "Album")
+
+	hostile := []string{
+		"x./../../reverb.db",
+		"x.../reverb.db",
+		strings.Repeat("a", 64) + ".png/../../reverb.db",
+		strings.Repeat("a", 63) + ".png",
+		strings.Repeat("a", 64) + ".exe",
+	}
+	for _, value := range hostile {
+		album := reverbsync.SyncChange{EntityType: EntityAlbum, EntityID: key, Field: FieldCover, Value: value, UpdatedAt: 1000}
+		if err := svc.Apply(ctx, album); err == nil {
+			t.Fatalf("album cover %q was accepted", value)
+		}
+		track := reverbsync.SyncChange{EntityType: EntityTrack, EntityID: "cat_1", Field: FieldCover, Value: value, UpdatedAt: 1000}
+		if err := svc.Apply(ctx, track); err == nil {
+			t.Fatalf("track cover %q was accepted", value)
+		}
+	}
+	if got := covers.Get(ctx, cover.KindAlbum, key); got != "" {
+		t.Fatalf("a malformed cover was stored anyway: %q", got)
+	}
+}

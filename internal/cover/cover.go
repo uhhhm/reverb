@@ -151,6 +151,29 @@ func (s *Service) blobPath(sha, ext string) string {
 	return filepath.Join(s.dir, sha+"."+ext)
 }
 
+// ErrBadRef is returned for a hash/extension pair that is not the shape Store
+// produces, so it cannot name a file.
+var ErrBadRef = errors.New("cover: malformed cover reference")
+
+// ValidRef reports whether a hash and extension are exactly what Store
+// produces. Every path that turns a value into a file name checks this: an
+// address off the sync log is as untrusted as one off a URL, and gc removes the
+// path it builds, so an unchecked "x./../../reverb.db" would delete a file
+// outside the cover directory.
+func ValidRef(sha, ext string) bool {
+	if len(sha) != 64 {
+		return false
+	}
+	if _, err := hex.DecodeString(sha); err != nil {
+		return false
+	}
+	switch ext {
+	case "jpg", "png", "webp":
+		return true
+	}
+	return false
+}
+
 // Assign points one entity at an already-stored blob.
 func (s *Service) Assign(ctx context.Context, kind, entityID, key, sha, ext string) error {
 	if !s.ready() {
@@ -158,6 +181,9 @@ func (s *Service) Assign(ctx context.Context, kind, entityID, key, sha, ext stri
 	}
 	if entityID == "" || sha == "" || ext == "" {
 		return errors.New("cover: incomplete assignment")
+	}
+	if !ValidRef(sha, ext) {
+		return ErrBadRef
 	}
 	prev, hadPrev := s.current(ctx, kind, entityID)
 	if err := s.q.UpsertEntityCover(ctx, db.UpsertEntityCoverParams{
@@ -192,6 +218,9 @@ func (s *Service) AssignByKey(ctx context.Context, kind, key, sha, ext string) e
 	}
 	if sha == "" {
 		return s.ClearByKey(ctx, kind, key)
+	}
+	if !ValidRef(sha, ext) {
+		return ErrBadRef
 	}
 	return s.Assign(ctx, kind, entityID, key, sha, ext)
 }
@@ -234,7 +263,9 @@ func (s *Service) current(ctx context.Context, kind, entityID string) (db.Entity
 // gc removes a blob once nothing points at it. A failure here costs disk, not
 // correctness, so it is not reported.
 func (s *Service) gc(ctx context.Context, sha, ext string) {
-	if sha == "" {
+	// Belt and braces with the check on the write side: this is the call that
+	// deletes a file, so it never builds a path out of anything but a hash.
+	if !ValidRef(sha, ext) {
 		return
 	}
 	n, err := s.q.CountEntityCoverRefs(ctx, sha)
@@ -284,17 +315,10 @@ func parseID(id string) (sha, ext string, ok bool) {
 		return "", "", false
 	}
 	sha, ext, found = strings.Cut(rest, ".")
-	if !found || len(sha) != 64 {
+	if !found || !ValidRef(sha, ext) {
 		return "", "", false
 	}
-	if _, err := hex.DecodeString(sha); err != nil {
-		return "", "", false
-	}
-	switch ext {
-	case "jpg", "png", "webp":
-		return sha, ext, true
-	}
-	return "", "", false
+	return sha, ext, true
 }
 
 // index loads every uploaded cover, keyed by backend id and by stable key.
