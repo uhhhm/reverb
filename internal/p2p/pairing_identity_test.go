@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/network"
+
 	"github.com/uhhhm/reverb/internal/store"
 	"github.com/uhhhm/reverb/internal/store/db"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
@@ -144,5 +146,90 @@ func TestPairingRefusesLocalDeviceID(t *testing.T) {
 	}
 	if dev.TokenHash != before.TokenHash {
 		t.Fatal("the refused pairing still rewrote the local device row")
+	}
+}
+
+// The binding has to hold in both directions. A hostile responder that names
+// the redeemer's own device ID would have its pushes read as self-authored:
+// accepted unsigned, then signed with the redeemer's key on relay, so every
+// other peer takes them for the victim's own changes.
+func TestRedeemRefusesResponderClaimingOurDeviceID(t *testing.T) {
+	ctx := context.Background()
+	server, client := newLinkedHosts(t)
+
+	cq := newSyncDB(t, "client.db")
+	clientLocal, err := reverbsync.EnsureLocalDevice(ctx, cq)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A responder that hands back a valid-looking pairing but claims the
+	// redeemer's identity for itself.
+	server.SetStreamHandler("/reverb/pair/1.0.0", func(s network.Stream) {
+		defer s.Close()
+		var req pairRequest
+		_ = json.NewDecoder(s).Decode(&req)
+		_ = json.NewEncoder(s).Encode(pairResponse{
+			DeviceID:     "minted-for-the-laptop",
+			Token:        "token",
+			PeerDeviceID: clientLocal,
+		})
+	})
+
+	clientGuard := NewGuard(cq)
+	_, _, err = RedeemViaPeer(ctx, client, clientGuard, cq,
+		server.ID().String(), "123456", "desktop", clientLocal)
+	if err == nil {
+		t.Fatal("redeemer accepted a responder claiming its own device identity")
+	}
+	peers, perr := clientGuard.TrustedPeers(ctx)
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	if len(peers) != 0 {
+		t.Fatalf("the refused peer was trusted anyway: %v", peers)
+	}
+}
+
+// Nor may a responder claim an identity already bound to a different peer:
+// that peer's changes and this one's would be indistinguishable.
+func TestRedeemRefusesResponderClaimingAnotherPeersDeviceID(t *testing.T) {
+	ctx := context.Background()
+	server, client := newLinkedHosts(t)
+
+	cq := newSyncDB(t, "client.db")
+	clientLocal, err := reverbsync.EnsureLocalDevice(ctx, cq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientGuard := NewGuard(cq)
+
+	// An unrelated peer already paired under its own device row.
+	other, _ := newLinkedHosts(t)
+	otherKey, err := PublicKeyBase64(other.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordPeerDevice(ctx, cq, "phone-device", "phone", otherKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientGuard.Trust(ctx, other.ID(), "phone-device", "phone"); err != nil {
+		t.Fatal(err)
+	}
+
+	server.SetStreamHandler("/reverb/pair/1.0.0", func(s network.Stream) {
+		defer s.Close()
+		var req pairRequest
+		_ = json.NewDecoder(s).Decode(&req)
+		_ = json.NewEncoder(s).Encode(pairResponse{
+			DeviceID:     "minted-for-the-laptop",
+			Token:        "token",
+			PeerDeviceID: "phone-device",
+		})
+	})
+
+	if _, _, err := RedeemViaPeer(ctx, client, clientGuard, cq,
+		server.ID().String(), "123456", "desktop", clientLocal); err == nil {
+		t.Fatal("redeemer accepted a responder claiming another peer's device identity")
 	}
 }

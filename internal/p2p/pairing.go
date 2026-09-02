@@ -77,7 +77,11 @@ func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, k
 		// this node's own identity or another peer's and have its changes
 		// indistinguishable from theirs.
 		if req.DeviceID != "" {
-			if taken, why := deviceIDTaken(ctx, guard, localDeviceID, remote, req.DeviceID); taken {
+			var localID string
+			if localDeviceID != nil {
+				localID, _ = localDeviceID(ctx)
+			}
+			if taken, why := deviceIDTaken(ctx, guard, localID, remote, req.DeviceID); taken {
 				_ = json.NewEncoder(s).Encode(pairResponse{Error: why})
 				return
 			}
@@ -123,13 +127,16 @@ func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, k
 	}))
 }
 
-// deviceIDTaken reports whether want is an identity the redeeming peer must not
-// pair into: this node's own, or one already bound to a different peer.
-func deviceIDTaken(ctx context.Context, guard *Guard, localDeviceID func(context.Context) (string, error), remote peer.ID, want string) (bool, string) {
-	if localDeviceID != nil {
-		if id, err := localDeviceID(ctx); err == nil && id == want {
-			return true, "device id is already this node's own"
-		}
+// deviceIDTaken reports whether want is an identity the peer on the other end of
+// this pairing must not be bound to: this node's own, or one already bound to a
+// different peer. Both halves of the exchange check it — the responder against
+// the device ID the redeemer announces, the redeemer against the one the
+// responder reports for itself — because the binding is only worth anything if
+// neither side can claim an identity the other already signs for. localID is
+// this node's device ID, or "" when it has none yet.
+func deviceIDTaken(ctx context.Context, guard *Guard, localID string, remote peer.ID, want string) (bool, string) {
+	if localID != "" && localID == want {
+		return true, "device id is already this node's own"
 	}
 	if guard == nil {
 		return false, ""
@@ -196,6 +203,16 @@ func RedeemViaPeer(ctx context.Context, h host.Host, guard *Guard, keys DeviceKe
 	}
 	if resp.DeviceID == "" || resp.Token == "" {
 		return "", "", fmt.Errorf("invalid pair response")
+	}
+	// The responder names the device it authors under, and it may not name one
+	// that is spoken for here. Without this a hostile responder could claim this
+	// node's own device ID: the sync handler would then read its pushes as
+	// self-authored, accept them unsigned, and signatureFor would sign them with
+	// this device's key, so every other peer would accept them as ours.
+	if resp.PeerDeviceID != "" {
+		if taken, why := deviceIDTaken(ctx, guard, localDeviceID, pid, resp.PeerDeviceID); taken {
+			return "", "", fmt.Errorf("peer claimed a device id that is not free: %s", why)
+		}
 	}
 	// Record the responder as a known device with its verification key. Its
 	// key is derivable from the peer ID we dialed, so a lying response cannot
