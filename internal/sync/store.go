@@ -816,6 +816,39 @@ func (s *SyncStore) effectivePolicy(ctx context.Context) MergePolicy {
 	return base
 }
 
+// MaxReconcileBatch is the largest inbound batch one Reconcile call accepts.
+// Both sync producers page well above it, so callers that hand over whatever a
+// peer sent must go through ReconcileBatched.
+const MaxReconcileBatch = 5000
+
+// ReconcileBatched applies inbound in slices of at most MaxReconcileBatch and
+// returns the last slice's outbound and revision plus every rejection.
+//
+// A peer that authored more than one batch's worth -- a first pairing after
+// BackfillHistory publishes a play per listen, say -- sends them all in one
+// round. Refusing the round would append nothing, leave the vector where it
+// was, and produce the identical oversized round on the next tick forever, so
+// the batch is split rather than declined. Slices commit one at a time; a
+// failure part-way leaves the earlier ones applied, which the next round
+// resumes from, since every change is idempotent per field.
+func (s *SyncStore) ReconcileBatched(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange) (outbound []SyncChange, newRev int64, rejected []SyncChange, err error) {
+	for start := 0; ; start += MaxReconcileBatch {
+		end := start + MaxReconcileBatch
+		if end > len(inbound) {
+			end = len(inbound)
+		}
+		out, rev, rej, rerr := s.Reconcile(ctx, deviceID, sinceRev, inbound[start:end])
+		if rerr != nil {
+			return nil, 0, nil, rerr
+		}
+		outbound, newRev = out, rev
+		rejected = append(rejected, rej...)
+		if end >= len(inbound) {
+			return outbound, newRev, rejected, nil
+		}
+	}
+}
+
 // Reconcile applies inbound changes per-field LWW with delete-wins and deterministic tie-breakers,
 // then returns outbound changes (revision > sinceRev) and new revision.
 // Delete-wins: a __deleted tombstone always wins over a concurrent field edit, irrespective of UpdatedAt.
@@ -823,8 +856,8 @@ func (s *SyncStore) effectivePolicy(ctx context.Context) MergePolicy {
 // Tie on HLC/UpdatedAt -> server wins (deprecated), then deviceId lex order.
 // It is atomic when backed by *sql.DB: the inbound loop and cursor advance run in a single transaction.
 func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange) (outbound []SyncChange, newRev int64, rejected []SyncChange, err error) {
-	if len(inbound) > 5000 {
-		return nil, 0, nil, fmt.Errorf("too many changes: %d > 5000", len(inbound))
+	if len(inbound) > MaxReconcileBatch {
+		return nil, 0, nil, fmt.Errorf("too many changes: %d > %d", len(inbound), MaxReconcileBatch)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

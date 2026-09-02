@@ -51,7 +51,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	submitted := len(req.Changes)
 	var unauthorized []sync.SyncChange
 	req.Changes, unauthorized = s.deps.SyncStore.AuthorizeInbound(r.Context(), deviceID, req.Changes)
-	outbound, newRev, rejected, err := s.deps.SyncStore.Reconcile(r.Context(), deviceID, req.SinceRevision, req.Changes)
+	outbound, newRev, rejected, err := s.deps.SyncStore.ReconcileBatched(r.Context(), deviceID, req.SinceRevision, req.Changes)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

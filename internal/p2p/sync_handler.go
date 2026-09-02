@@ -71,7 +71,7 @@ func RegisterSyncHandler(h host.Host, store *sync.SyncStore, guard *Guard, keys 
 		peerVector := req.Vector
 		_ = req.SinceHLC
 
-		outbound, newRev, rejectedChanges, err := store.Reconcile(ctx, deviceID, sinceRev, req.Changes)
+		outbound, newRev, rejectedChanges, err := store.ReconcileBatched(ctx, deviceID, sinceRev, req.Changes)
 		if err != nil {
 			_ = json.NewEncoder(s).Encode(map[string]string{"error": err.Error()})
 			return
