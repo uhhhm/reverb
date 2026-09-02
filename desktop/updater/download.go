@@ -61,7 +61,14 @@ func DownloadAsset(ctx context.Context, a Asset, destDir string, onProgress func
 		return "", fmt.Errorf("download %s: %d", a.Name, resp.StatusCode)
 	}
 
-	raw := filepath.Join(destDir, a.Name)
+	// The asset name comes from the release feed, so it is untrusted input on a
+	// path: take only its final element, or a name like "../../x.zip" would
+	// write outside the staging dir.
+	name := filepath.Base(a.Name)
+	if name == "." || name == ".." || name == string(filepath.Separator) {
+		return "", fmt.Errorf("refusing asset with unusable name %q", a.Name)
+	}
+	raw := filepath.Join(destDir, name)
 	tmp := raw + ".part"
 	f, err := os.Create(tmp)
 	if err != nil {
