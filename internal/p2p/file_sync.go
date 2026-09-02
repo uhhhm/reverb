@@ -69,8 +69,15 @@ func (f *FileSyncer) ScanAndSync(ctx context.Context) error {
 	seen := make(map[string]bool)
 	// Also track seen relPaths for migration of old unprefixed rows.
 	seenRel := make(map[string]bool)
+	// A walk error on any entry means the file set this scan produces is
+	// incomplete, so the stale-delete pass below must not run: a music dir that
+	// is briefly unreadable — an unmounted external or network volume — would
+	// otherwise delete every manifest this device advertises and force a full
+	// re-hash when the volume comes back.
+	incomplete := false
 	walkErr := filepath.WalkDir(f.musicDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
+			incomplete = true
 			return nil
 		}
 		if d.IsDir() {
@@ -145,6 +152,18 @@ func (f *FileSyncer) ScanAndSync(ctx context.Context) error {
 		}
 		return walkErr
 	}
+	// An unmounted volume usually leaves its mount point behind as an empty
+	// directory on the boot disk, so the walk succeeds and finds nothing. A
+	// library that went from many files to none is a mount that went away far
+	// more often than a library the user emptied; keep the manifests either way,
+	// since a stale row costs a failed fetch and a wrongly deleted one costs the
+	// whole library.
+	if len(seen) == 0 && f.hasOwnManifests(existingByID) {
+		incomplete = true
+	}
+	if incomplete {
+		return nil
+	}
 	// Delete stale manifests for files that no longer exist (only for this device).
 	for id, m := range existingByID {
 		if m.DeviceID != f.deviceID {
@@ -166,6 +185,16 @@ func (f *FileSyncer) ScanAndSync(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// hasOwnManifests reports whether this device already advertises any file.
+func (f *FileSyncer) hasOwnManifests(existing map[string]db.FileManifest) bool {
+	for _, m := range existing {
+		if m.DeviceID == f.deviceID {
+			return true
+		}
+	}
+	return false
 }
 
 // Run starts periodic scanning (5m) plus fsnotify immediate sync until ctx canceled.
