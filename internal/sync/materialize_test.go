@@ -90,3 +90,57 @@ func TestReconcileWithoutMaterializer(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// cancelOnFirst mimics a sync round whose deadline expires the moment the log
+// commits: the first projection cancels the caller's context, and every Apply
+// records what its own context saw.
+type cancelOnFirst struct {
+	cancel context.CancelFunc
+	seen   []error
+	fields []string
+}
+
+func (m *cancelOnFirst) Apply(ctx context.Context, ch syncpkg.SyncChange) error {
+	if len(m.seen) == 0 && m.cancel != nil {
+		m.cancel()
+	}
+	m.seen = append(m.seen, ctx.Err())
+	m.fields = append(m.fields, ch.Field)
+	return nil
+}
+
+// Projection must survive the sync round's deadline. The log commits inside
+// that deadline and the local vector advances with it, so no peer ever resends
+// these rows: if Apply were to fail with the round's context error, the change
+// would be in the log and permanently invisible on this device.
+func TestMaterializeIsNotBoundToTheCallersDeadline(t *testing.T) {
+	st := newTestStoreSync(t)
+	createDevice(t, st, "dev_local", "This one", 1)
+	createDevice(t, st, "dev_peer", "The other one", 0)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m := &cancelOnFirst{cancel: cancel}
+	ss := syncpkg.NewSyncStore(st.Q())
+	ss.SetMaterializer(m)
+
+	inbound := []syncpkg.SyncChange{
+		{EntityType: "track", EntityID: "cat_1", Field: "title", Value: "One", UpdatedAt: 2000, DeviceID: "dev_peer"},
+		{EntityType: "track", EntityID: "cat_2", Field: "title", Value: "Two", UpdatedAt: 2000, DeviceID: "dev_peer"},
+		{EntityType: "track", EntityID: "cat_3", Field: "title", Value: "Three", UpdatedAt: 2000, DeviceID: "dev_peer"},
+	}
+	if _, _, rejected, err := ss.Reconcile(ctx, "dev_peer", syncpkg.NoOutbound, inbound); err != nil {
+		t.Fatal(err)
+	} else if len(rejected) != 0 {
+		t.Fatalf("rejected %v", rejected)
+	}
+
+	if len(m.fields) != len(inbound) {
+		t.Fatalf("materialized %d change(s), want %d", len(m.fields), len(inbound))
+	}
+	for i, err := range m.seen {
+		if err != nil {
+			t.Fatalf("projection %d ran under a canceled context: %v", i, err)
+		}
+	}
+}
