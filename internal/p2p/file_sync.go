@@ -325,6 +325,8 @@ func (f *FileSyncer) FetchFileViaPeer(ctx context.Context, h host.Host, peerIDSt
 		return err
 	}
 	defer s.Close()
+	// Request and response header only; copyStreamIdle re-arms the deadline
+	// per chunk for the body, which may be gigabytes over a slow link.
 	_ = s.SetDeadline(time.Now().Add(60 * time.Second))
 	if err := json.NewEncoder(s).Encode(fileRequest{RelPath: relPath, ContentHash: expHash}); err != nil {
 		return err
@@ -345,7 +347,7 @@ func (f *FileSyncer) FetchFileViaPeer(ctx context.Context, h host.Host, peerIDSt
 	}
 	// Hash while copying so the file is read once.
 	digest := sha256.New()
-	n, copyErr := io.Copy(io.MultiWriter(tmp, digest), io.LimitReader(s, maxFileBytes))
+	n, copyErr := copyStreamIdle(io.MultiWriter(tmp, digest), io.LimitReader(s, maxFileBytes), s)
 	if copyErr != nil {
 		cleanup()
 		return copyErr

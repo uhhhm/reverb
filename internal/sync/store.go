@@ -37,6 +37,12 @@ type SyncStore struct {
 	// the readable copy, so it runs AFTER the log commits and a failure there
 	// is logged rather than rolling the change back.
 	materializer Materializer
+
+	// projections carries accepted batches to the background projector used by
+	// the network reconcile paths. It is FIFO and single-consumer, so batches
+	// project in the order their rounds committed.
+	projections chan []SyncChange
+	projectOnce sync.Once
 }
 
 // Materializer applies a change that has been accepted into the log onto the
@@ -836,12 +842,35 @@ const MaxReconcileBatch = 5000
 // failure part-way leaves the earlier ones applied, which the next round
 // resumes from, since every change is idempotent per field.
 func (s *SyncStore) ReconcileBatched(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange) (outbound []SyncChange, newRev int64, rejected []SyncChange, err error) {
+	return s.reconcileBatched(ctx, deviceID, sinceRev, inbound, false)
+}
+
+// ReconcileBatchedAsync is ReconcileBatched with the projection handed to a
+// background worker, so the caller returns as soon as the log has committed.
+//
+// A sync round runs under a short network deadline while the projection writes
+// through the domain services -- minutes of work on a first sync after
+// BackfillHistory. Projecting before replying spends the peer's deadline, so
+// the peer gives up and resends the whole batch next round. Batches project in
+// the order they committed, and the queue blocks rather than drops when the
+// projector falls behind.
+func (s *SyncStore) ReconcileBatchedAsync(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange) (outbound []SyncChange, newRev int64, rejected []SyncChange, err error) {
+	return s.reconcileBatched(ctx, deviceID, sinceRev, inbound, true)
+}
+
+func (s *SyncStore) reconcileBatched(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange, deferProjection bool) (outbound []SyncChange, newRev int64, rejected []SyncChange, err error) {
+	// Splitting an oversized batch must not split a catalog entity away from
+	// the rows that name it: everything keyed on a catalog id is unprojectable
+	// -- a play violates the plays.catalog_id foreign key, a rename parks under
+	// an id nothing resolves -- until the entity exists. Hoisting them puts
+	// every entity in the first slice.
+	inbound = catalogFirst(inbound)
 	for start := 0; ; start += MaxReconcileBatch {
 		end := start + MaxReconcileBatch
 		if end > len(inbound) {
 			end = len(inbound)
 		}
-		out, rev, rej, rerr := s.Reconcile(ctx, deviceID, sinceRev, inbound[start:end])
+		out, rev, rej, rerr := s.reconcile(ctx, deviceID, sinceRev, inbound[start:end], deferProjection)
 		if rerr != nil {
 			return nil, 0, nil, rerr
 		}
@@ -851,6 +880,27 @@ func (s *SyncStore) ReconcileBatched(ctx context.Context, deviceID string, since
 			return outbound, newRev, rejected, nil
 		}
 	}
+}
+
+// catalogFirst returns changes reordered so catalog entities come first,
+// stable within each group. Entities carry the identity every other change
+// addresses a track by, so they have to be applied ahead of the rest.
+func catalogFirst(changes []SyncChange) []SyncChange {
+	ordered := make([]SyncChange, 0, len(changes))
+	for _, ch := range changes {
+		if ch.EntityType == EntityCatalog {
+			ordered = append(ordered, ch)
+		}
+	}
+	if len(ordered) == 0 || len(ordered) == len(changes) {
+		return changes
+	}
+	for _, ch := range changes {
+		if ch.EntityType != EntityCatalog {
+			ordered = append(ordered, ch)
+		}
+	}
+	return ordered
 }
 
 // NoOutbound is a sinceRev that asks Reconcile for no outbound changes. A
@@ -866,6 +916,10 @@ const NoOutbound int64 = -1
 // It is atomic when backed by *sql.DB: the inbound loop and cursor advance run in a single transaction.
 // Pass NoOutbound as sinceRev to skip computing outbound entirely.
 func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange) (outbound []SyncChange, newRev int64, rejected []SyncChange, err error) {
+	return s.reconcile(ctx, deviceID, sinceRev, inbound, false)
+}
+
+func (s *SyncStore) reconcile(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange, deferProjection bool) (outbound []SyncChange, newRev int64, rejected []SyncChange, err error) {
 	if len(inbound) > MaxReconcileBatch {
 		return nil, 0, nil, fmt.Errorf("too many changes: %d > %d", len(inbound), MaxReconcileBatch)
 	}
@@ -878,8 +932,31 @@ func (s *SyncStore) Reconcile(ctx context.Context, deviceID string, sinceRev int
 	if err != nil {
 		return nil, 0, nil, err
 	}
-	s.materialize(ctx, accepted)
+	if deferProjection {
+		s.enqueueProjection(accepted)
+	} else {
+		s.materialize(ctx, accepted)
+	}
 	return outbound, newRev, rejected, nil
+}
+
+// enqueueProjection hands an accepted batch to the background projector,
+// starting it on first use. The send blocks when the projector is behind: a
+// dropped batch would never be resent, since the log has already committed and
+// the vector has already advanced.
+func (s *SyncStore) enqueueProjection(accepted []SyncChange) {
+	if len(accepted) == 0 {
+		return
+	}
+	s.projectOnce.Do(func() {
+		s.projections = make(chan []SyncChange, 32)
+		go func() {
+			for batch := range s.projections {
+				s.materialize(context.Background(), batch)
+			}
+		}()
+	})
+	s.projections <- accepted
 }
 
 func (s *SyncStore) reconcileLocked(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange) (outbound []SyncChange, newRev int64, rejected []SyncChange, accepted []SyncChange, err error) {
@@ -933,18 +1010,7 @@ func (s *SyncStore) materialize(ctx context.Context, accepted []SyncChange) {
 	defer cancel()
 	// Catalog entities first: a play or a rename names a track by its catalog
 	// id, so the entity has to exist before the row that points at it.
-	ordered := make([]SyncChange, 0, len(accepted))
-	for _, ch := range accepted {
-		if ch.EntityType == EntityCatalog {
-			ordered = append(ordered, ch)
-		}
-	}
-	for _, ch := range accepted {
-		if ch.EntityType != EntityCatalog {
-			ordered = append(ordered, ch)
-		}
-	}
-	for _, ch := range ordered {
+	for _, ch := range catalogFirst(accepted) {
 		if err := m.Apply(ctx, ch); err != nil {
 			log.Printf("sync: could not apply %s/%s %s: %v", ch.EntityType, ch.EntityID, ch.Field, err)
 		}

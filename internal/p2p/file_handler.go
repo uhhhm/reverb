@@ -2,7 +2,6 @@ package p2p
 
 import (
 	"context"
-	"io"
 	"os"
 	"time"
 
@@ -22,6 +21,9 @@ type fileRequest struct {
 func RegisterFileHandler(h host.Host, musicDir string, guard *Guard) {
 	h.SetStreamHandler("/reverb/file/1.0.0", safeHandler("file", func(s network.Stream) {
 		defer s.Close()
+		// Covers the request and the trust check only; the body copy refreshes
+		// the deadline per chunk, since a multi-gigabyte file cannot finish
+		// inside a fixed one.
 		_ = s.SetDeadline(time.Now().Add(60 * time.Second))
 		if musicDir == "" || guard == nil {
 			_ = s.Reset()
@@ -67,7 +69,7 @@ func RegisterFileHandler(h host.Host, musicDir string, guard *Guard) {
 			_ = s.Reset()
 			return
 		}
-		if _, err := io.Copy(s, f); err != nil {
+		if _, err := copyStreamIdle(s, f, s); err != nil {
 			_ = s.Reset()
 			return
 		}

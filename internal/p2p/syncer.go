@@ -225,13 +225,36 @@ func (s *Syncer) syncPeer(ctx context.Context, pid peer.ID) error {
 		for _, ch := range accepted {
 			byDevice[ch.DeviceID] = append(byDevice[ch.DeviceID], ch)
 		}
-		for did, batch := range byDevice {
-			// The syncer pulls in its own step, so the outbound half of a
-			// reconcile is read and thrown away; ask for none.
-			if _, _, _, err := s.store.ReconcileBatched(ctx, did, reverbsync.NoOutbound, batch); err != nil {
-				log.Printf("p2p syncer: Reconcile failed for device %s from %s: %v", did, pid, err)
+		// Each author's changes reconcile separately, so a play authored by one
+		// device can be projected before the catalog entity another device
+		// minted for the same track -- and the play then fails the
+		// plays.catalog_id foreign key with the log already committed, so
+		// nothing ever retries it. Catalog entities from every author go first.
+		for _, catalogOnly := range []bool{true, false} {
+			for did, batch := range byDevice {
+				part := filterCatalog(batch, catalogOnly)
+				if len(part) == 0 {
+					continue
+				}
+				// The syncer pulls in its own step, so the outbound half of a
+				// reconcile is read and thrown away; ask for none.
+				if _, _, _, err := s.store.ReconcileBatchedAsync(ctx, did, reverbsync.NoOutbound, part); err != nil {
+					log.Printf("p2p syncer: Reconcile failed for device %s from %s: %v", did, pid, err)
+				}
 			}
 		}
 	}
 	return nil
+}
+
+// filterCatalog splits a batch into its catalog entities and everything else,
+// preserving order within each half.
+func filterCatalog(batch []reverbsync.SyncChange, catalog bool) []reverbsync.SyncChange {
+	out := make([]reverbsync.SyncChange, 0, len(batch))
+	for _, ch := range batch {
+		if (ch.EntityType == reverbsync.EntityCatalog) == catalog {
+			out = append(out, ch)
+		}
+	}
+	return out
 }
