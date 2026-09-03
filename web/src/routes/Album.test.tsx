@@ -221,15 +221,16 @@ describe('Album page', () => {
     expect(artistLinks.some((l) => l.getAttribute('href') === '/artist/library/ar1')).toBe(true)
   })
 
-  it('Play button calls playTrackList with the 2 owned tracks only', async () => {
+  it('Play button calls playTrackList with owned + streamable missing tracks in order', async () => {
     await renderLoaded()
     // The header Play button is the first button matching /play kid a/i; the
     // TrackRow hover-play button for the "Kid A" track also matches — use [0].
     fireEvent.click(screen.getAllByRole('button', { name: /play kid a/i })[0])
-    expect(mockPlayTrackList).toHaveBeenCalledWith(
-      [ownedTrack1, ownedTrack2],
-      0,
-    )
+    expect(mockPlayTrackList).toHaveBeenCalledOnce()
+    const [tracks, idx] = mockPlayTrackList.mock.calls[0] as [import('../lib/types').Track[], number]
+    expect(idx).toBe(0)
+    expect(tracks.map((t) => t.id)).toEqual(['L1', 'L2', 'spotify:m1'])
+    expect(tracks[2].externalStream).toEqual({ source: 'spotify', externalId: 'm1' })
   })
 
   it('"Download missing · 1" button calls postBatchDownload with the missing externalRef', async () => {
@@ -250,13 +251,64 @@ describe('Album page', () => {
     expect(screen.getByRole('button', { name: /download treefingers/i })).toBeInTheDocument()
   })
 
-  it('owned rows are playable — double-clicking Track 1 calls playTrackList with ownedIndex 0', async () => {
+  it('owned rows are playable — double-clicking Track 1 calls playTrackList with playable index 0', async () => {
     await renderLoaded()
     // "Everything in Its Right Place" is unique — double-click the track row (Spotify semantics)
     fireEvent.doubleClick(screen.getByText('Everything in Its Right Place'))
-    expect(mockPlayTrackList).toHaveBeenCalledWith([ownedTrack1, ownedTrack2], 0)
+    expect(mockPlayTrackList).toHaveBeenCalledOnce()
+    const [tracks, idx] = mockPlayTrackList.mock.calls[0] as [import('../lib/types').Track[], number]
+    expect(idx).toBe(0)
+    expect(tracks.map((t) => t.id)).toEqual(['L1', 'L2', 'spotify:m1'])
   })
 
+  it('missing rows stream without downloading — double-clicking Treefingers plays the mixed queue at index 2', async () => {
+    await renderLoaded()
+    fireEvent.doubleClick(screen.getByText('Treefingers'))
+    expect(mockPlayTrackList).toHaveBeenCalledOnce()
+    const [tracks, idx] = mockPlayTrackList.mock.calls[0] as [import('../lib/types').Track[], number]
+    expect(idx).toBe(2)
+    expect(tracks[2]).toMatchObject({
+      id: 'spotify:m1',
+      title: 'Treefingers',
+      externalStream: { source: 'spotify', externalId: 'm1' },
+    })
+  })
+
+  it('repeated missing recording plays at the pressed row, not its duplicate', async () => {
+    const { useAlbumDetail } = await import('../lib/coverageApi')
+    const albumWithDup: AlbumDetail = {
+      ...partialAlbum,
+      totalCount: 4,
+      ownedCount: 2,
+      tracks: [
+        ...partialAlbum.tracks,
+        {
+          state: 'none',
+          externalRef: { ...missingRef },
+          title: 'Treefingers',
+          artist: 'Radiohead',
+          trackNumber: 4,
+          durationMs: 2000,
+        },
+      ],
+    }
+    vi.mocked(useAlbumDetail).mockReturnValue({
+      data: albumWithDup,
+      isLoading: false,
+      isError: false,
+    } as ReturnType<typeof useAlbumDetail>)
+    wrapper(<Album />)
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Kid A' })).toBeInTheDocument())
+    // Same recording twice: the second Treefingers row is the 4th row (index 3
+    // in the mixed queue); the first sits at index 2.
+    const rows = screen.getAllByText('Treefingers')
+    expect(rows).toHaveLength(2)
+    fireEvent.doubleClick(rows[1])
+    expect(mockPlayTrackList).toHaveBeenCalledOnce()
+    const [tracks, idx] = mockPlayTrackList.mock.calls[0] as [import('../lib/types').Track[], number]
+    expect(tracks.map((t) => t.id)).toEqual(['L1', 'L2', 'spotify:m1', 'spotify:m1'])
+    expect(idx).toBe(3)
+  })
   it('owned row receives coverSrc from coverUrl when libraryTrack has no coverArtId', async () => {
     const { useAlbumDetail } = await import('../lib/coverageApi')
     const albumWithCoverUrl: AlbumDetail = {
@@ -447,5 +499,7 @@ describe('Album page', () => {
     expect(mockPlayTrackList).toHaveBeenCalledOnce()
     const [tracks] = mockPlayTrackList.mock.calls[0] as [import('../lib/types').Track[], number]
     expect(tracks[0]).toMatchObject({ artistExternalId: 'sp-artist-77' })
+    // Missing track still streams in the mixed queue
+    expect(tracks[2]).toMatchObject({ externalStream: { source: 'spotify', externalId: 'm1' } })
   })
 })

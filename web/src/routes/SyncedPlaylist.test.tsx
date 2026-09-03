@@ -335,13 +335,46 @@ describe('SyncedPlaylist page', () => {
     expect(srcs).toContain('https://img/owned-cover.jpg')
   })
 
-  it('Play button calls playTrackList with owned tracks at index 0', async () => {
+  it('Play button calls playTrackList with owned + streamable missing tracks at index 0', async () => {
     await renderLoaded()
     fireEvent.click(screen.getByRole('button', { name: /play test synced playlist/i }))
-    expect(mockPlayTrackList).toHaveBeenCalledWith([track1, track2], 0)
+    expect(mockPlayTrackList).toHaveBeenCalledOnce()
+    const [tracks, idx] = mockPlayTrackList.mock.calls[0] as [Track[], number]
+    expect(idx).toBe(0)
+    expect(tracks.map((t) => t.id)).toEqual(['t1', 't2', 'spotify:e3'])
+    expect(tracks[2]).toMatchObject({ externalStream: { source: 'spotify', externalId: 'e3' } })
   })
 
-  it('Play button is disabled when no owned tracks', async () => {
+  it('missing rows stream — double-clicking the missing track plays the mixed queue at its index', async () => {
+    await renderLoaded()
+    fireEvent.doubleClick(screen.getByText('Missing Track'))
+    expect(mockPlayTrackList).toHaveBeenCalledOnce()
+    const [tracks, idx] = mockPlayTrackList.mock.calls[0] as [Track[], number]
+    expect(idx).toBe(2)
+    expect(tracks[2]).toMatchObject({
+      id: 'spotify:e3',
+      externalStream: { source: 'spotify', externalId: 'e3' },
+    })
+  })
+
+  it('Play button is disabled when no playable tracks', async () => {
+    mockUseSyncedPlaylist.mockReturnValue({
+      data: {
+        ...mockDetail,
+        ownedCount: 0,
+        tracks: [{ state: 'none', title: 'Ghost', artist: 'Nobody', trackNumber: 1, durationMs: 1000 }],
+      },
+      isLoading: false,
+      isError: false,
+    })
+    wrapper(<SyncedPlaylist />)
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Test Synced Playlist' })).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('button', { name: /play test synced playlist/i })).toBeDisabled()
+  })
+
+  it('Play button stays enabled when only streamable missing tracks exist', async () => {
     mockUseSyncedPlaylist.mockReturnValue({
       data: {
         ...mockDetail,
@@ -355,7 +388,12 @@ describe('SyncedPlaylist page', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Test Synced Playlist' })).toBeInTheDocument(),
     )
-    expect(screen.getByRole('button', { name: /play test synced playlist/i })).toBeDisabled()
+    const btn = screen.getByRole('button', { name: /play test synced playlist/i })
+    expect(btn).toBeEnabled()
+    fireEvent.click(btn)
+    expect(mockPlayTrackList).toHaveBeenCalledOnce()
+    const [tracks] = mockPlayTrackList.mock.calls[0] as [Track[], number]
+    expect(tracks[0]).toMatchObject({ externalStream: { source: 'spotify', externalId: 'e3' } })
   })
 
   it('"Sync now" button calls syncNow with the playlist id', async () => {

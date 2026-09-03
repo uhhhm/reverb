@@ -17,7 +17,10 @@ import { TrackRow } from '../components/ui/TrackRow'
 import { DownloadAction } from '../components/download/DownloadAction'
 import { Button, IconButton, Cover, Skeleton, EmptyState, Badge, Toggle, Select, Icon } from '../components/ui'
 import { PortalMenu } from '../components/PortalMenu'
-import type { ExternalResult, ExternalTrackRef, AlbumDetailTrack, Track } from '../lib/types'
+import type { AlbumDetailTrack, Track } from '../lib/types'
+import { prewarmExternalStream } from '../lib/libraryApi'
+import { prewarmTopResults } from '../lib/extstreamPrewarm'
+import { externalResultFromRef, externalTrackFromRef } from '../lib/externalTrack'
 import { usePlayer } from '../lib/playerStore'
 import { useDownloads } from '../lib/downloadStore'
 import { RenameTrackDialog } from '../components/RenameTrackDialog'
@@ -61,20 +64,6 @@ function asTrack(t: AlbumDetailTrack): Track {
     suffix: '',
     contentType: '',
     ...(t.artistExternalId ? { artistExternalId: t.artistExternalId } : {}),
-  }
-}
-
-/** Build an ExternalResult from an ExternalTrackRef so DownloadAction can drive it. */
-function refToExternalResult(ref: ExternalTrackRef, playlistName: string): ExternalResult {
-  return {
-    source: ref.source,
-    externalId: ref.externalId,
-    title: ref.title,
-    artist: ref.artist ?? '',
-    album: ref.album ?? playlistName,
-    durationMs: ref.durationMs,
-    isrc: ref.isrc,
-    type: 'track',
   }
 }
 
@@ -146,6 +135,23 @@ export default function SyncedPlaylist() {
 
   const palette = useAlbumPalette(detail?.coverUrl)
 
+  // Resolving a not-in-library track costs seconds on the play path. Start the
+  // top few as soon as the playlist appears, mirroring Search's prewarm.
+  // Predicate matches the playable queue below: any row that isn't owned but
+  // carries an externalRef streams (including full-but-libraryTrack-less rows).
+  const streamableForPrewarm = (detail?.tracks ?? [])
+    .filter((t) => !(t.state === 'full' && t.libraryTrack) && t.externalRef)
+    .map((t) => t.externalRef!)
+  const prewarmKey = streamableForPrewarm.slice(0, 4).map((r) => `${r.source}:${r.externalId}`).join(',')
+  useEffect(() => {
+    if (!detail || prewarmKey === '') return
+    prewarmTopResults(
+      streamableForPrewarm.slice(0, 4).map((r) => externalResultFromRef(r, detail.name, '')),
+    )
+    // streamableForPrewarm is rebuilt every render; prewarmKey is its stable identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail?.id, prewarmKey])
+
   // ── Loading / error states ──────────────────────────────────────────────────
 
   if (isLoading) {
@@ -183,9 +189,22 @@ export default function SyncedPlaylist() {
 
   const tracks = detail.tracks ?? []
 
-  const ownedTracks: Track[] = tracks
-    .filter((t) => t.state === 'full' && t.libraryTrack)
-    .map((t) => ({ ...t.libraryTrack!, ...(t.artistExternalId ? { artistExternalId: t.artistExternalId } : {}) }))
+  // Playable queue in track order: owned library tracks plus streamable
+  // missing tracks (externalStream, no download) so Next flows across the boundary.
+  const playableTracks: Track[] = tracks.flatMap((t) => {
+    if (t.state === 'full' && t.libraryTrack) {
+      return [{ ...t.libraryTrack!, ...(t.artistExternalId ? { artistExternalId: t.artistExternalId } : {}) }]
+    }
+    if (t.externalRef) {
+      return [externalTrackFromRef(t.externalRef, {
+        albumName: detail.name,
+        albumArtist: '',
+        trackNumber: t.trackNumber,
+        ...(t.artistExternalId ? { artistExternalId: t.artistExternalId } : {}),
+      })]
+    }
+    return []
+  })
 
   const claimedByJob = (t: (typeof tracks)[number]) => {
     if (!t.key) return false
@@ -197,9 +216,22 @@ export default function SyncedPlaylist() {
 
   const missingCount = tracks.filter((t) => t.state === 'none' && !claimedByJob(t)).length
 
-  const ownedIndexMap = new Map<string, number>(
-    ownedTracks.map((t, i) => [t.id, i]),
-  )
+  // Playable index per row position in `tracks` order (-1 when the row has no
+  // audio source). Positional, not id-keyed, so a repeated recording appearing
+  // twice still plays at the row that was pressed. Note the queue itself stays
+  // in `tracks` order even when drag-reorder changes the display order
+  // (pre-existing queue semantics, same as owned-only before).
+  const playableIdxByOrigRow: number[] = []
+  {
+    let pi = 0
+    for (const t of tracks) {
+      if ((t.state === 'full' && t.libraryTrack) || t.externalRef) {
+        playableIdxByOrigRow.push(pi++)
+      } else {
+        playableIdxByOrigRow.push(-1)
+      }
+    }
+  }
 
   // Resolved local settings (fall back to detail values)
   const effectiveSyncEnabled = syncEnabled ?? detail.syncEnabled
@@ -467,8 +499,8 @@ export default function SyncedPlaylist() {
               <Button
                 variant="primary"
                 size="md"
-                disabled={ownedTracks.length === 0}
-                onClick={() => ownedTracks.length && playTrackList(ownedTracks, 0)}
+                disabled={playableTracks.length === 0}
+                onClick={() => playableTracks.length && playTrackList(playableTracks, 0)}
                 aria-label={`Play ${detail.name}`}
               >
                 Play
@@ -617,10 +649,10 @@ export default function SyncedPlaylist() {
             : {}
 
           if (t.state === 'full' && t.libraryTrack) {
-            const ownedIdx = ownedIndexMap.get(t.libraryTrack.id) ?? 0
+            const playableIdx = playableIdxByOrigRow[origIdx] ?? 0
             const isActive = currentTrack?.id === t.libraryTrack.id
             return (
-              <div key={t.libraryTrack.id} className="flex items-center group" {...dragProps}>
+              <div key={`${t.libraryTrack.id}:${origIdx}`} className="flex items-center group" {...dragProps}>
                 {dragHandle}
                 <div className="flex-1 min-w-0">
                   <TrackRow
@@ -628,7 +660,7 @@ export default function SyncedPlaylist() {
                     index={origIdx}
                     active={isActive}
                     playing={isActive ? isPlaying : undefined}
-                    onPlay={() => playTrackList(ownedTracks, ownedIdx)}
+                    onPlay={() => playTrackList(playableTracks, playableIdx)}
                     onRename={setRenaming}
                     coverSrc={t.libraryTrack?.coverArtId ? undefined : t.coverUrl}
                     artistTo={t.artistExternalId ? `/artist/spotify/${t.artistExternalId}` : undefined}
@@ -658,8 +690,48 @@ export default function SyncedPlaylist() {
             )
           }
 
-          // Non-owned tracks: display row with DownloadAction right slot
-          const displayTrack = asTrack(t)
+          // Non-owned tracks with an externalRef stream straight from the
+          // source — no download. Rows without one stay non-playable.
+          if (!t.externalRef) {
+            const displayTrack = asTrack(t)
+            return (
+              <div key={t.libraryTrack ? `${t.libraryTrack.id}:${origIdx}` : t.key ? `${t.key.source}:${t.key.externalId}:${origIdx}` : `pending:${origIdx}`} className="flex items-center group" {...dragProps}>
+                {dragHandle}
+                <div className="flex-1 min-w-0">
+                  <TrackRow
+                    track={displayTrack}
+                    index={origIdx}
+                    onPlay={() => {}}
+                    coverSrc={t.coverUrl ?? detail.coverUrl}
+                    right={t.key ? (
+                      <div className="flex items-center gap-1 group">
+                        {detail.mode === 'once' && (
+                          <button
+                            type="button"
+                            aria-label={`Remove ${t.title} from playlist`}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 text-text-muted hover:text-text-primary focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                            onClick={(e) => { e.stopPropagation(); void handleRemoveTrack(t.key!.source, t.key!.externalId) }}
+                          >
+                            <Icon name="x" className="text-xs" />
+                          </button>
+                        )}
+                      </div>
+                    ) : undefined}
+                    rightWidth={t.key ? (detail.mode === 'once' ? '156px' : '120px') : undefined}
+                  />
+                </div>
+              </div>
+            )
+          }
+          const ref = t.externalRef
+          const displayTrack = externalTrackFromRef(ref, {
+            albumName: detail.name,
+            albumArtist: '',
+            trackNumber: t.trackNumber,
+            ...(t.artistExternalId ? { artistExternalId: t.artistExternalId } : {}),
+          })
+          const playableIdx = playableIdxByOrigRow[origIdx] ?? 0
+          const isActive = currentTrack?.id === displayTrack.id
           const missingArtistTo = t.artistExternalId ? `/artist/spotify/${t.artistExternalId}` : undefined
           const missingAlbumTo = t.albumExternalId ? `/album/spotify/${t.albumExternalId}` : undefined
           const missingArtistNode = missingArtistTo
@@ -686,44 +758,45 @@ export default function SyncedPlaylist() {
               </Link>
             )
             : undefined
-          const downloadAction = t.externalRef
-            ? (
-              <DownloadAction
-                result={refToExternalResult(t.externalRef, detail.name)}
-                onPlay={(libraryTrackId) => playTrackList([{ ...asTrack(t), id: libraryTrackId }], 0)}
-              />
-            )
-            : undefined
-          const right = (t.key || downloadAction)
-            ? (
-              <div className="flex items-center gap-1 group">
-                {detail.mode === 'once' && t.key && (
-                  <button
-                    type="button"
-                    aria-label={`Remove ${t.title} from playlist`}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 text-text-muted hover:text-text-primary focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                    onClick={(e) => { e.stopPropagation(); void handleRemoveTrack(t.key!.source, t.key!.externalId) }}
-                  >
-                    <Icon name="x" className="text-xs" />
-                  </button>
-                )}
-                {downloadAction}
-              </div>
-            )
-            : undefined
+          const downloadAction = (
+            <DownloadAction
+              result={externalResultFromRef(ref, detail.name, '')}
+              onPlay={(libraryTrackId) => playTrackList([{ ...asTrack(t), id: libraryTrackId }], 0)}
+            />
+          )
+          const right = (
+            <div className="flex items-center gap-1 group">
+              {detail.mode === 'once' && t.key && (
+                <button
+                  type="button"
+                  aria-label={`Remove ${t.title} from playlist`}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 text-text-muted hover:text-text-primary focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  onClick={(e) => { e.stopPropagation(); void handleRemoveTrack(t.key!.source, t.key!.externalId) }}
+                >
+                  <Icon name="x" className="text-xs" />
+                </button>
+              )}
+              {downloadAction}
+            </div>
+          )
           return (
-            <div key={t.libraryTrack?.id ?? t.key?.externalId ?? origIdx} className="flex items-center group" {...dragProps}>
+            <div key={`${displayTrack.id}:${origIdx}`} className="flex items-center group" {...dragProps}>
               {dragHandle}
               <div className="flex-1 min-w-0">
                 <TrackRow
                   track={displayTrack}
                   index={origIdx}
-                  onPlay={() => {}}
+                  active={isActive}
+                  playing={isActive ? isPlaying : undefined}
+                  onPlay={() => playTrackList(playableTracks, playableIdx)}
+                  onIntent={() => {
+                    prewarmExternalStream(ref.source, ref.externalId, displayTrack.artist, displayTrack.title)
+                  }}
                   coverSrc={t.coverUrl ?? detail.coverUrl}
                   artistNode={missingArtistNode}
                   albumNode={missingAlbumNode}
                   right={right}
-                  rightWidth={right ? (detail.mode === 'once' ? '156px' : '120px') : undefined}
+                  rightWidth={detail.mode === 'once' ? '156px' : '120px'}
                 />
               </div>
             </div>

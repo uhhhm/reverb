@@ -2,12 +2,14 @@ import { useState, useEffect, useMemo } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useAlbumDetail } from '../lib/coverageApi'
-import { coverUrl } from '../lib/libraryApi'
+import { coverUrl, prewarmExternalStream } from '../lib/libraryApi'
+import { prewarmTopResults } from '../lib/extstreamPrewarm'
+import { externalResultFromRef, externalTrackFromRef } from '../lib/externalTrack'
 import { TrackRow } from '../components/ui/TrackRow'
 import { DownloadAction } from '../components/download/DownloadAction'
 import { postBatchDownload } from '../lib/downloadApi'
 import { formatDuration } from '../lib/types'
-import type { AlbumDetailTrack, ExternalResult, ExternalTrackRef, Track } from '../lib/types'
+import type { AlbumDetailTrack, ExternalTrackRef, Track } from '../lib/types'
 import { usePlayer } from '../lib/playerStore'
 import { Button, IconButton, Cover, Skeleton, EmptyState, Badge, Icon } from '../components/ui'
 import { useAlbumPalette } from '../lib/useAlbumPalette'
@@ -41,20 +43,6 @@ function asTrack(t: AlbumDetailTrack): Track {
     suffix: '',
     contentType: '',
     ...(t.artistExternalId ? { artistExternalId: t.artistExternalId } : {}),
-  }
-}
-
-/** Build an ExternalResult from an ExternalTrackRef so DownloadAction can drive it. */
-function refToExternalResult(ref: ExternalTrackRef, albumName: string, albumArtist: string): ExternalResult {
-  return {
-    source: ref.source,
-    externalId: ref.externalId,
-    title: ref.title,
-    artist: ref.artist ?? albumArtist,
-    album: ref.album ?? albumName,
-    durationMs: ref.durationMs,
-    isrc: ref.isrc,
-    type: 'track',
   }
 }
 
@@ -117,6 +105,23 @@ export default function Album() {
     enabled: playCountTracks.length > 0,
   })
 
+  // Resolving a not-in-library track costs seconds on the play path. Start the
+  // top few as soon as the album appears, mirroring Search's prewarm.
+  // Predicate matches the playable queue below: any row that isn't owned but
+  // carries an externalRef streams (including full-but-libraryTrack-less rows).
+  const streamableRefs = (album?.tracks ?? [])
+    .filter((t) => !(t.state === 'full' && t.libraryTrack) && t.externalRef)
+    .map((t) => t.externalRef!)
+  const prewarmKey = streamableRefs.slice(0, 4).map((r) => `${r.source}:${r.externalId}`).join(',')
+  useEffect(() => {
+    if (!album || prewarmKey === '') return
+    prewarmTopResults(
+      streamableRefs.slice(0, 4).map((r) => externalResultFromRef(r, album.name, album.artist)),
+    )
+    // streamableRefs is rebuilt every render; prewarmKey is its stable identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [album?.source, album?.id, prewarmKey])
+
   if (isLoading) {
     return (
       <div data-testid="album-skeleton" className="space-y-6">
@@ -152,10 +157,23 @@ export default function Album() {
 
   // ── Derived data ────────────────────────────────────────────────────────────
 
-  // Owned tracks in order — used for Play/Shuffle and ownedIndexOf
-  const ownedTracks: Track[] = album.tracks
-    .filter((t) => t.state === 'full' && t.libraryTrack)
-    .map((t) => ({ ...t.libraryTrack!, ...(t.artistExternalId ? { artistExternalId: t.artistExternalId } : {}) }))
+  // Playable queue in track order: owned library tracks plus streamable
+  // missing tracks (externalStream, no download). Header Play/Shuffle and
+  // per-row onPlay all index into this so Next flows across the boundary.
+  const playableTracks: Track[] = album.tracks.flatMap((t) => {
+    if (t.state === 'full' && t.libraryTrack) {
+      return [{ ...t.libraryTrack!, ...(t.artistExternalId ? { artistExternalId: t.artistExternalId } : {}) }]
+    }
+    if (t.externalRef) {
+      return [externalTrackFromRef(t.externalRef, {
+        albumName: album.name,
+        albumArtist: album.artist,
+        trackNumber: t.trackNumber,
+        ...(t.artistExternalId ? { artistExternalId: t.artistExternalId } : {}),
+      })]
+    }
+    return []
+  })
 
   // Missing externalRefs for batch download
   const missingRefs: ExternalTrackRef[] = album.tracks
@@ -164,10 +182,20 @@ export default function Album() {
 
   const hasMissing = album.ownedCount < album.totalCount
 
-  // Map from libraryTrack id → index within ownedTracks (for per-row onPlay)
-  const ownedIndexMap = new Map<string, number>(
-    ownedTracks.map((t, i) => [t.id, i]),
-  )
+  // Playable index per row position (parallel to album.tracks; -1 when the row
+  // has no audio source). Positional, not id-keyed, so a repeated recording
+  // appearing twice still plays at the row that was pressed.
+  const playableIdxByRow: number[] = []
+  {
+    let pi = 0
+    for (const t of album.tracks) {
+      if ((t.state === 'full' && t.libraryTrack) || t.externalRef) {
+        playableIdxByRow.push(pi++)
+      } else {
+        playableIdxByRow.push(-1)
+      }
+    }
+  }
 
   // Cover source: prefer coverArtId proxy, fall back to direct coverUrl
   const coverSrc = album.coverArtId ? coverUrl(album.coverArtId, 300) : album.coverUrl
@@ -238,8 +266,8 @@ export default function Album() {
               <Button
                 variant="primary"
                 size="md"
-                disabled={ownedTracks.length === 0}
-                onClick={() => ownedTracks.length && playTrackList(ownedTracks, 0)}
+                disabled={playableTracks.length === 0}
+                onClick={() => playableTracks.length && playTrackList(playableTracks, 0)}
                 aria-label={`Play ${album.name}`}
               >
                 Play
@@ -248,11 +276,11 @@ export default function Album() {
                 name="shuffle"
                 label={`Shuffle ${album.name}`}
                 onClick={() => {
-                  if (!ownedTracks.length) return
+                  if (!playableTracks.length) return
                   if (!shuffle) toggleShuffle()
-                  playTrackList(ownedTracks, 0)
+                  playTrackList(playableTracks, 0)
                 }}
-                disabled={ownedTracks.length === 0}
+                disabled={playableTracks.length === 0}
               />
               {source === 'library' && id && (
                 <>
@@ -298,17 +326,17 @@ export default function Album() {
       <div className="space-y-0.5">
         {album.tracks.map((t, i) => {
           if (t.state === 'full' && t.libraryTrack) {
-            const ownedIdx = ownedIndexMap.get(t.libraryTrack.id) ?? 0
+            const playableIdx = playableIdxByRow[i] ?? 0
             const isActive = currentTrack?.id === t.libraryTrack.id
             const playCount = playCounts?.[t.libraryTrack.id] ?? 0
             return (
               <TrackRow
-                key={t.libraryTrack.id}
+                key={`${t.libraryTrack.id}:${i}`}
                 track={t.libraryTrack}
                 index={i}
                 active={isActive}
                 playing={isActive ? isPlaying : undefined}
-                onPlay={() => playTrackList(ownedTracks, ownedIdx)}
+                onPlay={() => playTrackList(playableTracks, playableIdx)}
                 onRename={setRenaming}
                 coverSrc={t.libraryTrack.coverArtId ? undefined : t.coverUrl}
                 artistTo={t.artistExternalId ? `/artist/spotify/${t.artistExternalId}` : undefined}
@@ -325,26 +353,54 @@ export default function Album() {
             )
           }
 
-          // Fallback: any other state (none, partial, pending, or unexpected) renders a
-          // non-playable row so no track ever silently vanishes from the list.
-          const displayTrack = asTrack(t)
-          const right = t.externalRef
-            ? (
-              <DownloadAction
-                result={refToExternalResult(t.externalRef, album.name, album.artist)}
-                onPlay={(libraryTrackId) => playTrackList([{ ...asTrack(t), id: libraryTrackId }], 0)}
+          // Missing (or partial/pending with an externalRef): stream straight
+          // from the source — no download. Rows without an externalRef stay
+          // non-playable so no track ever silently vanishes from the list.
+          if (!t.externalRef) {
+            const displayTrack = asTrack(t)
+            return (
+              <TrackRow
+                key={t.libraryTrack ? `${t.libraryTrack.id}:${i}` : `pending:${i}`}
+                track={displayTrack}
+                index={i}
+                onPlay={() => {}}
+                coverSrc={t.coverUrl ?? album.coverUrl}
+                right={undefined}
+                rightWidth={undefined}
               />
             )
-            : undefined
+          }
+          const ref = t.externalRef
+          const displayTrack = externalTrackFromRef(ref, {
+            albumName: album.name,
+            albumArtist: album.artist,
+            trackNumber: t.trackNumber,
+            ...(t.artistExternalId ? { artistExternalId: t.artistExternalId } : {}),
+          })
+          const playableIdx = playableIdxByRow[i] ?? 0
+          const isActive = currentTrack?.id === displayTrack.id
+          const right = (
+            <DownloadAction
+              result={externalResultFromRef(ref, album.name, album.artist)}
+              onPlay={(libraryTrackId) => playTrackList([{ ...asTrack(t), id: libraryTrackId }], 0)}
+            />
+          )
           return (
             <TrackRow
-              key={t.libraryTrack?.id ?? t.externalRef?.externalId ?? i}
+              key={`${displayTrack.id}:${i}`}
               track={displayTrack}
               index={i}
-              onPlay={() => {}}
+              active={isActive}
+              playing={isActive ? isPlaying : undefined}
+              onPlay={() => playTrackList(playableTracks, playableIdx)}
+              onIntent={() => {
+                prewarmExternalStream(ref.source, ref.externalId, displayTrack.artist, displayTrack.title)
+              }}
               coverSrc={t.coverUrl ?? album.coverUrl}
+              artistTo={t.artistExternalId ? `/artist/spotify/${t.artistExternalId}` : undefined}
+              albumTo={t.albumExternalId ? `/album/spotify/${t.albumExternalId}` : undefined}
               right={right}
-              rightWidth={right ? '120px' : undefined}
+              rightWidth="120px"
             />
           )
         })}
