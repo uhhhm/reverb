@@ -1,3 +1,4 @@
+import type { components } from './generated/api'
 export interface Track {
   id: string
   title: string
@@ -185,70 +186,20 @@ export interface SearchEnvelope {
   error?: string
 }
 
-export type DownloadStatus = 'queued' | 'running' | 'completed' | 'failed' | 'canceled'
+export type DownloadStatus = DownloadJob['status']
 
-export interface DownloadJob {
-  id: string
-  dedupKey: string
-  status: DownloadStatus
-  progress: number // 0-100, or -1 = unknown (indeterminate)
-  error?: string
-  outputPath?: string
-  libraryTrackId?: string
-  coverArtId?: string
-  /** Stable catalog entity id (trk_…) minted at link time. Preferred over
-   *  coverArtId for cover resolution so covers survive a backend swap. */
-  canonicalId?: string
-  downloaderName: string
-  priority: number
-  attempts: number
-  source: string
-  externalId: string
-  // Request fields carried from request_json (mirrors core.DownloadJob), so the
-  // client can build a playable Track for play-when-ready auto-play.
-  artist?: string
-  title?: string
-  album?: string
-  isrc?: string
-  playWhenReady: boolean
-  createdAt: number
-  startedAt: number
-  finishedAt: number
-}
+export type DownloadJob = components['schemas']['DownloadJob']
 
-export interface DownloadEvent {
-  jobId: string
-  dedupKey: string
-  status: DownloadStatus
-  progress: number
-  error?: string
-  source: string
-  externalId: string
-  libraryTrackId?: string
-  coverArtId?: string
-  canonicalId?: string
-  artistId?: string
-  albumId?: string
-}
+export type DownloadEvent = components['schemas']['DownloadEvent']
 
-export interface LibraryUpdatedEvent {
-  artistIds: string[]
-  albumIds: string[]
-}
+export type LibraryUpdatedEvent = components['schemas']['LibraryUpdatedEvent']
 
 // RealtimeEvent is one WS frame: {type, payload}. type is the EventBus topic.
-export interface RealtimeEvent {
-  type: string
-  payload: unknown
-}
+export type RealtimeEvent = components['schemas']['RealtimeEvent']
 
-export interface QueueStateEvent {
-  paused: boolean
-}
+export type QueueStateEvent = components['schemas']['QueueStateEvent']
 
-export interface DownloadRemovedEvent {
-  jobIds: string[]
-}
+export type DownloadRemovedEvent = components['schemas']['DownloadRemovedEvent']
 
 export interface SyncedPlaylist {
   id: string

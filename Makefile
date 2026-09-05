@@ -1,4 +1,4 @@
-.PHONY: gen gen-check test test-go test-web test-race fmt-check vet check check-web check-full setup-web build web dev clean desktop desktop-dev desktop-deps package-mac
+.PHONY: gen gen-check test test-go test-web test-race fmt-check vet check check-web check-full setup-web setup-contracts contracts contracts-check contracts-test build web dev clean desktop desktop-dev desktop-deps package-mac
 
 VERSION ?= dev
 GO_PACKAGES := ./cmd/... ./internal/... ./desktop/...
@@ -32,13 +32,25 @@ vet:
 check-web:
 	cd web && npm run typecheck && npm run lint && npm run test
 
-check: fmt-check vet test-go check-web gen-check
+check: fmt-check vet test-go check-web gen-check contracts-check contracts-test
 
 check-full: check test-race
 	cd web && npm run e2e
 
 setup-web:
 	cd web && npm ci
+
+setup-contracts:
+	npm ci --prefix tools/contracts
+
+contracts:
+	node tools/contracts/generate.mjs
+
+contracts-check:
+	node tools/contracts/generate.mjs --check
+
+contracts-test:
+	node tools/contracts/test.mjs
 
 web:
 	cd web && npm run build

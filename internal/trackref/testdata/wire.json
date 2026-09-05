@@ -1,0 +1,5 @@
+[
+  { "source": "deezer", "externalId": "123", "encoded": "deezer:123" },
+  { "source": " spotify ", "externalId": " ab:cd ", "encoded": "spotify:ab:cd" },
+  { "source": "youtube", "externalId": "動画", "encoded": "youtube:動画" }
+]

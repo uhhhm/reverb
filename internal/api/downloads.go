@@ -12,20 +12,7 @@ import (
 )
 
 // createDownloadBody is the POST /downloads request DTO.
-type createDownloadBody struct {
-	Source          string `json:"source"`
-	ExternalID      string `json:"externalId"`
-	Artist          string `json:"artist"`
-	Title           string `json:"title"`
-	Album           string `json:"album"`
-	ISRC            string `json:"isrc"`
-	DurationMs      int    `json:"durationMs"`
-	PlayWhenReady   bool   `json:"playWhenReady"`
-	AddToPlaylistID string `json:"addToPlaylistId,omitempty"`
-	// Quality overrides the configured download_quality for this one download.
-	// Empty means "use the setting".
-	Quality string `json:"quality,omitempty"`
-}
+type createDownloadBody = core.CreateDownloadRequest
 
 func (s *Server) handleCreateDownload(w http.ResponseWriter, r *http.Request) {
 	dl := s.downloads()

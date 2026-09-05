@@ -1,17 +1,8 @@
+import type { components } from './generated/api'
 import { api } from './api'
 import type { DownloadJob, ExternalResult, ExternalTrackRef } from './types'
 
-export interface CreateDownloadReq {
-  source: string
-  externalId: string
-  artist: string
-  title: string
-  album: string
-  isrc?: string
-  durationMs?: number
-  downloader?: string
-  playWhenReady?: boolean
-}
+export type CreateDownloadReq = components['schemas']['CreateDownloadRequest']
 
 // reqFromResult builds a download request from a search result. `downloader` is
 // optional — omitting it lets the server pick via the fallback chain.

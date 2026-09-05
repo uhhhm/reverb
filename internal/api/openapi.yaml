@@ -681,41 +681,27 @@ paths:
   /downloads:
     get:
       summary: List download jobs
-      responses: { "200": { description: array of DownloadJob } }
+      responses: { "200": { description: array of DownloadJob, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/DownloadJob' } } } } } }
     post:
       summary: Enqueue a one-click download (deduped)
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              properties:
-                source: { type: string }
-                externalId: { type: string }
-                artist: { type: string }
-                title: { type: string }
-                album: { type: string }
-                isrc: { type: string }
-                playWhenReady: { type: boolean }
-                quality:
-                  type: string
-                  enum: [low, medium, high, best]
-                  description: Overrides the configured default quality for this download.
-              required: [source, externalId, artist, title]
-      responses: { "200": { description: DownloadJob }, "400": { description: invalid } }
+            schema: { $ref: '#/components/schemas/CreateDownloadRequest' }
+      responses: { "200": { description: DownloadJob, content: { application/json: { schema: { $ref: '#/components/schemas/DownloadJob' } } } }, "400": { description: invalid } }
   /downloads/pause:
     post:
       summary: Pause the download queue (stop dispatching new jobs)
-      responses: { "200": { description: "{paused:true}" } }
+      responses: { "200": { description: queue state, content: { application/json: { schema: { $ref: '#/components/schemas/QueueStateEvent' } } } } }
   /downloads/resume:
     post:
       summary: Resume the download queue
-      responses: { "200": { description: "{paused:false}" } }
+      responses: { "200": { description: queue state, content: { application/json: { schema: { $ref: '#/components/schemas/QueueStateEvent' } } } } }
   /downloads/queue:
     get:
       summary: Queue state (paused flag)
-      responses: { "200": { description: "{paused:boolean}" } }
+      responses: { "200": { description: queue state, content: { application/json: { schema: { $ref: '#/components/schemas/QueueStateEvent' } } } } }
   /downloads/clear:
     post:
       summary: Clear finished downloads (hard delete); body {ids?} else all finished
@@ -741,7 +727,7 @@ paths:
     post:
       summary: Retry a failed/canceled download
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { "200": { description: DownloadJob }, "404": { description: not found } }
+      responses: { "200": { description: DownloadJob, content: { application/json: { schema: { $ref: '#/components/schemas/DownloadJob' } } } }, "404": { description: not found } }
   /synced-playlists:
     get:
       summary: List imported (synced) playlists
@@ -788,7 +774,7 @@ paths:
       summary: Enqueue downloads for the playlist's missing tracks
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
       responses:
-        "200": { description: array of DownloadJob }
+        "200": { description: array of DownloadJob, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/DownloadJob' } } } } }
         "422": { description: could not enqueue }
         "503": { description: playlist sync unavailable }
   /synced-playlists/{id}/settings:
@@ -864,7 +850,7 @@ paths:
                   description: Also persist quality as this track's standing override (needs libraryTrackId).
               required: [artist, title]
       responses:
-        "200": { description: DownloadJob }
+        "200": { description: DownloadJob, content: { application/json: { schema: { $ref: '#/components/schemas/DownloadJob' } } } }
         "400": { description: missing artist/title or unknown tier }
         "422": { description: already at that tier, unknown source, or nothing can fetch it }
   /downloads/upgradable:
@@ -997,7 +983,7 @@ paths:
                       isrc: { type: string }
                     required: [source, externalId, artist, title]
               required: [tracks]
-      responses: { "200": { description: array of DownloadJob }, "400": { description: invalid } }
+      responses: { "200": { description: array of DownloadJob, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/DownloadJob' } } } } }, "400": { description: invalid } }
   /ws:
     get:
       summary: >
@@ -1292,6 +1278,416 @@ paths:
 
 components:
   schemas:
+    DownloadJob:
+      type: object
+      x-go-generate: true
+      properties:
+        id:
+          type: string
+          x-go-name: ID
+          x-go-type: string
+        dedupKey:
+          type: string
+          x-go-name: DedupKey
+          x-go-type: string
+        status:
+          type: string
+          x-go-name: Status
+          x-go-type: DownloadStatus
+          enum:
+          - queued
+          - running
+          - completed
+          - failed
+          - canceled
+        progress:
+          type: integer
+          x-go-name: Progress
+          x-go-type: int
+        error:
+          type: string
+          x-go-name: Error
+          x-go-type: string
+        outputPath:
+          type: string
+          x-go-name: OutputPath
+          x-go-type: string
+        libraryTrackId:
+          type: string
+          x-go-name: LibraryTrackID
+          x-go-type: string
+        coverArtId:
+          type: string
+          x-go-name: CoverArtID
+          x-go-type: string
+        canonicalId:
+          type: string
+          x-go-name: CanonicalID
+          x-go-type: string
+        downloaderName:
+          type: string
+          x-go-name: DownloaderName
+          x-go-type: string
+        priority:
+          type: integer
+          x-go-name: Priority
+          x-go-type: int
+        attempts:
+          type: integer
+          x-go-name: Attempts
+          x-go-type: int
+        source:
+          type: string
+          x-go-name: Source
+          x-go-type: string
+        externalId:
+          type: string
+          x-go-name: ExternalID
+          x-go-type: string
+        artist:
+          type: string
+          x-go-name: Artist
+          x-go-type: string
+        title:
+          type: string
+          x-go-name: Title
+          x-go-type: string
+        album:
+          type: string
+          x-go-name: Album
+          x-go-type: string
+        isrc:
+          type: string
+          x-go-name: ISRC
+          x-go-type: string
+        durationMs:
+          type: integer
+          x-go-name: DurationMs
+          x-go-type: int
+        playWhenReady:
+          type: boolean
+          x-go-name: PlayWhenReady
+          x-go-type: bool
+        addToPlaylistId:
+          type: string
+          x-go-name: AddToPlaylistID
+          x-go-type: string
+        quality:
+          type: string
+          x-go-name: Quality
+          x-go-type: AudioQuality
+        downloaderRef:
+          type: string
+          x-go-name: DownloaderRef
+          x-go-type: string
+        createdAt:
+          type: integer
+          x-go-name: CreatedAt
+          x-go-type: int64
+          format: int64
+        startedAt:
+          type: integer
+          x-go-name: StartedAt
+          x-go-type: int64
+          format: int64
+        finishedAt:
+          type: integer
+          x-go-name: FinishedAt
+          x-go-type: int64
+          format: int64
+      required:
+      - id
+      - dedupKey
+      - status
+      - progress
+      - downloaderName
+      - priority
+      - attempts
+      - source
+      - externalId
+      - playWhenReady
+      - createdAt
+      - startedAt
+      - finishedAt
+    DownloadEvent:
+      type: object
+      x-go-generate: true
+      properties:
+        jobId:
+          type: string
+          x-go-name: JobID
+          x-go-type: string
+        dedupKey:
+          type: string
+          x-go-name: DedupKey
+          x-go-type: string
+        status:
+          type: string
+          x-go-name: Status
+          x-go-type: DownloadStatus
+          enum:
+          - queued
+          - running
+          - completed
+          - failed
+          - canceled
+        progress:
+          type: integer
+          x-go-name: Progress
+          x-go-type: int
+        error:
+          type: string
+          x-go-name: Error
+          x-go-type: string
+        source:
+          type: string
+          x-go-name: Source
+          x-go-type: string
+        externalId:
+          type: string
+          x-go-name: ExternalID
+          x-go-type: string
+        libraryTrackId:
+          type: string
+          x-go-name: LibraryTrackID
+          x-go-type: string
+        coverArtId:
+          type: string
+          x-go-name: CoverArtID
+          x-go-type: string
+        canonicalId:
+          type: string
+          x-go-name: CanonicalID
+          x-go-type: string
+        artistId:
+          type: string
+          x-go-name: ArtistID
+          x-go-type: string
+        albumId:
+          type: string
+          x-go-name: AlbumID
+          x-go-type: string
+      required:
+      - jobId
+      - dedupKey
+      - status
+      - progress
+      - source
+      - externalId
+    LibraryUpdatedEvent:
+      type: object
+      x-go-generate: true
+      properties:
+        artistIds:
+          type: array
+          x-go-name: ArtistIDs
+          x-go-type: '[]string'
+          items:
+            type: string
+          nullable: true
+        albumIds:
+          type: array
+          x-go-name: AlbumIDs
+          x-go-type: '[]string'
+          items:
+            type: string
+          nullable: true
+      required:
+      - artistIds
+      - albumIds
+    DownloadRemovedEvent:
+      type: object
+      x-go-generate: true
+      properties:
+        jobIds:
+          type: array
+          x-go-name: JobIDs
+          x-go-type: '[]string'
+          items:
+            type: string
+          nullable: true
+      required:
+      - jobIds
+    QueueStateEvent:
+      type: object
+      x-go-generate: true
+      properties:
+        paused:
+          type: boolean
+          x-go-name: Paused
+          x-go-type: bool
+      required:
+      - paused
+    CreateDownloadRequest:
+      type: object
+      x-go-generate: true
+      properties:
+        source:
+          type: string
+          x-go-name: Source
+          x-go-type: string
+          x-go-omitempty: false
+        externalId:
+          type: string
+          x-go-name: ExternalID
+          x-go-type: string
+          x-go-omitempty: false
+        artist:
+          type: string
+          x-go-name: Artist
+          x-go-type: string
+          x-go-omitempty: false
+        title:
+          type: string
+          x-go-name: Title
+          x-go-type: string
+          x-go-omitempty: false
+        album:
+          type: string
+          x-go-name: Album
+          x-go-type: string
+          x-go-omitempty: false
+        isrc:
+          type: string
+          x-go-name: ISRC
+          x-go-type: string
+          x-go-omitempty: false
+        durationMs:
+          type: integer
+          x-go-name: DurationMs
+          x-go-type: int
+          x-go-omitempty: false
+        playWhenReady:
+          type: boolean
+          x-go-name: PlayWhenReady
+          x-go-type: bool
+          x-go-omitempty: false
+        addToPlaylistId:
+          type: string
+          x-go-name: AddToPlaylistID
+          x-go-type: string
+          x-go-omitempty: true
+        quality:
+          type: string
+          x-go-name: Quality
+          x-go-type: string
+          x-go-omitempty: true
+        downloader:
+          type: string
+          x-go-ignore: true
+          description: Accepted for compatibility; this endpoint chooses through the configured fallback chain.
+      required:
+      - externalId
+    RealtimeEvent:
+      oneOf:
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - download.queued
+          payload:
+            $ref: '#/components/schemas/DownloadEvent'
+        required:
+        - type
+        - payload
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - download.progress
+          payload:
+            $ref: '#/components/schemas/DownloadEvent'
+        required:
+        - type
+        - payload
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - download.complete
+          payload:
+            $ref: '#/components/schemas/DownloadEvent'
+        required:
+        - type
+        - payload
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - download.failed
+          payload:
+            $ref: '#/components/schemas/DownloadEvent'
+        required:
+        - type
+        - payload
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - library.updated
+          payload:
+            $ref: '#/components/schemas/LibraryUpdatedEvent'
+        required:
+        - type
+        - payload
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - download.queue
+          payload:
+            $ref: '#/components/schemas/QueueStateEvent'
+        required:
+        - type
+        - payload
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - download.removed
+          payload:
+            $ref: '#/components/schemas/DownloadRemovedEvent'
+        required:
+        - type
+        - payload
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - update:state
+          payload:
+            $ref: '#/components/schemas/UpdateState'
+        required:
+        - type
+        - payload
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - sync.started
+          payload: {}
+        required:
+        - type
+        - payload
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - sync.finished
+          payload: {}
+        required:
+        - type
+        - payload
     UpdateState:
       type: object
       description: >-

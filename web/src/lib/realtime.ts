@@ -1,4 +1,5 @@
 import type { RealtimeEvent } from './types'
+import { validateRealtime } from './generated/validateRealtime'
 
 declare global {
   interface Window {
@@ -73,8 +74,8 @@ export class RealtimeConnection {
     }
     s.onmessage = (ev) => {
       try {
-        const frame = JSON.parse(ev.data) as RealtimeEvent
-        if (frame && typeof frame.type === 'string') {
+        const frame: unknown = JSON.parse(ev.data)
+        if (validateRealtime(frame)) {
           this.handlers.onEvent(frame)
         }
       } catch {

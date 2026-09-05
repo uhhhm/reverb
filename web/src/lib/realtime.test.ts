@@ -38,9 +38,14 @@ describe('RealtimeConnection', () => {
     s.onopen?.()
     expect(opened).toBe(1)
 
-    s.onmessage?.({ data: JSON.stringify({ type: 'download.progress', payload: { jobId: 'j1', progress: 42 } }) })
+    s.onmessage?.({ data: JSON.stringify({ type: 'download.progress', payload: { jobId: 'j1', progress: 42, dedupKey: 'dk', status: 'running', source: 'spotify', externalId: 'sp1' } }) })
     expect(events).toHaveLength(1)
     expect(events[0].type).toBe('download.progress')
+
+    // Malformed payloads and unknown topics never reach state consumers.
+    s.onmessage?.({ data: JSON.stringify({ type: 'download.progress', payload: { progress: '42' } }) })
+    s.onmessage?.({ data: JSON.stringify({ type: 'future.topic', payload: {} }) })
+    expect(events).toHaveLength(1)
 
     // Malformed frame is ignored (no throw).
     s.onmessage?.({ data: 'not json' })

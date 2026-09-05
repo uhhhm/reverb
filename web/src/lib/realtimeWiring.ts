@@ -5,9 +5,9 @@ import { useDownloads } from './downloadStore'
 import { useSyncStore } from './syncStore'
 import { useLibraryRevision } from './libraryRevisionStore'
 import { useUpdateStore } from './updateStore'
-import { EMPTY_UPDATE_STATE, type UpdateState } from './updateApi'
+import { EMPTY_UPDATE_STATE } from './updateApi'
 import { getDownloads, getQueueState } from './downloadApi'
-import type { DownloadEvent, DownloadRemovedEvent, LibraryUpdatedEvent, QueueStateEvent, RealtimeEvent } from './types'
+import type { RealtimeEvent } from './types'
 
 // useRealtime opens ONE app-wide WebSocket (distinct from the SSE search stream),
 // fans typed events into the download store and drives TanStack invalidation.
@@ -35,19 +35,19 @@ export function useRealtime(makeSocket?: (url: string) => WebSocketLike): void {
         case 'download.queued':
         case 'download.progress':
         case 'download.failed': {
-          const event = frame.payload as DownloadEvent
+          const event = frame.payload
           useDownloads.getState().applyEvent(event)
           break
         }
         case 'download.complete': {
-          const ev = frame.payload as DownloadEvent
+          const ev = frame.payload
           useDownloads.getState().applyEvent(ev)
           invalidateLibrary({ artistId: ev.artistId, albumId: ev.albumId })
           useLibraryRevision.getState().bump()
           break
         }
         case 'library.updated': {
-          const ev = frame.payload as LibraryUpdatedEvent
+          const ev = frame.payload
           const albumId = ev.albumIds?.[0]
           const artistId = ev.artistIds?.[0]
           invalidateLibrary({ artistId, albumId })
@@ -56,7 +56,7 @@ export function useRealtime(makeSocket?: (url: string) => WebSocketLike): void {
           break
         }
         case 'download.queue': {
-          useDownloads.getState().setPaused((frame.payload as QueueStateEvent).paused)
+          useDownloads.getState().setPaused(frame.payload.paused)
           break
         }
         case 'sync.started': {
@@ -72,12 +72,12 @@ export function useRealtime(makeSocket?: (url: string) => WebSocketLike): void {
           // prompt appears the moment a download finishes without polling.
           useUpdateStore.getState().setState({
             ...EMPTY_UPDATE_STATE,
-            ...(frame.payload as Partial<UpdateState>),
+            ...frame.payload,
           })
           break
         }
         case 'download.removed': {
-          useDownloads.getState().remove((frame.payload as DownloadRemovedEvent).jobIds)
+          useDownloads.getState().remove(frame.payload.jobIds ?? [])
           break
         }
         default:
