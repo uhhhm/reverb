@@ -2,156 +2,150 @@ package app
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 
 	"fmt"
 	"github.com/uhhhm/reverb/internal/api"
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/extstream"
-	"github.com/uhhhm/reverb/internal/library"
 	"github.com/uhhhm/reverb/internal/resolver"
 	"github.com/uhhhm/reverb/internal/wiring"
 )
 
-// matcherHolder wraps a resolver.Rematcher so it can live behind an atomic.Pointer
-// (atomic.Pointer needs a concrete pointee). The wrapped matcher may be nil when no
-// library is configured.
-type matcherHolder struct{ m resolver.Rematcher }
-
-// lookupHolder wraps an extstream.TrackLookup for the same reason matcherHolder
-// wraps a Rematcher: atomic.Pointer needs a concrete type, and the held value
-// may legitimately be nil (no search source configured).
-type lookupHolder struct{ l extstream.TrackLookup }
-
-// bundleBuilder is the seam ServiceReloader builds a fresh ServiceBundle through.
-// *wiring.Builder satisfies it; tests inject a stub to drive successive matchers.
+// bundleBuilder constructs candidates without publishing them.
 type bundleBuilder interface {
-	Build(ctx context.Context) (wiring.ServiceBundle, error)
+	Build(context.Context) (wiring.ServiceBundle, error)
+}
+type managedDownloads interface {
+	Start()
+	Stop()
+	RedispatchQueued()
+}
+type runtimeSnapshot struct {
+	services api.ActiveServices
+	matcher  resolver.Rematcher
+	lookup   extstream.TrackLookup
+	manager  managedDownloads
 }
 
-// ServiceReloader adapts a bundleBuilder to api.ServiceReloader. On each Reload it
-// builds a fresh bundle from the current adapter_instance rows, starts the new
-// download Manager (the server Stops the previous one after swapping), publishes the
-// freshly-built matcher into liveMatcher so the long-lived resolver re-matches
-// against the CURRENT adapter, and returns the services as the api interfaces —
-// passing typed nils when a concrete service is absent so handlers see a nil
-// interface, not a non-nil interface wrapping a nil pointer.
+// ServiceReloader is the single owner of reloadable services and download workers.
+// Readers retain a snapshot; replacement serializes with shutdown. Requests that
+// already captured an old service may finish while its workers retire.
 type ServiceReloader struct {
 	builder bundleBuilder
-	// liveMatcher is the shared holder the resolver's provider reads. It is set at
-	// boot from the initial bundle and overwritten on every reload, so the resolver
-	// singleton (constructed once with MatcherProvider) always reaches the live
-	// matcher and never a stale captured one. Holds a *matcherHolder whose .m may be
-	// nil (no library) — the provider tolerates that.
-	liveMatcher atomic.Pointer[matcherHolder]
-	// liveLookup is the same arrangement for the search aggregator, read by the
-	// external-stream service so playing an un-owned track resolves against the
-	// CURRENT search adapters rather than the ones present at boot.
-	liveLookup atomic.Pointer[lookupHolder]
+	mu      sync.Mutex
+	closed  bool
+	live    atomic.Pointer[runtimeSnapshot]
 }
 
 var _ api.ServiceReloader = (*ServiceReloader)(nil)
 
-// NewServiceReloader builds a reloader over a *wiring.Builder (the production path).
 func NewServiceReloader(builder *wiring.Builder) *ServiceReloader {
 	return &ServiceReloader{builder: builder}
 }
-
-// NewServiceReloaderFunc builds a reloader over an arbitrary bundle-builder func.
-// Used by tests to drive successive bundles (and thus matchers) without a DB.
 func NewServiceReloaderFunc(build func(context.Context) (wiring.ServiceBundle, error)) *ServiceReloader {
 	return &ServiceReloader{builder: bundleBuilderFunc(build)}
 }
 
 type bundleBuilderFunc func(context.Context) (wiring.ServiceBundle, error)
 
-func (f bundleBuilderFunc) Build(ctx context.Context) (wiring.ServiceBundle, error) {
-	return f(ctx)
+func (f bundleBuilderFunc) Build(ctx context.Context) (wiring.ServiceBundle, error) { return f(ctx) }
+
+func snapshot(bundle wiring.ServiceBundle) *runtimeSnapshot {
+	n := &runtimeSnapshot{matcher: bundle.Matcher}
+	n.services.Library = bundle.Library
+	if bundle.Aggregator != nil {
+		n.services.Search = bundle.Aggregator
+		n.lookup = bundle.Aggregator
+	}
+	if bundle.Coverage != nil {
+		n.services.Coverage = bundle.Coverage
+	}
+	if bundle.Manager != nil {
+		n.services.Downloads = bundle.Manager
+		n.manager = bundle.Manager
+	}
+	if bundle.Sync != nil {
+		n.services.Sync = bundle.Sync
+	}
+	return n
 }
 
-// PublishMatcher installs m as the current live matcher. Called once at boot with
-// the initial bundle.Matcher and again from Reload after each rebuild. m may be nil.
-func (r *ServiceReloader) PublishMatcher(m resolver.Rematcher) {
-	r.liveMatcher.Store(&matcherHolder{m: m})
+// Initialize installs the boot bundle without starting workers. Called before
+// requests or background work; Build remains safe to use in construction tests.
+func (r *ServiceReloader) Initialize(bundle wiring.ServiceBundle) { r.live.Store(snapshot(bundle)) }
+func (r *ServiceReloader) Current() api.ActiveServices {
+	if n := r.live.Load(); n != nil {
+		return n.services
+	}
+	return api.ActiveServices{}
 }
-
-// MatcherProvider returns the resolver.Service provider: a func that reads the
-// current live matcher on every call, so the resolver follows hot-reloads instead
-// of capturing a stale matcher. Returns nil safely before any publish or when no
-// library is configured.
 func (r *ServiceReloader) MatcherProvider() func() resolver.Rematcher {
 	return func() resolver.Rematcher {
-		h := r.liveMatcher.Load()
-		if h == nil {
-			return nil
+		if n := r.live.Load(); n != nil {
+			return n.matcher
 		}
-		return h.m
+		return nil
 	}
 }
-
-// PublishTrackLookup installs l as the current live search lookup. Called once at
-// boot and again after every rebuild. l may be nil.
-func (r *ServiceReloader) PublishTrackLookup(l extstream.TrackLookup) {
-	r.liveLookup.Store(&lookupHolder{l: l})
-}
-
-// TrackLookupProvider returns a func reading the current live lookup, so the
-// long-lived external-stream service follows hot-reloads instead of capturing a
-// stale aggregator. Returns nil safely before any publish.
 func (r *ServiceReloader) TrackLookupProvider() func() extstream.TrackLookup {
 	return func() extstream.TrackLookup {
-		h := r.liveLookup.Load()
-		if h == nil {
-			return nil
+		if n := r.live.Load(); n != nil {
+			return n.lookup
 		}
-		return h.l
+		return nil
 	}
 }
-
-func (r *ServiceReloader) Reload(ctx context.Context) (library.LibraryAdapter, api.Streamer, api.CoverageService, api.DownloadManager, api.SyncService, error) {
+func (r *ServiceReloader) Reload(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return fmt.Errorf("application runtime is closed")
+	}
 	bundle, err := r.builder.Build(ctx)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return err
 	}
+	r.replace(snapshot(bundle))
+	return nil
+}
 
-	// Publish the freshly-built matcher (may be nil) so the resolver singleton
-	// re-matches against the live adapter rather than the one it was wired with.
-	r.PublishMatcher(bundle.Matcher)
-	// Same for the search aggregator (may be nil when no search source is on).
-	if bundle.Aggregator != nil {
-		r.PublishTrackLookup(bundle.Aggregator)
-	} else {
-		r.PublishTrackLookup(nil)
+// replace preserves the download handoff order: recover/start the candidate,
+// publish all request services and lookups, stop the previous manager, then
+// redispatch jobs it requeued. The caller holds mu.
+func (r *ServiceReloader) replace(next *runtimeSnapshot) {
+	old := r.live.Load()
+	if next.manager != nil {
+		next.manager.Start()
 	}
-
-	// LibraryAdapter is itself an interface; a nil bundle.Library is a usable nil
-	// interface and the libraryReady guard handles it.
-	lib := bundle.Library
-
-	var srch api.Streamer
-	if bundle.Aggregator != nil {
-		srch = bundle.Aggregator
+	r.live.Store(next)
+	if old != nil && old.manager != nil && old.manager != next.manager {
+		old.manager.Stop()
+		if next.manager != nil {
+			next.manager.RedispatchQueued()
+		}
 	}
-
-	// Guard against the non-nil-interface-wrapping-nil-pointer trap: only set the
-	// interface when the concrete service is present.
-	var cov api.CoverageService
-	if bundle.Coverage != nil {
-		cov = bundle.Coverage
+}
+func (r *ServiceReloader) Start() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.closed {
+		if n := r.live.Load(); n != nil && n.manager != nil {
+			n.manager.Start()
+		}
 	}
-
-	var dl api.DownloadManager
-	if bundle.Manager != nil {
-		bundle.Manager.Start()
-		dl = bundle.Manager
+}
+func (r *ServiceReloader) Close() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return
 	}
-
-	var snc api.SyncService
-	if bundle.Sync != nil {
-		snc = bundle.Sync
+	r.closed = true
+	if n := r.live.Load(); n != nil && n.manager != nil {
+		n.manager.Stop()
 	}
-
-	return lib, srch, cov, dl, snc, nil
 }
 
 // ProviderLookup adapts a live-lookup provider to extstream.TrackLookup, so the

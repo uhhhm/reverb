@@ -8,11 +8,11 @@ import (
 // DeletionService emits tombstones via SyncStore.
 type DeletionService struct {
 	store *SyncStore
-	q     Querier
+	q     ServerDeviceQuerier
 }
 
 // NewDeletionService creates a service using store and q. If q is nil and store is non-nil, store.q is used.
-func NewDeletionService(store *SyncStore, q Querier) *DeletionService {
+func NewDeletionService(store *SyncStore, q ServerDeviceQuerier) *DeletionService {
 	if q == nil && store != nil {
 		q = store.q
 	}
@@ -75,7 +75,7 @@ func (s *DeletionService) IsDeleted(ctx context.Context, entityType, entityID st
 // resolveServerDevice mirrors offline_set serverDeviceID lookup: settings key then ListDevices fallback.
 // resolveServerDevice picks the identity a tombstone is authored under. It is
 // the author identity (local device), not the server device: see AuthorDeviceID.
-func resolveServerDevice(ctx context.Context, q Querier) (string, error) {
+func resolveServerDevice(ctx context.Context, q ServerDeviceQuerier) (string, error) {
 	return AuthorDeviceID(ctx, q)
 }
 

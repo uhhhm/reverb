@@ -54,9 +54,7 @@ type playlistPreviewer interface {
 // sync returns the currently active synced-playlist service under the read lock.
 // It may be nil when no PlaylistProvider-capable source is configured.
 func (s *Server) sync() SyncService {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.live.sync
+	return s.active().Sync
 }
 
 // handleExternalPlaylistPreview fetches a Spotify playlist without persisting it.

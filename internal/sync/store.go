@@ -14,13 +14,10 @@ import (
 	"github.com/uhhhm/reverb/internal/store/db"
 )
 
-// SyncStore provides changelog helpers around Querier.
-// Querier is the pairing Querier (minimal seam); sync methods are accessed via
-// type assertion on the underlying *db.Queries so we avoid extending Querier
-// and keep device.go untouched. This handles the historical GetMaxSyncRevision
-// return type (interface{} in generated code) transparently.
+// SyncStore reconciles the changelog through an explicit persistence interface.
+// Pairing uses its own, smaller Querier.
 type SyncStore struct {
-	q      Querier
+	q      SyncQuerier
 	policy MergePolicy
 	mu     sync.Mutex
 	hlc    *HLC
@@ -80,12 +77,12 @@ func (s *SyncStore) signerFor(deviceID string) ed25519.PrivateKey {
 }
 
 // NewSyncStore creates a store with default LWWPolicy.
-func NewSyncStore(q Querier) *SyncStore {
+func NewSyncStore(q SyncQuerier) *SyncStore {
 	return &SyncStore{q: q, policy: LWWPolicy{}, hlc: NewHLC()}
 }
 
 // NewSyncStoreWithPolicy creates a store with a custom merge policy (for tests).
-func NewSyncStoreWithPolicy(q Querier, p MergePolicy) *SyncStore {
+func NewSyncStoreWithPolicy(q SyncQuerier, p MergePolicy) *SyncStore {
 	if p == nil {
 		p = LWWPolicy{}
 	}
@@ -141,235 +138,88 @@ func dbToSyncChange(row db.SyncChange) SyncChange {
 	}
 }
 
-// --- helpers that reach sync methods via type assertion ---
-
-func (s *SyncStore) appendSyncChange(ctx context.Context, arg db.AppendSyncChangeParams) (int64, error) {
-	if qq, ok := any(s.q).(interface {
-		AppendSyncChange(context.Context, db.AppendSyncChangeParams) (int64, error)
-	}); ok {
-		return qq.AppendSyncChange(ctx, arg)
-	}
-	if dbq, ok := any(s.q).(*db.Queries); ok {
-		return dbq.AppendSyncChange(ctx, arg)
-	}
-	return 0, fmt.Errorf("querier does not support AppendSyncChange")
-}
-
 func (s *SyncStore) appendSyncChangeWithHLC(ctx context.Context, arg db.AppendSyncChangeWithHLCParams) (int64, error) {
-	if qq, ok := any(s.q).(interface {
-		AppendSyncChangeWithHLC(context.Context, db.AppendSyncChangeWithHLCParams) (int64, error)
-	}); ok {
-		return qq.AppendSyncChangeWithHLC(ctx, arg)
-	}
-	if dbq, ok := any(s.q).(*db.Queries); ok {
-		return dbq.AppendSyncChangeWithHLC(ctx, arg)
-	}
-	// Fallback to legacy without HLC (for mocks that only implement old).
-	return s.appendSyncChange(ctx, db.AppendSyncChangeParams{
-		DeviceID:   arg.DeviceID,
-		EntityType: arg.EntityType,
-		EntityID:   arg.EntityID,
-		Field:      arg.Field,
-		ValueJson:  arg.ValueJson,
-		UpdatedAt:  arg.UpdatedAt,
-	})
+	return s.q.AppendSyncChangeWithHLC(ctx, arg)
 }
 
 func (s *SyncStore) listSyncChangesSince(ctx context.Context, arg db.ListSyncChangesSinceParams) ([]db.SyncChange, error) {
-	if qq, ok := any(s.q).(interface {
-		ListSyncChangesSince(context.Context, db.ListSyncChangesSinceParams) ([]db.SyncChange, error)
-	}); ok {
-		return qq.ListSyncChangesSince(ctx, arg)
-	}
-	if dbq, ok := any(s.q).(*db.Queries); ok {
-		return dbq.ListSyncChangesSince(ctx, arg)
-	}
-	return nil, fmt.Errorf("querier does not support ListSyncChangesSince")
+	return s.q.ListSyncChangesSince(ctx, arg)
 }
 
 func (s *SyncStore) getMaxSyncRevision(ctx context.Context) (int64, error) {
-	if qq, ok := any(s.q).(interface {
-		GetMaxSyncRevision(context.Context) (int64, error)
-	}); ok {
-		return qq.GetMaxSyncRevision(ctx)
+	v, err := s.q.GetMaxSyncRevision(ctx)
+	if err != nil {
+		return 0, err
 	}
-	if qq, ok := any(s.q).(interface {
-		GetMaxSyncRevision(context.Context) (interface{}, error)
-	}); ok {
-		v, err := qq.GetMaxSyncRevision(ctx)
-		if err != nil {
-			return 0, err
-		}
-		switch vv := v.(type) {
-		case int64:
-			return vv, nil
-		case int:
-			return int64(vv), nil
-		case int32:
-			return int64(vv), nil
-		case int16:
-			return int64(vv), nil
-		case float64:
-			return int64(vv), nil
-		case nil:
-			return 0, nil
-		case string:
-			return 0, nil
-		default:
-			return 0, fmt.Errorf("unexpected GetMaxSyncRevision type %T", v)
-		}
+	switch vv := v.(type) {
+	case int64:
+		return vv, nil
+	case int:
+		return int64(vv), nil
+	case int32:
+		return int64(vv), nil
+	case int16:
+		return int64(vv), nil
+	case float64:
+		return int64(vv), nil
+	case nil:
+		return 0, nil
+	case string:
+		return 0, nil
+	default:
+		return 0, fmt.Errorf("unexpected GetMaxSyncRevision type %T", v)
 	}
-	if dbq, ok := any(s.q).(*db.Queries); ok {
-		v, err := dbq.GetMaxSyncRevision(ctx)
-		if err != nil {
-			return 0, err
-		}
-		switch vv := v.(type) {
-		case int64:
-			return vv, nil
-		case int:
-			return int64(vv), nil
-		case nil:
-			return 0, nil
-		default:
-			return 0, fmt.Errorf("unexpected GetMaxSyncRevision type %T", v)
-		}
-	}
-	return 0, fmt.Errorf("querier does not support GetMaxSyncRevision")
 }
 
 func (s *SyncStore) getMaxHLC(ctx context.Context) (int64, error) {
-	if qq, ok := any(s.q).(interface {
-		GetMaxHLC(context.Context) (int64, error)
-	}); ok {
-		return qq.GetMaxHLC(ctx)
+	v, err := s.q.GetMaxHLC(ctx)
+	if err != nil {
+		return 0, err
 	}
-	if qq, ok := any(s.q).(interface {
-		GetMaxHLC(context.Context) (interface{}, error)
-	}); ok {
-		v, err := qq.GetMaxHLC(ctx)
-		if err != nil {
-			return 0, err
-		}
-		switch vv := v.(type) {
-		case int64:
-			return vv, nil
-		case int:
-			return int64(vv), nil
-		case int32:
-			return int64(vv), nil
-		case float64:
-			return int64(vv), nil
-		case nil:
-			return 0, nil
-		case string:
-			return 0, nil
-		default:
-			return 0, fmt.Errorf("unexpected GetMaxHLC type %T", v)
-		}
+	switch vv := v.(type) {
+	case int64:
+		return vv, nil
+	case int:
+		return int64(vv), nil
+	case int32:
+		return int64(vv), nil
+	case float64:
+		return int64(vv), nil
+	case nil:
+		return 0, nil
+	case string:
+		return 0, nil
+	default:
+		return 0, fmt.Errorf("unexpected GetMaxHLC type %T", v)
 	}
-	if dbq, ok := any(s.q).(*db.Queries); ok {
-		v, err := dbq.GetMaxHLC(ctx)
-		if err != nil {
-			return 0, err
-		}
-		switch vv := v.(type) {
-		case int64:
-			return vv, nil
-		case int:
-			return int64(vv), nil
-		case nil:
-			return 0, nil
-		default:
-			return 0, fmt.Errorf("unexpected GetMaxHLC type %T", v)
-		}
-	}
-	// No HLC column on old mocks — treat as 0.
-	return 0, nil
 }
 
 func (s *SyncStore) getLatestSyncChangeForField(ctx context.Context, arg db.GetLatestSyncChangeForFieldParams) (db.SyncChange, error) {
-	if qq, ok := any(s.q).(interface {
-		GetLatestSyncChangeForField(context.Context, db.GetLatestSyncChangeForFieldParams) (db.SyncChange, error)
-	}); ok {
-		return qq.GetLatestSyncChangeForField(ctx, arg)
-	}
-	if dbq, ok := any(s.q).(*db.Queries); ok {
-		return dbq.GetLatestSyncChangeForField(ctx, arg)
-	}
-	return db.SyncChange{}, fmt.Errorf("querier does not support GetLatestSyncChangeForField")
+	return s.q.GetLatestSyncChangeForField(ctx, arg)
 }
 
 func (s *SyncStore) getSyncCursor(ctx context.Context, deviceID string) (db.SyncCursor, error) {
-	if qq, ok := any(s.q).(interface {
-		GetSyncCursor(context.Context, string) (db.SyncCursor, error)
-	}); ok {
-		return qq.GetSyncCursor(ctx, deviceID)
-	}
-	if dbq, ok := any(s.q).(*db.Queries); ok {
-		return dbq.GetSyncCursor(ctx, deviceID)
-	}
-	return db.SyncCursor{}, fmt.Errorf("querier does not support GetSyncCursor")
+	return s.q.GetSyncCursor(ctx, deviceID)
 }
 
 func (s *SyncStore) upsertSyncCursor(ctx context.Context, arg db.UpsertSyncCursorParams) error {
-	if qq, ok := any(s.q).(interface {
-		UpsertSyncCursor(context.Context, db.UpsertSyncCursorParams) error
-	}); ok {
-		return qq.UpsertSyncCursor(ctx, arg)
-	}
-	if dbq, ok := any(s.q).(*db.Queries); ok {
-		return dbq.UpsertSyncCursor(ctx, arg)
-	}
-	return fmt.Errorf("querier does not support UpsertSyncCursor")
+	return s.q.UpsertSyncCursor(ctx, arg)
 }
 
 func (s *SyncStore) getSyncVector(ctx context.Context, deviceID string) (db.SyncVector, error) {
-	if qq, ok := any(s.q).(interface {
-		GetSyncVector(context.Context, string) (db.SyncVector, error)
-	}); ok {
-		return qq.GetSyncVector(ctx, deviceID)
-	}
-	if dbq, ok := any(s.q).(*db.Queries); ok {
-		return dbq.GetSyncVector(ctx, deviceID)
-	}
-	return db.SyncVector{}, fmt.Errorf("querier does not support GetSyncVector")
+	return s.q.GetSyncVector(ctx, deviceID)
 }
 
 func (s *SyncStore) upsertSyncVector(ctx context.Context, arg db.UpsertSyncVectorParams) error {
-	if qq, ok := any(s.q).(interface {
-		UpsertSyncVector(context.Context, db.UpsertSyncVectorParams) error
-	}); ok {
-		return qq.UpsertSyncVector(ctx, arg)
-	}
-	if dbq, ok := any(s.q).(*db.Queries); ok {
-		return dbq.UpsertSyncVector(ctx, arg)
-	}
-	return fmt.Errorf("querier does not support UpsertSyncVector")
+	return s.q.UpsertSyncVector(ctx, arg)
 }
 
 func (s *SyncStore) listUnsignedForDevice(ctx context.Context, deviceID string) ([]db.SyncChange, error) {
-	if qq, ok := any(s.q).(interface {
-		ListUnsignedSyncChangesForDevice(context.Context, string) ([]db.SyncChange, error)
-	}); ok {
-		return qq.ListUnsignedSyncChangesForDevice(ctx, deviceID)
-	}
-	if dbq, ok := any(s.q).(*db.Queries); ok {
-		return dbq.ListUnsignedSyncChangesForDevice(ctx, deviceID)
-	}
-	return nil, fmt.Errorf("querier does not support ListUnsignedSyncChangesForDevice")
+	return s.q.ListUnsignedSyncChangesForDevice(ctx, deviceID)
 }
 
 func (s *SyncStore) updateSig(ctx context.Context, rev int64, sig string) error {
-	if qq, ok := any(s.q).(interface {
-		UpdateSyncChangeSig(context.Context, db.UpdateSyncChangeSigParams) error
-	}); ok {
-		return qq.UpdateSyncChangeSig(ctx, db.UpdateSyncChangeSigParams{Revision: rev, Sig: sig})
-	}
-	if dbq, ok := any(s.q).(*db.Queries); ok {
-		return dbq.UpdateSyncChangeSig(ctx, db.UpdateSyncChangeSigParams{Revision: rev, Sig: sig})
-	}
-	return fmt.Errorf("querier does not support UpdateSyncChangeSig")
+	return s.q.UpdateSyncChangeSig(ctx, db.UpdateSyncChangeSigParams{Revision: rev, Sig: sig})
 }
 
 func (s *SyncStore) ensureHLC(ctx context.Context) {
@@ -526,17 +376,7 @@ func (s *SyncStore) ListSinceHLC(ctx context.Context, since int64, limit int64) 
 	if limit <= 0 {
 		limit = 10000
 	}
-	q, ok := any(s.q).(interface {
-		ListSyncChangesSinceHLC(context.Context, db.ListSyncChangesSinceHLCParams) ([]db.SyncChange, error)
-	})
-	if !ok {
-		if dbq, ok := any(s.q).(*db.Queries); ok {
-			q = dbq
-		} else {
-			return nil, fmt.Errorf("querier does not support ListSyncChangesSinceHLC")
-		}
-	}
-	rows, err := q.ListSyncChangesSinceHLC(ctx, db.ListSyncChangesSinceHLCParams{Hlc: since, Limit: limit})
+	rows, err := s.q.ListSyncChangesSinceHLC(ctx, db.ListSyncChangesSinceHLCParams{Hlc: since, Limit: limit})
 	if err != nil {
 		return nil, err
 	}
@@ -676,17 +516,7 @@ func (s *SyncStore) SetVector(ctx context.Context, deviceID string, seq, hlc int
 
 // GetVectorMap returns all sync vectors as map[deviceID]{seq,hlc}.
 func (s *SyncStore) GetVectorMap(ctx context.Context) (map[string]int64, map[string]int64, error) {
-	q, ok := any(s.q).(interface {
-		ListSyncVectors(context.Context) ([]db.SyncVector, error)
-	})
-	if !ok {
-		if dbq, ok := any(s.q).(*db.Queries); ok {
-			q = dbq
-		} else {
-			return nil, nil, fmt.Errorf("querier does not support ListSyncVectors")
-		}
-	}
-	rows, err := q.ListSyncVectors(ctx)
+	rows, err := s.q.ListSyncVectors(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -973,23 +803,21 @@ func (s *SyncStore) reconcileLocked(ctx context.Context, deviceID string, sinceR
 	// Ensure HLC seeded from DB max before transactional path.
 	s.ensureHLC(ctx)
 	// Attempt transactional path when we have a *sql.DB.
-	if dbq, ok := any(s.q).(*db.Queries); ok {
-		if sqlDB, ok := dbq.UnderlyingDB().(*sql.DB); ok {
-			tx, err := sqlDB.BeginTx(ctx, nil)
-			if err == nil {
-				txQ := dbq.WithTx(tx)
-				txStore := &SyncStore{q: txQ, policy: s.policy, hlc: s.hlc}
-				txPolicy := txStore.effectivePolicy(ctx)
-				outbound, newRev, rejected, accepted, err = txStore.reconcileInternal(ctx, deviceID, sinceRev, inbound, txPolicy)
-				if err != nil {
-					_ = tx.Rollback()
-					return nil, 0, nil, nil, err
-				}
-				if err := tx.Commit(); err != nil {
-					return nil, 0, nil, nil, err
-				}
-				return outbound, newRev, rejected, accepted, nil
+	if sqlDB, ok := s.q.UnderlyingDB().(*sql.DB); ok {
+		tx, err := sqlDB.BeginTx(ctx, nil)
+		if err == nil {
+			txQ := s.q.WithTx(tx)
+			txStore := &SyncStore{q: txQ, policy: s.policy, hlc: s.hlc}
+			txPolicy := txStore.effectivePolicy(ctx)
+			outbound, newRev, rejected, accepted, err = txStore.reconcileInternal(ctx, deviceID, sinceRev, inbound, txPolicy)
+			if err != nil {
+				_ = tx.Rollback()
+				return nil, 0, nil, nil, err
 			}
+			if err := tx.Commit(); err != nil {
+				return nil, 0, nil, nil, err
+			}
+			return outbound, newRev, rejected, accepted, nil
 		}
 	}
 	return s.reconcileInternal(ctx, deviceID, sinceRev, inbound, policy)
@@ -1080,11 +908,7 @@ func (s *SyncStore) advanceVectorSeq(ctx context.Context, deviceID string, handl
 // applied by an earlier slice or phase counts as received even though the
 // current call never saw it.
 func (s *SyncStore) logSeqs(ctx context.Context, deviceID string, low int64) (map[int64]bool, error) {
-	dbq, ok := any(s.q).(*db.Queries)
-	if !ok {
-		return nil, nil
-	}
-	conn := dbq.UnderlyingDB()
+	conn := s.q.UnderlyingDB()
 	if conn == nil {
 		return nil, nil
 	}

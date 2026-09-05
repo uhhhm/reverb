@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/uhhhm/reverb/internal/library"
+	"github.com/uhhhm/reverb/internal/metadata"
 	"github.com/uhhhm/reverb/internal/override"
 )
 
@@ -26,25 +27,7 @@ type entityRename struct {
 // blank clears it back to the library's own name — two different requests, so
 // they cannot share the zero string. Without that distinction a client sending
 // only the field it edited would silently clear the other two.
-type trackNamePatch struct {
-	Title  *string `json:"title"`
-	Artist *string `json:"artist"`
-	Album  *string `json:"album"`
-}
-
-// merge folds the patch onto the override a track already carries.
-func (p trackNamePatch) merge(cur override.Name) override.Name {
-	if p.Title != nil {
-		cur.Title = *p.Title
-	}
-	if p.Artist != nil {
-		cur.Artist = *p.Artist
-	}
-	if p.Album != nil {
-		cur.Album = *p.Album
-	}
-	return cur
-}
+type trackNamePatch = metadata.NamePatch
 
 // trackRename is one track rename inside a batch.
 type trackRename struct {
@@ -55,19 +38,7 @@ type trackRename struct {
 // applyTrackRename stores one track rename and publishes it, returning the
 // override as it now stands.
 func (s *Server) applyTrackRename(ctx context.Context, id string, p trackNamePatch) (override.Name, error) {
-	cur, err := s.deps.Overrides.Get(ctx, id)
-	if err != nil {
-		return override.Name{}, err
-	}
-	if err := s.deps.Overrides.Set(ctx, id, p.merge(cur)); err != nil {
-		return override.Name{}, err
-	}
-	name, err := s.deps.Overrides.Get(ctx, id)
-	if err != nil {
-		return override.Name{}, err
-	}
-	s.emitTrackRename(ctx, id, name)
-	return name, nil
+	return s.edits.Rename(ctx, metadata.BackendID(id), p)
 }
 
 // batchRenameRequest is a whole batch. The three lists are independent, so one

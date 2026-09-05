@@ -176,9 +176,9 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 
 	// Construction order: reloader → resolver → SetResolverProvider → Build.
 	//
-	// The reloader owns the live-matcher holder, so it is created BEFORE Build and
+	// The reloader owns the active snapshot, so it is created BEFORE Build and
 	// the resolver singleton is constructed against it (the provider reads the
-	// holder per-resolve; it is empty until PublishMatcher below, which is fine —
+	// snapshot per-resolve; it is empty until Initialize below, which is fine —
 	// live services only Resolve at runtime).
 	//
 	// SetResolverProvider must precede the first Build so download.Manager and
@@ -198,12 +198,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		return nil, err
 	}
 
-	// Publish the boot matcher and search aggregator (either may be nil) so the
-	// long-lived resolver and stream service see them on their first call.
-	reloader.PublishMatcher(bundle.Matcher)
-	if bundle.Aggregator != nil {
-		reloader.PublishTrackLookup(bundle.Aggregator)
-	}
+	reloader.Initialize(bundle)
 
 	if bundle.Manager != nil {
 		bundle.Manager.SetCanonicalMinter(catalogSvc)
@@ -480,8 +475,8 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 	if r.Bundle.Supervisor != nil {
 		r.Bundle.Supervisor.Start()
 	}
-	if r.Bundle.Manager != nil {
-		r.Bundle.Manager.Start()
+	if r.Reloader != nil {
+		r.Reloader.Start()
 	}
 	// The bundled library reports ready once Navidrome is serving. Re-running the
 	// backfill then heals the boot race, where the backfill at Start() fired
@@ -516,8 +511,8 @@ func (r *Runtime) Close() {
 	if r.P2P != nil {
 		_ = r.P2P.Close()
 	}
-	if r.Bundle.Manager != nil {
-		r.Bundle.Manager.Stop()
+	if r.Reloader != nil {
+		r.Reloader.Close()
 	}
 	if r.Store != nil {
 		_ = r.Store.Close()

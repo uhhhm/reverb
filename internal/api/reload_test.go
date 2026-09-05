@@ -2,101 +2,63 @@ package api
 
 import (
 	"context"
-	"sync/atomic"
+	"errors"
 	"testing"
-
-	"github.com/uhhhm/reverb/internal/library"
 )
 
-// stoppableManager is a fakeManager that records whether Stop was called.
-type stoppableManager struct {
-	fakeManager
-	stopped atomic.Bool
-}
-
-func newStoppableManager() *stoppableManager {
-	return &stoppableManager{fakeManager: *newFakeManager()}
-}
-func (m *stoppableManager) Stop() { m.stopped.Store(true) }
-
-// fakeReloader returns a fixed set of services on Reload.
 type fakeReloader struct {
-	lib   library.LibraryAdapter
-	srch  Streamer
-	cov   CoverageService
-	dl    DownloadManager
-	snc   SyncService
-	calls atomic.Int32
+	current, next ActiveServices
+	calls         int
+	err           error
 }
 
-var _ ServiceReloader = (*fakeReloader)(nil)
-
-func (r *fakeReloader) Reload(context.Context) (library.LibraryAdapter, Streamer, CoverageService, DownloadManager, SyncService, error) {
-	r.calls.Add(1)
-	return r.lib, r.srch, r.cov, r.dl, r.snc, nil
-}
-
-func TestReloadSwapsDownloadsAndStopsOld(t *testing.T) {
-	oldMgr := newStoppableManager()
-	newMgr := newStoppableManager()
-	newCov := &fakeCoverage{}
-	newSnc := &fakeSync{}
-
-	rl := &fakeReloader{dl: newMgr, cov: newCov, snc: newSnc}
-	srv := NewServer(Deps{AllowedHosts: testAllowedHosts, Downloads: oldMgr, Reload: rl})
-
-	if srv.downloads() != DownloadManager(oldMgr) {
-		t.Fatal("expected the old manager before reload")
+func (r *fakeReloader) Current() ActiveServices { return r.current }
+func (r *fakeReloader) Reload(context.Context) error {
+	r.calls++
+	if r.err != nil {
+		return r.err
 	}
+	r.current = r.next
+	return nil
+}
 
-	if err := srv.reload(context.Background()); err != nil {
+func TestReloadReadsRuntimeSnapshot(t *testing.T) {
+	old, next := newFakeManager(), newFakeManager()
+	cov, snc := &fakeCoverage{}, &fakeSync{}
+	r := &fakeReloader{current: ActiveServices{Downloads: old}, next: ActiveServices{Downloads: next, Coverage: cov, Sync: snc}}
+	s := NewServer(Deps{Reload: r})
+	if s.downloads() != old {
+		t.Fatal("initial runtime snapshot not used")
+	}
+	if err := s.reload(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if rl.calls.Load() != 1 {
-		t.Fatalf("expected Reload called once, got %d", rl.calls.Load())
+	if r.calls != 1 || s.downloads() != next || s.coverage() != cov || s.sync() != snc {
+		t.Fatal("handlers must read the published runtime snapshot")
 	}
-	if srv.downloads() != DownloadManager(newMgr) {
-		t.Fatal("expected the new manager to be live after reload")
-	}
-	if srv.coverage() != CoverageService(newCov) {
-		t.Fatal("expected the new coverage service to be live after reload")
-	}
-	if srv.sync() != SyncService(newSnc) {
-		t.Fatal("expected the new sync service to be live after reload")
-	}
-	if !oldMgr.stopped.Load() {
-		t.Fatal("old manager must be Stopped after the swap")
-	}
-	if newMgr.stopped.Load() {
-		t.Fatal("new manager must NOT be Stopped")
-	}
-}
-
-func TestReloadNilDownloadsDoesNotPanic(t *testing.T) {
-	// Old manager present; reload yields no manager → old must be stopped and the
-	// live downloads becomes a genuine nil interface (handlers see 503/empty).
-	oldMgr := newStoppableManager()
-	rl := &fakeReloader{dl: nil}
-	srv := NewServer(Deps{AllowedHosts: testAllowedHosts, Downloads: oldMgr, Reload: rl})
-
-	if err := srv.reload(context.Background()); err != nil {
+	r.next = ActiveServices{}
+	if err := s.reload(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if srv.downloads() != nil {
-		t.Fatal("expected nil downloads after reload with no manager")
-	}
-	if !oldMgr.stopped.Load() {
-		t.Fatal("old manager must be Stopped even when the new one is nil")
+	if s.downloads() != nil {
+		t.Fatal("unconfigured manager must remain nil")
 	}
 }
-
-func TestReloadNoReloaderIsNoop(t *testing.T) {
-	oldMgr := newStoppableManager()
-	srv := NewServer(Deps{AllowedHosts: testAllowedHosts, Downloads: oldMgr})
-	if err := srv.reload(context.Background()); err != nil {
+func TestReloadFailureAndAbsentRuntime(t *testing.T) {
+	old := newFakeManager()
+	r := &fakeReloader{current: ActiveServices{Downloads: old}, err: errors.New("build failed")}
+	s := NewServer(Deps{Reload: r})
+	if err := s.reload(context.Background()); !errors.Is(err, r.err) {
 		t.Fatal(err)
 	}
-	if oldMgr.stopped.Load() {
-		t.Fatal("no reloader → reload must be a no-op (old manager untouched)")
+	if s.downloads() != old {
+		t.Fatal("failure replaced current services")
+	}
+	s = NewServer(Deps{Downloads: old})
+	if err := s.reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if s.downloads() != old {
+		t.Fatal("static service changed")
 	}
 }

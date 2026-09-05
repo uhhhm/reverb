@@ -2,8 +2,6 @@ package api
 
 import (
 	"context"
-	"log"
-	"time"
 
 	"github.com/uhhhm/reverb/internal/cover"
 	"github.com/uhhhm/reverb/internal/materialize"
@@ -22,31 +20,7 @@ import (
 // Best-effort by design: a device that is not paired has nothing to publish to,
 // and a sync failure must never fail the user's edit.
 func (s *Server) emitTrackFieldChange(ctx context.Context, catalogID, field string, value any) {
-	if catalogID == "" {
-		return
-	}
-	// The emitter also publishes the catalog entity the id names. Without that a
-	// peer receives an edit to trk_… and has no way to tell which track it is.
-	if s.deps.SyncEmit != nil {
-		s.deps.SyncEmit.EmitTrackField(ctx, catalogID, field, value)
-		return
-	}
-	if s.deps.SyncStore == nil {
-		return
-	}
-	deviceID := s.resolveAuthorDeviceForSync(ctx)
-	if deviceID == "" {
-		return
-	}
-	if _, err := s.deps.SyncStore.AppendChange(ctx, deviceID, reverbsync.SyncChange{
-		EntityType: materialize.EntityTrack,
-		EntityID:   catalogID,
-		Field:      field,
-		Value:      value,
-		UpdatedAt:  time.Now().UnixMilli(),
-	}); err != nil {
-		log.Printf("sync %s for track %q: %v", field, catalogID, err)
-	}
+	s.deps.SyncEmit.EmitTrackField(ctx, catalogID, field, value)
 }
 
 // emitTrackQuality publishes a per-track quality override. An empty tier is how
@@ -66,30 +40,6 @@ func (s *Server) emitTrackLoudness(ctx context.Context, trackID string, gainDb f
 		return
 	}
 	s.emitTrackFieldChange(ctx, s.deps.Overrides.CatalogIDForTrack(ctx, trackID), materialize.FieldLoudnessGainDb, gainDb)
-}
-
-// emitTrackRename publishes a rename. Title, artist, and album are separate LWW
-// fields, so all three are sent — clearing one is as much a change as setting it.
-func (s *Server) emitTrackRename(ctx context.Context, trackID string, n override.Name) {
-	if s.deps.Overrides == nil {
-		return
-	}
-	catalogID := s.deps.Overrides.CatalogIDForTrack(ctx, trackID)
-	s.emitTrackFieldChange(ctx, catalogID, materialize.FieldTitle, n.Title)
-	s.emitTrackFieldChange(ctx, catalogID, materialize.FieldArtist, n.Artist)
-	s.emitTrackFieldChange(ctx, catalogID, materialize.FieldAlbum, n.Album)
-}
-
-// emitTrackCrop publishes crop boundaries. Zero on both is how an uncrop
-// travels: there is no tombstone for a crop, because the track itself still
-// exists and the file was never modified.
-func (s *Server) emitTrackCrop(ctx context.Context, trackID string, startMs, endMs int) {
-	if s.deps.Crop == nil {
-		return
-	}
-	catalogID := s.deps.Crop.CatalogIDForTrack(ctx, trackID)
-	s.emitTrackFieldChange(ctx, catalogID, materialize.FieldCropStartMs, startMs)
-	s.emitTrackFieldChange(ctx, catalogID, materialize.FieldCropEndMs, endMs)
 }
 
 // emitEntityRename publishes an album or artist rename. The entity id is the
@@ -126,27 +76,5 @@ func (s *Server) emitEntityCover(ctx context.Context, kind, key, sha, ext string
 // Best-effort by design: a device that is not paired has nothing to publish to,
 // and a sync failure must never fail the user's edit.
 func (s *Server) emitEntityFieldChange(ctx context.Context, entityType, key, field string, value any) {
-	if key == "" {
-		return
-	}
-	if s.deps.SyncEmit != nil {
-		s.deps.SyncEmit.EmitEntityField(ctx, entityType, key, field, value)
-		return
-	}
-	if s.deps.SyncStore == nil {
-		return
-	}
-	deviceID := s.resolveAuthorDeviceForSync(ctx)
-	if deviceID == "" {
-		return
-	}
-	if _, err := s.deps.SyncStore.AppendChange(ctx, deviceID, reverbsync.SyncChange{
-		EntityType: entityType,
-		EntityID:   key,
-		Field:      field,
-		Value:      value,
-		UpdatedAt:  time.Now().UnixMilli(),
-	}); err != nil {
-		log.Printf("sync %s for %s %q: %v", field, entityType, key, err)
-	}
+	s.deps.SyncEmit.EmitEntityField(ctx, entityType, key, field, value)
 }

@@ -25,9 +25,7 @@ type CoverageService interface {
 // coverage returns the currently active coverage service under the read lock.
 // It may be nil when no coverage-capable source is configured.
 func (s *Server) coverage() CoverageService {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.live.coverage
+	return s.active().Coverage
 }
 
 func (s *Server) handleArtistDetail(w http.ResponseWriter, r *http.Request) {

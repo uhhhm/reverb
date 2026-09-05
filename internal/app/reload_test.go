@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,7 +44,7 @@ func TestResolverProvider_FollowsReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rl.PublishMatcher(boot.Matcher)
+	rl.Initialize(boot)
 	provider := rl.MatcherProvider()
 
 	if got := provider(); got != resolver.Rematcher(m1) {
@@ -50,7 +52,7 @@ func TestResolverProvider_FollowsReload(t *testing.T) {
 	}
 
 	// Reload swaps the live bundle to one carrying M2; the provider must follow.
-	if _, _, _, _, _, err := rl.Reload(context.Background()); err != nil {
+	if err := rl.Reload(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if got := provider(); got != resolver.Rematcher(m2) {
@@ -68,14 +70,14 @@ func TestResolverProvider_NilMatcherIsSafe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rl.PublishMatcher(boot.Matcher)
+	rl.Initialize(boot)
 	provider := rl.MatcherProvider()
 
 	if got := provider(); got != nil {
 		t.Fatalf("provider() with no matcher = %v, want nil", got)
 	}
 	// A reload that still has no matcher keeps the provider nil-safe.
-	if _, _, _, _, _, err := rl.Reload(context.Background()); err != nil {
+	if err := rl.Reload(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if got := provider(); got != nil {
@@ -167,4 +169,99 @@ func TestResolverProviderSeam_BuilderAcceptsProvider(t *testing.T) {
 	// We don't call Build here (it requires real adapter rows + registries), but the
 	// above proves the seam: Builder.SetResolverProvider accepts the provider.
 	_ = b
+}
+
+// Lifecycle tests sit with the owner, rather than teaching HTTP fixtures how
+// worker retirement works.
+type recordingWorker struct{ onStart, onStop, onDispatch func() }
+
+func (w *recordingWorker) Start() {
+	if w.onStart != nil {
+		w.onStart()
+	}
+}
+func (w *recordingWorker) Stop() {
+	if w.onStop != nil {
+		w.onStop()
+	}
+}
+func (w *recordingWorker) RedispatchQueued() {
+	if w.onDispatch != nil {
+		w.onDispatch()
+	}
+}
+
+func TestReloadRetiresAfterPublicationAndClosesCurrentOnce(t *testing.T) {
+	r := NewServiceReloaderFunc(func(context.Context) (wiring.ServiceBundle, error) { return wiring.ServiceBundle{}, nil })
+	m1, m2 := &stubMatcher{name: "old"}, &stubMatcher{name: "new"}
+	var order []string
+	old := &recordingWorker{onStop: func() {
+		if r.MatcherProvider()() != m2 {
+			t.Error("retired old workers before publishing candidate")
+		}
+		order = append(order, "stop old")
+	}}
+	next := &recordingWorker{
+		onStart:    func() { order = append(order, "start new") },
+		onStop:     func() { order = append(order, "stop new") },
+		onDispatch: func() { order = append(order, "redispatch") },
+	}
+	r.live.Store(&runtimeSnapshot{matcher: m1, manager: old})
+	r.replace(&runtimeSnapshot{matcher: m2, manager: next})
+	r.Close()
+	r.Close()
+	if got := strings.Join(order, ","); got != "start new,stop old,redispatch,stop new" {
+		t.Fatal(got)
+	}
+	if err := r.Reload(context.Background()); err == nil {
+		t.Fatal("reload after close should fail")
+	}
+}
+
+func TestReloadFailureKeepsSnapshot(t *testing.T) {
+	want := errors.New("invalid adapter configuration")
+	r := NewServiceReloaderFunc(func(context.Context) (wiring.ServiceBundle, error) { return wiring.ServiceBundle{}, want })
+	m := &stubMatcher{name: "old"}
+	r.Initialize(wiring.ServiceBundle{Matcher: m})
+	if err := r.Reload(context.Background()); !errors.Is(err, want) {
+		t.Fatal(err)
+	}
+	if r.MatcherProvider()() != m {
+		t.Fatal("failed candidate was published")
+	}
+}
+
+func TestCloseSerializesWithReload(t *testing.T) {
+	entered, release := make(chan struct{}), make(chan struct{})
+	r := NewServiceReloaderFunc(func(context.Context) (wiring.ServiceBundle, error) {
+		close(entered)
+		<-release
+		return wiring.ServiceBundle{}, nil
+	})
+	done := make(chan error, 1)
+	go func() { done <- r.Reload(context.Background()) }()
+	<-entered
+	closed := make(chan struct{})
+	go func() { r.Close(); close(closed) }()
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	<-closed
+	if err := r.Reload(context.Background()); err == nil {
+		t.Fatal("closed runtime accepted reload")
+	}
+}
+
+func TestReloadRetiresWhenDownloadsDisabled(t *testing.T) {
+	r := NewServiceReloaderFunc(func(context.Context) (wiring.ServiceBundle, error) { return wiring.ServiceBundle{}, nil })
+	stops := 0
+	r.live.Store(&runtimeSnapshot{manager: &recordingWorker{onStop: func() { stops++ }}})
+	if err := r.Reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	if stops != 1 || r.Current().Downloads != nil {
+		t.Fatalf("stops=%d, downloads=%v", stops, r.Current().Downloads)
+	}
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/uhhhm/reverb/internal/crop"
+	"github.com/uhhhm/reverb/internal/metadata"
 )
 
 // handleGetTrackCrop reports a track's playback boundaries. A track with no
@@ -46,7 +47,7 @@ func (s *Server) handleSetTrackCrop(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
-	if err := s.deps.Crop.Set(r.Context(), id, body); err != nil {
+	if err := s.edits.SetCrop(r.Context(), metadata.BackendID(id), body); err != nil {
 		if errors.Is(err, crop.ErrInvalid) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
@@ -54,7 +55,6 @@ func (s *Server) handleSetTrackCrop(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	s.emitTrackCrop(r.Context(), id, body.StartMs, body.EndMs)
 	s.handleGetTrackCrop(w, r)
 }
 
@@ -70,10 +70,9 @@ func (s *Server) handleDeleteTrackCrop(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing track id"})
 		return
 	}
-	if err := s.deps.Crop.Clear(r.Context(), id); err != nil {
+	if err := s.edits.ClearCrop(r.Context(), metadata.BackendID(id)); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	s.emitTrackCrop(r.Context(), id, 0, 0)
 	writeJSON(w, http.StatusOK, crop.Points{})
 }

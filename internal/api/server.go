@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -18,6 +17,7 @@ import (
 	"github.com/uhhhm/reverb/internal/library"
 	"github.com/uhhhm/reverb/internal/linkadd"
 	"github.com/uhhhm/reverb/internal/linkresolve"
+	"github.com/uhhhm/reverb/internal/metadata"
 	"github.com/uhhhm/reverb/internal/override"
 	"github.com/uhhhm/reverb/internal/p2p"
 	"github.com/uhhhm/reverb/internal/play"
@@ -27,6 +27,7 @@ import (
 	"github.com/uhhhm/reverb/internal/search"
 	"github.com/uhhhm/reverb/internal/store/db"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
+	"github.com/uhhhm/reverb/internal/syncemit"
 )
 
 // Streamer is the subset of *search.Aggregator the SSE handler needs.
@@ -40,9 +41,8 @@ type EventSubscriber interface {
 	Subscribe(topic string) (<-chan events.Event, func())
 }
 
-// DownloadManager is the subset of *download.Manager the API needs. Stop is used
-// by the live-reload path to shut down the previous Manager after a new one has
-// been swapped in.
+// DownloadManager is the request-facing download interface. The application
+// runtime owns worker startup and shutdown.
 type DownloadManager interface {
 	Enqueue(ctx context.Context, req core.DownloadRequest) (core.DownloadJob, error)
 	List(ctx context.Context) ([]core.DownloadJob, error)
@@ -53,7 +53,6 @@ type DownloadManager interface {
 	IsPaused() bool
 	Clear(ctx context.Context, jobID string) error
 	ClearFinished(ctx context.Context) ([]string, error)
-	Stop()
 }
 
 // PlaylistOwnerStore is the persistence slice the playlist-ownership checks need.
@@ -87,12 +86,19 @@ type ConfigDirty interface {
 	Dirty() bool
 }
 
-// ServiceReloader rebuilds the active library/search/download/coverage/sync services
-// from the current DB state and returns them. The returned Manager (if any) is
-// already Started; the server Stops the previous one after swapping the new one in.
-// A nil interface result means "no service of that kind is configured".
+// ActiveServices is one consistent snapshot of reloadable request services.
+type ActiveServices struct {
+	Library   library.LibraryAdapter
+	Search    Streamer
+	Coverage  CoverageService
+	Downloads DownloadManager
+	Sync      SyncService
+}
+
+// ServiceReloader owns publication and retirement; HTTP only requests reload.
 type ServiceReloader interface {
-	Reload(ctx context.Context) (lib library.LibraryAdapter, search Streamer, coverage CoverageService, downloads DownloadManager, sync SyncService, err error)
+	Current() ActiveServices
+	Reload(context.Context) error
 }
 
 // Resolver is the subset of *resolver.Service consumed by the cover/stream
@@ -295,35 +301,26 @@ type FileManifestStore interface {
 type Server struct {
 	deps   Deps
 	router chi.Router
+	edits  *metadata.Edits
 
 	// loudness tracks the opt-in bulk loudness measurement pass. Normal
 	// operation measures lazily on first play; this is the user-triggered
 	// alternative for someone who would rather spend the CPU up front.
 	loudness loudnessBackfill
-
-	// live holds the currently active services. Handlers read them through the
-	// getters under the RLock; reload swaps them under the write lock so adapter
-	// mutations take effect without a restart.
-	mu   sync.RWMutex
-	live struct {
-		library   library.LibraryAdapter
-		search    Streamer
-		coverage  CoverageService
-		downloads DownloadManager
-		// sync is reload-swapped alongside coverage: when the Spotify adapter or
-		// library changes, the new SyncService (or nil) is atomically installed
-		// without a restart.
-		sync SyncService
-	}
 }
 
 func NewServer(deps Deps) *Server {
 	s := &Server{deps: deps, router: chi.NewRouter()}
-	s.live.library = deps.Library
-	s.live.search = deps.SearchAggregator
-	s.live.coverage = deps.Coverage
-	s.live.downloads = deps.Downloads
-	s.live.sync = deps.Sync
+	// Legacy/test construction may provide only a log. Use the same emitter
+	// implementation without a catalog publisher, preserving that configuration.
+	if s.deps.SyncEmit == nil {
+		var log syncemit.Log
+		if deps.SyncStore != nil {
+			log = deps.SyncStore
+		}
+		s.deps.SyncEmit = syncemit.New(log, nil, s.resolveAuthorDeviceForSync)
+	}
+	s.edits = metadata.New(deps.Overrides, deps.Crop, s.deps.SyncEmit)
 	// Ensure the playlist-covers directory exists when a data dir is configured.
 	if deps.DataDir != "" {
 		_ = os.MkdirAll(filepath.Join(deps.DataDir, "playlist-covers"), 0o755)
@@ -332,53 +329,23 @@ func NewServer(deps Deps) *Server {
 	return s
 }
 
-// library / searchAggregator / downloads return the currently active service
-// under the read lock. Any may be nil when nothing of that kind is configured.
-func (s *Server) library() library.LibraryAdapter {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.live.library
+// active reads the application-owned snapshot, or static services in a
+// standalone handler fixture with no runtime.
+func (s *Server) active() ActiveServices {
+	if s.deps.Reload != nil {
+		return s.deps.Reload.Current()
+	}
+	return ActiveServices{Library: s.deps.Library, Search: s.deps.SearchAggregator,
+		Coverage: s.deps.Coverage, Downloads: s.deps.Downloads, Sync: s.deps.Sync}
 }
-
-func (s *Server) searchAggregator() Streamer {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.live.search
-}
-
-func (s *Server) downloads() DownloadManager {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.live.downloads
-}
-
-// reload rebuilds the active services from the current DB state and atomically
-// swaps them in. The previous download Manager is Stopped after the swap so
-// in-flight reads never see a stopped Manager. A no-op when no reloader is wired.
+func (s *Server) library() library.LibraryAdapter { return s.active().Library }
+func (s *Server) searchAggregator() Streamer      { return s.active().Search }
+func (s *Server) downloads() DownloadManager      { return s.active().Downloads }
 func (s *Server) reload(ctx context.Context) error {
 	if s.deps.Reload == nil {
 		return nil
 	}
-	lib, srch, cov, dl, snc, err := s.deps.Reload.Reload(ctx)
-	if err != nil {
-		return err
-	}
-	s.mu.Lock()
-	old := s.live.downloads
-	s.live.library, s.live.search, s.live.coverage, s.live.downloads, s.live.sync = lib, srch, cov, dl, snc
-	s.mu.Unlock()
-	// Stop the previous Manager only after the new one is swapped in, and never
-	// stop a nil or unchanged Manager. Stopping requeues whatever it was running,
-	// but the new Manager ran its recovery pass while the old one was still
-	// working, so nothing has re-dispatched those rows yet — hence the second
-	// pass here.
-	if old != nil && old != dl {
-		old.Stop()
-		if rd, ok := dl.(interface{ RedispatchQueued() }); ok {
-			rd.RedispatchQueued()
-		}
-	}
-	return nil
+	return s.deps.Reload.Reload(ctx)
 }
 
 func (s *Server) Handler() http.Handler { return s.router }
