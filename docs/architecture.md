@@ -59,6 +59,14 @@ React 19 + TypeScript, Vite, TanStack Query, Zustand, Tailwind, react-router.
 
 Wails wrapper — same monolith on `127.0.0.1:0` (`desktop/main.go:boot`, `desktop/app.go:App`). Listens on random port, publishes `LocalAPIPort` so the AssetServer-served SPA dials the real API (WS cannot upgrade through Wails). DB at `~/Library/Application Support/Reverb/reverb.db` (macOS) / `~/.config/reverb/reverb.db` (Linux XDG) with legacy `./data/reverb.db` migration; downloads in `~/Music/Reverb` (`internal/desktop/paths.go`). Bundled `ffmpeg`/`navidrome`/`spotdl`/`yt-dlp`/`deno` resolved via `desktop/bundle.go:ResolveBundledTools` and injected before `config.Load` (`ApplyBundledToolEnv`); fetched into `desktop/tools/` via `make desktop-deps`. Build tags `desktop,production,webkit2_41` (`desktop/frontend.go` vs `desktop/run_fallback.go` plain HTTP). Single-instance lock in `desktop/singleinstance.go`.
 
+Desktop close behaviour hands the backend to a headless `--background` process
+after releasing the single-instance lock. It runs the same composition root at
+reduced CPU priority, without Wails or a webview. Reopening requests shutdown via
+a user-private Unix socket and waits for resource release before booting the UI.
+The local `desktop.json` preference controls this handoff; an explicit quit or
+update restart bypasses it. No login service is installed. See
+[desktop background sync](../desktop/README.md#background-sync-macos-and-linux).
+
 ### Configuration
 
 Flags > env > defaults. Flags: `--port`/`--bind`/`--p2p-port`/`--db`/`--dev`/`--update-repo`. Env: `REVERB_PORT`/`REVERB_BIND`/`REVERB_P2P_PORT`/`REVERB_DB`/`REVERB_DEV`/`REVERB_DOWNLOAD_DIR` / `REVERB_SPOTIFY_CLIENT_ID/SECRET` / `REVERB_LIBRARY_PASSWORD` / `REVERB_SPOTDL_PATH`/`REVERB_NAVIDROME_BIN`/`REVERB_YTDLP_PATH`/`REVERB_DENO_PATH` (+ navidrome listen/port vars) — see `README.md` + `internal/config`. Secrets via env/`.env` only (gitignored; `.env.example` template).
@@ -66,4 +74,3 @@ Flags > env > defaults. Flags: `--port`/`--bind`/`--p2p-port`/`--db`/`--dev`/`--
 ### Linting
 
 `.golangci.yml`: errcheck, govet, ineffassign, misspell, staticcheck, unconvert. Deferred `Close()` ignores pre-configured. staticcheck disables QF1001/QF1003/ST1000/ST1003 (ST1003 because `CoverUrl` etc. is pervasive).
-

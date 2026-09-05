@@ -5,6 +5,8 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/uhhhm/reverb/desktop/updater"
@@ -32,7 +34,13 @@ type App struct {
 	// releaseLock drops the single-instance lock. It must run after the store
 	// is closed and the child Navidrome is down, or the successor of an update
 	// would start while this process still holds both.
-	releaseLock func()
+	releaseLock       func()
+	backgroundEnabled atomic.Bool
+	quitRequested     atomic.Bool
+	backgroundArgs    []string
+	startBackground   func() error
+	stopBackground    context.CancelFunc
+	shutdownOnce      sync.Once
 }
 
 // NewApp creates a new desktop App.
@@ -43,7 +51,12 @@ func NewApp() *App {
 // OnStartup is called by the Wails runtime on startup. It starts the local
 // HTTP server on 127.0.0.1:0 when not already running.
 func (a *App) OnStartup(ctx context.Context) {
-	a.ctx, a.cancel = context.WithCancel(ctx)
+	// Keep the lifetime used by StartServices; the Wails context is only for UI calls.
+	if a.cancel == nil {
+		a.ctx, a.cancel = context.WithCancel(ctx)
+	} else {
+		a.ctx = ctx
+	}
 
 	if a.ln == nil {
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -81,6 +94,10 @@ func (a *App) OnStartup(ctx context.Context) {
 // OnShutdown is called by the Wails runtime on shutdown. It gracefully
 // stops the HTTP server and any wiring services.
 func (a *App) OnShutdown(ctx context.Context) {
+	a.shutdownOnce.Do(func() { a.shutdown(ctx) })
+}
+
+func (a *App) shutdown(ctx context.Context) {
 	if a.cancel != nil {
 		a.cancel()
 	}
@@ -102,10 +119,16 @@ func (a *App) OnShutdown(ctx context.Context) {
 		a.releaseLock()
 		a.releaseLock = nil
 	}
+	if a.startBackground != nil && a.backgroundEnabled.Load() && !a.quitRequested.Load() {
+		if err := a.startBackground(); err != nil {
+			log.Printf("desktop: could not start background sync: %v", err)
+		}
+	}
 }
 
-// OnBeforeClose is called when the window is about to close. Returning
-// false allows the quit to proceed (close→quit).
+// OnBeforeClose lets the window process exit. OnShutdown may then hand the
+// backend to a headless process, unless background sync is disabled or the
+// user explicitly requested Quit Reverb and stop sync.
 func (a *App) OnBeforeClose(ctx context.Context) bool {
 	return false
 }

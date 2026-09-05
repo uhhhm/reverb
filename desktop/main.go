@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,7 +21,31 @@ import (
 var version = "dev"
 
 func main() {
-	app, err := boot(os.Args[1:])
+	args := os.Args[1:]
+	if len(args) > 0 && args[0] == "--background" {
+		if err := runBackground(args[1:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	if len(args) > 0 && args[0] == "--stop-background" {
+		cfg, err := desktopConfig(args[1:])
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := stopBackgroundSync(filepath.Dir(cfg.DBPath)); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+	cfg, err := desktopConfig(args)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := stopBackgroundSync(filepath.Dir(cfg.DBPath)); err != nil {
+		log.Fatal(err)
+	}
+	app, err := boot(args)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -29,8 +54,20 @@ func main() {
 	// runApp is build-tag dispatched: the native Wails window under -tags
 	// desktop (frontend.go), plain HTTP otherwise (run_fallback.go).
 	if err := runApp(app); err != nil {
+		app.quitRequested.Store(true)
+		app.OnShutdown(context.Background())
 		log.Fatal(err)
 	}
+	app.OnShutdown(context.Background())
+}
+
+func desktopConfig(args []string) (config.Config, error) {
+	return config.Load(args, func(key string) string {
+		if key == "REVERB_DB" {
+			return desktop.ResolveDesktopDB()
+		}
+		return os.Getenv(key)
+	})
 }
 
 // boot builds the desktop composition root: filesystem contract, bundled-tool
@@ -40,15 +77,18 @@ func main() {
 // args are the CLI flags (os.Args[1:] in main; nil under test, where os.Args
 // carries the test binary's own flags).
 func boot(args []string) (*App, error) {
+	cfg, err := desktopConfig(args)
+	if err != nil {
+		return nil, err
+	}
 	// Desktop filesystem contract: XDG DB, Music dir, legacy migration.
-	desktopDB := desktop.ResolveDesktopDB()
+	// Resolve --db before the lock and background socket, so all three identify
+	// the same database even when a CLI flag overrides the environment.
+	_ = os.Setenv("REVERB_DB", cfg.DBPath)
 	downloadDir := desktop.ResolveDesktopDownloadDir()
-	dataDir := desktop.ResolveDesktopDataDir()
+	dataDir := filepath.Dir(cfg.DBPath)
 	if err := desktop.MaybeMigrateLegacyDB(); err != nil {
 		log.Printf("desktop: legacy DB migration: %v", err)
-	}
-	if os.Getenv("REVERB_DB") == "" {
-		_ = os.Setenv("REVERB_DB", desktopDB)
 	}
 	if os.Getenv("REVERB_DOWNLOAD_DIR") == "" {
 		_ = os.Setenv("REVERB_DOWNLOAD_DIR", downloadDir)
@@ -70,14 +110,9 @@ func boot(args []string) (*App, error) {
 	}
 
 	// Point the services at the bundled navidrome/spotdl/yt-dlp/ffmpeg before
-	// config.Load and wiring read the environment.
+	// wiring reads the environment.
 	ApplyBundledToolEnv()
 
-	cfg, err := config.Load(args, os.Getenv)
-	if err != nil {
-		releaseLock()
-		return nil, err
-	}
 	// Override Port=0 (random) unless --port arg or REVERB_PORT is set.
 	hasPortArg := false
 	for _, arg := range args {
@@ -147,6 +182,11 @@ func boot(args []string) (*App, error) {
 	a.deps = deps
 	a.port = port
 	a.ctx, a.cancel = context.WithCancel(context.Background())
+	a.backgroundArgs = append([]string(nil), args...)
+	if err := a.loadBackgroundPreference(); err != nil {
+		a.OnShutdown(context.Background())
+		return nil, err
+	}
 
 	return a, nil
 }
@@ -156,7 +196,12 @@ func boot(args []string) (*App, error) {
 // effects — notably, booting it in a test must not spawn a second Navidrome on
 // the fixed 4533 port.
 func (a *App) StartServices() {
-	a.runtime.StartBackground(context.Background())
+	// All workers share a cancellable lifetime, including in headless mode.
+	ctx := context.Background()
+	if a.ctx != nil {
+		ctx = a.ctx
+	}
+	a.runtime.StartBackground(ctx)
 	if a.updater != nil {
 		// Discard the binary and payload the previous version left behind
 		// before polling for the next one.

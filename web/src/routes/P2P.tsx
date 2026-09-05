@@ -1,14 +1,22 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getP2PStatus, getP2PPeers, redeemViaPeer, getFileManifests, fetchFileFromPeer } from '../lib/p2pApi'
-import { generatePairingCode } from '../lib/pairingApi'
+import { generatePairingCode, listDevices, deleteDevice, type DeviceInfo } from '../lib/pairingApi'
+import { triggerSync } from '../lib/syncApi'
+import { useSyncStore } from '../lib/syncStore'
+import { Button } from '../components/ui/Button'
+import { Modal } from '../components/ui/Modal'
+import { BackgroundSyncSettings } from '../components/BackgroundSyncSettings'
 
 export default function P2P() {
   const qc = useQueryClient()
   const [code, setCode] = useState('')
   const [peerId, setPeerId] = useState('')
   const [deviceName, setDeviceName] = useState('')
+  const [removingDevice, setRemovingDevice] = useState<DeviceInfo | null>(null)
+  const syncing = useSyncStore((s) => s.syncing)
 
+  const devicesQ = useQuery({ queryKey: ['pairing/devices'], queryFn: listDevices, refetchInterval: 5000 })
   const statusQ = useQuery({ queryKey: ['p2p/status'], queryFn: getP2PStatus })
   const peersQ = useQuery({ queryKey: ['p2p/peers'], queryFn: getP2PPeers, refetchInterval: 5000 })
   const manifestsQ = useQuery({ queryKey: ['p2p/manifests'], queryFn: getFileManifests })
@@ -18,9 +26,20 @@ export default function P2P() {
     onSuccess: (data) => setCode(data.code),
   })
 
+  const remove = useMutation({
+    mutationFn: deleteDevice,
+    onSuccess: () => {
+      setRemovingDevice(null)
+      void qc.invalidateQueries({ queryKey: ['pairing/devices'] })
+      void qc.invalidateQueries({ queryKey: ['p2p/peers'] })
+    },
+  })
+  const sync = useMutation({ mutationFn: triggerSync })
+
   const redeem = useMutation({
     mutationFn: () => redeemViaPeer(peerId, code, deviceName || 'unnamed'),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pairing/devices'] })
       qc.invalidateQueries({ queryKey: ['p2p/peers'] })
       qc.invalidateQueries({ queryKey: ['p2p/status'] })
     },
@@ -32,6 +51,69 @@ export default function P2P() {
         <h1 className="text-2xl font-bold">P2P Devices</h1>
         <p className="text-sm text-text-secondary">Link devices directly via libp2p — no central server. Single pairing code, full file sync.</p>
       </header>
+
+      <BackgroundSyncSettings />
+
+      <section className="rounded-lg border border-border-subtle bg-raised p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="font-semibold">Paired devices</h2>
+          <Button onClick={() => sync.mutate()} disabled={sync.isPending || syncing}>
+            {sync.isPending || syncing ? 'Syncing…' : 'Sync now'}
+          </Button>
+        </div>
+        <p className="text-sm text-text-secondary">Manage the devices allowed to sync with this library.</p>
+        {sync.isError && <p role="alert" className="text-sm text-error">{sync.error.message}</p>}
+        {syncing ? (
+          <p role="status" className="text-sm text-text-secondary">Syncing with paired devices…</p>
+        ) : sync.isSuccess && (
+          <p role="status" className="text-sm text-text-secondary">Sync requested.</p>
+        )}
+        {devicesQ.isLoading ? (
+          <p className="text-sm">Loading paired devices…</p>
+        ) : devicesQ.isError ? (
+          <p role="alert" className="text-sm text-error">{devicesQ.error.message}</p>
+        ) : (
+          <ul className="space-y-2">
+            {devicesQ.data?.map((device) => (
+              <li key={device.id} className="flex items-center justify-between gap-3 rounded border border-border-subtle p-3">
+                <div className="min-w-0">
+                  <p className="font-semibold truncate">{device.name}</p>
+                  <p className="text-xs text-text-secondary">
+                    {device.lastSeen ? `Last seen ${new Date(device.lastSeen * 1000).toLocaleString()}` : 'Not synced yet'}
+                  </p>
+                </div>
+                {device.isServer ? (
+                  <span className="text-xs text-text-secondary">Server device</span>
+                ) : (
+                  <Button size="sm" aria-label={`Remove ${device.name}`} onClick={() => {
+                    remove.reset()
+                    setRemovingDevice(device)
+                  }}>Remove</Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {devicesQ.data?.length === 0 && <p className="text-sm text-text-secondary">No paired devices yet.</p>}
+      </section>
+
+      <Modal
+        open={removingDevice !== null}
+        title={`Remove ${removingDevice?.name ?? 'device'}?`}
+        onClose={() => { if (!remove.isPending) setRemovingDevice(null) }}
+        footer={<>
+          <Button disabled={remove.isPending} onClick={() => setRemovingDevice(null)}>Cancel</Button>
+          <Button variant="primary" disabled={remove.isPending} onClick={() => {
+            if (removingDevice) remove.mutate(removingDevice.id)
+          }}>{remove.isPending ? 'Removing…' : 'Remove device'}</Button>
+        </>}
+      >
+        <p className="text-sm text-text-secondary">
+          This device will lose access to this library and stop syncing. Downloaded files stay on it.
+          To reconnect, pair it again with a new code.
+        </p>
+        {remove.isError && <p role="alert" className="text-sm text-error">{remove.error.message}</p>}
+      </Modal>
 
       <section className="rounded-lg border border-border-subtle bg-raised p-4 space-y-3">
         <h2 className="font-semibold">Local status</h2>

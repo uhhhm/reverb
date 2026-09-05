@@ -12,6 +12,10 @@ import (
 // quitApp stops the fallback server, which ends runApp and the process with
 // it. The native build closes the window instead.
 func quitApp(app *App) {
+	if app != nil && app.stopBackground != nil {
+		app.stopBackground()
+		return
+	}
 	if app == nil || app.srv == nil {
 		return
 	}
