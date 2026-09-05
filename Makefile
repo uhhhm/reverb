@@ -1,6 +1,7 @@
-.PHONY: gen gen-check test build web dev clean desktop desktop-dev desktop-deps package-mac
+.PHONY: gen gen-check test test-go test-web test-race fmt-check vet check check-web check-full setup-web build web dev clean desktop desktop-dev desktop-deps package-mac
 
 VERSION ?= dev
+GO_PACKAGES := ./cmd/... ./internal/... ./desktop/...
 
 gen:
 	@if command -v sqlc >/dev/null 2>&1; then sqlc generate; else go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.27.0 generate; fi
@@ -11,12 +12,36 @@ gen:
 gen-check: gen
 	@git diff --exit-code -- internal/store/db
 
-test:
-	go test ./cmd/... ./internal/...
+test: test-go test-web
+
+test-go:
+	go test $(GO_PACKAGES)
+
+test-web:
 	cd web && npm run test
 
+test-race:
+	go test -race $(GO_PACKAGES) -count=1
+
+fmt-check:
+	@test -z "$$(gofmt -l $$(git ls-files --cached --others --exclude-standard '*.go'))"
+
+vet:
+	go vet $(GO_PACKAGES)
+
+check-web:
+	cd web && npm run typecheck && npm run lint && npm run test
+
+check: fmt-check vet test-go check-web gen-check
+
+check-full: check test-race
+	cd web && npm run e2e
+
+setup-web:
+	cd web && npm ci
+
 web:
-	cd web && npm install && npm run build
+	cd web && npm run build
 	rm -rf internal/api/dist
 	cp -r web/dist internal/api/dist
 

@@ -111,7 +111,7 @@ func TestBootServesRuntimeConfigWithRealPort(t *testing.T) {
 	handler := api.NewServer(app.deps).Handler()
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runtime-config.js", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://wails/runtime-config.js", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
@@ -142,7 +142,7 @@ func TestBootStreamsEverywhereToNonFlushingWriter(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/search/everywhere?q=test&type=track", nil).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodGet, "http://wails/api/v1/search/everywhere?q=test&type=track", nil).WithContext(ctx)
 
 	w := newNonFlushingWriter()
 	if _, isFlusher := http.ResponseWriter(w).(http.Flusher); isFlusher {
@@ -193,7 +193,7 @@ func TestBootOffersYtdlpDownloader(t *testing.T) {
 	handler := api.NewServer(app.deps).Handler()
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/adapters/available", nil))
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://wails/api/v1/adapters/available", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d (body %s)", rec.Code, rec.Body.String())
 	}

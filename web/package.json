@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "typecheck": "tsc -b --pretty false"
   },
   "dependencies": {
     "@fontsource-variable/figtree": "^5.2.10",

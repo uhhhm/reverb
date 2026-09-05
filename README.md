@@ -207,23 +207,24 @@ The HTTP API is documented in OpenAPI, served live at `/api/v1/openapi.yaml`.
 
 ```bash
 # Backend tests — never ./... (web/node_modules contains vendored Go)
-go test ./cmd/... ./internal/...
+go test ./cmd/... ./internal/... ./desktop/...
 make test   # backend + frontend unit tests
 
 # Frontend (from web/)
-cd web && npm install
+make setup-web
+cd web
 npm run test   # vitest
 npm run lint   # eslint
 
 # Build
-make build        # -> ./reverb (requires Go 1.23+, Node 22+)
+make build        # -> ./reverb (requires the Go version in go.mod, Node 22+)
 make desktop      # -> ./dist/reverb-desktop (Wails desktop app)
 make desktop-dev  # wails dev -projectdir ./desktop (hot reload via Vite :5173)
 ```
 
 Desktop (Wails) runs the same Go monolith on `127.0.0.1:0`, DB at `~/Library/Application Support/Reverb/reverb.db` (macOS) / `~/.config/reverb/reverb.db` (Linux, XDG) and downloads in `~/Music/Reverb`. Bundled `ffmpeg`/`spotDL`/`Navidrome`/`deno` are fetched into `desktop/tools/` via `make desktop-deps`. See [docs/deployment.md#desktop-wails](docs/deployment.md#desktop-wails) and `desktop/README.md`.
 
-See `CLAUDE.md` for architecture notes and conventions. `gofmt -w` and Conventional Commits are required.
+See `AGENTS.md` for task navigation, verification commands, and architecture references. `gofmt -w` and Conventional Commits are required.
 
 ## License
 
