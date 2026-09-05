@@ -113,4 +113,8 @@ Before and after the pilots, try three representative tasks: add a download stat
 
 Do not introduce a generic repository layer, dependency-injection framework, universal feature registry, or new state-management library for this effort. Preserve the single-owner product model, transport security guards, offline-set locality, identity semantics, and supported peer/storage formats. No database migration or protocol change is required by this plan; any later need should be scoped and reviewed separately.
 
-This deliverable is a source-grounded plan only. No application code has been changed, and test suites have not been run to establish a green baseline. Establish that baseline in step 1 and record pre-existing failures separately from refactor regressions.
+Steps 1–4 are implemented: shared agent guidance and desktop-inclusive checks, generated download/event contracts with handler validation, explicit sync persistence and local metadata commands, and application-owned reload publication and worker retirement. Steps 5–6 remain future work. Existing desktop Host fixtures and browser Add from link/pairing fixtures were updated to match the application's existing guards and UI; production UI behavior was preserved. Malformed and unknown WebSocket frames are now ignored as specified in step 2.
+
+Validation on 2026-09-05: `make check-full` passed, including Go tests and race coverage, 1,262 frontend unit tests, 17 browser tests, and generated contract/sqlc checks. The separate `make desktop` native Wails build also passed. The existing `makeSocket` hook-dependency lint warning remains.
+
+The contract pilot reduces repeated transport declarations to OpenAPI plus generated output, and metadata/reload orchestration each have one owner. The representative before/after task timings proposed above have not been measured, so no productivity improvement is quantified.

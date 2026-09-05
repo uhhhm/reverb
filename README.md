@@ -210,11 +210,11 @@ The HTTP API is documented in OpenAPI, served live at `/api/v1/openapi.yaml`.
 go test ./cmd/... ./internal/... ./desktop/...
 make test   # backend + frontend unit tests
 
-# Frontend (from web/)
+# Install locked frontend and contract tools from the repository root
 make setup-web
-cd web
-npm run test   # vitest
-npm run lint   # eslint
+make setup-contracts
+make check       # formatting, vet, tests, types, lint, generated contracts/sqlc
+make check-full  # also race and browser tests
 
 # Build
 make build        # -> ./reverb (requires the Go version in go.mod, Node 22+)

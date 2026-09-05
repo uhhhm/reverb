@@ -17,7 +17,7 @@ Reverb is a Go modular monolith with an embedded React/TypeScript SPA. **Desktop
 | --- | --- | --- |
 | Playback, seek, queue | `web/src/lib/audioEngine.ts`, `playerStore.ts` | `cd web && npx vitest run src/lib/audioEngine.test.ts src/lib/playerStore.test.ts` |
 | Downloads | `internal/download`, `web/src/lib/downloadApi.ts` | `go test ./internal/download/...` |
-| Track metadata, sync emission | `internal/override`, `internal/crop`, `internal/cover`, `internal/syncemit`, `internal/api/track_sync.go` | `go test ./internal/api ./internal/materialize ./internal/syncemit ./internal/catalog` |
+| Track metadata, sync emission | `internal/metadata`, `internal/override`, `internal/crop`, `internal/syncemit` | `go test ./internal/metadata ./internal/api ./internal/materialize ./internal/syncemit ./internal/catalog` |
 | Pairing, reconciliation | `internal/sync`, `internal/p2p` | `go test ./internal/sync ./internal/p2p` |
 | Adapters, live reload | `internal/registry`, `internal/wiring`, `internal/app/reload.go` | `go test ./internal/wiring ./internal/app` |
 | Desktop startup, tools, updates | `desktop/`, `internal/desktop` | `go test ./desktop/... ./internal/desktop/...` |
@@ -25,9 +25,10 @@ Reverb is a Go modular monolith with an embedded React/TypeScript SPA. **Desktop
 
 ## Setup and checks
 
-- `make setup-web` installs locked frontend dependencies. `make web` builds already-installed dependencies; `make desktop-dev` starts Wails development mode.
+- `make setup-web` installs locked frontend dependencies; `make setup-contracts` installs the isolated contract tools. `make web` builds already-installed dependencies; `make desktop-dev` starts Wails development mode.
 - Go minimum is declared by `go.mod`; CI selects its toolchain in `.github/workflows/ci.yml`. Use Node 22+.
 - `make test` includes backend, desktop Go packages, and frontend unit tests. Use explicit Go package roots (`./cmd/... ./internal/... ./desktop/...`): repository-wide `./...` can traverse vendored Go in `web/node_modules`.
+- For HTTP or WebSocket shape changes, read [docs/contracts.md](docs/contracts.md), edit OpenAPI, and run `make contracts`. Generated transport files are checked by `make contracts-check`.
 - `make gen` regenerates sqlc output; `make gen-check` checks drift. Edit SQL in `internal/store/queries`, migrations in `internal/store/migrations`, and handwritten extensions in separate files such as `internal/store/db/underlying.go`. Generated Go files are not hand-edited.
 - `make fmt-check`, `make vet`, and `make check-web` expose the individual fast checks. Untagged desktop tests exercise boot and transport; they do not compile the native Wails window.
 

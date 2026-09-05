@@ -66,7 +66,7 @@ test('pairing: generate pairing code and redeem stores sync token', async ({ pag
   await expect(page.getByRole('heading', { level: 1, name: 'Pairing' })).toBeVisible()
 
   // No devices yet
-  await expect(page.getByText('No devices found.')).toBeVisible()
+  await expect(page.getByText(/No devices paired yet/)).toBeVisible()
 
   // Generate pairing code
   await page.getByRole('button', { name: 'Generate pairing code' }).click()
