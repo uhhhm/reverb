@@ -473,13 +473,13 @@ describe('SyncedPlaylist page', () => {
 
   // ── Schedule settings ──────────────────────────────────────────────────────
 
-  it('opening "…" menu shows schedule settings + Remove', async () => {
+  it('opening "…" menu shows schedule settings + Delete', async () => {
     await renderLoaded()
     fireEvent.click(screen.getByRole('button', { name: /more options/i }))
     expect(screen.getByRole('switch', { name: 'Auto-sync' })).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: /sync interval/i })).toBeInTheDocument()
     expect(screen.getByRole('switch', { name: /auto-download missing/i })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: 'Remove' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument()
   })
 
   it('toggling Auto-sync calls updateSyncSettings', async () => {
@@ -523,26 +523,31 @@ describe('SyncedPlaylist page', () => {
     })
   })
 
-  // ── Remove ─────────────────────────────────────────────────────────────────
+  // ── Delete ─────────────────────────────────────────────────────────────────
 
-  it('Remove (confirm=true) calls deleteSyncedPlaylist and navigates to /library', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+  it('Delete opens a confirmation dialog, then deletes and navigates to /library', async () => {
     await renderLoaded()
     fireEvent.click(screen.getByRole('button', { name: /more options/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }))
+
+    const dialog = screen.getByRole('dialog', { name: 'Delete playlist?' })
+    expect(dialog).toHaveTextContent('Test Synced Playlist')
+    expect(mockDeleteSyncedPlaylist).not.toHaveBeenCalled()
+
     await act(async () => {
-      fireEvent.click(screen.getByRole('menuitem', { name: 'Remove' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Delete playlist' }))
     })
     expect(mockDeleteSyncedPlaylist).toHaveBeenCalledWith('sp1')
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/library'))
   })
 
-  it('Remove (confirm=false) does NOT call deleteSyncedPlaylist', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
+  it('cancelling playlist deletion does not call deleteSyncedPlaylist', async () => {
     await renderLoaded()
     fireEvent.click(screen.getByRole('button', { name: /more options/i }))
-    await act(async () => {
-      fireEvent.click(screen.getByRole('menuitem', { name: 'Remove' }))
-    })
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByRole('dialog', { name: 'Delete playlist?' })).not.toBeInTheDocument()
     expect(mockDeleteSyncedPlaylist).not.toHaveBeenCalled()
     expect(mockNavigate).not.toHaveBeenCalled()
   })

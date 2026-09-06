@@ -17,7 +17,7 @@ import { PlaylistControls, PlaylistColumns } from '../components/PlaylistControl
 import { playlistOrder, type PlaylistSort } from '../lib/playlistOrder'
 import { TrackRow } from '../components/ui/TrackRow'
 import { DownloadAction } from '../components/download/DownloadAction'
-import { Button, IconButton, Cover, Skeleton, EmptyState, Badge, Toggle, Select, Icon } from '../components/ui'
+import { Button, IconButton, Cover, Skeleton, EmptyState, Badge, Toggle, Select, Icon, Modal } from '../components/ui'
 import { PortalMenu } from '../components/PortalMenu'
 import type { AlbumDetailTrack, Track } from '../lib/types'
 import { prewarmExternalStream } from '../lib/libraryApi'
@@ -93,6 +93,8 @@ export default function SyncedPlaylist() {
   const [bulkSubmitting, setBulkSubmitting] = useState(false)
   const [renaming, setRenaming] = useState<Track | null>(null)
   const [managingTracks, setManagingTracks] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   // "…" menu state
   const [menuOpen, setMenuOpen] = useState(false)
@@ -322,15 +324,18 @@ export default function SyncedPlaylist() {
   }
 
   async function handleDelete() {
-    setMenuOpen(false)
-    if (!window.confirm(`Remove synced playlist "${detail!.name}"?`)) return
+    if (deleting) return
+    setDeleting(true)
     try {
       await deleteSyncedPlaylist(id)
-      qc.invalidateQueries({ queryKey: ['synced-playlists'] })
+      setDeleteOpen(false)
+      void qc.invalidateQueries({ queryKey: ['synced-playlists'] })
       navigate('/library')
     } catch (err) {
       console.error('Failed to delete synced playlist:', err)
-      useToastStore.getState().push("Couldn't remove this playlist", 'error')
+      useToastStore.getState().push("Couldn't delete this playlist", 'error')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -584,10 +589,13 @@ export default function SyncedPlaylist() {
                   <button
                     type="button"
                     role="menuitem"
-                    onClick={() => void handleDelete()}
-                    className="flex w-full items-center gap-3 rounded-b-xl px-4 py-2.5 text-sm text-text-primary hover:bg-raised-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      setDeleteOpen(true)
+                    }}
+                    className="flex w-full items-center gap-3 rounded-b-xl px-4 py-2.5 text-sm text-error hover:bg-raised-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                   >
-                    Remove
+                    Delete
                   </button>
                 </PortalMenu>
               )}
@@ -643,6 +651,22 @@ export default function SyncedPlaylist() {
       </div>
 
       <RenameTrackDialog track={renaming} onClose={() => setRenaming(null)} />
+
+      <Modal
+        open={deleteOpen}
+        title="Delete playlist?"
+        onClose={() => { if (!deleting) setDeleteOpen(false) }}
+        footer={<>
+          <Button disabled={deleting} onClick={() => setDeleteOpen(false)}>Cancel</Button>
+          <Button variant="primary" disabled={deleting} onClick={() => void handleDelete()}>
+            {deleting ? 'Deleting…' : 'Delete playlist'}
+          </Button>
+        </>}
+      >
+        <p className="text-sm text-text-secondary">
+          Delete <strong className="text-text-primary">{detail.name}</strong>? This removes the playlist from every synced device. Its tracks will remain in your library.
+        </p>
+      </Modal>
 
       {managingTracks && (
         <ManagePlaylistTracksDialog
