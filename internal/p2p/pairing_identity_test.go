@@ -233,3 +233,91 @@ func TestRedeemRefusesResponderClaimingAnotherPeersDeviceID(t *testing.T) {
 		t.Fatal("redeemer accepted a responder claiming another peer's device identity")
 	}
 }
+
+// Older pairing minted an alias while the same peer kept authoring under its
+// original ID. Both IDs already have the authenticated peer's pinned key.
+func TestSyncRepairsPinnedIdentityAlias(t *testing.T) {
+	ctx := context.Background()
+	server, client := newLinkedHosts(t)
+	q := newSyncDB(t, "alias.db")
+	key, err := PublicKeyBase64(client.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"paired-alias", "actual-author"} {
+		if err := RecordPeerDevice(ctx, q, id, id, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	guard := NewGuard(q)
+	if err := guard.Trust(ctx, client.ID(), "paired-alias", "laptop"); err != nil {
+		t.Fatal(err)
+	}
+	RegisterSyncHandler(server, reverbsync.NewSyncStore(q), guard, q)
+	s, err := client.NewStream(ctx, server.ID(), "/reverb/sync/1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	_ = s.SetDeadline(time.Now().Add(5 * time.Second))
+	if err := json.NewEncoder(s).Encode(reverbsync.SyncRequest{DeviceID: "actual-author"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.CloseWrite()
+	var resp reverbsync.SyncResponse
+	if err := json.NewDecoder(s).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Error != "" {
+		t.Fatalf("same-key legacy pairing refused: %s", resp.Error)
+	}
+	bound, err := guard.DeviceFor(ctx, client.ID())
+	if err != nil || bound != "actual-author" {
+		t.Fatalf("binding = %q, %v", bound, err)
+	}
+}
+
+func TestAliasRepairCannotClaimUnpinnedOrForeignIdentity(t *testing.T) {
+	for _, tc := range []string{"unknown", "no-key", "foreign-key", "foreign-binding"} {
+		t.Run(tc, func(t *testing.T) {
+			ctx := context.Background()
+			server, client := newLinkedHosts(t)
+			q := newSyncDB(t, "guard.db")
+			key, _ := PublicKeyBase64(client.ID())
+			foreignKey, _ := PublicKeyBase64(server.ID())
+			if err := RecordPeerDevice(ctx, q, "alias", "alias", key); err != nil {
+				t.Fatal(err)
+			}
+			if tc != "unknown" {
+				wantKey := key
+				if tc == "foreign-key" {
+					wantKey = foreignKey
+				}
+				if err := RecordPeerDevice(ctx, q, "target", "target", wantKey); err != nil {
+					t.Fatal(err)
+				}
+				if tc == "no-key" {
+					if err := q.SetDevicePublicKey(ctx, db.SetDevicePublicKeyParams{ID: "target", PublicKey: ""}); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			guard := NewGuard(q)
+			if err := guard.Trust(ctx, client.ID(), "alias", "client"); err != nil {
+				t.Fatal(err)
+			}
+			if tc == "foreign-binding" {
+				if err := guard.Trust(ctx, server.ID(), "target", "other"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if repairPeerBinding(ctx, guard, q, client.ID(), "alias", "target") {
+				t.Fatal("unsafe identity repair accepted")
+			}
+			bound, err := guard.DeviceFor(ctx, client.ID())
+			if err != nil || bound != "alias" {
+				t.Fatalf("binding changed: %q, %v", bound, err)
+			}
+		})
+	}
+}

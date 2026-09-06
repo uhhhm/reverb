@@ -43,13 +43,17 @@ func RegisterSyncHandler(h host.Host, store *sync.SyncStore, guard *Guard, keys 
 			_ = json.NewEncoder(s).Encode(sync.SyncResponse{Error: err.Error()})
 			return
 		}
-		// The connection decides who this is. A mismatched claim is a forgery
-		// attempt, not a recoverable error.
-		if req.DeviceID != "" && req.DeviceID != boundDevice {
+		// Repair legacy aliases only from keys pinned before this request.
+		// Request announcements must never authorize an identity change.
+		if req.DeviceID != "" && req.DeviceID != boundDevice &&
+			!repairPeerBinding(ctx, guard, keys, s.Conn().RemotePeer(), boundDevice, req.DeviceID) {
 			_ = json.NewEncoder(s).Encode(sync.SyncResponse{Error: "deviceId does not match paired identity"})
 			return
 		}
 		deviceID := boundDevice
+		if req.DeviceID != "" {
+			deviceID = req.DeviceID
+		}
 		if err := store.ValidateDevice(ctx, deviceID); err != nil {
 			_ = json.NewEncoder(s).Encode(sync.SyncResponse{Error: "unknown deviceId: pairing required"})
 			return

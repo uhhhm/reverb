@@ -257,6 +257,13 @@ type SyncCursor struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
+type SyncQuarantine struct {
+	Revision      int64  `json:"revision"`
+	ChangeJson    string `json:"change_json"`
+	Reason        string `json:"reason"`
+	QuarantinedAt int64  `json:"quarantined_at"`
+}
+
 type SyncVector struct {
 	DeviceID  string `json:"device_id"`
 	Seq       int64  `json:"seq"`

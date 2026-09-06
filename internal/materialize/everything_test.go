@@ -188,3 +188,34 @@ func TestPeerRenameFollowsTheCatalogID(t *testing.T) {
 }
 
 func nullString(s string) sql.NullString { return sql.NullString{String: s, Valid: true} }
+
+func TestPeerPlayRetriesAfterCatalogArrivesInLaterRound(t *testing.T) {
+	st, ss, _ := newPeerStore(t)
+	receive(t, ss, reverbsync.SyncChange{EntityType: reverbsync.EntityPlay, EntityID: "play_late", Field: syncemit.FieldRecord, Value: syncemit.Play{UserID: "local", CatalogID: "trk_late", PlayedAt: 500}})
+	receive(t, ss, reverbsync.SyncChange{EntityType: reverbsync.EntityCatalog, EntityID: "trk_late", Field: syncemit.FieldIdentity, Value: peerTrack})
+	if _, err := st.Q().GetPlay(context.Background(), "play_late"); err != nil {
+		t.Fatalf("play lost after catalog arrived: %v", err)
+	}
+}
+
+func TestRecoverPlayHistoryAfterRestart(t *testing.T) {
+	st, ss, cat := newPeerStore(t)
+	ctx := context.Background()
+	// The log committed, but the old process never projected the play.
+	receive(t, ss, reverbsync.SyncChange{EntityType: reverbsync.EntityCatalog, EntityID: "trk_restart", Field: syncemit.FieldIdentity, Value: peerTrack})
+	ss.SetMaterializer(nil)
+	receive(t, ss, reverbsync.SyncChange{EntityType: reverbsync.EntityPlay, EntityID: "play_restart", Field: syncemit.FieldRecord, Value: syncemit.Play{UserID: "local", CatalogID: "trk_restart", PlayedAt: 500}})
+	projector := materialize.New(nil, nil).WithCatalog(cat).WithTrackStore(st.Q())
+	for i := 0; i < 2; i++ {
+		if err := projector.RecoverPlays(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.Q().GetPlay(ctx, "play_restart"); err != nil {
+		t.Fatal(err)
+	}
+	plays, err := st.Q().ListAllPlays(ctx)
+	if err != nil || len(plays) != 1 {
+		t.Fatalf("plays = %d, %v", len(plays), err)
+	}
+}

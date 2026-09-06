@@ -116,3 +116,38 @@ func ApplyDeviceAnnouncements(ctx context.Context, store DeviceKeyStore, announc
 		}
 	}
 }
+
+// repairPeerBinding repairs the alias minted by old pairing implementations.
+// Both existing rows must already be pinned to the authenticated connection's
+// key. Neither an unrecognised ID nor a key supplied in this round is proof.
+func repairPeerBinding(ctx context.Context, guard *Guard, keys DeviceKeyStore, remote peer.ID, bound, want string) bool {
+	if keys == nil || bound == "" || want == "" {
+		return false
+	}
+	pub, err := PublicKeyBase64(remote)
+	if err != nil {
+		return false
+	}
+	old, err := keys.GetDeviceByID(ctx, bound)
+	if err != nil || old.PublicKey != pub {
+		return false
+	}
+	next, err := keys.GetDeviceByID(ctx, want)
+	if err != nil || next.PublicKey != pub {
+		return false
+	}
+	peers, err := guard.TrustedPeers(ctx)
+	if err != nil {
+		return false
+	}
+	for pid, id := range peers {
+		if id == want && pid != remote {
+			return false
+		}
+	}
+	if err := guard.Trust(ctx, remote, want, next.Name); err != nil {
+		return false
+	}
+	log.Printf("p2p: repaired paired device alias %s -> %s for %s", bound, want, remote)
+	return true
+}

@@ -95,6 +95,7 @@ type Runtime struct {
 	// the history this device had before it could replicate any of it.
 	SyncEmit  *syncemit.Service
 	Playlists *playlistcrdt.Service
+	projector *materialize.Service
 }
 
 // Build opens the store, runs migrations, constructs every service, and returns
@@ -332,7 +333,8 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 			WithEntities(deps.Entities).
 			WithCovers(coverSvc)
 	}
-	deps.SyncStore.SetMaterializer(newMaterializer())
+	projector := newMaterializer()
+	deps.SyncStore.SetMaterializer(projector)
 	if syncStoreForLink != deps.SyncStore {
 		syncStoreForLink.SetMaterializer(newMaterializer())
 	}
@@ -378,6 +380,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 
 		SyncEmit:  emitter,
 		Playlists: playlistProjection,
+		projector: projector,
 	}
 	rt.Deps.P2P = func() *p2p.Host { return rt.P2P }
 	rt.Deps.P2PGuard = func() *p2p.Guard { return rt.P2PGuard }
@@ -411,9 +414,6 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 					return reverbsync.LocalDeviceID(c, r.Store.Q())
 				})
 			}
-			if r.Deps.SyncStore != nil && h.LibHost() != nil {
-				p2p.RegisterSyncHandler(h.LibHost(), r.Deps.SyncStore, guard, r.Store.Q())
-			}
 			// File sync: hash local music dir and keep file_manifest up to date.
 			getenv := r.Getenv
 			if getenv == nil {
@@ -441,6 +441,11 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 				if priv != nil {
 					if raw, rerr := priv.Raw(); rerr == nil && len(raw) == ed25519.PrivateKeySize {
 						r.Deps.SyncStore.SetSigner(ed25519.PrivateKey(raw), localID)
+						if n, err := r.Deps.SyncStore.RecoverInvalidRemoteChanges(ctx); err != nil {
+							logf("WARNING: sync: repair corrupt remote changes: %v", err)
+						} else if n > 0 {
+							logf("sync: quarantined %d corrupt remote changes; requesting authentic copies", n)
+						}
 						if pubB64, perr := p2p.PublicKeyBase64(h.LibHost().ID()); perr == nil {
 							if err := r.Deps.SyncStore.RecordDeviceKey(ctx, localID, pubB64); err != nil {
 								logf("WARNING: p2p: record local device key: %v", err)
@@ -464,12 +469,18 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 				}
 				// P2P anti-entropy for sync changes over libp2p.
 				if r.Deps.SyncStore != nil && h.LibHost() != nil {
+					p2p.RegisterSyncHandler(h.LibHost(), r.Deps.SyncStore, guard, r.Store.Q())
 					syncer := p2p.NewSyncer(h.LibHost(), r.Deps.SyncStore, guard, r.Store.Q(), localID)
 					syncer.SetBus(r.Bus)
 					r.P2PSyncer = syncer
 					p2p.SafeGoLoop(ctx, "syncer", func() { _ = syncer.Run(ctx) })
 				}
 			}
+		}
+	}
+	if r.projector != nil {
+		if err := r.projector.RecoverPlays(ctx); err != nil {
+			logf("sync: recover play history: %v", err)
 		}
 	}
 	if r.Bundle.Supervisor != nil {

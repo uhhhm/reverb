@@ -80,6 +80,15 @@ func (q *Queries) CountSyncChanges(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const deleteCorruptSyncChange = `-- name: DeleteCorruptSyncChange :exec
+DELETE FROM sync_change WHERE revision = ?
+`
+
+func (q *Queries) DeleteCorruptSyncChange(ctx context.Context, revision int64) error {
+	_, err := q.db.ExecContext(ctx, deleteCorruptSyncChange, revision)
+	return err
+}
+
 const deleteSyncCursor = `-- name: DeleteSyncCursor :exec
 DELETE FROM sync_cursor WHERE device_id = ?
 `
@@ -381,6 +390,55 @@ func (q *Queries) ListSyncVectors(ctx context.Context) ([]SyncVector, error) {
 	return items, nil
 }
 
+const listUnprojectedPlays = `-- name: ListUnprojectedPlays :many
+SELECT s.revision, s.device_id, s.entity_type, s.entity_id, s.field, s.value_json,
+       s.updated_at, s.created_at, s.hlc, s.seq, s.sig
+FROM sync_change s
+WHERE s.entity_type = 'play' AND s.field = 'record'
+  AND (CAST(?1 AS TEXT) = '' OR json_extract(s.value_json, '$.catalogId') = ?1)
+  AND NOT EXISTS (SELECT 1 FROM plays p WHERE p.id = s.entity_id)
+  AND s.revision = (SELECT MAX(c.revision) FROM sync_change c
+                   WHERE c.entity_type = s.entity_type AND c.entity_id = s.entity_id AND c.field = s.field)
+ORDER BY s.revision
+`
+
+// Accepted facts whose projection failed or was interrupted. The log is the
+// durable retry queue; an empty catalog_id retries all missing history.
+func (q *Queries) ListUnprojectedPlays(ctx context.Context, catalogID string) ([]SyncChange, error) {
+	rows, err := q.db.QueryContext(ctx, listUnprojectedPlays, catalogID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SyncChange
+	for rows.Next() {
+		var i SyncChange
+		if err := rows.Scan(
+			&i.Revision,
+			&i.DeviceID,
+			&i.EntityType,
+			&i.EntityID,
+			&i.Field,
+			&i.ValueJson,
+			&i.UpdatedAt,
+			&i.CreatedAt,
+			&i.Hlc,
+			&i.Seq,
+			&i.Sig,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnsignedSyncChangesForDevice = `-- name: ListUnsignedSyncChangesForDevice :many
 SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq, sig FROM sync_change WHERE device_id = ? AND sig = '' ORDER BY revision ASC
 `
@@ -418,6 +476,30 @@ func (q *Queries) ListUnsignedSyncChangesForDevice(ctx context.Context, deviceID
 		return nil, err
 	}
 	return items, nil
+}
+
+const quarantineSyncCopy = `-- name: QuarantineSyncCopy :exec
+INSERT INTO sync_quarantine(revision, change_json, reason)
+VALUES (?, ?, 'invalid remote signature') ON CONFLICT(revision) DO NOTHING
+`
+
+type QuarantineSyncCopyParams struct {
+	Revision   int64  `json:"revision"`
+	ChangeJson string `json:"change_json"`
+}
+
+func (q *Queries) QuarantineSyncCopy(ctx context.Context, arg QuarantineSyncCopyParams) error {
+	_, err := q.db.ExecContext(ctx, quarantineSyncCopy, arg.Revision, arg.ChangeJson)
+	return err
+}
+
+const resetSyncVector = `-- name: ResetSyncVector :exec
+UPDATE sync_vector SET seq = 0, hlc = 0 WHERE device_id = ?
+`
+
+func (q *Queries) ResetSyncVector(ctx context.Context, deviceID string) error {
+	_, err := q.db.ExecContext(ctx, resetSyncVector, deviceID)
+	return err
 }
 
 const updateSyncChangeSig = `-- name: UpdateSyncChangeSig :exec

@@ -66,3 +66,26 @@ WHERE c.entity_type = ? AND c.entity_id = ?
     ORDER BY c2.revision DESC LIMIT 1
   )
 ORDER BY c.field ASC;
+
+-- name: ListUnprojectedPlays :many
+-- Accepted facts whose projection failed or was interrupted. The log is the
+-- durable retry queue; an empty catalog_id retries all missing history.
+SELECT s.revision, s.device_id, s.entity_type, s.entity_id, s.field, s.value_json,
+       s.updated_at, s.created_at, s.hlc, s.seq, s.sig
+FROM sync_change s
+WHERE s.entity_type = 'play' AND s.field = 'record'
+  AND (CAST(sqlc.arg(catalog_id) AS TEXT) = '' OR json_extract(s.value_json, '$.catalogId') = sqlc.arg(catalog_id))
+  AND NOT EXISTS (SELECT 1 FROM plays p WHERE p.id = s.entity_id)
+  AND s.revision = (SELECT MAX(c.revision) FROM sync_change c
+                   WHERE c.entity_type = s.entity_type AND c.entity_id = s.entity_id AND c.field = s.field)
+ORDER BY s.revision;
+
+-- name: QuarantineSyncCopy :exec
+INSERT INTO sync_quarantine(revision, change_json, reason)
+VALUES (?, ?, 'invalid remote signature') ON CONFLICT(revision) DO NOTHING;
+
+-- name: DeleteCorruptSyncChange :exec
+DELETE FROM sync_change WHERE revision = ?;
+
+-- name: ResetSyncVector :exec
+UPDATE sync_vector SET seq = 0, hlc = 0 WHERE device_id = ?;

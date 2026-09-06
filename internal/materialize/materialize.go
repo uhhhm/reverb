@@ -12,6 +12,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -78,11 +79,13 @@ type Playlists interface {
 // TrackStore writes the per-track tables that are keyed on a catalog id.
 // *db.Queries satisfies it.
 type TrackStore interface {
+	GetCatalogEntity(context.Context, string) (db.CatalogEntity, error)
 	GetBackendIDByCatalogID(ctx context.Context, catalogID string) (string, error)
 	UpsertTrackQualityOverrideByCatalogID(ctx context.Context, arg db.UpsertTrackQualityOverrideByCatalogIDParams) error
 	DeleteTrackQualityOverrideByCatalogID(ctx context.Context, catalogID sql.NullString) error
 	UpsertTrackLoudnessByCatalogID(ctx context.Context, arg db.UpsertTrackLoudnessByCatalogIDParams) error
 	InsertPlayIfAbsent(ctx context.Context, arg db.InsertPlayIfAbsentParams) error
+	ListUnprojectedPlays(context.Context, string) ([]db.SyncChange, error)
 }
 
 type Service struct {
@@ -182,8 +185,10 @@ func (s *Service) applyCatalogEntity(ctx context.Context, ch reverbsync.SyncChan
 	if err := decodeValue(ch, &id); err != nil {
 		return err
 	}
-	_, err := s.catalog.Adopt(ctx, ch.EntityID, id)
-	return err
+	if _, err := s.catalog.Adopt(ctx, ch.EntityID, id); err != nil {
+		return err
+	}
+	return s.recoverPlays(ctx, ch.EntityID)
 }
 
 // applyPlay records a play a peer reported. Plays are immutable facts under
@@ -200,6 +205,14 @@ func (s *Service) applyPlay(ctx context.Context, ch reverbsync.SyncChange) error
 	cid := s.resolveCatalogID(ctx, p.CatalogID)
 	if cid == "" {
 		return nil
+	}
+	// Catalog identities can arrive in a later page. Leave the accepted play
+	// in the log for recovery instead of attempting an invalid foreign key.
+	if _, err := s.tracks.GetCatalogEntity(ctx, cid); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
 	}
 	completed := int64(0)
 	if p.Completed {
@@ -424,4 +437,26 @@ func decodeValue(ch reverbsync.SyncChange, target any) error {
 		raw = encoded
 	}
 	return json.Unmarshal(raw, target)
+}
+
+// RecoverPlays repairs plays accepted by earlier builds or interrupted rounds.
+// Failed dependencies remain in the log and are retried when their catalog
+// identity is adopted. Inserts are idempotent and never emit new changes.
+func (s *Service) RecoverPlays(ctx context.Context) error { return s.recoverPlays(ctx, "") }
+
+func (s *Service) recoverPlays(ctx context.Context, catalogID string) error {
+	if s.tracks == nil {
+		return nil
+	}
+	rows, err := s.tracks.ListUnprojectedPlays(ctx, catalogID)
+	if err != nil {
+		return err
+	}
+	var first error
+	for _, row := range rows {
+		if err := s.applyPlay(ctx, reverbsync.SyncChange{EntityType: row.EntityType, EntityID: row.EntityID, Field: row.Field, ValueJSON: row.ValueJson}); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }
