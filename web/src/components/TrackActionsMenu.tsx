@@ -11,6 +11,7 @@ import { qualityLabel } from '../lib/audioQuality'
 import type { Track } from '../lib/types'
 
 interface TrackActionsMenuProps {
+  onRemove?: () => void
   track: Track
   /** Show the rename action. Omit to hide it. */
   onRename?: (track: Track) => void
@@ -41,7 +42,7 @@ function estimatedHeight(count: number): number {
  * self-explanatory from an icon alone (an upgrade re-downloads and replaces the
  * file), and the list is expected to grow.
  */
-export function TrackActionsMenu({ track, onRename }: TrackActionsMenuProps) {
+export function TrackActionsMenu({ track, onRename, onRemove }: TrackActionsMenuProps) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
@@ -62,9 +63,10 @@ export function TrackActionsMenu({ track, onRename }: TrackActionsMenuProps) {
     return () => document.removeEventListener('keydown', onKey)
   }, [open])
 
-  if (!track.id) return null
+  if (!track.id && !onRemove) return null
 
   const items: MenuItem[] = []
+  if (onRemove) items.push({ icon: 'x', label: 'Remove from this playlist', description: 'Keep the track in your library', onSelect: onRemove })
   if (onRename) {
     items.push({
       icon: 'pencil',
@@ -73,19 +75,19 @@ export function TrackActionsMenu({ track, onRename }: TrackActionsMenuProps) {
       onSelect: () => onRename(track),
     })
   }
-  items.push({
+  if (track.id && !track.externalStream) items.push({
     icon: 'plus',
     label: 'Add to playlist',
     description: 'Put this track in one of your playlists',
     onSelect: () => setPlaylistOpen(true),
   })
-  items.push({
+  if (track.id && !track.externalStream) items.push({
     icon: 'camera',
     label: 'Cover art',
     description: 'Use your own image for this track — the file is never modified',
     onSelect: () => setCoverOpen(true),
   })
-  items.push({
+  if (track.id && !track.externalStream) items.push({
     icon: 'scissors',
     label: 'Crop',
     description: 'Trim the intro or outro — your file is never modified',

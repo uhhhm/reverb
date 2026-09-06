@@ -7,6 +7,7 @@ import { useAdapters } from '../../lib/adaptersApi'
 import type { ExternalResult } from '../../lib/types'
 
 interface Props {
+  compact?: boolean
   result: ExternalResult
   onPlay?: (libraryTrackId: string) => void
 }
@@ -20,7 +21,7 @@ function useDownloaders() {
     .sort((a, b) => a.priority - b.priority)
 }
 
-export function DownloadAction({ result, onPlay }: Props) {
+export function DownloadAction({ result, onPlay, compact = false }: Props) {
   // Optimistic: flip to "Downloading" the instant the user clicks, before the
   // POST round-trips. The real job (from the store) takes over once it lands.
   const [optimistic, setOptimistic] = useState(false)
@@ -113,7 +114,7 @@ export function DownloadAction({ result, onPlay }: Props) {
 
   // ── 1. In library (includes just-completed downloads) ─────────────────────
   if (inLibrary) {
-    const badge = (
+    const badge = compact ? <span title="In Library" className="text-text-muted"><Icon name="check" className="h-4 w-4" /><span className="sr-only">In Library</span></span> : (
       <Badge kind="in-library">
         <Icon name="check" className="text-xs" />
         In Library
@@ -148,7 +149,7 @@ export function DownloadAction({ result, onPlay }: Props) {
     return (
       <span className="inline-flex items-center gap-2">
         <ProgressRing value={0} size={24} indeterminate />
-        <Badge kind="status">Queued</Badge>
+        <span className={compact ? 'sr-only' : undefined}><Badge kind="status">Queued</Badge></span>
       </span>
     )
   }
@@ -159,7 +160,7 @@ export function DownloadAction({ result, onPlay }: Props) {
     return (
       <span className="inline-flex items-center gap-2">
         <ProgressRing value={isIndeterminate ? 0 : job.progress} size={24} indeterminate={isIndeterminate} />
-        <Badge kind="downloading">Downloading</Badge>
+        <span className={compact ? 'sr-only' : undefined}><Badge kind="downloading">Downloading</Badge></span>
       </span>
     )
   }
@@ -202,7 +203,7 @@ export function DownloadAction({ result, onPlay }: Props) {
 
     return (
       <span className="relative inline-flex items-center gap-2">
-        <Icon name="warn" className="text-xs text-text-muted" />
+        {!compact && <Icon name="warn" className="text-xs text-text-muted" />}
 
         {/* Direct Retry button — single click retries immediately */}
         <button
@@ -214,10 +215,10 @@ export function DownloadAction({ result, onPlay }: Props) {
               .then((j) => useDownloads.getState().upsert(j))
               .catch((err) => console.error('[DownloadAction] retry failed:', err))
           }}
-          className="inline-flex items-center gap-1 rounded-full border border-border-subtle px-2.5 py-1 text-xs font-bold text-text-primary transition-colors hover:bg-raised-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent active:opacity-80"
+          className={`inline-flex items-center gap-1 rounded-full ${compact ? 'p-1.5' : 'border border-border-subtle px-2.5 py-1'} text-xs font-bold text-text-primary transition-colors hover:bg-raised-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent active:opacity-80`}
         >
           <Icon name="retry" className="text-xs" />
-          Retry
+          <span className={compact ? 'sr-only' : undefined}>Retry</span>
         </button>
 
         {/* "Download from a link" secondary affordance */}
@@ -228,10 +229,10 @@ export function DownloadAction({ result, onPlay }: Props) {
             e.stopPropagation()
             setLinkModalOpen(true)
           }}
-          className="inline-flex items-center gap-1 rounded-full border border-border-subtle px-2.5 py-1 text-xs text-text-muted transition-colors hover:bg-raised-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent active:opacity-80"
+          className={`inline-flex items-center gap-1 rounded-full ${compact ? 'p-1.5' : 'border border-border-subtle px-2.5 py-1'} text-xs text-text-muted transition-colors hover:bg-raised-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent active:opacity-80`}
         >
           <Icon name="dl" className="text-xs" />
-          Link
+          <span className={compact ? 'sr-only' : undefined}>Link</span>
         </button>
 
         {/* Stable centered modal — does NOT close on scroll */}
@@ -298,6 +299,7 @@ export function DownloadAction({ result, onPlay }: Props) {
 
   // ── 5. No downloaders ─────────────────────────────────────────────────────
   if (downloaders.length === 0) {
+    if (compact) return <span title="No downloader configured" className="text-text-muted opacity-40"><Icon name="dl" className="h-4 w-4" /><span className="sr-only">No downloader</span></span>
     return (
       <Badge kind="disabled">
         <Icon name="dl" className="text-xs" />
@@ -305,6 +307,8 @@ export function DownloadAction({ result, onPlay }: Props) {
       </Badge>
     )
   }
+
+  if (compact) return <button type="button" aria-label={`Download ${result.title}`} title="Download track" onClick={handleDownloadClick} className="playlist-tool text-text-muted"><Icon name="dl" className="h-4 w-4" /></button>
 
   // ── 6. Available (≥1 downloader, no active job) ───────────────────────────
   // Single Download button — no picker caret. The granularity chains decide

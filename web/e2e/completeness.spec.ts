@@ -83,5 +83,5 @@ test('completeness: artist coverage -> partial album -> download missing -> flip
 
   await page.getByRole('button', { name: 'Play Chill Mix' }).click()
   await expect(page.getByTestId('player-bar').getByText('Owned Song')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Pause' })).toBeVisible()
+  await expect(page.getByTestId('player-bar').getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
 })

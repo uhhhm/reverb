@@ -212,7 +212,7 @@ describe('SyncedPlaylist page', () => {
 
   it('shows "1 missing" in accent', async () => {
     await renderLoaded()
-    expect(screen.getByText(/1 missing/)).toBeInTheDocument()
+    expect(screen.getByText('· 1 missing')).toBeInTheDocument()
   })
 
   it('owned rows render artist + album as links (asTrack threads libraryTrack ids)', async () => {
@@ -722,7 +722,8 @@ describe('SyncedPlaylist page', () => {
       await waitFor(() => expect(screen.getByRole('heading', { name: 'Test Synced Playlist' })).toBeInTheDocument())
 
       // Remove button for "Owned One" (externalRef source='spotify', externalId='e1')
-      const removeBtn = screen.getByRole('button', { name: /remove owned one from playlist/i })
+      fireEvent.click(screen.getByRole('button', { name: 'More actions for Owned One' }))
+      const removeBtn = screen.getByRole('menuitem', { name: /Remove from this playlist/ })
       expect(removeBtn).toBeInTheDocument()
       await act(async () => { fireEvent.click(removeBtn) })
       expect(mockRemoveSyncedTrack).toHaveBeenCalledWith('sp1', 'spotify', 'e1')
@@ -808,7 +809,7 @@ describe('SyncedPlaylist page', () => {
     it('mode=once: drag handles are present (one per track)', async () => {
       await renderOnce()
       // 3 tracks → 3 drag handles
-      const handles = screen.getAllByLabelText(/drag to reorder/i)
+      const handles = screen.getAllByTitle(/drag to reorder/i)
       expect(handles.length).toBe(3)
     })
 
@@ -820,7 +821,7 @@ describe('SyncedPlaylist page', () => {
       })
       wrapper(<SyncedPlaylist />)
       await waitFor(() => expect(screen.getByRole('heading', { name: 'Test Synced Playlist' })).toBeInTheDocument())
-      expect(screen.queryByLabelText(/drag to reorder/i)).not.toBeInTheDocument()
+      expect(screen.queryByTitle(/drag to reorder/i)).not.toBeInTheDocument()
     })
 
     it('mode=once: track wrapper rows are draggable', async () => {

@@ -169,3 +169,33 @@ input[type='range'].rvb-range::-moz-range-thumb {
 .rvb-logo-on-light { display: none; }
 [data-theme='light'] .rvb-logo-on-dark { display: none; }
 [data-theme='light'] .rvb-logo-on-light { display: inline-block; }
+
+/* Playlist headers and songs share columns, including at narrow widths. */
+.playlist-grid {
+  display: grid;
+  grid-template-columns: 26px 40px minmax(0, 4fr) minmax(0, 3fr) 64px 44px 32px;
+  align-items: center;
+  column-gap: 16px;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+.playlist-grid .playlist-duration { grid-column: 6; grid-row: 1; }
+.playlist-grid .playlist-actions { grid-column: 7; grid-row: 1; }
+.playlist-tool {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 32px;
+  height: 36px;
+  border-radius: 6px;
+  transition: color 150ms, transform 150ms;
+}
+.playlist-tool:hover { color: var(--text-primary); transform: scale(1.06); }
+.playlist-tool:focus-visible { outline: 2px solid rgb(var(--color-accent)); outline-offset: 3px; }
+.playlist-tool:disabled { opacity: .4; }
+@media (max-width: 767px) {
+  .playlist-grid { grid-template-columns: 22px 40px minmax(0, 1fr) 40px 38px 28px; column-gap: 8px; padding-left: 4px; padding-right: 4px; }
+  .playlist-grid .playlist-album { display: none; }
+  .playlist-grid .playlist-duration { grid-column: 5; }
+  .playlist-grid .playlist-actions { grid-column: 6; }
+}

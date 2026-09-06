@@ -262,6 +262,8 @@ test('SyncedPlaylist keeps offline toggle', async ({ page }) => {
   await putPromise
 
   await expect(offlineToggle).toHaveAttribute('aria-checked', 'true')
-  // Helper text present
-  await expect(page.getByText(/Removing from offline set does not delete the playlist/)).toBeVisible()
+  await expect(offlineToggle).toHaveAttribute('title', 'Remove offline download')
+  await offlineToggle.click()
+  await expect(offlineToggle).toHaveAttribute('aria-checked', 'false')
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 })

@@ -9,6 +9,8 @@ import { Equalizer } from './Equalizer'
 import { Icon } from './Icon'
 
 interface TrackRowProps {
+  playlist?: boolean
+  onRemove?: () => void
   track: Track
   index?: number
   active?: boolean
@@ -40,12 +42,13 @@ interface TrackRowProps {
   onIntent?: () => void
 }
 
-export function TrackRow({ track, index, active = false, playing, onPlay, right, coverSrc, rightWidth = 'auto', artistNode, albumNode, artistTo, albumTo, caption, onRename, onIntent }: TrackRowProps) {
+export function TrackRow({ playlist = false, onRemove, track, index, active = false, playing, onPlay, right, coverSrc, rightWidth = 'auto', artistNode, albumNode, artistTo, albumTo, caption, onRename, onIntent }: TrackRowProps) {
   // coverSrc overrides (external Spotify images); otherwise use album cover directly
   // (album art reliably resolves; per-song embedded art is usually absent).
   const src = coverSrc ?? trackCoverUrl(track, 80)
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.target !== e.currentTarget) return
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
       onPlay()
@@ -62,12 +65,12 @@ export function TrackRow({ track, index, active = false, playing, onPlay, right,
       onFocus={onIntent}
       onKeyDown={handleKeyDown}
       className={[
-        'group w-full grid items-center gap-3.5 px-2.5 py-2 rounded-md text-left',
+        playlist ? 'playlist-grid group w-full py-2 rounded text-left' : 'group w-full grid items-center gap-3.5 px-2.5 py-2 rounded-md text-left',
         'transition-colors hover:bg-raised-hover cursor-default',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         active ? 'text-accent' : 'text-text-primary',
       ].join(' ')}
-      style={{ gridTemplateColumns: `26px 40px 1fr 1fr ${rightWidth} 36px 44px` }}
+      style={playlist ? undefined : { gridTemplateColumns: `26px 40px 1fr 1fr ${rightWidth} 36px 44px` }}
     >
       {/* Lead: index or Equalizer when active */}
       <span className="grid place-items-center text-sm font-bold text-text-muted">
@@ -129,7 +132,7 @@ export function TrackRow({ track, index, active = false, playing, onPlay, right,
       </span>
 
       {/* Album */}
-      <span className="truncate text-sm text-text-secondary hidden md:block">
+      <span className="playlist-album truncate text-sm text-text-secondary hidden md:block">
         {albumNode ?? ((albumTo ?? (track.albumId ? `/album/library/${track.albumId}` : null)) ? (
           <Link
             to={albumTo ?? `/album/library/${track.albumId}`}
@@ -150,12 +153,12 @@ export function TrackRow({ track, index, active = false, playing, onPlay, right,
       </span>
 
       {/* Row actions — only for owned tracks (truthy track.id) */}
-      <span className="flex items-center justify-center">
-        <TrackActionsMenu track={track} onRename={onRename} />
+      <span className="playlist-actions flex items-center justify-center">
+        <TrackActionsMenu track={track} onRename={onRename} onRemove={onRemove} />
       </span>
 
       {/* Duration */}
-      <span className="text-sm text-text-muted text-right tabular-nums">
+      <span className="playlist-duration text-sm text-text-muted text-right tabular-nums">
         {formatDuration(track.durationMs)}
       </span>
     </div>
