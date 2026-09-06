@@ -18,9 +18,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/uhhhm/reverb/internal/auth"
 	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/materialize"
+	"github.com/uhhhm/reverb/internal/playlistcrdt"
 	"github.com/uhhhm/reverb/internal/playlistsync"
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/store/db"
+	reverbsync "github.com/uhhhm/reverb/internal/sync"
 	"github.com/uhhhm/reverb/internal/wiring"
 )
 
@@ -161,7 +165,7 @@ func syncTestServerWithDataDir(t *testing.T, svc SyncService, dataDir string) (*
 }
 
 // realSyncServer builds a Server backed by a real playlistsync.Service over the
-// store, so created playlists persist and owner-scoped listing works.
+// store, so created and replicated playlists use the real list path.
 func realSyncServer(t *testing.T) *Server {
 	t.Helper()
 	st, err := store.Open(t.TempDir() + "/realsync.db")
@@ -1084,5 +1088,48 @@ func TestImportSyncedDownloadMissingAllowedWithAutoApprove(t *testing.T) {
 	}
 	if !svc.lastDL {
 		t.Fatalf("import-synced: owner's downloadMissing=true should have been passed through, but service received false")
+	}
+}
+
+// A synced playlist has no local HTTP creator to stamp owner_user_id. It must
+// still appear beside locally created playlists in the household owner's list.
+func TestSyncedListIncludesPlaylistReceivedFromDevice(t *testing.T) {
+	srv := realSyncServer(t)
+	q := srv.deps.PlaylistOwner.(*db.Queries)
+	ctx := context.Background()
+	if err := q.CreateDevice(ctx, db.CreateDeviceParams{ID: "other-laptop", Name: "Other laptop", TokenHash: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	log := reverbsync.NewSyncStore(q)
+	projector := playlistcrdt.New(log, wiring.NewSyncStore(q), nil)
+	log.SetMaterializer(materialize.New(nil, nil).WithPlaylists(projector))
+	changes := []reverbsync.SyncChange{}
+	for field, value := range map[string]any{"name": "From other laptop", "source": "local", "externalId": "remote-playlist", "mode": "once"} {
+		changes = append(changes, reverbsync.SyncChange{EntityType: reverbsync.EntityPlaylist, EntityID: "remote-playlist", Field: field, Value: value, UpdatedAt: 1000, DeviceID: "other-laptop"})
+	}
+	if _, _, _, err := log.ReconcileBatched(ctx, "other-laptop", reverbsync.NoOutbound, changes); err != nil {
+		t.Fatal(err)
+	}
+	row, err := q.GetSyncedPlaylist(ctx, "remote-playlist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.OwnerUserID.Valid {
+		t.Fatal("fixture must exercise a playlist with no local creator")
+	}
+	rec := doGET(t, srv, "/api/v1/playlists", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list = %d: %s", rec.Code, rec.Body.String())
+	}
+	var list []core.SyncedPlaylist
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ID != "remote-playlist" {
+		t.Fatalf("received playlist exists in storage but is hidden by list API: %+v", list)
+	}
+	detail := doGET(t, srv, "/api/v1/playlists/remote-playlist", "")
+	if detail.Code != http.StatusOK {
+		t.Fatalf("received playlist detail = %d: %s", detail.Code, detail.Body.String())
 	}
 }

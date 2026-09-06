@@ -203,34 +203,18 @@ func (s *Server) handleListSyncedPlaylists(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "playlist sync unavailable"})
 		return
 	}
-	// Owner-scoped listing: GET /playlists returns ONLY the caller's own
-	// playlists — including for admins (admin bypass applies to detail/mutations,
-	// not to the list view).
-	cu, _ := currentUser(r)
-	if s.deps.PlaylistOwner != nil {
-		rows, err := s.deps.PlaylistOwner.ListSyncedPlaylistsCountForOwner(
-			r.Context(), sql.NullString{String: cu.ID, Valid: cu.ID != ""})
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not list synced playlists"})
-			return
-		}
-		list := make([]core.SyncedPlaylist, 0, len(rows))
-		for _, row := range rows {
-			list = append(list, core.SyncedPlaylist{
-				ID: row.ID, Source: row.Source, ExternalID: row.ExternalID,
-				Name: row.Name, CoverURL: row.CoverUrl, Mode: row.Mode,
-				SyncEnabled: row.SyncEnabled != 0, SyncIntervalSec: int(row.SyncIntervalSec),
-				AutoDownload: row.AutoDownload != 0, LastSyncedAt: row.LastSyncedAt,
-				TrackCount: int(row.TrackCount),
-			})
-		}
-		writeJSON(w, http.StatusOK, list)
+	// All managed playlists belong to the household library. Replicated rows
+	// have no local HTTP creator, so filtering by owner_user_id hides them even
+	// though sync has received and applied them successfully.
+	list, err := svc.List(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not list synced playlists"})
 		return
 	}
-	// PlaylistOwner is always expected to be wired in production. When it is nil
-	// (wiring slip or test misconfiguration), return an empty list rather than
-	// bypassing ownership scoping and exposing all playlists.
-	writeJSON(w, http.StatusOK, []core.SyncedPlaylist{})
+	if list == nil {
+		list = []core.SyncedPlaylist{}
+	}
+	writeJSON(w, http.StatusOK, list)
 }
 
 func (s *Server) handleSyncedPlaylistDetail(w http.ResponseWriter, r *http.Request) {
