@@ -19,6 +19,7 @@ const mockTriggerSync = vi.fn()
 vi.mock('../lib/syncApi', async (orig) => ({
   ...(await orig<Record<string, unknown>>()),
   triggerSync: (...args: unknown[]) => mockTriggerSync(...args),
+  getSyncStatus: (...args: unknown[]) => mockGetSyncStatus(...args),
 }))
 
 vi.mock('../lib/pairingApi', () => ({

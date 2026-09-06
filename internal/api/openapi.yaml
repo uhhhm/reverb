@@ -1120,6 +1120,10 @@ paths:
                 properties:
                   revision: { type: integer, format: int64 }
                   deviceCount: { type: integer }
+                  round:
+                    allOf:
+                      - $ref: '#/components/schemas/SyncRound'
+                    nullable: true
                 required: [revision, deviceCount]
         "401": { description: invalid sync token }
         "503": { description: sync unavailable }
@@ -1127,7 +1131,16 @@ paths:
     post:
       summary: Start one device-sync round now (progress arrives over the WebSocket)
       responses:
-        "202": { description: sync started }
+        "202":
+          description: Sync accepted or already running
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, round]
+                properties:
+                  status: { type: string }
+                  round: { $ref: '#/components/schemas/SyncRound' }
         "401": { description: no valid pairing token and the request did not arrive over loopback }
         "503": { description: sync unavailable }
   /p2p/status:
@@ -1278,6 +1291,19 @@ paths:
 
 components:
   schemas:
+    SyncRound:
+      type: object
+      description: Metadata exchange status. Local projection and file transfers run independently in the background.
+      required: [id, state, startedAt, finishedAt, durationMs, peers, succeeded, errors]
+      properties:
+        id: { type: integer, format: int64 }
+        state: { type: string, enum: [idle, pending, running, completed, failed, no_peers] }
+        startedAt: { type: integer, format: int64, description: Unix milliseconds }
+        finishedAt: { type: integer, format: int64, description: Unix milliseconds }
+        durationMs: { type: integer, format: int64 }
+        peers: { type: integer }
+        succeeded: { type: integer }
+        errors: { type: array, items: { type: string } }
     DownloadJob:
       type: object
       x-go-generate: true

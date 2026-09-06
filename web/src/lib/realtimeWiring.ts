@@ -28,6 +28,8 @@ export function useRealtime(makeSocket?: (url: string) => WebSocketLike): void {
       void qc.invalidateQueries({ queryKey: ['album-detail'] })
       void qc.invalidateQueries({ queryKey: ['artist-detail'] })
       void qc.invalidateQueries({ queryKey: ['synced-playlist'] })
+      void qc.invalidateQueries({ queryKey: ['synced-playlists'] })
+      void qc.invalidateQueries({ queryKey: ['stats'] })
     }
 
     function onEvent(frame: RealtimeEvent) {

@@ -33,7 +33,8 @@ type SyncStore struct {
 	// they describe. The change log is the source of truth; materialization is
 	// the readable copy, so it runs AFTER the log commits and a failure there
 	// is logged rather than rolling the change back.
-	materializer Materializer
+	materializer    Materializer
+	afterProjection func()
 
 	// projections carries accepted batches to the background projector used by
 	// the network reconcile paths. It is FIFO and single-consumer, so batches
@@ -56,6 +57,14 @@ func (s *SyncStore) SetMaterializer(m Materializer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.materializer = m
+}
+
+// SetAfterProjection installs a notification after a batch reaches the readable
+// tables. It runs outside the store lock and never emits new sync changes.
+func (s *SyncStore) SetAfterProjection(notify func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.afterProjection = notify
 }
 
 // SetSigner installs the key used to sign locally-authored changes. deviceID
@@ -830,6 +839,7 @@ func (s *SyncStore) reconcileLocked(ctx context.Context, deviceID string, sinceR
 func (s *SyncStore) materialize(ctx context.Context, accepted []SyncChange) {
 	s.mu.Lock()
 	m := s.materializer
+	notify := s.afterProjection
 	s.mu.Unlock()
 	if m == nil || len(accepted) == 0 {
 		return
@@ -849,6 +859,9 @@ func (s *SyncStore) materialize(ctx context.Context, accepted []SyncChange) {
 		if err := m.Apply(ctx, ch); err != nil {
 			log.Printf("sync: could not apply %s/%s %s: %v", ch.EntityType, ch.EntityID, ch.Field, err)
 		}
+	}
+	if notify != nil {
+		notify()
 	}
 }
 

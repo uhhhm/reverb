@@ -213,3 +213,33 @@ func TestReconcileDoesNotHoldStoreLockDuringMaterialize(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAsyncProjectionNotifiesAfterReadableDataChanges(t *testing.T) {
+	st := newTestStoreSync(t)
+	ctx := context.Background()
+	createDevice(t, st, "dev_peer", "Other laptop", 0)
+	overrides := override.New(st.Q())
+	ss := syncpkg.NewSyncStore(st.Q())
+	ss.SetMaterializer(materialize.New(overrides, crop.New(st.Q())))
+	visible := make(chan string, 1)
+	ss.SetAfterProjection(func() {
+		name, err := overrides.GetByCatalogID(ctx, "cat_notify")
+		if err != nil {
+			visible <- "read failed"
+			return
+		}
+		visible <- name.Title
+	})
+	inbound := []syncpkg.SyncChange{{EntityType: "track", EntityID: "cat_notify", Field: "title", Value: "Updated on laptop", UpdatedAt: 2000, DeviceID: "dev_peer"}}
+	if _, _, _, err := ss.ReconcileBatchedAsync(ctx, "dev_peer", syncpkg.NoOutbound, inbound); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case title := <-visible:
+		if title != "Updated on laptop" {
+			t.Fatalf("notification before projection: %q", title)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no notification after incoming change")
+	}
+}

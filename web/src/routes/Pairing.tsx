@@ -13,7 +13,7 @@ import {
   type DeviceInfo,
 } from '../lib/pairingApi'
 import { getP2PStatus } from '../lib/p2pApi'
-import { triggerSync } from '../lib/syncApi'
+import { ManualSyncControl } from '../components/ManualSyncControl'
 import { useSyncStore } from '../lib/syncStore'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
 import { Button } from '../components/ui/Button'
@@ -75,8 +75,7 @@ export default function Pairing() {
 
   const [syncStatus, setSyncStatus] = useState<{ revision: number; deviceCount: number } | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
-  // Driven by sync.started / sync.finished over the WebSocket, so the indicator
-  // also lights up for the background 30s rounds, not just manual ones.
+  // Refresh the legacy revision summary after background exchanges too.
   const syncing = useSyncStore((s) => s.syncing)
 
   async function refreshDevices(opts?: { silent?: boolean }) {
@@ -141,15 +140,6 @@ export default function Pairing() {
     const id = window.setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 1000)
     return () => window.clearInterval(id)
   }, [pairingCode])
-
-  async function onSyncNow() {
-    setSyncError(null)
-    try {
-      await triggerSync()
-    } catch (e) {
-      setSyncError(e instanceof Error ? e.message : 'Could not start a sync')
-    }
-  }
 
   async function onGenerate() {
     setGenLoading(true)
@@ -433,24 +423,11 @@ export default function Pairing() {
             ))}
           </ul>
         )}
-        <div className="flex items-center gap-3">
-          <Button variant="secondary" onClick={() => void onSyncNow()} disabled={syncing}>
-            {syncing ? 'Syncing…' : 'Sync now'}
-          </Button>
-          {syncing && (
-            <span role="status" className="text-xs text-text-secondary">
-              Syncing with paired devices…
-            </span>
-          )}
-        </div>
+        <ManualSyncControl />
+        {syncError && <p role="alert" className="text-xs text-error">{syncError}</p>}
         {syncStatus && (
           <p className="text-xs text-text-secondary">
             Sync status: revision {syncStatus.revision}, {syncStatus.deviceCount} device(s)
-          </p>
-        )}
-        {syncError && (
-          <p role="alert" className="text-xs text-error">
-            {syncError}
           </p>
         )}
       </section>

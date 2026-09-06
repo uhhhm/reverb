@@ -4068,6 +4068,7 @@ export interface paths {
                             /** Format: int64 */
                             revision: number;
                             deviceCount: number;
+                            round?: components["schemas"]["SyncRound"] | null;
                         };
                     };
                 };
@@ -4114,12 +4115,17 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description sync started */
+                /** @description Sync accepted or already running */
                 202: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            status: string;
+                            round: components["schemas"]["SyncRound"];
+                        };
+                    };
                 };
                 /** @description no valid pairing token and the request did not arrive over loopback */
                 401: {
@@ -4461,6 +4467,28 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Metadata exchange status. Local projection and file transfers run independently in the background. */
+        SyncRound: {
+            /** Format: int64 */
+            id: number;
+            /** @enum {string} */
+            state: "idle" | "pending" | "running" | "completed" | "failed" | "no_peers";
+            /**
+             * Format: int64
+             * @description Unix milliseconds
+             */
+            startedAt: number;
+            /**
+             * Format: int64
+             * @description Unix milliseconds
+             */
+            finishedAt: number;
+            /** Format: int64 */
+            durationMs: number;
+            peers: number;
+            succeeded: number;
+            errors: string[];
+        };
         DownloadJob: {
             id: string;
             dedupKey: string;

@@ -2,8 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getP2PStatus, getP2PPeers, redeemViaPeer, getFileManifests, fetchFileFromPeer } from '../lib/p2pApi'
 import { generatePairingCode, listDevices, deleteDevice, type DeviceInfo } from '../lib/pairingApi'
-import { triggerSync } from '../lib/syncApi'
-import { useSyncStore } from '../lib/syncStore'
+import { ManualSyncControl } from '../components/ManualSyncControl'
 import { Button } from '../components/ui/Button'
 import { Modal } from '../components/ui/Modal'
 import { BackgroundSyncSettings } from '../components/BackgroundSyncSettings'
@@ -14,7 +13,6 @@ export default function P2P() {
   const [peerId, setPeerId] = useState('')
   const [deviceName, setDeviceName] = useState('')
   const [removingDevice, setRemovingDevice] = useState<DeviceInfo | null>(null)
-  const syncing = useSyncStore((s) => s.syncing)
 
   const devicesQ = useQuery({ queryKey: ['pairing/devices'], queryFn: listDevices, refetchInterval: 5000 })
   const statusQ = useQuery({ queryKey: ['p2p/status'], queryFn: getP2PStatus })
@@ -34,7 +32,6 @@ export default function P2P() {
       void qc.invalidateQueries({ queryKey: ['p2p/peers'] })
     },
   })
-  const sync = useMutation({ mutationFn: triggerSync })
 
   const redeem = useMutation({
     mutationFn: () => redeemViaPeer(peerId, code, deviceName || 'unnamed'),
@@ -57,17 +54,9 @@ export default function P2P() {
       <section className="rounded-lg border border-border-subtle bg-raised p-4 space-y-3">
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-semibold">Paired devices</h2>
-          <Button onClick={() => sync.mutate()} disabled={sync.isPending || syncing}>
-            {sync.isPending || syncing ? 'Syncing…' : 'Sync now'}
-          </Button>
         </div>
         <p className="text-sm text-text-secondary">Manage the devices allowed to sync with this library.</p>
-        {sync.isError && <p role="alert" className="text-sm text-error">{sync.error.message}</p>}
-        {syncing ? (
-          <p role="status" className="text-sm text-text-secondary">Syncing with paired devices…</p>
-        ) : sync.isSuccess && (
-          <p role="status" className="text-sm text-text-secondary">Sync requested.</p>
-        )}
+        <ManualSyncControl />
         {devicesQ.isLoading ? (
           <p className="text-sm">Loading paired devices…</p>
         ) : devicesQ.isError ? (

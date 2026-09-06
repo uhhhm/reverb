@@ -20,6 +20,7 @@ import (
 	"github.com/uhhhm/reverb/internal/api"
 	"github.com/uhhhm/reverb/internal/auth"
 	"github.com/uhhhm/reverb/internal/catalog"
+	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/cover"
 	"github.com/uhhhm/reverb/internal/crop"
 	"github.com/uhhhm/reverb/internal/download"
@@ -335,8 +336,13 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	}
 	projector := newMaterializer()
 	deps.SyncStore.SetMaterializer(projector)
+	notifyProjection := func() {
+		bus.Publish(events.Event{Topic: "library.updated", Payload: core.LibraryUpdatedEvent{}})
+	}
+	deps.SyncStore.SetAfterProjection(notifyProjection)
 	if syncStoreForLink != deps.SyncStore {
 		syncStoreForLink.SetMaterializer(newMaterializer())
+		syncStoreForLink.SetAfterProjection(notifyProjection)
 	}
 	// Only set an interface field when the concrete service is present, or it
 	// becomes a non-nil interface wrapping a nil pointer.

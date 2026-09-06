@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/uhhhm/reverb/internal/p2p"
 	"github.com/uhhhm/reverb/internal/store/db"
 	"github.com/uhhhm/reverb/internal/sync"
 )
@@ -126,13 +127,20 @@ func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"revision": rev, "hlc": newHLC, "vector": seqMap, "hlcVector": hlcMap, "deviceCount": count})
+	var round *p2p.SyncRound
+	if s.deps.P2PSyncer != nil {
+		if syncer := s.deps.P2PSyncer(); syncer != nil {
+			snapshot := syncer.Status()
+			round = &snapshot
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"round": round, "revision": rev, "hlc": newHLC, "vector": seqMap, "hlcVector": hlcMap, "deviceCount": count})
 }
 
 // handleSyncTrigger kicks off one on-demand anti-entropy round with paired
-// peers. It returns immediately — progress is reported over the WebSocket as
-// sync.started / sync.finished, since a round can take as long as the dial
-// timeout of the slowest peer.
+// peers. It returns immediately with a pending or active round. Progress is
+// retained in /sync/status as well as reported over the WebSocket, since a
+// round can take as long as the dial timeout of the slowest peer.
 func (s *Server) handleSyncTrigger(w http.ResponseWriter, r *http.Request) {
 	// Authenticate like the other sync routes: a Bearer token that names a paired
 	// device, or a request that actually arrived over loopback. Without this the
@@ -155,6 +163,6 @@ func (s *Server) handleSyncTrigger(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "sync unavailable"})
 		return
 	}
-	go syncer.SyncNow(context.WithoutCancel(r.Context()))
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+	round := syncer.RequestSync(context.WithoutCancel(r.Context()))
+	writeJSON(w, http.StatusAccepted, map[string]any{"status": "started", "round": round})
 }

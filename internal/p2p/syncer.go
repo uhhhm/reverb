@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	stdsync "sync"
 	"time"
 
@@ -35,22 +36,98 @@ type Syncer struct {
 	bus *events.Bus
 	// runMu single-flights sync rounds: the 30s ticker and an on-demand
 	// SyncNow must not overlap and double-push the change log.
-	runMu stdsync.Mutex
+	runMu    stdsync.Mutex
+	statusMu stdsync.Mutex
+	round    SyncRound
 }
 
 // SetBus installs the event bus used to publish sync.started / sync.finished.
 // Optional — a Syncer without a bus syncs silently.
 func (s *Syncer) SetBus(b *events.Bus) { s.bus = b }
 
-// SyncNow runs one anti-entropy round on demand. It blocks until the round
-// finishes, so callers that must not block should run it in a goroutine.
+// SyncRound is a snapshot of a metadata exchange. File transfers and local
+// projection continue independently; completion does not claim those are done.
+type SyncRound struct {
+	ID         int64    `json:"id"`
+	State      string   `json:"state"`
+	StartedAt  int64    `json:"startedAt"`
+	FinishedAt int64    `json:"finishedAt"`
+	DurationMs int64    `json:"durationMs"`
+	Peers      int      `json:"peers"`
+	Succeeded  int      `json:"succeeded"`
+	Errors     []string `json:"errors"`
+}
+
+func (s *Syncer) Status() SyncRound {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	result := s.round
+	result.Errors = append([]string{}, result.Errors...)
+	if result.State == "" {
+		result.State = "idle"
+	}
+	return result
+}
+
+// RequestSync coalesces repeated clicks with an active round. The pending state
+// is visible before returning, so polling works even if WebSocket frames are lost.
+func (s *Syncer) RequestSync(ctx context.Context) SyncRound {
+	if !s.runMu.TryLock() {
+		return s.Status()
+	}
+	s.beginRound()
+	pending := s.Status()
+	go func() { defer s.runMu.Unlock(); s.runRound(ctx) }()
+	return pending
+}
+
+func (s *Syncer) beginRound() {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	s.round = SyncRound{ID: s.round.ID + 1, State: "pending", StartedAt: time.Now().UnixMilli(), Errors: []string{}}
+}
+
+// SyncNow blocks for one round; background ticks skip an already active round.
 func (s *Syncer) SyncNow(ctx context.Context) {
-	s.runMu.Lock()
+	if !s.runMu.TryLock() {
+		return
+	}
 	defer s.runMu.Unlock()
+	s.beginRound()
+	s.runRound(ctx)
+}
+
+func (s *Syncer) runRound(ctx context.Context) {
+	s.statusMu.Lock()
+	s.round.State = "running"
+	s.statusMu.Unlock()
 	s.publish(TopicSyncStarted, nil)
 	start := time.Now()
+	defer func() {
+		s.statusMu.Lock()
+		if failure := recover(); failure != nil {
+			log.Printf("p2p syncer: round panic: %v", failure)
+			s.round.Errors = append(s.round.Errors, "Sync interrupted by an internal error; try again.")
+		}
+		s.round.State = "completed"
+		if len(s.round.Errors) > 0 {
+			s.round.State = "failed"
+		} else if s.round.Peers == 0 {
+			s.round.State = "no_peers"
+		}
+		s.round.FinishedAt = time.Now().UnixMilli()
+		s.round.DurationMs = time.Since(start).Milliseconds()
+		sort.Strings(s.round.Errors)
+		s.statusMu.Unlock()
+		s.publish(TopicSyncFinished, s.Status())
+	}()
 	s.syncAll(ctx)
-	s.publish(TopicSyncFinished, map[string]any{"durationMs": time.Since(start).Milliseconds()})
+}
+
+func (s *Syncer) roundError(message string) {
+	s.statusMu.Lock()
+	defer s.statusMu.Unlock()
+	s.round.Errors = append(s.round.Errors, message)
 }
 
 func (s *Syncer) publish(topic string, payload any) {
@@ -104,6 +181,7 @@ func (s *Syncer) Run(ctx context.Context) error {
 
 func (s *Syncer) syncAll(ctx context.Context) {
 	if s.host == nil || s.store == nil || s.guard == nil {
+		s.roundError("Sync unavailable: device networking has not started.")
 		return
 	}
 	// Only paired peers. mDNS auto-connects to anything advertising the service
@@ -113,8 +191,12 @@ func (s *Syncer) syncAll(ctx context.Context) {
 	trusted, err := s.guard.TrustedPeers(ctx)
 	if err != nil {
 		log.Printf("p2p syncer: trusted peer lookup failed: %v", err)
+		s.roundError("Could not read paired devices: " + err.Error())
 		return
 	}
+	s.statusMu.Lock()
+	s.round.Peers = len(trusted)
+	s.statusMu.Unlock()
 	if len(trusted) == 0 {
 		return
 	}
@@ -134,11 +216,27 @@ func (s *Syncer) syncAll(ctx context.Context) {
 			// Contained per peer: a round reconciles and materializes data
 			// the peer sent, so a panic here is reachable from peer input
 			// and must not take the process down with it.
+			reported := false
+			defer func() {
+				if !reported {
+					s.roundError(fmt.Sprintf("Device %s did not complete sync.", pid))
+				}
+			}()
 			SafeRun("sync peer", func() {
 				if !EnsureConnected(ctx, s.host, s.guard, pid) {
+					s.roundError(fmt.Sprintf("Device %s is unreachable. Check it is open and on the same network or VPN; verify its saved pairing address.", pid))
+					reported = true // the specific failure has already been recorded
 					return
 				}
-				_ = s.syncPeer(ctx, pid)
+				if err := s.syncPeer(ctx, pid); err != nil {
+					log.Printf("p2p syncer: exchange with %s failed: %v", pid, err)
+					s.roundError(fmt.Sprintf("Device %s: %v", pid, err))
+				} else {
+					s.statusMu.Lock()
+					s.round.Succeeded++
+					s.statusMu.Unlock()
+				}
+				reported = true
 			})
 		}()
 	}
@@ -160,7 +258,7 @@ func (s *Syncer) syncPeer(ctx context.Context, pid peer.ID) error {
 	seqMap, _, err := s.store.GetVectorMap(ctx)
 	if err != nil {
 		log.Printf("p2p syncer: GetVectorMap failed for %s: %v", pid, err)
-		seqMap = nil
+		return err
 	}
 	s.mu.Lock()
 	peerVec := s.peerVectors[pid]
@@ -214,7 +312,7 @@ func (s *Syncer) syncPeer(ctx context.Context, pid peer.ID) error {
 		peerDevice, derr := s.guard.DeviceFor(ctx, pid)
 		if derr != nil || peerDevice == "" {
 			log.Printf("p2p syncer: no device binding for peer %s, dropping %d changes", pid, len(resp.Changes))
-			return nil
+			return fmt.Errorf("paired device binding unavailable")
 		}
 		ApplyDeviceAnnouncements(ctx, s.keys, resp.Devices)
 		accepted, refused, why := filterAuthorizedChanges(ctx, s.store, peerDevice, resp.Changes)
@@ -239,9 +337,12 @@ func (s *Syncer) syncPeer(ctx context.Context, pid peer.ID) error {
 				// The syncer pulls in its own step, so the outbound half of a
 				// reconcile is read and thrown away; ask for none.
 				if _, _, _, err := s.store.ReconcileBatchedAsync(ctx, did, reverbsync.NoOutbound, part); err != nil {
-					log.Printf("p2p syncer: Reconcile failed for device %s from %s: %v", did, pid, err)
+					return fmt.Errorf("apply changes: %w", err)
 				}
 			}
+		}
+		if refused > 0 {
+			return fmt.Errorf("%d unverifiable changes refused: %s", refused, why)
 		}
 	}
 	return nil

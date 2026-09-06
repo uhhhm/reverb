@@ -75,6 +75,7 @@ describe('useRealtime', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['album-detail'] })
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['artist-detail'] })
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['synced-playlist'] })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['synced-playlists'] })
 
     // library.updated also invalidates (broad fallback even with empty IDs).
     invalidateSpy.mockClear()
@@ -83,6 +84,7 @@ describe('useRealtime', () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['album-detail'] })
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['artist-detail'] })
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['synced-playlist'] })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['synced-playlists'] })
 
     // Unmount closes the socket.
     unmount()

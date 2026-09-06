@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/uhhhm/reverb/internal/auth"
+	"github.com/uhhhm/reverb/internal/p2p"
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/store"
 	"github.com/uhhhm/reverb/internal/store/db"
@@ -543,4 +544,50 @@ func TestSyncStatusRejectsNonLoopbackInServerMode(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("sync status from a remote peer = %d, want 401", rec.Code)
 	}
+}
+
+func TestSyncStatusRetainsRoundOutcomeWithoutWebSocket(t *testing.T) {
+	srv, _, _ := newSyncTestServer(t)
+	syncer := p2p.NewSyncer(nil, nil, nil, nil, "local")
+	srv.deps.P2PSyncer = func() *p2p.Syncer { return syncer }
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/sync/trigger", nil)
+	req.RemoteAddr = "127.0.0.1:54321"
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("trigger = %d: %s", rec.Code, rec.Body.String())
+	}
+	var accepted struct {
+		Round p2p.SyncRound `json:"round"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &accepted); err != nil {
+		t.Fatal(err)
+	}
+	if accepted.Round.State != "pending" {
+		t.Fatalf("accepted = %+v", accepted)
+	}
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		rec = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, "/api/v1/sync/status", nil)
+		req.RemoteAddr = "127.0.0.1:54321"
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+		}
+		var status struct {
+			Round p2p.SyncRound `json:"round"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
+			t.Fatal(err)
+		}
+		if status.Round.State == "failed" {
+			if status.Round.ID != accepted.Round.ID || len(status.Round.Errors) == 0 {
+				t.Fatalf("status = %+v", status)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("status never reported completion")
 }
