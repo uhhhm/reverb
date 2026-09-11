@@ -62,3 +62,43 @@ _Avoid_: Mirror, replicate
 Removing a playlist or a track from the canonical library, which propagates to
 every device. Distinct from removing a track from a device's offline set, which is
 local-only.
+
+### Recommendations
+
+**Recommendation**:
+A track or artist Reverb suggests from the household's taste. It may be outside the
+library; it is playable on demand but never becomes part of the library unless the
+owner adds it.
+_Avoid_: Suggestion, pick
+
+**Taste profile**:
+The household's single model of what it likes, derived from plays, library and
+playlist contents, and not-interested marks. There is one per household, not per
+person or device.
+_Avoid_: User profile, preferences
+
+**Not interested**:
+The owner's explicit rejection of a track or artist, which stops it from being
+recommended. The only explicit negative signal; skips alone do not mean rejection.
+_Avoid_: Dislike, thumbs down, block
+
+**Radio**:
+An endless stream of recommendations seeded from a track, artist, album, or
+playlist, which continues when the queue runs out.
+_Avoid_: Autoplay, station
+
+**Mix**:
+A generated, regularly refreshed list of recommendations (Discover Weekly, Release
+Radar, Daily Mix). Not a playlist: it does not sync as one, and saving it creates
+an ordinary playlist copy.
+_Avoid_: Generated playlist, smart playlist
+
+**Adventurousness**:
+The household-wide setting for how much of what Reverb recommends is new to the
+library versus already known.
+_Avoid_: Discovery level, novelty
+
+**Tracked artist**:
+An artist whose new releases appear in Release Radar, inferred from plays and
+library contents rather than chosen explicitly.
+_Avoid_: Followed artist, favourite artist

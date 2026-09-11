@@ -39,3 +39,17 @@ Reverb is a Go modular monolith with an embedded React/TypeScript SPA. **Desktop
 - The product has one household owner. Keep loopback/Host/Origin guards and paired-device authentication; capability gates do not imply a planned account system.
 - Write current truth in documentation and comments. Replace stale claims rather than appending corrections or completed-task history.
 - Secrets belong in environment variables or ignored `.env` files. Keep `.env.example` free of credentials.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as local markdown files under `.scratch/<feature>/` (GitHub Issues is disabled). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: root `CONTEXT.md` plus `docs/adr/`. See `docs/agents/domain.md`.
