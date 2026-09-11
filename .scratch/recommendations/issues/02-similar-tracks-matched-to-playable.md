@@ -4,10 +4,10 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Similar tracks list shows matched results, and each plays when clicked
-- [ ] Owned candidates resolve to the library track by catalog ID. Everything else resolves to a search result, and candidates that can't be matched are dropped
-- [ ] Matching reuses the existing matching and normalisation logic, with tests covering wrong-version and wrong-artist cases
-- [ ] Matched results are cached. Rate limits are respected, with backoff on errors
-- [ ] Hidden gracefully when Last.fm isn't configured
+- [x] Similar tracks list shows matched results, and each plays when clicked
+- [x] Owned candidates resolve to the library track by catalog ID. Everything else resolves to a search result, and candidates that can't be matched are dropped
+- [x] Matching reuses the existing matching and normalisation logic, with tests covering wrong-version and wrong-artist cases
+- [x] Matched results are cached. Rate limits are respected, with backoff on errors
+- [x] Hidden gracefully when Last.fm isn't configured

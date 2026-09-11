@@ -4,10 +4,10 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Marking works for library tracks, search-source tracks, and artists. Identity follows the existing catalog-ID vs backend-ID rules, so the same recording marked on two devices is one mark
-- [ ] Marks replicate through the sync change log and apply on peers without re-emitting
-- [ ] Recommendation results exclude marked tracks and every track by a marked artist
-- [ ] Undo removes the mark on every device
-- [ ] Sync tests cover replication and concurrent mark and undo
+- [x] Marking works for library tracks, search-source tracks, and artists. Identity follows the existing catalog-ID vs backend-ID rules, so the same recording marked on two devices is one mark
+- [x] Marks replicate through the sync change log and apply on peers without re-emitting
+- [x] Recommendation results exclude marked tracks and every track by a marked artist
+- [x] Undo removes the mark on every device
+- [x] Sync tests cover replication and concurrent mark and undo
