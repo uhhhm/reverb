@@ -4,10 +4,10 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Start Radio is available from the track, artist, album, and playlist menus
-- [ ] The queue keeps at least a few tracks ahead. The next external track is resolved before the current one ends
-- [ ] The same artist never plays more than twice in a row, and no track repeats within a session
-- [ ] Manually queued tracks play before Radio tracks. Clearing the queue or playing something else ends the Radio session
-- [ ] Player store tests cover refill, the artist limit, and ending a session
+- [x] Start Radio is available from the track, artist, album, and playlist menus
+- [x] The queue keeps at least a few tracks ahead. The next external track is resolved before the current one ends
+- [x] The same artist never plays more than twice in a row, and no track repeats within a session
+- [x] Manually queued tracks play before Radio tracks. Clearing the queue or playing something else ends the Radio session
+- [x] Player store tests cover refill, the artist limit, and ending a session

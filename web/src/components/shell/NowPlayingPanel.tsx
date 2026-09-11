@@ -86,6 +86,8 @@ export function NowPlayingPanel() {
   const queue = usePlayer((s) => s.queue)
   const upNextIndices = usePlayer((s) => s.upNext)
   const jumpTo = usePlayer((s) => s.jumpTo)
+  const clearQueue = usePlayer((s) => s.clearQueue)
+  const radio = usePlayer((s) => s.radio)
 
   const navigate = useNavigate()
   const [addMenuOpen, setAddMenuOpen] = useState(false)
@@ -191,7 +193,15 @@ export function NowPlayingPanel() {
         {/* Next in queue */}
         <div className="mt-3.5 overflow-hidden rounded-lg bg-raised">
           <div className="flex items-center justify-between px-4 py-3.5">
-            <span className="text-sm font-bold text-text-primary">Next in queue</span>
+            <span className="text-sm font-bold text-text-primary">
+              Next in queue
+              {radio && <span className="ml-2 text-xs font-semibold text-accent">Radio</span>}
+            </span>
+            {queue.length > 0 && (
+              <button type="button" onClick={clearQueue} className="text-xs font-semibold text-text-muted hover:text-text-primary">
+                Clear
+              </button>
+            )}
           </div>
           <ul>
             {upNext.length === 0 && (

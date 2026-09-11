@@ -180,6 +180,40 @@ func (q *Queries) ListAllPlays(ctx context.Context) ([]Play, error) {
 	return items, nil
 }
 
+const listPlayedSince = `-- name: ListPlayedSince :many
+SELECT DISTINCT e.title, e.artist
+FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
+WHERE p.played_at >= ?
+`
+
+type ListPlayedSinceRow struct {
+	Title  string `json:"title"`
+	Artist string `json:"artist"`
+}
+
+func (q *Queries) ListPlayedSince(ctx context.Context, playedAt int64) ([]ListPlayedSinceRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPlayedSince, playedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPlayedSinceRow
+	for rows.Next() {
+		var i ListPlayedSinceRow
+		if err := rows.Scan(&i.Title, &i.Artist); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecentPlays = `-- name: ListRecentPlays :many
 SELECT p.id, p.catalog_id, p.played_at, e.title, e.artist, e.album
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id

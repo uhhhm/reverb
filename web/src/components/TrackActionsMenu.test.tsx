@@ -36,6 +36,11 @@ vi.mock('../lib/notInterestedApi', () => ({
   useMarkNotInterested: () => ({ mutate: mockMarkNotInterested, isPending: false }),
 }))
 
+const mockStartRadio = vi.fn()
+vi.mock('../lib/playerStore', () => ({
+  usePlayer: (sel: (s: unknown) => unknown) => sel({ startRadio: mockStartRadio }),
+}))
+
 const track = makeTrack({ id: 't1', title: '01 - Dunanna Pit', artist: 'A', bitRate: 143 })
 
 function open() {
@@ -50,6 +55,14 @@ function open() {
 beforeEach(() => {
   vi.clearAllMocks()
   upgradable = []
+})
+
+describe('TrackActionsMenu radio', () => {
+  it('starts Radio seeded by this track', () => {
+    open()
+    fireEvent.click(screen.getByRole('menuitem', { name: /start radio/i }))
+    expect(mockStartRadio).toHaveBeenCalledWith({ lead: [track], seeds: [{ artist: 'A', title: '01 - Dunanna Pit' }] })
+  })
 })
 
 describe('TrackActionsMenu similar tracks', () => {

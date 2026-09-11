@@ -347,6 +347,17 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		recommend.WithExclusions(func(ctx context.Context) (recommend.Exclusions, error) {
 			return marks.Set(ctx)
 		}),
+		recommend.WithRecentPlays(func(ctx context.Context, since time.Time) ([]recommend.TrackCandidate, error) {
+			rows, err := st.Q().ListPlayedSince(ctx, since.Unix())
+			if err != nil {
+				return nil, err
+			}
+			out := make([]recommend.TrackCandidate, len(rows))
+			for i, r := range rows {
+				out[i] = recommend.TrackCandidate{Artist: r.Artist, Title: r.Title}
+			}
+			return out, nil
+		}),
 	)
 
 	playlistProjection := playlistcrdt.New(deps.SyncStore, wiring.NewSyncStore(st.Q()), authorDevice)

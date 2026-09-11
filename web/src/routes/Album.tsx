@@ -11,6 +11,7 @@ import { postBatchDownload } from '../lib/downloadApi'
 import { formatDuration } from '../lib/types'
 import type { AlbumDetailTrack, ExternalTrackRef, Track } from '../lib/types'
 import { usePlayer } from '../lib/playerStore'
+import { radioFromTracks } from '../lib/radio'
 import { Button, IconButton, Cover, Skeleton, EmptyState, Badge, Icon } from '../components/ui'
 import { useAlbumPalette } from '../lib/useAlbumPalette'
 import { rgbToCss } from '../lib/palette'
@@ -53,6 +54,7 @@ export default function Album() {
   const { data: album, isLoading, isError } = useAlbumDetail(source, id)
   useDocumentTitle(album ? `${album.name} · ${album.artist}` : 'Album')
   const playTrackList = usePlayer((s) => s.playTrackList)
+  const startRadio = usePlayer((s) => s.startRadio)
   const toggleShuffle = usePlayer((s) => s.toggleShuffle)
   const shuffle = usePlayer((s) => s.shuffle)
   const currentTrack = usePlayer((s) => s.current)
@@ -282,6 +284,15 @@ export default function Album() {
                 }}
                 disabled={playableTracks.length === 0}
               />
+              <Button
+                variant="ghost"
+                size="md"
+                disabled={playableTracks.length === 0}
+                onClick={() => playableTracks.length && startRadio(radioFromTracks(playableTracks))}
+                aria-label={`Start Radio from ${album.name}`}
+              >
+                Start Radio
+              </Button>
               {source === 'library' && id && (
                 <>
                   <Button

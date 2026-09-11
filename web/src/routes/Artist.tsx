@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useArtistDetail } from '../lib/coverageApi'
 import { useSimilarArtists } from '../lib/recommendationsApi'
 import { useMarkNotInterested } from '../lib/notInterestedApi'
+import { usePlayer } from '../lib/playerStore'
 import { useCoverageStream } from '../lib/coverageStore'
 import { postBatchDownload } from '../lib/downloadApi'
 import { useDownloads } from '../lib/downloadStore'
@@ -101,6 +102,7 @@ export default function Artist() {
   const { data: detail, isLoading, isError } = useArtistDetail(source, id)
   const similarArtists = useSimilarArtists(source, id).data?.artists ?? []
   const markNotInterested = useMarkNotInterested()
+  const startRadio = usePlayer((s) => s.startRadio)
   // The page is reused across artists; a mark made on one must not show on the next.
   const resetMark = markNotInterested.reset
   useEffect(() => resetMark(), [source, id, resetMark])
@@ -279,6 +281,14 @@ export default function Artist() {
                   Rename
                 </Button>
               )}
+              <Button
+                variant="ghost"
+                size="md"
+                onClick={() => startRadio({ lead: [], seeds: [{ artist: detail.name }] })}
+                aria-label={`Start Radio from ${detail.name}`}
+              >
+                Start Radio
+              </Button>
               {/* Stops this artist being recommended anywhere, on every device. */}
               <Button
                 variant="ghost"

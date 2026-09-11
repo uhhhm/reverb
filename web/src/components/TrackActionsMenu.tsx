@@ -11,6 +11,7 @@ import { CoverUploadDialog } from './CoverUploadDialog'
 import { qualityLabel } from '../lib/audioQuality'
 import { useMarkNotInterested } from '../lib/notInterestedApi'
 import type { NotInterestedRequest } from '../lib/notInterestedApi'
+import { usePlayer } from '../lib/playerStore'
 import type { Track } from '../lib/types'
 
 interface TrackActionsMenuProps {
@@ -84,6 +85,7 @@ export function TrackActionsMenu({ track, onRename, onRemove, onRemoveFromLibrar
   const upgrade = useTrackUpgrade(track)
   const navigate = useNavigate()
   const markNotInterested = useMarkNotInterested()
+  const startRadio = usePlayer((s) => s.startRadio)
 
   useEffect(() => {
     if (!open) return
@@ -112,6 +114,12 @@ export function TrackActionsMenu({ track, onRename, onRemove, onRemoveFromLibrar
     label: 'Add to playlist',
     description: 'Put this track in one of your playlists',
     onSelect: () => setPlaylistOpen(true),
+  })
+  if (track.title && track.artist) items.push({
+    icon: 'play',
+    label: 'Start Radio',
+    description: 'Play this track, then an endless stream like it',
+    onSelect: () => startRadio({ lead: [track], seeds: [{ artist: track.artist, title: track.title }] }),
   })
   if (track.title && track.artist) items.push({
     icon: 'browse',

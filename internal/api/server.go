@@ -433,6 +433,7 @@ func (s *Server) routes() {
 			pr.Get("/artist/{source}/{id}/coverage", s.handleArtistCoverage)
 			pr.Get("/recommendations/artists/{source}/{id}", s.handleSimilarArtists)
 			pr.Get("/recommendations/similar-tracks", s.handleSimilarTracks)
+			pr.Post("/recommendations/radio", s.handleRadio)
 			pr.Get("/not-interested", s.handleListNotInterested)
 			pr.Post("/not-interested", s.handleMarkNotInterested)
 			pr.Delete("/not-interested", s.handleUndoNotInterested)

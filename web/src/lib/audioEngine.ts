@@ -83,6 +83,9 @@ export class AudioEngine {
   private resolveSrc: (t: Track, startMs: number) => string
   private active: AudioElement
   private preload: AudioElement
+  // The source last handed to the preload element, so re-preloading the same
+  // next track does not restart its download.
+  private preloadedSrc = ''
   private listeners = new Set<(s: PlayerState) => void>()
 
   private queue: Track[] = []
@@ -688,10 +691,33 @@ export class AudioEngine {
   }
 
   enqueue(track: Track) {
-    this.queue = [...this.queue, track]
+    this.insertAt(this.queue.length, track)
+  }
+
+  /** Inserts a track at a queue position without interrupting the current one. */
+  insertAt(at: number, track: Track) {
+    const i = Math.min(Math.max(at, 0), this.queue.length)
+    const q = this.queue.slice()
+    q.splice(i, 0, track)
+    this.queue = q
     if (this.index === -1) this.index = 0
+    else if (i <= this.index) this.index++
     this.rebuildShuffle()
+    // The track after the current one may have just changed; start fetching it
+    // now rather than when the current one ends.
+    if (this.active.src) this.preloadNext()
     this.emit()
+  }
+
+  /** Stops playback and empties the queue. */
+  clear() {
+    this.clearRetry()
+    this.clearStall()
+    this.active.pause()
+    this.playing = false
+    this.loading = false
+    this.preloadedSrc = ''
+    this.setQueue([])
   }
 
   removeAt(i: number) {
@@ -766,7 +792,10 @@ export class AudioEngine {
   private preloadNext() {
     const ni = this.peekNextIndex()
     if (ni < 0 || ni >= this.queue.length) return
-    this.preload.src = this.resolveSrc(this.queue[ni], 0)
+    const src = this.resolveSrc(this.queue[ni], 0)
+    if (src === this.preloadedSrc) return
+    this.preloadedSrc = src
+    this.preload.src = src
     this.preload.load()
     this.preload.volume = this.volume
   }

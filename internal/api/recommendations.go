@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -16,6 +17,36 @@ import (
 type Recommendations interface {
 	SimilarArtists(ctx context.Context, source, id string) recommend.ArtistResult
 	SimilarTracks(ctx context.Context, artist, title string) recommend.TrackResult
+	Radio(ctx context.Context, seeds []recommend.Seed) recommend.TrackResult
+}
+
+type radioRequest struct {
+	Seeds []recommend.Seed `json:"seeds"`
+}
+
+func (s *Server) handleRadio(w http.ResponseWriter, r *http.Request) {
+	var req radioRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		return
+	}
+	if len(req.Seeds) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one seed is required"})
+		return
+	}
+	for i := range req.Seeds {
+		req.Seeds[i].Artist = strings.TrimSpace(req.Seeds[i].Artist)
+		req.Seeds[i].Title = strings.TrimSpace(req.Seeds[i].Title)
+		if req.Seeds[i].Artist == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "every seed needs an artist"})
+			return
+		}
+	}
+	if s.deps.Recommend == nil {
+		writeJSON(w, http.StatusOK, recommend.TrackResult{Tracks: []core.ExternalResult{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.deps.Recommend.Radio(r.Context(), req.Seeds))
 }
 
 func (s *Server) handleSimilarArtists(w http.ResponseWriter, r *http.Request) {

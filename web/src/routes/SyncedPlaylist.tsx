@@ -24,6 +24,7 @@ import { prewarmExternalStream } from '../lib/libraryApi'
 import { prewarmTopResults } from '../lib/extstreamPrewarm'
 import { externalResultFromRef, externalTrackFromRef } from '../lib/externalTrack'
 import { usePlayer } from '../lib/playerStore'
+import { radioFromTracks } from '../lib/radio'
 import { useDownloads } from '../lib/downloadStore'
 import { RenameTrackDialog } from '../components/RenameTrackDialog'
 import { ManagePlaylistTracksDialog } from '../components/ManagePlaylistTracksDialog'
@@ -83,6 +84,7 @@ export default function SyncedPlaylist() {
   const qc = useQueryClient()
   const { data: detail, isLoading, isError } = useSyncedPlaylist(id)
   const playTrackList = usePlayer((s) => s.playTrackList)
+  const startRadio = usePlayer((s) => s.startRadio)
   const currentTrack = usePlayer((s) => s.current)
   const isPlaying = usePlayer((s) => s.playing)
   // Local job overlay: a track whose download is queued/running/completed is no
@@ -541,6 +543,7 @@ export default function SyncedPlaylist() {
                   label="Synced playlist options"
                   widthClass="w-72"
                 >
+                  {playableTracks.length > 0 && <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); startRadio(radioFromTracks(playableTracks)) }} className="w-full px-4 py-2.5 text-left text-sm hover:bg-raised-hover">Start Radio</button>}
                   <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); setNameInput(detail.name); setEditingName(true) }} className="w-full px-4 py-2.5 text-left text-sm hover:bg-raised-hover">Edit playlist name</button>
                   {detail.mode === 'once' && <button type="button" role="menuitem" onClick={() => { setMenuOpen(false); setManagingTracks(true) }} className="w-full px-4 py-2.5 text-left text-sm hover:bg-raised-hover">Manage tracks</button>}
                   {/* Schedule settings panel — hidden for one-time imports */}

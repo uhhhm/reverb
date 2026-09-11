@@ -87,7 +87,7 @@ func (s *Service) SimilarTracks(ctx context.Context, artist, title string) Track
 			kept = append(kept, c)
 		}
 	}
-	tracks := s.matchCandidates(ctx, kept)
+	tracks := filterTracks(s.matchCandidates(ctx, kept), []Seed{{Artist: artist, Title: title}}, similarTracksSurface, nil)
 	// A lookup cut short by the deadline keeps what it matched: re-asking the
 	// source on every reopen would be worse than a shorter list.
 	if ctx.Err() == nil || len(tracks) > 0 {
@@ -138,15 +138,32 @@ func (s *Service) matchCandidates(ctx context.Context, cands []TrackCandidate) [
 			break
 		}
 	}
-	if len(owned) > 0 && s.catalogIDs != nil {
-		ids := s.catalogIDs(ctx, owned)
-		for i := range out {
-			if out[i].Source == "library" {
-				out[i].CanonicalID = ids[out[i].ExternalID]
-			}
-		}
+	if len(owned) > 0 {
+		s.assignCatalogIDs(ctx, out)
 	}
 	return out
+}
+
+// assignCatalogIDs sets the catalog id on every library track in place.
+func (s *Service) assignCatalogIDs(ctx context.Context, tracks []core.ExternalResult) {
+	if s.catalogIDs == nil {
+		return
+	}
+	var owned []string
+	for _, t := range tracks {
+		if t.Source == "library" {
+			owned = append(owned, t.ExternalID)
+		}
+	}
+	if len(owned) == 0 {
+		return
+	}
+	ids := s.catalogIDs(ctx, owned)
+	for i := range tracks {
+		if tracks[i].Source == "library" {
+			tracks[i].CanonicalID = ids[tracks[i].ExternalID]
+		}
+	}
 }
 
 // resolveCandidate finds what a candidate plays as: the library copy when one

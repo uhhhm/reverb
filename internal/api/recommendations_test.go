@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/uhhhm/reverb/internal/core"
@@ -17,11 +19,56 @@ type fakeRecommendations struct {
 	tracks           recommend.TrackResult
 	gotArtist        string
 	gotTitle         string
+	gotSeeds         []recommend.Seed
 }
 
 func (f *fakeRecommendations) SimilarTracks(_ context.Context, artist, title string) recommend.TrackResult {
 	f.gotArtist, f.gotTitle = artist, title
 	return f.tracks
+}
+
+func (f *fakeRecommendations) Radio(_ context.Context, seeds []recommend.Seed) recommend.TrackResult {
+	f.gotSeeds = seeds
+	return f.tracks
+}
+
+func postRadio(t *testing.T, srv *Server, body string, out any) int {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/recommendations/radio", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if out != nil && rec.Code == http.StatusOK {
+		if err := json.Unmarshal(rec.Body.Bytes(), out); err != nil {
+			t.Fatalf("decode %s: %v", rec.Body.String(), err)
+		}
+	}
+	return rec.Code
+}
+
+func TestRadioEndpoint(t *testing.T) {
+	fake := &fakeRecommendations{tracks: recommend.TrackResult{Available: true, Tracks: []core.ExternalResult{
+		{Source: "deezer", ExternalID: "1", Title: "Genesis", Artist: "Justice", Type: core.EntityTrack},
+	}}}
+	srv := recommendationServer(t, fake)
+
+	var body recommend.TrackResult
+	code := postRadio(t, srv, `{"seeds":[{"artist":" Daft Punk ","title":"One More Time"},{"artist":"Air"}]}`, &body)
+	if code != http.StatusOK {
+		t.Fatalf("status %d", code)
+	}
+	want := []recommend.Seed{{Artist: "Daft Punk", Title: "One More Time"}, {Artist: "Air"}}
+	if !reflect.DeepEqual(fake.gotSeeds, want) {
+		t.Fatalf("seeds %+v, want %+v", fake.gotSeeds, want)
+	}
+	if !body.Available || len(body.Tracks) != 1 {
+		t.Fatalf("body %+v", body)
+	}
+	for _, bad := range []string{`{"seeds":[]}`, `{"seeds":[{"title":"No Artist"}]}`, `nope`} {
+		if code := postRadio(t, srv, bad, nil); code != http.StatusBadRequest {
+			t.Fatalf("%s: status %d, want 400", bad, code)
+		}
+	}
 }
 
 func (f *fakeRecommendations) SimilarArtists(_ context.Context, source, id string) recommend.ArtistResult {

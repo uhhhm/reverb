@@ -20,6 +20,11 @@ FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
 WHERE p.user_id = ? AND p.played_at < ?
 ORDER BY p.played_at DESC LIMIT ?;
 
+-- name: ListPlayedSince :many
+SELECT DISTINCT e.title, e.artist
+FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
+WHERE p.played_at >= ?;
+
 -- name: StatsSummary :one
 SELECT
     COUNT(*)                    AS plays,

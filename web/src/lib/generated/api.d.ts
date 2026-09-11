@@ -2599,6 +2599,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/recommendations/radio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The next tracks for a Radio session
+         * @description An artist seed (no title) is first turned into a few of that artist's own tracks, which lead the result. Tracks similar to every seed follow, interleaved in seed order. Owned tracks stay; other versions (live, cover, remix, karaoke, instrumental) are dropped unless a seed is one, and duplicate recordings collapse. available is false when no similar-tracks source is configured.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RadioRequest"];
+                };
+            };
+            responses: {
+                /** @description radio tracks */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SimilarTracks"];
+                    };
+                };
+                /** @description at least one seed */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/not-interested": {
         parameters: {
             query?: never;
@@ -4906,6 +4956,14 @@ export interface components {
         SimilarTracks: {
             available: boolean;
             tracks: components["schemas"]["RecommendedTrack"][];
+        };
+        /** @description A track, or an artist when title is omitted. */
+        RadioSeed: {
+            artist: string;
+            title?: string;
+        };
+        RadioRequest: {
+            seeds: components["schemas"]["RadioSeed"][];
         };
         NotInterestedMark: {
             key: string;

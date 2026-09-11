@@ -713,6 +713,28 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SimilarTracks" }
         "400": { description: artist and title are required }
+  /recommendations/radio:
+    post:
+      summary: The next tracks for a Radio session
+      description: >-
+        An artist seed (no title) is first turned into a few of that artist's
+        own tracks, which lead the result. Tracks similar to every seed follow,
+        interleaved in seed order. Owned tracks stay; other versions (live,
+        cover, remix, karaoke, instrumental) are dropped unless a seed is one,
+        and duplicate recordings collapse. available is false when no
+        similar-tracks source is configured.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RadioRequest" }
+      responses:
+        "200":
+          description: radio tracks
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimilarTracks" }
+        "400": { description: at least one seed, each with an artist, is required }
   /not-interested:
     get:
       summary: Every Not interested mark, most recent first
@@ -1858,6 +1880,18 @@ components:
       properties:
         available: { type: boolean }
         tracks: { type: array, items: { $ref: "#/components/schemas/RecommendedTrack" } }
+    RadioSeed:
+      type: object
+      description: A track, or an artist when title is omitted.
+      required: [artist]
+      properties:
+        artist: { type: string }
+        title: { type: string }
+    RadioRequest:
+      type: object
+      required: [seeds]
+      properties:
+        seeds: { type: array, items: { $ref: "#/components/schemas/RadioSeed" } }
     NotInterestedMark:
       type: object
       required: [key, kind, artist, markedAt]
