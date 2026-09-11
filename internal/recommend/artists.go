@@ -59,8 +59,7 @@ type similarArtistSource struct {
 }
 
 // SimilarArtists merges candidates from every capable search adapter and each
-// dedicated source. Agreement ranks ahead of single-source candidates until a
-// personal ranking model replaces this temporary ordering.
+// dedicated source. Agreement ranks ahead of single-source candidates.
 func (s *Service) SimilarArtists(ctx context.Context, source, id string) ArtistResult {
 	var capable []similarArtistSource
 	for _, src := range s.liveSources() {
@@ -78,18 +77,20 @@ func (s *Service) SimilarArtists(ctx context.Context, source, id string) ArtistR
 		return result
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, s.timeout)
-	defer cancel()
-	seed := s.artistSeed(ctx, source, id)
-	candidates, available := s.artistCandidates(ctx, seed, capable)
+	sourceCtx, cancelSources := context.WithTimeout(ctx, s.timeout)
+	seed := s.artistSeed(sourceCtx, source, id)
+	candidates, available := s.artistCandidates(sourceCtx, seed, capable)
+	cancelSources()
 	if !available {
 		return ArtistResult{Artists: []core.ExternalArtist{}}
 	}
-	resolved := s.matchArtistCandidates(ctx, candidates)
+	matchCtx, cancelMatches := context.WithTimeout(ctx, s.timeout)
+	defer cancelMatches()
+	resolved := s.matchArtistCandidates(matchCtx, candidates)
 	if len(resolved) > similarArtistLimit {
 		resolved = resolved[:similarArtistLimit]
 	}
-	if ctx.Err() == nil || len(resolved) > 0 {
+	if matchCtx.Err() == nil || len(resolved) > 0 {
 		s.cache.put(key, resolved)
 	}
 	result.Artists = s.withoutMarkedArtists(ctx, resolved)

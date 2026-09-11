@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/uhhhm/reverb/internal/recommend/listenbrainz"
 	"github.com/uhhhm/reverb/internal/recommend/quality"
 )
 
@@ -29,6 +30,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fixturePath := flags.String("fixture", defaultFixture, "anonymised history and recorded network responses")
 	databasePath := flags.String("db", "", "use play history from this Reverb database")
 	baselinePath := flags.String("baseline", defaultBaseline, "baseline report to compare against")
+	recordCache := flags.String("record-cache", "", "capture ListenBrainz responses to this fixture (requires -db)")
 	writeBaseline := flags.Bool("write-baseline", false, "replace the baseline with the current fixture report")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -44,6 +46,20 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("load database: %w", err)
 		}
 		fixture.Name = "database"
+	}
+	if *recordCache != "" {
+		if *databasePath == "" {
+			return fmt.Errorf("-record-cache requires -db")
+		}
+		fixture.Sources = nil
+		fixture, err = quality.RecordSource(ctx, fixture, listenbrainz.New())
+		if err != nil {
+			return fmt.Errorf("record ListenBrainz cache: %w", err)
+		}
+		if err := quality.WriteFixture(*recordCache, fixture); err != nil {
+			return fmt.Errorf("write recorded cache: %w", err)
+		}
+		fmt.Fprintf(stderr, "saved replayable fixture to %s\n", *recordCache)
 	}
 	report, err := quality.Evaluate(ctx, fixture)
 	if err != nil {

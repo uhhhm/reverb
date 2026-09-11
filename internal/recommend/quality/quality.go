@@ -108,6 +108,32 @@ func Evaluate(ctx context.Context, fixture Fixture) (Report, error) {
 	}, nil
 }
 
+// RecordSource captures the source responses used by the evaluator so a real
+// database run can be replayed without network access.
+func RecordSource(ctx context.Context, fixture Fixture, source recommend.TrackSimilarity) (Fixture, error) {
+	training, hidden := splitHistory(fixture.Plays, fixture.HoldoutDays)
+	if len(training) == 0 || len(hidden) == 0 {
+		return Fixture{}, errors.New("quality: history must contain plays on both sides of the holdout boundary")
+	}
+	seeds := evaluationSeeds(training)
+	recorded := RecordedSource{Name: source.Name(), Lookups: make([]RecordedLookup, 0, len(seeds))}
+	for _, seed := range seeds {
+		candidates, err := source.SimilarTracks(ctx, seed, 30)
+		if err != nil {
+			return Fixture{}, fmt.Errorf("record %s for %q by %q: %w", source.Name(), seed.Title, seed.Artist, err)
+		}
+		recorded.Lookups = append(recorded.Lookups, RecordedLookup{Seed: seed, Candidates: candidates})
+	}
+	kept := fixture.Sources[:0:0]
+	for _, existing := range fixture.Sources {
+		if existing.Name != source.Name() {
+			kept = append(kept, existing)
+		}
+	}
+	fixture.Sources = append(kept, recorded)
+	return fixture, nil
+}
+
 func splitHistory(plays []Play, holdoutDays int) ([]Play, []Play) {
 	ordered := append([]Play(nil), plays...)
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].PlayedAt < ordered[j].PlayedAt })
@@ -124,15 +150,25 @@ func trackSeed(play Play) recommend.TrackSeed {
 }
 
 func radioSeeds(training []Play) []recommend.Seed {
-	seeds := make([]recommend.Seed, 0, 5)
-	seen := map[string]bool{}
-	for i := len(training) - 1; i >= 0 && len(seeds) < 5; i-- {
-		key := playKey(training[i])
-		if seen[key] {
+	trackSeeds := evaluationSeeds(training)
+	seeds := make([]recommend.Seed, 0, len(trackSeeds))
+	for _, seed := range trackSeeds {
+		seeds = append(seeds, recommend.Seed{Artist: seed.Artist, Title: seed.Title, MBID: seed.MBID})
+	}
+	return seeds
+}
+
+func evaluationSeeds(training []Play) []recommend.TrackSeed {
+	plays := make([]Play, 0, 5)
+	for i := len(training) - 1; i >= 0 && len(plays) < 5; i-- {
+		if containsPlay(plays, training[i]) {
 			continue
 		}
-		seen[key] = true
-		seeds = append(seeds, recommend.Seed{Artist: training[i].Artist, Title: training[i].Title, MBID: training[i].MBID})
+		plays = append(plays, training[i])
+	}
+	seeds := make([]recommend.TrackSeed, 0, len(plays))
+	for _, play := range plays {
+		seeds = append(seeds, trackSeed(play))
 	}
 	return seeds
 }
@@ -141,32 +177,31 @@ func metrics(predictions []core.ExternalResult, hidden []Play, k int) SurfaceMet
 	if len(predictions) > k {
 		predictions = predictions[:k]
 	}
-	predicted := map[string]bool{}
-	for _, prediction := range predictions {
-		predicted[resultKey(prediction)] = true
-	}
-	hiddenUnique := map[string]bool{}
+	hiddenUnique := make([]Play, 0, len(hidden))
 	hits := 0
 	for _, play := range hidden {
-		key := playKey(play)
-		hiddenUnique[key] = true
-		if predicted[key] {
+		if !containsPlay(hiddenUnique, play) {
+			hiddenUnique = append(hiddenUnique, play)
+		}
+		if anyResultMatchesPlay(predictions, play) {
 			hits++
 		}
 	}
 	uniqueHits := 0
-	for key := range hiddenUnique {
-		if predicted[key] {
+	for _, play := range hiddenUnique {
+		if anyResultMatchesPlay(predictions, play) {
 			uniqueHits++
 		}
 	}
 	dcg := 0.0
-	seenRelevant := map[string]bool{}
+	seenRelevant := make([]bool, len(hiddenUnique))
 	for i, prediction := range predictions {
-		key := resultKey(prediction)
-		if hiddenUnique[key] && !seenRelevant[key] {
-			dcg += 1 / math.Log2(float64(i)+2)
-			seenRelevant[key] = true
+		for hiddenIndex, play := range hiddenUnique {
+			if !seenRelevant[hiddenIndex] && resultMatchesPlay(prediction, play) {
+				dcg += 1 / math.Log2(float64(i)+2)
+				seenRelevant[hiddenIndex] = true
+				break
+			}
 		}
 	}
 	idealCount := min(k, len(hiddenUnique))
@@ -179,6 +214,35 @@ func metrics(predictions []core.ExternalResult, hidden []Play, k int) SurfaceMet
 		HitRate: fraction(hits, len(hidden)), RecallAtK: fraction(uniqueHits, len(hiddenUnique)),
 		NDCGAtK: fractionFloat(dcg, idcg),
 	}
+}
+
+func anyResultMatchesPlay(results []core.ExternalResult, play Play) bool {
+	for _, result := range results {
+		if resultMatchesPlay(result, play) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPlay(plays []Play, candidate Play) bool {
+	for _, play := range plays {
+		if identitiesMatch(play.Artist, play.Title, play.MBID, candidate.Artist, candidate.Title, candidate.MBID) {
+			return true
+		}
+	}
+	return false
+}
+
+func resultMatchesPlay(result core.ExternalResult, play Play) bool {
+	return identitiesMatch(result.Artist, result.Title, result.MBID, play.Artist, play.Title, play.MBID)
+}
+
+func identitiesMatch(artistA, titleA, mbidA, artistB, titleB, mbidB string) bool {
+	if mbidA != "" && mbidB != "" {
+		return mbidA == mbidB
+	}
+	return nameKey(artistA, titleA) == nameKey(artistB, titleB)
 }
 
 func fraction(numerator, denominator int) float64 {

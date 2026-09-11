@@ -27,7 +27,7 @@ function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={['/similar-tracks?artist=Daft%20Punk&title=One%20More%20Time']}>
+      <MemoryRouter initialEntries={['/similar-tracks?artist=Daft%20Punk&title=One%20More%20Time&mbid=recording-seed']}>
         <Routes>
           <Route path="/similar-tracks" element={<SimilarTracks />} />
         </Routes>
@@ -56,7 +56,7 @@ describe('Similar tracks page', () => {
   it('asks about the seed track from the URL', () => {
     respond(undefined, true)
     renderPage()
-    expect(useSimilarTracks).toHaveBeenCalledWith('Daft Punk', 'One More Time')
+    expect(useSimilarTracks).toHaveBeenCalledWith('Daft Punk', 'One More Time', 'recording-seed')
   })
 
   it('plays the list from the clicked track', () => {

@@ -29,11 +29,11 @@ export function useSimilarArtists(source: string, id: string) {
 }
 
 /** Playable tracks similar to a seed. Sources are merged by the server. */
-export function useSimilarTracks(artist: string, title: string) {
+export function useSimilarTracks(artist: string, title: string, mbid?: string) {
   return useQuery({
-    queryKey: ['similar-tracks', artist, title],
+    queryKey: ['similar-tracks', artist, title, mbid],
     queryFn: () =>
-      api.get<SimilarTracksResult>(`/recommendations/similar-tracks?${new URLSearchParams({ artist, title })}`),
+      api.get<SimilarTracksResult>(`/recommendations/similar-tracks?${new URLSearchParams({ artist, title, ...(mbid ? { mbid } : {}) })}`),
     enabled: !!artist && !!title,
     staleTime: STALE_MS,
   })
@@ -66,10 +66,11 @@ export function recommendedTrackToTrack(r: RecommendedTrack): Track {
       suffix: '',
       contentType: '',
       ...(r.isrc ? { isrc: r.isrc } : {}),
+      ...(r.mbid ? { mbid: r.mbid } : {}),
     }
   }
   return externalTrackFromRef(
-    { source: r.source, externalId: r.externalId, title: r.title, artist: r.artist, album: r.album, isrc: r.isrc, durationMs: r.durationMs },
+    { source: r.source, externalId: r.externalId, title: r.title, artist: r.artist, album: r.album, isrc: r.isrc, mbid: r.mbid, durationMs: r.durationMs },
     r.artistExternalId ? { artistExternalId: r.artistExternalId } : {},
   )
 }

@@ -35,6 +35,7 @@ export function externalTrackFromRef(ref: ExternalTrackRef, opts: ExternalTrackO
     suffix: '',
     contentType: '',
     ...(ref.isrc ? { isrc: ref.isrc } : {}),
+    ...(ref.mbid ? { mbid: ref.mbid } : {}),
     ...(opts.artistExternalId ? { artistExternalId: opts.artistExternalId } : {}),
     externalStream: { source: ref.source, externalId: ref.externalId },
   }
@@ -54,7 +55,7 @@ export function externalResultFromRef(
     album: ref.album ?? fallbackAlbum,
     durationMs: ref.durationMs,
     isrc: ref.isrc,
+    mbid: ref.mbid,
     type: 'track',
   }
 }
-

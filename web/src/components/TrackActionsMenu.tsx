@@ -119,13 +119,13 @@ export function TrackActionsMenu({ track, onRename, onRemove, onRemoveFromLibrar
     icon: 'play',
     label: 'Start Radio',
     description: 'Play this track, then an endless stream like it',
-    onSelect: () => startRadio({ lead: [track], seeds: [{ artist: track.artist, title: track.title }] }),
+    onSelect: () => startRadio({ lead: [track], seeds: [{ artist: track.artist, title: track.title, ...(track.mbid ? { mbid: track.mbid } : {}) }] }),
   })
   if (track.title && track.artist) items.push({
     icon: 'browse',
     label: 'Similar tracks',
     description: 'Tracks like this one, from your library and your sources',
-    onSelect: () => navigate(`/similar-tracks?${new URLSearchParams({ artist: track.artist, title: track.title })}`),
+    onSelect: () => navigate(`/similar-tracks?${new URLSearchParams({ artist: track.artist, title: track.title, ...(track.mbid ? { mbid: track.mbid } : {}) })}`),
   })
   if (track.id && track.title && track.artist) items.push({
     icon: 'x',

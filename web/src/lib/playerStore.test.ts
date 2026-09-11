@@ -265,8 +265,10 @@ describe('Radio', () => {
 
   it('seeds a list Radio from tracks spread across the list', () => {
     const list = Array.from({ length: 10 }, (_, i) => track(String(i), 'A', 'S' + i))
+    list[0].mbid = 'recording-0'
     const start = radioFromTracks(list)
     expect(start.lead.map((t) => t.id)).toEqual(['0'])
     expect(start.seeds.map((s) => s.title)).toEqual(['S0', 'S2', 'S4', 'S6', 'S8'])
+    expect(start.seeds[0].mbid).toBe('recording-0')
   })
 })

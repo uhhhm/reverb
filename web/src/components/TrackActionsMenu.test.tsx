@@ -41,7 +41,7 @@ vi.mock('../lib/playerStore', () => ({
   usePlayer: (sel: (s: unknown) => unknown) => sel({ startRadio: mockStartRadio }),
 }))
 
-const track = makeTrack({ id: 't1', title: '01 - Dunanna Pit', artist: 'A', bitRate: 143 })
+const track = makeTrack({ id: 't1', title: '01 - Dunanna Pit', artist: 'A', bitRate: 143, mbid: 'recording-1' })
 
 function open() {
   render(
@@ -61,7 +61,7 @@ describe('TrackActionsMenu radio', () => {
   it('starts Radio seeded by this track', () => {
     open()
     fireEvent.click(screen.getByRole('menuitem', { name: /start radio/i }))
-    expect(mockStartRadio).toHaveBeenCalledWith({ lead: [track], seeds: [{ artist: 'A', title: '01 - Dunanna Pit' }] })
+    expect(mockStartRadio).toHaveBeenCalledWith({ lead: [track], seeds: [{ artist: 'A', title: '01 - Dunanna Pit', mbid: 'recording-1' }] })
   })
 })
 
@@ -77,7 +77,7 @@ describe('TrackActionsMenu similar tracks', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: /more actions/i }))
     fireEvent.click(screen.getByRole('menuitem', { name: /similar tracks/i }))
-    expect(screen.getByTestId('similar-probe')).toHaveTextContent('artist=A title=01 - Dunanna Pit')
+    expect(screen.getByTestId('similar-probe')).toHaveTextContent('artist=A title=01 - Dunanna Pit mbid=recording-1')
   })
 
   it('is offered for a track that streams from a search source', () => {
@@ -117,7 +117,7 @@ describe('TrackActionsMenu not interested', () => {
 
 function SimilarTracksProbe() {
   const [params] = useSearchParams()
-  return <div data-testid="similar-probe">{`artist=${params.get('artist')} title=${params.get('title')}`}</div>
+  return <div data-testid="similar-probe">{`artist=${params.get('artist')} title=${params.get('title')} mbid=${params.get('mbid')}`}</div>
 }
 
 describe('TrackActionsMenu', () => {

@@ -34,6 +34,14 @@ func (s *similarTracks) SimilarTracks(context.Context, recommend.TrackSeed, int)
 	return s.cands, s.err
 }
 
+type blockingTracks struct{ name string }
+
+func (s blockingTracks) Name() string { return s.name }
+func (s blockingTracks) SimilarTracks(ctx context.Context, _ recommend.TrackSeed, _ int) ([]recommend.TrackCandidate, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 // trackSource answers a track search with every result whose title appears in
 // the query, and counts its searches.
 type trackSource struct {
@@ -130,12 +138,12 @@ func TestSimilarTracksMergeSourcesAndRankAgreementFirst(t *testing.T) {
 		{Artist: "Shared Artist", Title: "Shared Track", MBID: "mbid-shared"},
 		{Artist: "Artist B", Title: "Only ListenBrainz", MBID: "mbid-listenbrainz"},
 	}}
-	search := &trackSource{plainSource: plainSource{name: "deezer"}, tracks: []core.ExternalResult{
+	catalog := &trackSource{plainSource: plainSource{name: "deezer"}, tracks: []core.ExternalResult{
 		{Source: "deezer", ExternalID: "shared", Title: "Shared Track", Artist: "Shared Artist", MBID: "mbid-shared", Type: core.EntityTrack},
 		{Source: "deezer", ExternalID: "lfm", Title: "Only Last.fm", Artist: "Artist A", MBID: "mbid-lastfm", Type: core.EntityTrack},
 		{Source: "deezer", ExternalID: "lb", Title: "Only ListenBrainz", Artist: "Artist B", MBID: "mbid-listenbrainz", Type: core.EntityTrack},
 	}}
-	svc := newTrackServiceWithSources([]recommend.TrackSimilarity{lastfm, listenbrainz}, libraryMatcher{}, nil, search)
+	svc := newTrackServiceWithSources([]recommend.TrackSimilarity{lastfm, listenbrainz}, libraryMatcher{}, nil, catalog)
 
 	got := svc.SimilarTracksFor(context.Background(), recommend.TrackSeed{Artist: "Seed Artist", Title: "Seed Track", MBID: "seed-mbid"})
 	if len(got.Tracks) != 3 {
@@ -152,10 +160,10 @@ func TestSimilarTracksMergeSourcesAndRankAgreementFirst(t *testing.T) {
 func TestSimilarTracksUseNamesWhenOnlyOneCandidateHasAnMBID(t *testing.T) {
 	lastfm := &similarTracks{name: "lastfm", cands: []recommend.TrackCandidate{{Artist: "Shared Artist", Title: "Shared Track"}}}
 	listenbrainz := &similarTracks{name: "listenbrainz", cands: []recommend.TrackCandidate{{Artist: "Shared Artist", Title: "Shared Track", MBID: "mbid-shared"}}}
-	search := &trackSource{plainSource: plainSource{name: "deezer"}, tracks: []core.ExternalResult{
+	catalog := &trackSource{plainSource: plainSource{name: "deezer"}, tracks: []core.ExternalResult{
 		{Source: "deezer", ExternalID: "shared", Title: "Shared Track", Artist: "Shared Artist", MBID: "mbid-shared", Type: core.EntityTrack},
 	}}
-	svc := newTrackServiceWithSources([]recommend.TrackSimilarity{lastfm, listenbrainz}, libraryMatcher{}, nil, search)
+	svc := newTrackServiceWithSources([]recommend.TrackSimilarity{lastfm, listenbrainz}, libraryMatcher{}, nil, catalog)
 
 	got := svc.SimilarTracks(context.Background(), "Seed Artist", "Seed Track")
 	if len(got.Tracks) != 1 || len(got.Tracks[0].RecommendationSources) != 2 {
@@ -174,6 +182,25 @@ func TestSimilarTracksKeepHealthySourceWhenPeerFails(t *testing.T) {
 	got := svc.SimilarTracks(context.Background(), "Seed Artist", "Seed Track")
 	if !got.Available || len(got.Tracks) != 1 || got.Tracks[0].ExternalID != "a" {
 		t.Fatalf("got %+v, want the healthy source result", got)
+	}
+}
+
+func TestSimilarTracksKeepHealthySourceWhenPeerConsumesSourceDeadline(t *testing.T) {
+	healthy := &similarTracks{name: "listenbrainz", cands: []recommend.TrackCandidate{{Artist: "Artist A", Title: "Track A", MBID: "mbid-a"}}}
+	catalog := &trackSource{plainSource: plainSource{name: "deezer"}, tracks: []core.ExternalResult{
+		{Source: "deezer", ExternalID: "a", Title: "Track A", Artist: "Artist A", MBID: "mbid-a", Type: core.EntityTrack},
+	}}
+	svc := recommend.New(
+		func() []search.SearchSource { return []search.SearchSource{catalog} },
+		recommend.WithMatcher(func() recommend.Matcher { return libraryMatcher{} }),
+		recommend.WithTrackSource(blockingTracks{name: "lastfm"}),
+		recommend.WithTrackSource(healthy),
+		recommend.WithTimeout(20*time.Millisecond),
+	)
+
+	got := svc.SimilarTracks(context.Background(), "Seed Artist", "Seed Track")
+	if !got.Available || len(got.Tracks) != 1 || got.Tracks[0].ExternalID != "a" {
+		t.Fatalf("got %+v, want the healthy source result after the peer timed out", got)
 	}
 }
 

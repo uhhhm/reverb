@@ -29,8 +29,9 @@ type Seed struct {
 // turned into a few of that artist's own tracks, which lead the result; after
 // them come tracks similar to every seed, interleaved in seed order so no one
 // seed crowds out the rest. There is no personal ranking: candidates keep the
-// order their sources gave. Radio is not a discovery surface, so owned tracks
-// stay, but other versions and duplicate recordings are dropped.
+// order, with candidates supported by several sources first. Radio is not a
+// discovery surface, so owned tracks stay, but other versions and duplicate
+// recordings are dropped.
 func (s *Service) Radio(ctx context.Context, seeds []Seed) TrackResult {
 	if len(s.tracks) == 0 {
 		return TrackResult{Tracks: []core.ExternalResult{}}

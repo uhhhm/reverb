@@ -27,6 +27,12 @@ func LoadReport(path string) (Report, error) {
 	return report, nil
 }
 
+// WriteFixture saves history and captured source responses for deterministic
+// replay on later evaluator runs.
+func WriteFixture(path string, fixture Fixture) error {
+	return writeJSON(path, fixture)
+}
+
 func loadJSON(path string, out any) error {
 	file, err := os.Open(path)
 	if err != nil {
@@ -43,7 +49,11 @@ func loadJSON(path string, out any) error {
 
 // WriteReport saves stable, indented JSON for review and future comparisons.
 func WriteReport(path string, report Report) error {
-	body, err := json.MarshalIndent(report, "", "  ")
+	return writeJSON(path, report)
+}
+
+func writeJSON(path string, value any) error {
+	body, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return err
 	}

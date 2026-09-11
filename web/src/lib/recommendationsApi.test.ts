@@ -12,13 +12,14 @@ describe('recommendedTrackToTrack', () => {
       artist: 'Daft Punk',
       album: '',
       durationMs: 429000,
+      mbid: 'recording-owned',
       type: 'track',
       match: { status: 'in_library', libraryTrackId: 'lib-7', method: 'fuzzy', confidence: 0.9, albumId: 'al-1', artistId: 'ar-1', coverArtId: 'cov-1' },
     }
     const track = recommendedTrackToTrack(owned)
     expect(track.id).toBe('lib-7')
     expect(track.externalStream).toBeUndefined()
-    expect(track).toMatchObject({ title: 'Around the World', artist: 'Daft Punk', albumId: 'al-1', artistId: 'ar-1', coverArtId: 'cov-1' })
+    expect(track).toMatchObject({ title: 'Around the World', artist: 'Daft Punk', albumId: 'al-1', artistId: 'ar-1', coverArtId: 'cov-1', mbid: 'recording-owned' })
   })
 
   it('streams anything else from its source', () => {
@@ -29,10 +30,11 @@ describe('recommendedTrackToTrack', () => {
       artist: 'Justice',
       album: 'Cross',
       durationMs: 242000,
+      mbid: 'recording-external',
       type: 'track',
       artistExternalId: '6404',
     })
     expect(track.externalStream).toEqual({ source: 'deezer', externalId: '3135556' })
-    expect(track).toMatchObject({ title: 'D.A.N.C.E.', artist: 'Justice', album: 'Cross', artistExternalId: '6404' })
+    expect(track).toMatchObject({ title: 'D.A.N.C.E.', artist: 'Justice', album: 'Cross', artistExternalId: '6404', mbid: 'recording-external' })
   })
 })

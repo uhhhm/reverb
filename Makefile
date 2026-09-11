@@ -40,6 +40,10 @@ check-full: check test-race
 # Deterministic holdout evaluation against anonymised history and recorded
 # recommendation-source responses. Use ARGS="-db /path/to/reverb.db" for local
 # history, optionally with -fixture pointing at a matching recorded cache.
+# Capture a real-history replay with:
+# make recommend-quality ARGS="-db /path/reverb.db -record-cache /path/recommend-cache.json"
+# Replay it later with:
+# make recommend-quality ARGS="-db /path/reverb.db -fixture /path/recommend-cache.json"
 recommend-quality:
 	go run ./cmd/recommend-quality $(ARGS)
 

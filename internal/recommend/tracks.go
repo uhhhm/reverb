@@ -16,8 +16,8 @@ import (
 // missing API key). The surfaces it feeds are hidden rather than shown empty.
 var ErrNotConfigured = errors.New("recommend: source not configured")
 
-// TrackCandidate is a similar track as a similarity source names it: artist
-// and title only, not yet something that can be played.
+// TrackCandidate is a similar recording before it is matched to something
+// playable. MBID and duration are optional; Sources records its provenance.
 type TrackCandidate struct {
 	Artist     string
 	Title      string
@@ -77,9 +77,9 @@ func (s *Service) SimilarTracksFor(ctx context.Context, seed TrackSeed) TrackRes
 		return result
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, s.timeout)
-	defer cancel()
-	cands, available := s.trackCandidates(ctx, seed)
+	sourceCtx, cancelSources := context.WithTimeout(ctx, s.timeout)
+	cands, available := s.trackCandidates(sourceCtx, seed)
+	cancelSources()
 	if !available {
 		return TrackResult{Tracks: []core.ExternalResult{}}
 	}
@@ -91,10 +91,12 @@ func (s *Service) SimilarTracksFor(ctx context.Context, seed TrackSeed) TrackRes
 			kept = append(kept, c)
 		}
 	}
-	tracks := filterTracks(s.matchCandidates(ctx, kept), []Seed{{Artist: seed.Artist, Title: seed.Title, MBID: seed.MBID}}, similarTracksSurface, nil)
+	matchCtx, cancelMatches := context.WithTimeout(ctx, s.timeout)
+	defer cancelMatches()
+	tracks := filterTracks(s.matchCandidates(matchCtx, kept), []Seed{{Artist: seed.Artist, Title: seed.Title, MBID: seed.MBID}}, similarTracksSurface, nil)
 	// A lookup cut short by the deadline keeps what it matched: re-asking the
 	// source on every reopen would be worse than a shorter list.
-	if ctx.Err() == nil || len(tracks) > 0 {
+	if matchCtx.Err() == nil || len(tracks) > 0 {
 		s.cache.put(key, tracks)
 	}
 	result.Tracks = s.withoutMarkedTracks(ctx, tracks)
@@ -114,7 +116,7 @@ type trackSourceResult struct {
 }
 
 // trackCandidates asks every source independently. Failures stay local to one
-// result, and agreement is the temporary ranker until the taste model arrives.
+// result, and candidates with more source agreement rank first.
 func (s *Service) trackCandidates(ctx context.Context, seed TrackSeed) ([]TrackCandidate, bool) {
 	results := make([]trackSourceResult, len(s.tracks))
 	var wg sync.WaitGroup

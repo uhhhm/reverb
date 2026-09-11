@@ -11,6 +11,16 @@ import (
 	"github.com/uhhhm/reverb/internal/store/db"
 )
 
+type recordingSource struct {
+	seeds []recommend.TrackSeed
+}
+
+func (*recordingSource) Name() string { return "recorded-test" }
+func (s *recordingSource) SimilarTracks(_ context.Context, seed recommend.TrackSeed, _ int) ([]recommend.TrackCandidate, error) {
+	s.seeds = append(s.seeds, seed)
+	return []recommend.TrackCandidate{{Artist: seed.Artist, Title: seed.Title + " Similar"}}, nil
+}
+
 func TestEvaluateHidesRecentPlaysAndReportsEverySurface(t *testing.T) {
 	fixture := quality.Fixture{
 		Name:        "anonymous-test",
@@ -20,7 +30,7 @@ func TestEvaluateHidesRecentPlaysAndReportsEverySurface(t *testing.T) {
 			{Artist: "Artist 001", Title: "Track 001", MBID: "recording-001", PlayedAt: 86400},
 			{Artist: "Artist 002", Title: "Track 002", MBID: "recording-002", PlayedAt: 172800},
 			{Artist: "Artist 003", Title: "Track 003", MBID: "recording-003", PlayedAt: 259200},
-			{Artist: "Artist 004", Title: "Track 004", MBID: "recording-004", PlayedAt: 432000},
+			{Artist: "Artist 004", Title: "Track 004", PlayedAt: 432000},
 			{Artist: "Artist 005", Title: "Track 005", MBID: "recording-005", PlayedAt: 518400},
 		},
 		Sources: []quality.RecordedSource{
@@ -52,6 +62,27 @@ func TestEvaluateHidesRecentPlaysAndReportsEverySurface(t *testing.T) {
 		if metrics.Hits != 1 || metrics.HitRate != 0.5 || metrics.RecallAtK != 0.5 || metrics.NDCGAtK <= 0 {
 			t.Fatalf("%s metrics = %+v", surface, metrics)
 		}
+	}
+}
+
+func TestRecordSourceCapturesEveryEvaluationSeed(t *testing.T) {
+	fixture := quality.Fixture{Name: "database", HoldoutDays: 1, K: 10}
+	for i := 1; i <= 7; i++ {
+		fixture.Plays = append(fixture.Plays, quality.Play{
+			Artist: "Artist", Title: "Track " + string(rune('0'+i)), PlayedAt: int64(i * 86400),
+		})
+	}
+	source := &recordingSource{}
+
+	recorded, err := quality.RecordSource(context.Background(), fixture, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(source.seeds) != 5 || len(recorded.Sources) != 1 || len(recorded.Sources[0].Lookups) != 5 {
+		t.Fatalf("recorded seeds = %d calls and %+v", len(source.seeds), recorded.Sources)
+	}
+	if source.seeds[0].Title != "Track 5" || source.seeds[4].Title != "Track 1" {
+		t.Fatalf("seed order = %+v, want newest training plays first", source.seeds)
 	}
 }
 

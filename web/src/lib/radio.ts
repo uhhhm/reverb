@@ -6,6 +6,7 @@ import type { Track } from './types'
 export interface RadioSeed {
   artist: string
   title?: string
+  mbid?: string
 }
 
 /** What Radio starts with: tracks to play first, and what to recommend from. */
@@ -24,6 +25,14 @@ const REFILL_SEEDS = 3
 const PREWARM_AHEAD = 2
 /** How many tracks of a list seed a Radio started from it. */
 const LIST_SEEDS = 5
+
+function seedFromTrack(track: Track): RadioSeed {
+  return {
+    artist: track.artist,
+    title: track.title,
+    ...(track.mbid ? { mbid: track.mbid } : {}),
+  }
+}
 
 /** What a RadioSession needs from the player. */
 export interface RadioHost {
@@ -62,7 +71,7 @@ export function radioFromTracks(tracks: Track[]): RadioStart {
   const step = Math.max(1, Math.floor(tracks.length / LIST_SEEDS))
   const seeds: RadioSeed[] = []
   for (let i = 0; i < tracks.length && seeds.length < LIST_SEEDS; i += step) {
-    seeds.push({ artist: tracks[i].artist, title: tracks[i].title })
+    seeds.push(seedFromTrack(tracks[i]))
   }
   return { lead: tracks.slice(0, 1), seeds }
 }
@@ -180,7 +189,7 @@ export class RadioSession {
       const key = trackKey(queue[i])
       if (this.seeded.has(key)) continue
       this.seeded.add(key)
-      seeds.push({ artist: queue[i].artist, title: queue[i].title })
+      seeds.push(seedFromTrack(queue[i]))
     }
     return seeds
   }

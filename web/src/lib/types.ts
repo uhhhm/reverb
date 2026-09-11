@@ -14,6 +14,7 @@ export interface Track {
   suffix: string
   contentType: string
   isrc?: string
+  mbid?: string
   artistExternalId?: string
   /**
    * Non-destructive playback boundaries. The file is never rewritten — the
@@ -72,6 +73,7 @@ export interface ExternalTrackRef {
   artist?: string
   album?: string
   isrc?: string
+  mbid?: string
   durationMs: number
 }
 

@@ -14,8 +14,9 @@ export default function SimilarTracks() {
   const [params] = useSearchParams()
   const artist = params.get('artist') ?? ''
   const title = params.get('title') ?? ''
+  const mbid = params.get('mbid') ?? undefined
   useDocumentTitle(title ? `Similar to ${title}` : 'Similar tracks')
-  const { data, isLoading } = useSimilarTracks(artist, title)
+  const { data, isLoading } = useSimilarTracks(artist, title, mbid)
   const playTrackList = usePlayer((s) => s.playTrackList)
   const currentTrackId = usePlayer((s) => s.current?.id)
 

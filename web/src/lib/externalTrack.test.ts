@@ -10,6 +10,7 @@ const ref: ExternalTrackRef = {
   album: 'Kid A',
   durationMs: 2000,
   isrc: 'GBAYE0000123',
+  mbid: 'recording-1',
 }
 
 describe('externalTrackFromRef', () => {
@@ -23,6 +24,7 @@ describe('externalTrackFromRef', () => {
     expect(t.trackNumber).toBe(3)
     expect(t.durationMs).toBe(2000)
     expect(t.isrc).toBe('GBAYE0000123')
+    expect(t.mbid).toBe('recording-1')
   })
 
   it('falls back to album context when ref artist/album are absent', () => {
@@ -47,6 +49,10 @@ describe('externalTrackFromRef', () => {
 })
 
 describe('externalResultFromRef', () => {
+  it('keeps a recording MBID for later recommendation seeds', () => {
+    expect(externalResultFromRef(ref).mbid).toBe('recording-1')
+  })
+
   it('fills artist/album from fallbacks when ref omits them', () => {
     const bare: ExternalTrackRef = { source: 'spotify', externalId: 'x', title: 'T', durationMs: 5 }
     expect(externalResultFromRef(bare, 'Kid A', 'Radiohead')).toMatchObject({
@@ -58,4 +64,3 @@ describe('externalResultFromRef', () => {
     })
   })
 })
-
