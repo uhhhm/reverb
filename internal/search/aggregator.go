@@ -52,6 +52,10 @@ func NewAggregator(sources []SearchSource, matcher Matcher, timeout time.Duratio
 	return &Aggregator{sources: sources, matcher: matcher, timeout: timeout}
 }
 
+// Sources returns the enabled sources in configured priority order, for callers
+// that need a capability beyond search (e.g. SimilarArtistsProvider).
+func (a *Aggregator) Sources() []SearchSource { return a.sources }
+
 func (a *Aggregator) source(name string) SearchSource {
 	for _, src := range a.sources {
 		if src.Name() == name {

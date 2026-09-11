@@ -1,6 +1,8 @@
 import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useArtistDetail } from '../lib/coverageApi'
+import { useSimilarArtists } from '../lib/recommendationsApi'
+import { useMarkNotInterested } from '../lib/notInterestedApi'
 import { useCoverageStream } from '../lib/coverageStore'
 import { postBatchDownload } from '../lib/downloadApi'
 import { useDownloads } from '../lib/downloadStore'
@@ -97,6 +99,11 @@ function AlbumCard({ album, cov, resolved, onNavigate }: AlbumCardProps) {
 export default function Artist() {
   const { source = 'library', id = '' } = useParams()
   const { data: detail, isLoading, isError } = useArtistDetail(source, id)
+  const similarArtists = useSimilarArtists(source, id).data?.artists ?? []
+  const markNotInterested = useMarkNotInterested()
+  // The page is reused across artists; a mark made on one must not show on the next.
+  const resetMark = markNotInterested.reset
+  useEffect(() => resetMark(), [source, id, resetMark])
   useDocumentTitle(detail?.name ?? 'Artist')
   const coverage = useCoverageStream(source, id, detail?.resolved === true)
   const navigate = useNavigate()
@@ -261,8 +268,8 @@ export default function Artist() {
               </p>
             )}
 
-            {source === 'library' && id && (
-              <div className="mt-4 flex items-center gap-3">
+            <div className="mt-4 flex items-center gap-3">
+              {source === 'library' && id && (
                 <Button
                   variant="ghost"
                   size="md"
@@ -271,8 +278,17 @@ export default function Artist() {
                 >
                   Rename
                 </Button>
-              </div>
-            )}
+              )}
+              {/* Stops this artist being recommended anywhere, on every device. */}
+              <Button
+                variant="ghost"
+                size="md"
+                disabled={markNotInterested.isPending || markNotInterested.isSuccess}
+                onClick={() => markNotInterested.mutate({ kind: 'artist', source, id, name: detail.name })}
+              >
+                {markNotInterested.isSuccess ? 'Marked not interested' : 'Not interested'}
+              </Button>
+            </div>
 
             {/* Acquisition action row — "Download all missing" (guarded by a
                 confirm so a stray click can't enqueue a large batch). */}
@@ -360,6 +376,26 @@ export default function Artist() {
           <EmptyState icon="browse" title="No albums" />
         )}
       </section>
+
+      {/* Related artists — hidden when no source relates artists or the lookup failed */}
+      {similarArtists.length > 0 && (
+        <section aria-label="Fans also like">
+          <h2 className="text-base font-bold text-text-primary mb-4">Fans also like</h2>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {similarArtists.map((artist) => (
+              <MediaCard
+                key={`${artist.source}:${artist.externalId}`}
+                title={artist.name}
+                subtitle="Artist"
+                coverSrc={artist.coverUrl || undefined}
+                coverId={artist.coverArtId}
+                rounded="full"
+                onClick={() => navigate(`/artist/${artist.source}/${artist.externalId}`)}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       {renamingArtist && (
         <RenameEntityDialog

@@ -13,6 +13,14 @@ vi.mock('../lib/coverageApi', () => ({
   useArtistDetail: vi.fn(),
 }))
 
+vi.mock('../lib/recommendationsApi', () => ({
+  useSimilarArtists: vi.fn(() => ({ data: undefined })),
+}))
+
+vi.mock('../lib/notInterestedApi', () => ({
+  useMarkNotInterested: vi.fn(() => ({ mutate: vi.fn(), reset: vi.fn(), isPending: false })),
+}))
+
 vi.mock('../lib/statsApi', () => ({
   entity: vi.fn(async () => ({
     Plays: 0,
@@ -66,6 +74,8 @@ import { useAuthStore } from '../lib/authStore'
 import { useAlbumPalette } from '../lib/useAlbumPalette'
 import { useNavigate } from 'react-router-dom'
 import * as statsApi from '../lib/statsApi'
+import { useSimilarArtists } from '../lib/recommendationsApi'
+import { useMarkNotInterested } from '../lib/notInterestedApi'
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -639,5 +649,68 @@ describe('Artist page', () => {
     const creepBtn = screen.getByRole('button', { name: 'Creep' })
     expect(kidABtn.className).not.toMatch(/border-dashed/)
     expect(creepBtn.className).toMatch(/border-dashed/)
+  })
+})
+
+describe('Fans also like', () => {
+  beforeEach(() => {
+    vi.mocked(useArtistDetail).mockReturnValue({
+      data: STUB_DETAIL,
+      isLoading: false,
+      isError: false,
+    } as ReturnType<typeof useArtistDetail>)
+    vi.mocked(useCoverageStream).mockReturnValue(STUB_COVERAGE)
+  })
+
+  function similar(data: { available: boolean; artists: { source: string; externalId: string; name: string; coverUrl?: string }[] } | undefined) {
+    vi.mocked(useSimilarArtists).mockReturnValue({ data } as ReturnType<typeof useSimilarArtists>)
+  }
+
+  it('asks about the artist on the page', () => {
+    similar(undefined)
+    wrapper(<Artist />)
+    expect(useSimilarArtists).toHaveBeenCalledWith('spotify', 'ar-radiohead')
+  })
+
+  it('lists related artists, each linking to its artist page', () => {
+    similar({ available: true, artists: [
+      { source: 'deezer', externalId: '6404', name: 'Justice', coverUrl: 'https://cdn.example.com/justice.jpg' },
+      { source: 'deezer', externalId: '2049', name: 'Cassius' },
+    ] })
+    wrapper(<Artist />)
+    expect(screen.getByRole('region', { name: 'Fans also like' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Justice' }))
+    expect(vi.mocked(useNavigate)()).toHaveBeenCalledWith('/artist/deezer/6404')
+  })
+
+  it('is hidden when no source can relate artists', () => {
+    similar({ available: false, artists: [] })
+    wrapper(<Artist />)
+    expect(screen.queryByRole('region', { name: 'Fans also like' })).toBeNull()
+  })
+
+  it('is hidden when the lookup found nothing or failed', () => {
+    similar({ available: true, artists: [] })
+    wrapper(<Artist />)
+    expect(screen.queryByRole('region', { name: 'Fans also like' })).toBeNull()
+  })
+})
+
+describe('Not interested in an artist', () => {
+  beforeEach(() => {
+    vi.mocked(useArtistDetail).mockReturnValue({
+      data: STUB_DETAIL,
+      isLoading: false,
+      isError: false,
+    } as ReturnType<typeof useArtistDetail>)
+    vi.mocked(useCoverageStream).mockReturnValue(STUB_COVERAGE)
+  })
+
+  it('marks the artist on the page', () => {
+    const mutate = vi.fn()
+    vi.mocked(useMarkNotInterested).mockReturnValue({ mutate, reset: vi.fn(), isPending: false } as unknown as ReturnType<typeof useMarkNotInterested>)
+    wrapper(<Artist />)
+    fireEvent.click(screen.getByRole('button', { name: 'Not interested' }))
+    expect(mutate).toHaveBeenCalledWith({ kind: 'artist', source: 'spotify', id: 'ar-radiohead', name: 'Radiohead' })
   })
 })

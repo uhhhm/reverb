@@ -23,6 +23,7 @@ const OfflineSet = lazy(() => import('./routes/OfflineSet'))
 const AddFromLink = lazy(() => import('./routes/AddFromLink'))
 const ManageTracks = lazy(() => import('./routes/ManageTracks'))
 const P2P = lazy(() => import('./routes/P2P'))
+const SimilarTracks = lazy(() => import('./routes/SimilarTracks'))
 
 /** Redirect bare `/album/:id` or `/artist/:id` URLs to the source-qualified form
  *  `/album/library/:id` / `/artist/library/:id`. These old URLs may exist in
@@ -90,6 +91,7 @@ function Routed() {
         {/* The bulk quality page moved into Manage tracks; keep old links working. */}
         <Route path="/upgrade-quality" element={<Navigate to="/manage-tracks" replace />} />
         <Route path="/p2p" element={<P2P />} />
+        <Route path="/similar-tracks" element={<SimilarTracks />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

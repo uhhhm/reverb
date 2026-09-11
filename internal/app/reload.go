@@ -10,6 +10,7 @@ import (
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/extstream"
 	"github.com/uhhhm/reverb/internal/resolver"
+	"github.com/uhhhm/reverb/internal/search"
 	"github.com/uhhhm/reverb/internal/wiring"
 )
 
@@ -26,6 +27,7 @@ type runtimeSnapshot struct {
 	services api.ActiveServices
 	matcher  resolver.Rematcher
 	lookup   extstream.TrackLookup
+	sources  []search.SearchSource
 	manager  managedDownloads
 }
 
@@ -58,6 +60,7 @@ func snapshot(bundle wiring.ServiceBundle) *runtimeSnapshot {
 	if bundle.Aggregator != nil {
 		n.services.Search = bundle.Aggregator
 		n.lookup = bundle.Aggregator
+		n.sources = bundle.Aggregator.Sources()
 	}
 	if bundle.Coverage != nil {
 		n.services.Coverage = bundle.Coverage
@@ -97,6 +100,18 @@ func (r *ServiceReloader) TrackLookupProvider() func() extstream.TrackLookup {
 		return nil
 	}
 }
+
+// SearchSourcesProvider returns the live search sources, read per call so
+// recommendations follow an adapter reload.
+func (r *ServiceReloader) SearchSourcesProvider() func() []search.SearchSource {
+	return func() []search.SearchSource {
+		if n := r.live.Load(); n != nil {
+			return n.sources
+		}
+		return nil
+	}
+}
+
 func (r *ServiceReloader) Reload(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

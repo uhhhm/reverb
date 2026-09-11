@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom'
 import { TrackActionsMenu } from './TrackActionsMenu'
 import { makeTrack } from '../test/factories'
 import type { UpgradableTrack } from '../lib/upgradeApi'
@@ -31,6 +31,11 @@ vi.mock('../lib/trackQualityApi', () => ({
   useSetTrackQuality: () => ({ mutate: mockSetQuality, isPending: false }),
 }))
 
+const mockMarkNotInterested = vi.fn()
+vi.mock('../lib/notInterestedApi', () => ({
+  useMarkNotInterested: () => ({ mutate: mockMarkNotInterested, isPending: false }),
+}))
+
 const track = makeTrack({ id: 't1', title: '01 - Dunanna Pit', artist: 'A', bitRate: 143 })
 
 function open() {
@@ -46,6 +51,61 @@ beforeEach(() => {
   vi.clearAllMocks()
   upgradable = []
 })
+
+describe('TrackActionsMenu similar tracks', () => {
+  it('opens similar tracks for this track', () => {
+    render(
+      <MemoryRouter>
+        <Routes>
+          <Route path="/" element={<TrackActionsMenu track={track} />} />
+          <Route path="/similar-tracks" element={<SimilarTracksProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /more actions/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /similar tracks/i }))
+    expect(screen.getByTestId('similar-probe')).toHaveTextContent('artist=A title=01 - Dunanna Pit')
+  })
+
+  it('is offered for a track that streams from a search source', () => {
+    render(
+      <MemoryRouter>
+        <TrackActionsMenu track={makeTrack({ id: 'ext:deezer:1', title: 'D.A.N.C.E.', artist: 'Justice', externalStream: { source: 'deezer', externalId: '1' } })} />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /more actions/i }))
+    expect(screen.getByRole('menuitem', { name: /similar tracks/i })).toBeInTheDocument()
+  })
+})
+
+describe('TrackActionsMenu not interested', () => {
+  it('marks a library track by its library id', () => {
+    open()
+    fireEvent.click(screen.getByRole('menuitem', { name: /not interested/i }))
+    expect(mockMarkNotInterested).toHaveBeenCalledWith({
+      kind: 'track', source: 'library', trackId: 't1',
+      title: '01 - Dunanna Pit', artist: 'A', album: 'Test Album', durationMs: 180000,
+    })
+  })
+
+  it('marks a search-source track by its source id', () => {
+    render(
+      <MemoryRouter>
+        <TrackActionsMenu track={makeTrack({ id: 'ext:deezer:1', title: 'D.A.N.C.E.', artist: 'Justice', externalStream: { source: 'deezer', externalId: '1' } })} />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /more actions/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /not interested/i }))
+    expect(mockMarkNotInterested).toHaveBeenCalledWith({
+      kind: 'track', source: 'deezer', externalId: '1', title: 'D.A.N.C.E.', artist: 'Justice',
+    })
+  })
+})
+
+function SimilarTracksProbe() {
+  const [params] = useSearchParams()
+  return <div data-testid="similar-probe">{`artist=${params.get('artist')} title=${params.get('title')}`}</div>
+}
 
 describe('TrackActionsMenu', () => {
   // A low bitrate is not evidence a better file exists — the sources serve

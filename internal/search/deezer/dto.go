@@ -59,6 +59,10 @@ type searchArtistsResponse struct {
 	Data []artistSearchDTO `json:"data"`
 }
 
+type relatedArtistsResponse struct {
+	Data []artistDTO `json:"data"`
+}
+
 type artistAlbumsResponse struct {
 	Data []albumSearchDTO `json:"data"`
 }

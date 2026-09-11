@@ -1,0 +1,51 @@
+{
+  "similartracks": {
+    "track": [
+      {
+        "name": "Around the World",
+        "playcount": 1854210,
+        "mbid": "7a2cba5e-8c4d-4b5b-a5a9-4b3f8b5f1b2c",
+        "match": 1,
+        "url": "https://www.last.fm/music/Daft+Punk/_/Around+the+World",
+        "streamable": { "#text": "0", "fulltrack": "0" },
+        "duration": 429,
+        "artist": {
+          "name": "Daft Punk",
+          "mbid": "056e4f3e-d505-4dad-8ec1-d04f521cbb56",
+          "url": "https://www.last.fm/music/Daft+Punk"
+        },
+        "image": [
+          { "#text": "https://lastfm.freetls.fastly.net/i/u/34s/2a96cbd8b46e442fc41c2b86b821562f.png", "size": "small" }
+        ]
+      },
+      {
+        "name": "D.A.N.C.E.",
+        "playcount": 1203311,
+        "match": 0.842,
+        "url": "https://www.last.fm/music/Justice/_/D.A.N.C.E.",
+        "streamable": { "#text": "0", "fulltrack": "0" },
+        "duration": 242,
+        "artist": {
+          "name": "Justice",
+          "mbid": "ad8b0b5a-8b8c-4c7e-9f4b-7f5c8b6a1e2d",
+          "url": "https://www.last.fm/music/Justice"
+        },
+        "image": []
+      },
+      {
+        "name": "Music Sounds Better with You",
+        "playcount": 998120,
+        "match": 0.713,
+        "url": "https://www.last.fm/music/Stardust/_/Music+Sounds+Better+with+You",
+        "streamable": { "#text": "0", "fulltrack": "0" },
+        "duration": 0,
+        "artist": {
+          "name": "Stardust",
+          "url": "https://www.last.fm/music/Stardust"
+        },
+        "image": []
+      }
+    ],
+    "@attr": { "artist": "Daft Punk" }
+  }
+}

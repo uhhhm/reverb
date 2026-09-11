@@ -2457,6 +2457,220 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/recommendations/artists/{source}/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Artists related to a search-source or library artist ("Fans also like")
+         * @description Source failures and timeouts return an empty list rather than an error, so the section hides without breaking the artist page. Results are cached on this device and never replicated.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description A search source name, or "library" */
+                    source: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description related artists */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SimilarArtists"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/recommendations/similar-tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Playable tracks similar to a seed track (Last.fm similar tracks)
+         * @description Each candidate is matched to something playable: the library copy when owned, otherwise a search-source result that plays through external playback. Candidates nothing matches are dropped. available is false when Last.fm is not configured.
+         */
+        get: {
+            parameters: {
+                query: {
+                    artist: string;
+                    title: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description similar tracks */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SimilarTracks"];
+                    };
+                };
+                /** @description artist and title are required */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/not-interested": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every Not interested mark, most recent first */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description marks */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotInterestedList"];
+                    };
+                };
+                /** @description marks unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Mark a track or artist Not interested on every device
+         * @description A library track is keyed on its catalog identity's original metadata and a search-source track on source + externalId, so the same recording marked on two devices is one mark. An artist is keyed on its library name (for source "library") or the given name.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["NotInterestedRequest"];
+                };
+            };
+            responses: {
+                /** @description the recorded mark */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["NotInterestedMark"];
+                    };
+                };
+                /** @description missing or unknown kind */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description marks unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        /** Undo a mark on every device */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        key: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description removed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description missing key */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description marks unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/album/{source}/{id}": {
         parameters: {
             query?: never;
@@ -4600,6 +4814,79 @@ export interface components {
             /** @enum {string} */
             type: "sync.finished";
             payload: unknown;
+        };
+        ExternalArtist: {
+            source: string;
+            externalId: string;
+            name: string;
+            coverUrl?: string;
+            coverArtId?: string;
+        };
+        /** @description available is false when no configured source can relate artists; an empty list with available set means nothing was found or the lookup failed. */
+        SimilarArtists: {
+            available: boolean;
+            artists: components["schemas"]["ExternalArtist"][];
+        };
+        /** @description A playable recommendation. A library track has source "library", externalId set to the backend track id, canonicalId set to its catalog id, and match.status "in_library"; anything else is a search-source result that plays through external playback. */
+        RecommendedTrack: {
+            source: string;
+            externalId: string;
+            title: string;
+            artist: string;
+            album: string;
+            durationMs: number;
+            isrc?: string;
+            coverUrl?: string;
+            coverArtId?: string;
+            artistExternalId?: string;
+            albumExternalId?: string;
+            type: string;
+            canonicalId?: string;
+            match?: {
+                /** @enum {string} */
+                status: "in_library" | "not_in_library" | "unknown";
+                libraryTrackId: string;
+                method: string;
+                confidence: number;
+                artistId?: string;
+                albumId?: string;
+                coverArtId?: string;
+            };
+        };
+        SimilarTracks: {
+            available: boolean;
+            tracks: components["schemas"]["RecommendedTrack"][];
+        };
+        NotInterestedMark: {
+            key: string;
+            /** @enum {string} */
+            kind: "track" | "artist";
+            title?: string;
+            artist: string;
+            source?: string;
+            externalId?: string;
+            /**
+             * Format: int64
+             * @description Unix milliseconds
+             */
+            markedAt: number;
+        };
+        NotInterestedList: {
+            marks: components["schemas"]["NotInterestedMark"][];
+        };
+        /** @description kind "track": source plus externalId, or source "library" with trackId (the backend track id). kind "artist": source plus id, and name. */
+        NotInterestedRequest: {
+            /** @enum {string} */
+            kind: "track" | "artist";
+            source: string;
+            externalId?: string;
+            trackId?: string;
+            id?: string;
+            title?: string;
+            artist?: string;
+            album?: string;
+            durationMs?: number;
+            name?: string;
         };
         /** @description Mirrors desktop/updater.State. The backend owns polling, downloading and version comparison; the UI only reflects this and decides when to ask. */
         UpdateState: {

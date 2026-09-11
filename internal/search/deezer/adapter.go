@@ -16,11 +16,12 @@ import (
 )
 
 var (
-	_ search.SearchSource        = (*Adapter)(nil)
-	_ search.TrackProvider       = (*Adapter)(nil)
-	_ search.ArtistProvider      = (*Adapter)(nil)
-	_ search.DiscographyProvider = (*Adapter)(nil)
-	_ registry.Plugin            = (*Adapter)(nil)
+	_ search.SearchSource           = (*Adapter)(nil)
+	_ search.TrackProvider          = (*Adapter)(nil)
+	_ search.ArtistProvider         = (*Adapter)(nil)
+	_ search.DiscographyProvider    = (*Adapter)(nil)
+	_ search.SimilarArtistsProvider = (*Adapter)(nil)
+	_ registry.Plugin               = (*Adapter)(nil)
 )
 
 const defaultAPIURL = "https://api.deezer.com"
@@ -180,6 +181,25 @@ func (a *Adapter) GetArtist(ctx context.Context, externalID string) (core.Extern
 		cover = artist.PictureMedium
 	}
 	return core.ExternalArtist{Source: "deezer", ExternalID: id64(artist.ID), Name: artist.Name, CoverURL: cover}, nil
+}
+
+// SimilarArtists returns Deezer's related artists, most similar first.
+func (a *Adapter) SimilarArtists(ctx context.Context, externalID string, limit int) ([]core.ExternalArtist, error) {
+	params := url.Values{}
+	params.Set("limit", strconv.Itoa(limit))
+	var response relatedArtistsResponse
+	if err := a.client.get(ctx, "/artist/"+url.PathEscape(externalID)+"/related", params, &response); err != nil {
+		return nil, err
+	}
+	artists := make([]core.ExternalArtist, 0, len(response.Data))
+	for _, artist := range response.Data {
+		cover := artist.PictureBig
+		if cover == "" {
+			cover = artist.PictureMedium
+		}
+		artists = append(artists, core.ExternalArtist{Source: "deezer", ExternalID: id64(artist.ID), Name: artist.Name, CoverURL: cover})
+	}
+	return artists, nil
 }
 
 // GetArtistDiscography returns the albums Deezer exposes for an artist. Deezer

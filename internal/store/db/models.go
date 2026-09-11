@@ -173,6 +173,16 @@ type MatchCache struct {
 	CoverArtID     string         `json:"cover_art_id"`
 }
 
+type NotInterested struct {
+	Key        string `json:"key"`
+	Kind       string `json:"kind"`
+	Title      string `json:"title"`
+	Artist     string `json:"artist"`
+	Source     string `json:"source"`
+	ExternalID string `json:"external_id"`
+	MarkedAt   int64  `json:"marked_at"`
+}
+
 type OfflineSet struct {
 	DeviceID   string `json:"device_id"`
 	PlaylistID string `json:"playlist_id"`

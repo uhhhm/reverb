@@ -34,11 +34,13 @@ import (
 	"github.com/uhhhm/reverb/internal/library/subsonic"
 	"github.com/uhhhm/reverb/internal/linkadd"
 	"github.com/uhhhm/reverb/internal/materialize"
+	"github.com/uhhhm/reverb/internal/notinterested"
 	"github.com/uhhhm/reverb/internal/override"
 	"github.com/uhhhm/reverb/internal/p2p"
 	"github.com/uhhhm/reverb/internal/play"
 	"github.com/uhhhm/reverb/internal/playlistcrdt"
 	"github.com/uhhhm/reverb/internal/playlistsync"
+	"github.com/uhhhm/reverb/internal/recommend"
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/resolver"
 	"github.com/uhhhm/reverb/internal/scrobble"
@@ -318,6 +320,35 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	playSvc.WithEmitter(emitter)
 	deps.SyncEmit = emitter
 
+	// Not interested marks replicate through the change log; the projection
+	// below applies a peer's marks without emitting them again.
+	marks := notinterested.New(st.Q(), emitter)
+	deps.NotInterested = marks
+
+	// Recommendations read the LIVE sources, library and matcher, so an adapter
+	// reload changes what they can ask without rebuilding the module. Last.fm is
+	// the similar-tracks source; it reuses the scrobbling API key.
+	liveMatcher := reloader.MatcherProvider()
+	deps.Recommend = recommend.New(reloader.SearchSourcesProvider(),
+		recommend.WithLibrary(func() recommend.Library {
+			if lib := reloader.Current().Library; lib != nil {
+				return lib
+			}
+			return nil
+		}),
+		recommend.WithTrackSource(lastfm.NewSimilarity(lastfm.New(), func() string { return scrobbleCfg().APIKey })),
+		recommend.WithMatcher(func() recommend.Matcher {
+			if m := liveMatcher(); m != nil {
+				return m
+			}
+			return nil
+		}),
+		recommend.WithCatalogIDs(deps.Overrides.CatalogIDsForTracks),
+		recommend.WithExclusions(func(ctx context.Context) (recommend.Exclusions, error) {
+			return marks.Set(ctx)
+		}),
+	)
+
 	playlistProjection := playlistcrdt.New(deps.SyncStore, wiring.NewSyncStore(st.Q()), authorDevice)
 	if bundle.Sync != nil {
 		bundle.Sync.WithEmitter(playlistProjection)
@@ -332,7 +363,8 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 			WithPlaylists(playlistProjection).
 			WithTrackStore(st.Q()).
 			WithEntities(deps.Entities).
-			WithCovers(coverSvc)
+			WithCovers(coverSvc).
+			WithNotInterested(marks)
 	}
 	projector := newMaterializer()
 	deps.SyncStore.SetMaterializer(projector)

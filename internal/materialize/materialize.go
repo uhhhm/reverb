@@ -20,6 +20,7 @@ import (
 	"github.com/uhhhm/reverb/internal/catalog"
 	"github.com/uhhhm/reverb/internal/cover"
 	"github.com/uhhhm/reverb/internal/crop"
+	"github.com/uhhhm/reverb/internal/notinterested"
 	"github.com/uhhhm/reverb/internal/override"
 	"github.com/uhhhm/reverb/internal/store/db"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
@@ -88,15 +89,25 @@ type TrackStore interface {
 	ListUnprojectedPlays(context.Context, string) ([]db.SyncChange, error)
 }
 
-type Service struct {
-	overrides *override.Service
-	crops     *crop.Service
-	catalog   Catalog
-	playlists Playlists
-	tracks    TrackStore
-	entities  *override.Entities
-	covers    *cover.Service
+// NotInterested records the Not interested marks a peer made, without emitting
+// them again. *notinterested.Service satisfies it.
+type NotInterested interface {
+	Apply(ctx context.Context, key string, m *notinterested.Mark) error
 }
+
+type Service struct {
+	overrides     *override.Service
+	crops         *crop.Service
+	catalog       Catalog
+	playlists     Playlists
+	tracks        TrackStore
+	entities      *override.Entities
+	covers        *cover.Service
+	notInterested NotInterested
+}
+
+// WithNotInterested attaches Not interested marks.
+func (s *Service) WithNotInterested(n NotInterested) *Service { s.notInterested = n; return s }
 
 // WithEntities attaches album and artist renames. Without it those changes stay
 // in the log and are projected after an upgrade that supplies one.
@@ -142,6 +153,8 @@ func (s *Service) Apply(ctx context.Context, ch reverbsync.SyncChange) error {
 		return s.applyTrack(ctx, ch)
 	case EntityAlbum, EntityArtist:
 		return s.applyEntity(ctx, ch)
+	case reverbsync.EntityNotInterested:
+		return s.applyNotInterested(ctx, ch)
 	default:
 		return nil
 	}
@@ -165,6 +178,18 @@ func (s *Service) applyTrack(ctx context.Context, ch reverbsync.SyncChange) erro
 	default:
 		return nil
 	}
+}
+
+// applyNotInterested records or removes a mark. A null value is an undo.
+func (s *Service) applyNotInterested(ctx context.Context, ch reverbsync.SyncChange) error {
+	if s.notInterested == nil || ch.Field != reverbsync.FieldMark {
+		return nil
+	}
+	var m *notinterested.Mark
+	if err := decodeValue(ch, &m); err != nil {
+		return err
+	}
+	return s.notInterested.Apply(ctx, ch.EntityID, m)
 }
 
 func (s *Service) resolveCatalogID(ctx context.Context, id string) string {

@@ -107,6 +107,9 @@ const (
 	EntityAlbum = "album"
 	// EntityArtist carries artist-level metadata under a stable artist key.
 	EntityArtist = "artist"
+	// EntityNotInterested carries one Not interested mark under a key every
+	// device derives the same way for the same track or artist.
+	EntityNotInterested = "notInterested"
 )
 
 // Field names carried by the change log. They are the wire format — renaming
@@ -140,4 +143,9 @@ const (
 	// own art applies again. Only the address travels in the log; the bytes are
 	// fetched from the peer that has them.
 	FieldCover = "cover"
+
+	// FieldMark is a Not interested mark, on EntityNotInterested. Undo writes
+	// null rather than a tombstone: delete-wins would stop a later re-mark
+	// from ever beating an earlier undo.
+	FieldMark = "mark"
 )

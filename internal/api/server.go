@@ -196,6 +196,13 @@ type Deps struct {
 	// it. Nil disables per-track quality (handlers return 503).
 	TrackQuality TrackQualityStore
 
+	// Recommend gathers recommendations for artist and track pages. Nil hides
+	// every recommendation section.
+	Recommend Recommendations
+	// NotInterested records the owner's Not interested marks. Nil disables the
+	// endpoints (503).
+	NotInterested NotInterestedService
+
 	// SyncEmit publishes locally-made per-track changes to paired devices. Nil
 	// when this device replicates nothing.
 	SyncEmit TrackSyncEmitter
@@ -423,6 +430,11 @@ func (s *Server) routes() {
 			pr.Get("/artist/{source}/{id}", s.handleArtistDetail)
 			pr.Get("/artist/{source}/{id}/profile", s.handleArtistProfile)
 			pr.Get("/artist/{source}/{id}/coverage", s.handleArtistCoverage)
+			pr.Get("/recommendations/artists/{source}/{id}", s.handleSimilarArtists)
+			pr.Get("/recommendations/similar-tracks", s.handleSimilarTracks)
+			pr.Get("/not-interested", s.handleListNotInterested)
+			pr.Post("/not-interested", s.handleMarkNotInterested)
+			pr.Delete("/not-interested", s.handleUndoNotInterested)
 			pr.Get("/album/{source}/{id}", s.handleAlbumDetail)
 			pr.Get("/playlists", s.handleListSyncedPlaylists)
 			pr.Get("/playlists/external/{source}/{id}", s.handleExternalPlaylistPreview)

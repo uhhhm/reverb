@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import { Icon } from './ui'
 import type { IconName } from './ui/Icon'
 import { AddToPlaylistMenu } from './AddToPlaylistMenu'
@@ -8,6 +9,8 @@ import { TrackQualityDialog } from './TrackQualityDialog'
 import { TrackCropDialog } from './TrackCropDialog'
 import { CoverUploadDialog } from './CoverUploadDialog'
 import { qualityLabel } from '../lib/audioQuality'
+import { useMarkNotInterested } from '../lib/notInterestedApi'
+import type { NotInterestedRequest } from '../lib/notInterestedApi'
 import type { Track } from '../lib/types'
 
 interface TrackActionsMenuProps {
@@ -36,6 +39,32 @@ function estimatedHeight(count: number): number {
 }
 
 /**
+ * What a Not interested mark names. A search result is identified by its
+ * source id; a library track by its library id, from which the server reads
+ * the metadata every device keys the mark on.
+ */
+function notInterestedRequest(track: Track): NotInterestedRequest {
+  if (track.externalStream) {
+    return {
+      kind: 'track',
+      source: track.externalStream.source,
+      externalId: track.externalStream.externalId,
+      title: track.title,
+      artist: track.artist,
+    }
+  }
+  return {
+    kind: 'track',
+    source: 'library',
+    trackId: track.id,
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    durationMs: track.durationMs,
+  }
+}
+
+/**
  * The row-level actions for an owned track, behind one "…" trigger.
  *
  * Each action carries a one-line description: the actions are not
@@ -52,6 +81,8 @@ export function TrackActionsMenu({ track, onRename, onRemove }: TrackActionsMenu
   const [coverOpen, setCoverOpen] = useState(false)
   const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
   const upgrade = useTrackUpgrade(track)
+  const navigate = useNavigate()
+  const markNotInterested = useMarkNotInterested()
 
   useEffect(() => {
     if (!open) return
@@ -80,6 +111,18 @@ export function TrackActionsMenu({ track, onRename, onRemove }: TrackActionsMenu
     label: 'Add to playlist',
     description: 'Put this track in one of your playlists',
     onSelect: () => setPlaylistOpen(true),
+  })
+  if (track.title && track.artist) items.push({
+    icon: 'browse',
+    label: 'Similar tracks',
+    description: 'Tracks like this one, from your library and your sources',
+    onSelect: () => navigate(`/similar-tracks?${new URLSearchParams({ artist: track.artist, title: track.title })}`),
+  })
+  if (track.id && track.title && track.artist) items.push({
+    icon: 'x',
+    label: 'Not interested',
+    description: 'Never recommend this track, on any of your devices',
+    onSelect: () => markNotInterested.mutate(notInterestedRequest(track)),
   })
   if (track.id && !track.externalStream) items.push({
     icon: 'camera',

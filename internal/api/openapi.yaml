@@ -671,6 +671,84 @@ paths:
           content:
             text/event-stream:
               schema: { type: string }
+  /recommendations/artists/{source}/{id}:
+    get:
+      summary: Artists related to a search-source or library artist ("Fans also like")
+      description: >-
+        Source failures and timeouts return an empty list rather than an error,
+        so the section hides without breaking the artist page. Results are
+        cached on this device and never replicated.
+      parameters:
+        - { name: source, in: path, required: true, schema: { type: string }, description: 'A search source name, or "library"' }
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: related artists
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimilarArtists" }
+  /recommendations/similar-tracks:
+    get:
+      summary: Playable tracks similar to a seed track (Last.fm similar tracks)
+      description: >-
+        Each candidate is matched to something playable: the library copy when
+        owned, otherwise a search-source result that plays through external
+        playback. Candidates nothing matches are dropped. available is false
+        when Last.fm is not configured.
+      parameters:
+        - { name: artist, in: query, required: true, schema: { type: string } }
+        - { name: title, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: similar tracks
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimilarTracks" }
+        "400": { description: artist and title are required }
+  /not-interested:
+    get:
+      summary: Every Not interested mark, most recent first
+      responses:
+        "200":
+          description: marks
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotInterestedList" }
+        "503": { description: marks unavailable }
+    post:
+      summary: Mark a track or artist Not interested on every device
+      description: >-
+        A library track is keyed on its catalog identity's original metadata
+        and a search-source track on source + externalId, so the same
+        recording marked on two devices is one mark. An artist is keyed on its
+        library name (for source "library") or the given name.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NotInterestedRequest" }
+      responses:
+        "200":
+          description: the recorded mark
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NotInterestedMark" }
+        "400": { description: missing or unknown kind, source, id or name }
+        "503": { description: marks unavailable }
+    delete:
+      summary: Undo a mark on every device
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key]
+              properties: { key: { type: string } }
+      responses:
+        "204": { description: removed }
+        "400": { description: missing key }
+        "503": { description: marks unavailable }
   /album/{source}/{id}:
     get:
       summary: External album detail (tracks, metadata)
@@ -1714,6 +1792,97 @@ components:
         required:
         - type
         - payload
+    ExternalArtist:
+      type: object
+      required: [source, externalId, name]
+      properties:
+        source: { type: string }
+        externalId: { type: string }
+        name: { type: string }
+        coverUrl: { type: string }
+        coverArtId: { type: string }
+    SimilarArtists:
+      type: object
+      description: >-
+        available is false when no configured source can relate artists; an
+        empty list with available set means nothing was found or the lookup
+        failed.
+      required: [available, artists]
+      properties:
+        available: { type: boolean }
+        artists: { type: array, items: { $ref: "#/components/schemas/ExternalArtist" } }
+    RecommendedTrack:
+      type: object
+      description: >-
+        A playable recommendation. A library track has source "library",
+        externalId set to the backend track id, canonicalId set to its catalog
+        id, and match.status "in_library"; anything else is a search-source
+        result that plays through external playback.
+      required: [source, externalId, title, artist, album, durationMs, type]
+      properties:
+        source: { type: string }
+        externalId: { type: string }
+        title: { type: string }
+        artist: { type: string }
+        album: { type: string }
+        durationMs: { type: integer }
+        isrc: { type: string }
+        coverUrl: { type: string }
+        coverArtId: { type: string }
+        artistExternalId: { type: string }
+        albumExternalId: { type: string }
+        type: { type: string }
+        canonicalId: { type: string }
+        match:
+          type: object
+          required: [status, libraryTrackId, method, confidence]
+          properties:
+            status: { type: string, enum: [in_library, not_in_library, unknown] }
+            libraryTrackId: { type: string }
+            method: { type: string }
+            confidence: { type: number }
+            artistId: { type: string }
+            albumId: { type: string }
+            coverArtId: { type: string }
+    SimilarTracks:
+      type: object
+      required: [available, tracks]
+      properties:
+        available: { type: boolean }
+        tracks: { type: array, items: { $ref: "#/components/schemas/RecommendedTrack" } }
+    NotInterestedMark:
+      type: object
+      required: [key, kind, artist, markedAt]
+      properties:
+        key: { type: string }
+        kind: { type: string, enum: [track, artist] }
+        title: { type: string }
+        artist: { type: string }
+        source: { type: string }
+        externalId: { type: string }
+        markedAt: { type: integer, format: int64, description: Unix milliseconds }
+    NotInterestedList:
+      type: object
+      required: [marks]
+      properties:
+        marks: { type: array, items: { $ref: "#/components/schemas/NotInterestedMark" } }
+    NotInterestedRequest:
+      type: object
+      description: >-
+        kind "track": source plus externalId, or source "library" with trackId
+        (the backend track id). kind "artist": source plus id, and name.
+      required: [kind, source]
+      properties:
+        kind: { type: string, enum: [track, artist] }
+        source: { type: string }
+        externalId: { type: string }
+        trackId: { type: string }
+        id: { type: string }
+        title: { type: string }
+        artist: { type: string }
+        album: { type: string }
+        durationMs: { type: integer }
+        name: { type: string }
     UpdateState:
       type: object
       description: >-

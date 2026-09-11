@@ -24,6 +24,13 @@ type DiscographyProvider interface {
 	GetArtistDiscography(ctx context.Context, externalID string) ([]core.ExternalAlbum, error)
 }
 
+// SimilarArtistsProvider is an OPTIONAL capability: artists the source relates
+// to the given one, most similar first. Recommendations detect it via a type
+// assertion and skip sources without it.
+type SimilarArtistsProvider interface {
+	SimilarArtists(ctx context.Context, externalID string, limit int) ([]core.ExternalArtist, error)
+}
+
 // TrackProvider is an optional direct lookup capability used to enrich durable
 // references (such as listening stats) with the source's current artist/album IDs.
 type TrackProvider interface {
