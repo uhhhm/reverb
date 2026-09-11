@@ -70,6 +70,7 @@ function trackFromMatch(r: ExternalResult, libraryTrackId: string): Track {
     suffix: '',
     contentType: '',
     isrc: r.isrc,
+    mbid: r.mbid,
   }
 }
 
@@ -280,6 +281,7 @@ export default function Search() {
                   suffix: '',
                   contentType: '',
                   isrc: r.isrc,
+                  mbid: r.mbid,
                   // Not in the library: play it straight from the source instead
                   // of downloading it first.
                   externalStream: { source: r.source, externalId: r.externalId },

@@ -32,7 +32,7 @@ const playlist: ExtPlaylist = {
   externalId: 'PL',
   name: 'Preview Mix',
   tracks: [
-    { source: 'spotify', externalId: 'e1', title: 'Song One', artist: 'Artist A', album: 'Album A', durationMs: 180000, type: 'track' },
+    { source: 'spotify', externalId: 'e1', title: 'Song One', artist: 'Artist A', album: 'Album A', durationMs: 180000, mbid: 'recording-1', type: 'track' },
     { source: 'spotify', externalId: 'e2', title: 'Song Two', artist: 'Artist B', album: 'Album B', durationMs: 200000, type: 'track' },
   ],
 }
@@ -63,7 +63,7 @@ describe('ExternalPlaylist preview playback', () => {
     expect(mockPlayTrackList).toHaveBeenCalledOnce()
     const [tracks, idx] = mockPlayTrackList.mock.calls[0] as [import('../lib/types').Track[], number]
     expect(idx).toBe(0)
-    expect(tracks[0]).toMatchObject({ externalStream: { source: 'spotify', externalId: 'e1' } })
+    expect(tracks[0]).toMatchObject({ mbid: 'recording-1', externalStream: { source: 'spotify', externalId: 'e1' } })
   })
 
   it('header Play plays the full preview queue in order', async () => {

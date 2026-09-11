@@ -25,6 +25,7 @@ function displayTrack(result: ExternalResult): Track {
     suffix: '',
     contentType: '',
     isrc: result.isrc,
+    mbid: result.mbid,
     // Preview streams straight from the source — importing/downloading is separate.
     externalStream: { source: result.source, externalId: result.externalId },
   }

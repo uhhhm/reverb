@@ -35,6 +35,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	fixtureExplicit := false
+	flags.Visit(func(item *flag.Flag) {
+		if item.Name == "fixture" {
+			fixtureExplicit = true
+		}
+	})
+	if *databasePath != "" && *recordCache == "" && !fixtureExplicit {
+		return fmt.Errorf("-db requires either -record-cache to capture matching responses or an explicit -fixture to replay them")
+	}
 
 	fixture, err := quality.LoadFixture(*fixturePath)
 	if err != nil {

@@ -134,6 +134,7 @@ describe('Search (blended results)', () => {
               artist: 'B',
               album: 'B',
               durationMs: 200000,
+              mbid: 'recording-external',
               type: 'track',
               match: { status: 'not_in_library', libraryTrackId: '', method: 'none', confidence: 0 },
             },
@@ -187,6 +188,7 @@ describe('Search (blended results)', () => {
               artist: 'B',
               album: 'B',
               durationMs: 200000,
+              mbid: 'recording-external',
               type: 'track',
               match: { status: 'not_in_library', libraryTrackId: '', method: 'none', confidence: 0 },
             },
@@ -200,8 +202,9 @@ describe('Search (blended results)', () => {
 
     expect(postDownloadMock).not.toHaveBeenCalled()
     expect(spy).toHaveBeenCalledOnce()
-    const [tracks] = spy.mock.calls[0] as [Array<{ externalStream?: { source: string; externalId: string } }>, number]
+    const [tracks] = spy.mock.calls[0] as [Array<{ mbid?: string; externalStream?: { source: string; externalId: string } }>, number]
     expect(tracks[0].externalStream).toEqual({ source: 'deezer', externalId: 'dz-1' })
+    expect(tracks[0].mbid).toBe('recording-external')
 
     spy.mockRestore()
     vi.unstubAllGlobals()
@@ -276,4 +279,3 @@ describe('Search (blended results)', () => {
   })
 
 })
-
