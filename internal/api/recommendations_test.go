@@ -19,11 +19,17 @@ type fakeRecommendations struct {
 	tracks           recommend.TrackResult
 	gotArtist        string
 	gotTitle         string
+	gotTrackSeed     recommend.TrackSeed
 	gotSeeds         []recommend.Seed
 }
 
 func (f *fakeRecommendations) SimilarTracks(_ context.Context, artist, title string) recommend.TrackResult {
 	f.gotArtist, f.gotTitle = artist, title
+	return f.tracks
+}
+
+func (f *fakeRecommendations) SimilarTracksFor(_ context.Context, seed recommend.TrackSeed) recommend.TrackResult {
+	f.gotArtist, f.gotTitle, f.gotTrackSeed = seed.Artist, seed.Title, seed
 	return f.tracks
 }
 
@@ -121,11 +127,14 @@ func TestSimilarTracksEndpoint(t *testing.T) {
 	srv := recommendationServer(t, fake)
 
 	var body recommend.TrackResult
-	if code := getJSON(t, srv, "/recommendations/similar-tracks?artist=Daft+Punk&title=One+More+Time", &body); code != http.StatusOK {
+	if code := getJSON(t, srv, "/recommendations/similar-tracks?artist=Daft+Punk&title=One+More+Time&mbid=recording-1", &body); code != http.StatusOK {
 		t.Fatalf("status %d", code)
 	}
 	if fake.gotArtist != "Daft Punk" || fake.gotTitle != "One More Time" {
 		t.Fatalf("asked for %q by %q", fake.gotTitle, fake.gotArtist)
+	}
+	if fake.gotTrackSeed.MBID != "recording-1" {
+		t.Fatalf("seed MBID = %q, want recording-1", fake.gotTrackSeed.MBID)
 	}
 	if !body.Available || len(body.Tracks) != 1 || body.Tracks[0].ExternalID != "1" {
 		t.Fatalf("body %+v", body)

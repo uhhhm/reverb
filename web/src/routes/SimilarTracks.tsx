@@ -40,7 +40,7 @@ export default function SimilarTracks() {
         <EmptyState
           icon="browse"
           title="Similar tracks aren't set up"
-          hint="They come from Last.fm — add a Last.fm API key in Admin → Integrations."
+          hint="No online similarity source is available on this device."
         />
       ) : tracks.length === 0 ? (
         <EmptyState icon="browse" title="No similar tracks found" hint="Nothing similar could be matched to something playable." />

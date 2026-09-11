@@ -71,10 +71,10 @@ describe('Similar tracks page', () => {
     expect(tracks[1]).toMatchObject({ externalStream: { source: 'deezer', externalId: '1' } })
   })
 
-  it('explains that Last.fm is needed when it is not configured', () => {
+  it('explains that no online similarity source is available', () => {
     respond({ available: false, tracks: [] })
     renderPage()
-    expect(screen.getByText(/last\.fm/i)).toBeInTheDocument()
+    expect(screen.getByText(/no online similarity source/i)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^Play / })).toBeNull()
   })
 

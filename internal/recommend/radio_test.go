@@ -13,8 +13,8 @@ import (
 type seededSimilarity map[string][]recommend.TrackCandidate
 
 func (seededSimilarity) Name() string { return "lastfm" }
-func (s seededSimilarity) SimilarTracks(_ context.Context, _, title string, _ int) ([]recommend.TrackCandidate, error) {
-	return s[title], nil
+func (s seededSimilarity) SimilarTracks(_ context.Context, seed recommend.TrackSeed, _ int) ([]recommend.TrackCandidate, error) {
+	return s[seed.Title], nil
 }
 
 func titles(tracks []core.ExternalResult) []string {

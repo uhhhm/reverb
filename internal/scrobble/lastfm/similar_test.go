@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"testing"
 
 	"github.com/uhhhm/reverb/internal/recommend"
@@ -26,7 +27,7 @@ func TestSimilarTracksFromFixture(t *testing.T) {
 	defer srv.Close()
 
 	var src recommend.TrackSimilarity = NewSimilarity(newTestAdapter(srv.URL), func() string { return "key1" })
-	cands, err := src.SimilarTracks(context.Background(), "Daft Punk", "One More Time", 30)
+	cands, err := src.SimilarTracks(context.Background(), recommend.TrackSeed{Artist: "Daft Punk", Title: "One More Time"}, 30)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +44,7 @@ func TestSimilarTracksFromFixture(t *testing.T) {
 		}
 	}
 	want := []recommend.TrackCandidate{
-		{Artist: "Daft Punk", Title: "Around the World", DurationMs: 429000},
+		{Artist: "Daft Punk", Title: "Around the World", DurationMs: 429000, MBID: "7a2cba5e-8c4d-4b5b-a5a9-4b3f8b5f1b2c"},
 		{Artist: "Justice", Title: "D.A.N.C.E.", DurationMs: 242000},
 		{Artist: "Stardust", Title: "Music Sounds Better with You"},
 	}
@@ -51,7 +52,7 @@ func TestSimilarTracksFromFixture(t *testing.T) {
 		t.Fatalf("got %d candidates, want %d", len(cands), len(want))
 	}
 	for i := range want {
-		if cands[i] != want[i] {
+		if !reflect.DeepEqual(cands[i], want[i]) {
 			t.Errorf("candidate %d = %+v, want %+v", i, cands[i], want[i])
 		}
 	}
@@ -59,7 +60,7 @@ func TestSimilarTracksFromFixture(t *testing.T) {
 
 func TestSimilarTracksNotConfiguredWithoutKey(t *testing.T) {
 	src := NewSimilarity(newTestAdapter("http://127.0.0.1:0"), func() string { return "" })
-	if _, err := src.SimilarTracks(context.Background(), "A", "B", 10); !errors.Is(err, recommend.ErrNotConfigured) {
+	if _, err := src.SimilarTracks(context.Background(), recommend.TrackSeed{Artist: "A", Title: "B"}, 10); !errors.Is(err, recommend.ErrNotConfigured) {
 		t.Fatalf("err = %v, want ErrNotConfigured", err)
 	}
 }
@@ -71,7 +72,7 @@ func TestSimilarTracksSurfacesInBandError(t *testing.T) {
 	}))
 	defer srv.Close()
 	src := NewSimilarity(newTestAdapter(srv.URL), func() string { return "key1" })
-	if _, err := src.SimilarTracks(context.Background(), "A", "B", 10); err == nil {
+	if _, err := src.SimilarTracks(context.Background(), recommend.TrackSeed{Artist: "A", Title: "B"}, 10); err == nil {
 		t.Fatal("want an error for Last.fm's in-band error body")
 	}
 }

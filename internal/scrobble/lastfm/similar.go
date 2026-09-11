@@ -32,7 +32,7 @@ func NewSimilarity(a *Adapter, key func() string) *Similarity {
 func (s *Similarity) Name() string { return "lastfm" }
 
 // SimilarTracks returns tracks Last.fm considers similar, most similar first.
-func (s *Similarity) SimilarTracks(ctx context.Context, artist, title string, limit int) ([]recommend.TrackCandidate, error) {
+func (s *Similarity) SimilarTracks(ctx context.Context, seed recommend.TrackSeed, limit int) ([]recommend.TrackCandidate, error) {
 	key := ""
 	if s.key != nil {
 		key = s.key()
@@ -42,10 +42,14 @@ func (s *Similarity) SimilarTracks(ctx context.Context, artist, title string, li
 	}
 	q := url.Values{}
 	q.Set("method", "track.getSimilar")
-	// Last.fm knows one canonical artist; a composite library credit would
-	// look up an unknown artist and return nothing.
-	q.Set("artist", matching.PrimaryArtist(artist))
-	q.Set("track", title)
+	if seed.MBID != "" {
+		q.Set("mbid", seed.MBID)
+	} else {
+		// Last.fm knows one canonical artist; a composite library credit would
+		// look up an unknown artist and return nothing.
+		q.Set("artist", matching.PrimaryArtist(seed.Artist))
+		q.Set("track", seed.Title)
+	}
 	q.Set("api_key", key)
 	q.Set("limit", strconv.Itoa(limit))
 	q.Set("autocorrect", "1")
@@ -69,6 +73,7 @@ func (s *Similarity) SimilarTracks(ctx context.Context, artist, title string, li
 		SimilarTracks struct {
 			Track []struct {
 				Name     string      `json:"name"`
+				MBID     string      `json:"mbid"`
 				Duration json.Number `json:"duration"`
 				Artist   struct {
 					Name string `json:"name"`
@@ -95,7 +100,7 @@ func (s *Similarity) SimilarTracks(ctx context.Context, artist, title string, li
 			continue
 		}
 		seconds, _ := t.Duration.Int64()
-		cands = append(cands, recommend.TrackCandidate{Artist: t.Artist.Name, Title: t.Name, DurationMs: int(seconds) * 1000})
+		cands = append(cands, recommend.TrackCandidate{Artist: t.Artist.Name, Title: t.Name, DurationMs: int(seconds) * 1000, MBID: t.MBID})
 	}
 	return cands, nil
 }

@@ -47,8 +47,12 @@ type ExternalResult struct {
 	DurationMs int    `json:"durationMs"`
 	ISRC       string `json:"isrc,omitempty"`
 	MBID       string `json:"mbid,omitempty"`
-	CoverURL   string `json:"coverUrl,omitempty"`
-	CoverArtID string `json:"coverArtId,omitempty"`
+	// RecommendationSources names every similarity source that proposed this
+	// recording. It is kept after matching so ranking and reasons can use source
+	// agreement without re-running the lookups.
+	RecommendationSources []string `json:"recommendationSources,omitempty"`
+	CoverURL              string   `json:"coverUrl,omitempty"`
+	CoverArtID            string   `json:"coverArtId,omitempty"`
 	// ArtistExternalID and AlbumExternalID carry the source-specific IDs for the
 	// primary artist and album of this track result. Populated by adapters that
 	// have these IDs readily available (e.g. Spotify). Used by the frontend to
@@ -70,7 +74,11 @@ type ExternalArtist struct {
 	Source     string `json:"source"`
 	ExternalID string `json:"externalId"`
 	Name       string `json:"name"`
-	CoverURL   string `json:"coverUrl,omitempty"`
+	MBID       string `json:"mbid,omitempty"`
+	// RecommendationSources is the provenance retained when several sources
+	// agree that this artist is similar to the seed.
+	RecommendationSources []string `json:"recommendationSources,omitempty"`
+	CoverURL              string   `json:"coverUrl,omitempty"`
 	// CoverArtID is set for library-source profiles where the image is served
 	// via /api/v1/cover/{id} rather than a remote URL.
 	CoverArtID string `json:"coverArtId,omitempty"`

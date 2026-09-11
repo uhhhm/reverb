@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -45,6 +46,17 @@ type similarSource struct {
 	lastID  string
 }
 
+type artistSimilarity struct {
+	name    string
+	related []recommend.ArtistCandidate
+	err     error
+}
+
+func (s artistSimilarity) Name() string { return s.name }
+func (s artistSimilarity) SimilarArtists(context.Context, recommend.ArtistSeed, int) ([]recommend.ArtistCandidate, error) {
+	return s.related, s.err
+}
+
 func (s *similarSource) SimilarArtists(ctx context.Context, id string, limit int) ([]core.ExternalArtist, error) {
 	s.calls.Add(1)
 	s.lastID = id
@@ -82,10 +94,20 @@ func relatedN(n int) []core.ExternalArtist {
 }
 
 func newService(lib library, sources ...search.SearchSource) *recommend.Service {
+	return newServiceWithArtistSources(lib, nil, sources...)
+}
+
+func newServiceWithArtistSources(lib library, artistSources []recommend.ArtistSimilarity, sources ...search.SearchSource) *recommend.Service {
+	options := []recommend.Option{
+		recommend.WithLibrary(func() recommend.Library { return lib }),
+		recommend.WithTimeout(50 * time.Millisecond),
+	}
+	for _, source := range artistSources {
+		options = append(options, recommend.WithArtistSource(source))
+	}
 	return recommend.New(
 		func() []search.SearchSource { return sources },
-		recommend.WithLibrary(func() recommend.Library { return lib }),
-		recommend.WithTimeout(50*time.Millisecond),
+		options...,
 	)
 }
 
@@ -151,5 +173,34 @@ func TestSimilarArtistsFailureAndTimeoutAreEmpty(t *testing.T) {
 	}
 	if time.Since(start) > 500*time.Millisecond {
 		t.Fatal("a slow source held the request past its timeout")
+	}
+}
+
+func TestSimilarArtistsMergeDedicatedAndSearchSources(t *testing.T) {
+	deezer := &similarSource{
+		plainSource: plainSource{name: "deezer", artists: []core.ExternalResult{
+			{Source: "deezer", ExternalID: "seed", Title: "Seed Artist", Type: core.EntityArtist},
+			{Source: "deezer", ExternalID: "shared", Title: "Shared Artist", Type: core.EntityArtist},
+			{Source: "deezer", ExternalID: "only-lb", Title: "ListenBrainz Only", Type: core.EntityArtist},
+		}},
+		related: []core.ExternalArtist{
+			{Source: "deezer", ExternalID: "deezer-only", Name: "Deezer Only"},
+			{Source: "deezer", ExternalID: "shared", Name: "Shared Artist", MBID: "artist-mbid"},
+		},
+	}
+	svc := newServiceWithArtistSources(library{"ar-1": {ID: "ar-1", Name: "Seed Artist"}}, []recommend.ArtistSimilarity{artistSimilarity{name: "listenbrainz", related: []recommend.ArtistCandidate{
+		{Name: "Shared Artist", MBID: "artist-mbid"},
+		{Name: "ListenBrainz Only", MBID: "lb-only-mbid"},
+	}}}, deezer)
+
+	got := svc.SimilarArtists(context.Background(), "library", "ar-1")
+	if len(got.Artists) != 3 {
+		t.Fatalf("got %d artists, want 3: %+v", len(got.Artists), got.Artists)
+	}
+	if got.Artists[0].Name != "Shared Artist" || strings.Join(got.Artists[0].RecommendationSources, ",") != "deezer,listenbrainz" {
+		t.Fatalf("first artist = %+v, want shared artist with both sources", got.Artists[0])
+	}
+	if got.Artists[2].Source != "deezer" || got.Artists[2].ExternalID != "only-lb" {
+		t.Fatalf("ListenBrainz-only artist was not resolved to a browseable source: %+v", got.Artists[2])
 	}
 }

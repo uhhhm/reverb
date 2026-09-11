@@ -17,13 +17,19 @@ import (
 
 // similarTracks is a track similarity source with a fixed answer.
 type similarTracks struct {
+	name  string
 	cands []recommend.TrackCandidate
 	err   error
 	calls atomic.Int32
 }
 
-func (s *similarTracks) Name() string { return "lastfm" }
-func (s *similarTracks) SimilarTracks(context.Context, string, string, int) ([]recommend.TrackCandidate, error) {
+func (s *similarTracks) Name() string {
+	if s.name != "" {
+		return s.name
+	}
+	return "lastfm"
+}
+func (s *similarTracks) SimilarTracks(context.Context, recommend.TrackSeed, int) ([]recommend.TrackCandidate, error) {
 	s.calls.Add(1)
 	return s.cands, s.err
 }
@@ -86,12 +92,14 @@ func (c *clock) sleep(_ context.Context, d time.Duration) error {
 }
 
 func newTrackService(ts recommend.TrackSimilarity, lib libraryMatcher, c *clock, sources ...search.SearchSource) *recommend.Service {
+	return newTrackServiceWithSources([]recommend.TrackSimilarity{ts}, lib, c, sources...)
+}
+
+func newTrackServiceWithSources(trackSources []recommend.TrackSimilarity, lib libraryMatcher, c *clock, sources ...search.SearchSource) *recommend.Service {
 	if c == nil {
 		c = &clock{t: time.Unix(1_700_000_000, 0)}
 	}
-	return recommend.New(
-		func() []search.SearchSource { return sources },
-		recommend.WithTrackSource(ts),
+	options := []recommend.Option{
 		recommend.WithMatcher(func() recommend.Matcher { return lib }),
 		recommend.WithCatalogIDs(func(_ context.Context, ids []string) map[string]string {
 			out := map[string]string{}
@@ -103,7 +111,70 @@ func newTrackService(ts recommend.TrackSimilarity, lib libraryMatcher, c *clock,
 		recommend.WithClock(c.now),
 		recommend.WithSleep(c.sleep),
 		recommend.WithTimeout(time.Second),
+	}
+	for _, trackSource := range trackSources {
+		options = append(options, recommend.WithTrackSource(trackSource))
+	}
+	return recommend.New(
+		func() []search.SearchSource { return sources },
+		options...,
 	)
+}
+
+func TestSimilarTracksMergeSourcesAndRankAgreementFirst(t *testing.T) {
+	lastfm := &similarTracks{name: "lastfm", cands: []recommend.TrackCandidate{
+		{Artist: "Artist A", Title: "Only Last.fm", MBID: "mbid-lastfm"},
+		{Artist: "Shared Artist", Title: "Shared Track", MBID: "mbid-shared"},
+	}}
+	listenbrainz := &similarTracks{name: "listenbrainz", cands: []recommend.TrackCandidate{
+		{Artist: "Shared Artist", Title: "Shared Track", MBID: "mbid-shared"},
+		{Artist: "Artist B", Title: "Only ListenBrainz", MBID: "mbid-listenbrainz"},
+	}}
+	search := &trackSource{plainSource: plainSource{name: "deezer"}, tracks: []core.ExternalResult{
+		{Source: "deezer", ExternalID: "shared", Title: "Shared Track", Artist: "Shared Artist", MBID: "mbid-shared", Type: core.EntityTrack},
+		{Source: "deezer", ExternalID: "lfm", Title: "Only Last.fm", Artist: "Artist A", MBID: "mbid-lastfm", Type: core.EntityTrack},
+		{Source: "deezer", ExternalID: "lb", Title: "Only ListenBrainz", Artist: "Artist B", MBID: "mbid-listenbrainz", Type: core.EntityTrack},
+	}}
+	svc := newTrackServiceWithSources([]recommend.TrackSimilarity{lastfm, listenbrainz}, libraryMatcher{}, nil, search)
+
+	got := svc.SimilarTracksFor(context.Background(), recommend.TrackSeed{Artist: "Seed Artist", Title: "Seed Track", MBID: "seed-mbid"})
+	if len(got.Tracks) != 3 {
+		t.Fatalf("got %d tracks, want 3: %+v", len(got.Tracks), got.Tracks)
+	}
+	if got.Tracks[0].ExternalID != "shared" {
+		t.Fatalf("first track = %q, want the candidate supported by both sources", got.Tracks[0].ExternalID)
+	}
+	if diff := strings.Join(got.Tracks[0].RecommendationSources, ","); diff != "lastfm,listenbrainz" {
+		t.Fatalf("shared sources = %q, want lastfm,listenbrainz", diff)
+	}
+}
+
+func TestSimilarTracksUseNamesWhenOnlyOneCandidateHasAnMBID(t *testing.T) {
+	lastfm := &similarTracks{name: "lastfm", cands: []recommend.TrackCandidate{{Artist: "Shared Artist", Title: "Shared Track"}}}
+	listenbrainz := &similarTracks{name: "listenbrainz", cands: []recommend.TrackCandidate{{Artist: "Shared Artist", Title: "Shared Track", MBID: "mbid-shared"}}}
+	search := &trackSource{plainSource: plainSource{name: "deezer"}, tracks: []core.ExternalResult{
+		{Source: "deezer", ExternalID: "shared", Title: "Shared Track", Artist: "Shared Artist", MBID: "mbid-shared", Type: core.EntityTrack},
+	}}
+	svc := newTrackServiceWithSources([]recommend.TrackSimilarity{lastfm, listenbrainz}, libraryMatcher{}, nil, search)
+
+	got := svc.SimilarTracks(context.Background(), "Seed Artist", "Seed Track")
+	if len(got.Tracks) != 1 || len(got.Tracks[0].RecommendationSources) != 2 {
+		t.Fatalf("got %+v, want one name-fallback candidate with two sources", got.Tracks)
+	}
+}
+
+func TestSimilarTracksKeepHealthySourceWhenPeerFails(t *testing.T) {
+	failing := &similarTracks{name: "lastfm", err: errors.New("outage")}
+	healthy := &similarTracks{name: "listenbrainz", cands: []recommend.TrackCandidate{{Artist: "Artist A", Title: "Track A", MBID: "mbid-a"}}}
+	search := &trackSource{plainSource: plainSource{name: "deezer"}, tracks: []core.ExternalResult{
+		{Source: "deezer", ExternalID: "a", Title: "Track A", Artist: "Artist A", MBID: "mbid-a", Type: core.EntityTrack},
+	}}
+	svc := newTrackServiceWithSources([]recommend.TrackSimilarity{failing, healthy}, libraryMatcher{}, nil, search)
+
+	got := svc.SimilarTracks(context.Background(), "Seed Artist", "Seed Track")
+	if !got.Available || len(got.Tracks) != 1 || got.Tracks[0].ExternalID != "a" {
+		t.Fatalf("got %+v, want the healthy source result", got)
+	}
 }
 
 func TestSimilarTracksResolveOwnedToLibraryByCatalogID(t *testing.T) {

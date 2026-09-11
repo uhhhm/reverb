@@ -1,0 +1,80 @@
+{
+  "name": "anonymised-v1",
+  "holdoutDays": 3,
+  "k": 10,
+  "plays": [
+    { "catalogId": "track-001", "artist": "Artist 001", "title": "Track 001", "mbid": "recording-001", "playedAt": 86400 },
+    { "catalogId": "track-002", "artist": "Artist 002", "title": "Track 002", "mbid": "recording-002", "playedAt": 172800 },
+    { "catalogId": "track-003", "artist": "Artist 003", "title": "Track 003", "mbid": "recording-003", "playedAt": 259200 },
+    { "catalogId": "track-004", "artist": "Artist 004", "title": "Track 004", "mbid": "recording-004", "playedAt": 345600 },
+    { "catalogId": "track-005", "artist": "Artist 005", "title": "Track 005", "mbid": "recording-005", "playedAt": 432000 },
+    { "catalogId": "track-006", "artist": "Artist 006", "title": "Track 006", "mbid": "recording-006", "playedAt": 518400 },
+    { "catalogId": "track-007", "artist": "Artist 007", "title": "Track 007", "mbid": "recording-007", "playedAt": 604800 },
+    { "catalogId": "track-008", "artist": "Artist 008", "title": "Track 008", "mbid": "recording-008", "playedAt": 691200 },
+    { "catalogId": "track-009", "artist": "Artist 009", "title": "Track 009", "mbid": "recording-009", "playedAt": 777600 },
+    { "catalogId": "track-010", "artist": "Artist 010", "title": "Track 010", "mbid": "recording-010", "playedAt": 864000 },
+    { "catalogId": "track-011", "artist": "Artist 011", "title": "Track 011", "mbid": "recording-011", "playedAt": 950400 },
+    { "catalogId": "track-012", "artist": "Artist 012", "title": "Track 012", "mbid": "recording-012", "playedAt": 1036800 },
+    { "catalogId": "track-013", "artist": "Artist 013", "title": "Track 013", "mbid": "recording-013", "playedAt": 1123200 },
+    { "catalogId": "track-014", "artist": "Artist 014", "title": "Track 014", "mbid": "recording-014", "playedAt": 1209600 }
+  ],
+  "sources": [
+    {
+      "name": "lastfm",
+      "lookups": [
+        {
+          "seed": { "artist": "Artist 010", "title": "Track 010", "mbid": "recording-010" },
+          "candidates": [
+            { "artist": "Artist 011", "title": "Track 011", "mbid": "recording-011" },
+            { "artist": "Artist 021", "title": "Track 021", "mbid": "recording-021" },
+            { "artist": "Artist 012", "title": "Track 012", "mbid": "recording-012" }
+          ]
+        },
+        {
+          "seed": { "artist": "Artist 009", "title": "Track 009", "mbid": "recording-009" },
+          "candidates": [{ "artist": "Artist 013", "title": "Track 013", "mbid": "recording-013" }]
+        },
+        {
+          "seed": { "artist": "Artist 008", "title": "Track 008", "mbid": "recording-008" },
+          "candidates": [{ "artist": "Artist 022", "title": "Track 022", "mbid": "recording-022" }]
+        },
+        {
+          "seed": { "artist": "Artist 007", "title": "Track 007", "mbid": "recording-007" },
+          "candidates": [{ "artist": "Artist 011", "title": "Track 011", "mbid": "recording-011" }]
+        },
+        {
+          "seed": { "artist": "Artist 006", "title": "Track 006", "mbid": "recording-006" },
+          "candidates": [{ "artist": "Artist 014", "title": "Track 014", "mbid": "recording-014" }]
+        }
+      ]
+    },
+    {
+      "name": "listenbrainz",
+      "lookups": [
+        {
+          "seed": { "artist": "Artist 010", "title": "Track 010", "mbid": "recording-010" },
+          "candidates": [
+            { "artist": "Artist 011", "title": "Track 011", "mbid": "recording-011" },
+            { "artist": "Artist 013", "title": "Track 013", "mbid": "recording-013" }
+          ]
+        },
+        {
+          "seed": { "artist": "Artist 009", "title": "Track 009", "mbid": "recording-009" },
+          "candidates": [{ "artist": "Artist 012", "title": "Track 012", "mbid": "recording-012" }]
+        },
+        {
+          "seed": { "artist": "Artist 008", "title": "Track 008", "mbid": "recording-008" },
+          "candidates": [{ "artist": "Artist 014", "title": "Track 014", "mbid": "recording-014" }]
+        },
+        {
+          "seed": { "artist": "Artist 007", "title": "Track 007", "mbid": "recording-007" },
+          "candidates": [{ "artist": "Artist 023", "title": "Track 023", "mbid": "recording-023" }]
+        },
+        {
+          "seed": { "artist": "Artist 006", "title": "Track 006", "mbid": "recording-006" },
+          "candidates": [{ "artist": "Artist 013", "title": "Track 013", "mbid": "recording-013" }]
+        }
+      ]
+    }
+  ]
+}

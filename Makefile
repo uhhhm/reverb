@@ -1,4 +1,4 @@
-.PHONY: gen gen-check test test-go test-web test-race fmt-check vet check check-web check-full setup-web setup-contracts contracts contracts-check contracts-test build web dev clean desktop desktop-dev desktop-deps package-mac
+.PHONY: gen gen-check test test-go test-web test-race fmt-check vet check check-web check-full recommend-quality setup-web setup-contracts contracts contracts-check contracts-test build web dev clean desktop desktop-dev desktop-deps package-mac
 
 VERSION ?= dev
 GO_PACKAGES := ./cmd/... ./internal/... ./desktop/...
@@ -36,6 +36,12 @@ check: fmt-check vet test-go check-web gen-check contracts-check contracts-test
 
 check-full: check test-race
 	cd web && npm run e2e
+
+# Deterministic holdout evaluation against anonymised history and recorded
+# recommendation-source responses. Use ARGS="-db /path/to/reverb.db" for local
+# history, optionally with -fixture pointing at a matching recorded cache.
+recommend-quality:
+	go run ./cmd/recommend-quality $(ARGS)
 
 setup-web:
 	cd web && npm ci

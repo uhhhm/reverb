@@ -28,7 +28,7 @@ export function useSimilarArtists(source: string, id: string) {
   })
 }
 
-/** Playable tracks similar to a seed. available is false without Last.fm. */
+/** Playable tracks similar to a seed. Sources are merged by the server. */
 export function useSimilarTracks(artist: string, title: string) {
   return useQuery({
     queryKey: ['similar-tracks', artist, title],

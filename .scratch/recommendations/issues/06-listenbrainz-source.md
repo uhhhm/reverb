@@ -4,9 +4,9 @@
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] ListenBrainz source is registered at the composition root. It needs no user account and respects the service's rate limits
-- [ ] MusicBrainz IDs are used for matching when present, with a fallback to artist and title
-- [ ] Merged candidates keep the list of sources that suggested them, available to later ranking and reasons
-- [ ] One source failing doesn't fail the request. Tests use recorded fixtures
+- [x] ListenBrainz source is registered at the composition root. It needs no user account and respects the service's rate limits
+- [x] MusicBrainz IDs are used for matching when present, with a fallback to artist and title
+- [x] Merged candidates keep the list of sources that suggested them, available to later ranking and reasons
+- [x] One source failing doesn't fail the request. Tests use recorded fixtures

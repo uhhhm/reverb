@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"sort"
 	"sync"
 
 	"github.com/uhhhm/reverb/internal/core"
@@ -21,12 +22,22 @@ type TrackCandidate struct {
 	Artist     string
 	Title      string
 	DurationMs int
+	MBID       string
+	Sources    []string
+}
+
+// TrackSeed identifies the recording a recommendation lookup starts from.
+// MBID is preferred when known; artist and title remain the portable fallback.
+type TrackSeed struct {
+	Artist string `json:"artist"`
+	Title  string `json:"title"`
+	MBID   string `json:"mbid,omitempty"`
 }
 
 // TrackSimilarity is a source of tracks similar to a seed, most similar first.
 type TrackSimilarity interface {
 	Name() string
-	SimilarTracks(ctx context.Context, artist, title string, limit int) ([]TrackCandidate, error)
+	SimilarTracks(ctx context.Context, seed TrackSeed, limit int) ([]TrackCandidate, error)
 }
 
 const (
@@ -50,11 +61,17 @@ type TrackResult struct {
 
 // SimilarTracks returns playable tracks similar to the seed.
 func (s *Service) SimilarTracks(ctx context.Context, artist, title string) TrackResult {
-	if s.tracks == nil {
+	return s.SimilarTracksFor(ctx, TrackSeed{Artist: artist, Title: title})
+}
+
+// SimilarTracksFor returns playable tracks similar to a seed, using its MBID
+// when one is available and retaining which sources proposed each candidate.
+func (s *Service) SimilarTracksFor(ctx context.Context, seed TrackSeed) TrackResult {
+	if len(s.tracks) == 0 {
 		return TrackResult{Tracks: []core.ExternalResult{}}
 	}
 	result := TrackResult{Available: true, Tracks: []core.ExternalResult{}}
-	key := "tracks\x1f" + matching.Normalize(matching.PrimaryArtist(artist)) + "\x1f" + matching.Normalize(title)
+	key := trackCacheKey(seed)
 	if cached, ok := s.cache.get(key); ok {
 		result.Tracks = s.withoutMarkedTracks(ctx, cached.([]core.ExternalResult))
 		return result
@@ -62,32 +79,19 @@ func (s *Service) SimilarTracks(ctx context.Context, artist, title string) Track
 
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
-	if err := s.trackGate.wait(ctx, s.now, s.sleep); err != nil {
-		return result
-	}
-	cands, err := s.tracks.SimilarTracks(ctx, artist, title, similarTrackCandidates)
-	if errors.Is(err, ErrNotConfigured) {
+	cands, available := s.trackCandidates(ctx, seed)
+	if !available {
 		return TrackResult{Tracks: []core.ExternalResult{}}
 	}
-	if err != nil {
-		// Our own deadline or a caller that went away says nothing about the
-		// source, so only a real failure backs off.
-		if ctx.Err() == nil {
-			s.trackGate.failed(s.now())
-		}
-		log.Printf("recommend: similar tracks from %s for %q by %q: %v", s.tracks.Name(), title, artist, err)
-		return result
-	}
-	s.trackGate.succeeded()
 
-	seed := TrackCandidate{Artist: artist, Title: title}
+	seedCandidate := TrackCandidate{Artist: seed.Artist, Title: seed.Title, MBID: seed.MBID}
 	kept := cands[:0:0]
 	for _, c := range cands {
-		if !sameRecording(seed, c.Title, c.Artist) {
+		if !sameCandidate(seedCandidate, c) {
 			kept = append(kept, c)
 		}
 	}
-	tracks := filterTracks(s.matchCandidates(ctx, kept), []Seed{{Artist: artist, Title: title}}, similarTracksSurface, nil)
+	tracks := filterTracks(s.matchCandidates(ctx, kept), []Seed{{Artist: seed.Artist, Title: seed.Title, MBID: seed.MBID}}, similarTracksSurface, nil)
 	// A lookup cut short by the deadline keeps what it matched: re-asking the
 	// source on every reopen would be worse than a shorter list.
 	if ctx.Err() == nil || len(tracks) > 0 {
@@ -95,6 +99,122 @@ func (s *Service) SimilarTracks(ctx context.Context, artist, title string) Track
 	}
 	result.Tracks = s.withoutMarkedTracks(ctx, tracks)
 	return result
+}
+
+func trackCacheKey(seed TrackSeed) string {
+	if seed.MBID != "" {
+		return "tracks\x1fmbid\x1f" + seed.MBID
+	}
+	return "tracks\x1fname\x1f" + matching.Normalize(matching.PrimaryArtist(seed.Artist)) + "\x1f" + matching.Normalize(seed.Title)
+}
+
+type trackSourceResult struct {
+	candidates []TrackCandidate
+	available  bool
+}
+
+// trackCandidates asks every source independently. Failures stay local to one
+// result, and agreement is the temporary ranker until the taste model arrives.
+func (s *Service) trackCandidates(ctx context.Context, seed TrackSeed) ([]TrackCandidate, bool) {
+	results := make([]trackSourceResult, len(s.tracks))
+	var wg sync.WaitGroup
+	for i, src := range s.tracks {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			gate := s.trackGates[src.Name()]
+			if gate != nil {
+				if err := gate.wait(ctx, s.now, s.sleep); err != nil {
+					results[i].available = !errors.Is(err, ErrNotConfigured)
+					return
+				}
+			}
+			cands, err := src.SimilarTracks(ctx, seed, similarTrackCandidates)
+			if errors.Is(err, ErrNotConfigured) {
+				return
+			}
+			results[i].available = true
+			if err != nil {
+				if ctx.Err() == nil && gate != nil {
+					gate.failed(s.now())
+				}
+				log.Printf("recommend: similar tracks from %s for %q by %q: %v", src.Name(), seed.Title, seed.Artist, err)
+				return
+			}
+			if gate != nil {
+				gate.succeeded()
+			}
+			for j := range cands {
+				cands[j].Sources = []string{src.Name()}
+			}
+			results[i].candidates = cands
+		}()
+	}
+	wg.Wait()
+
+	available := false
+	var all []TrackCandidate
+	for _, result := range results {
+		available = available || result.available
+		all = append(all, result.candidates...)
+	}
+	return mergeTrackCandidates(all), available
+}
+
+func mergeTrackCandidates(in []TrackCandidate) []TrackCandidate {
+	var out []TrackCandidate
+	byMBID := map[string]int{}
+	byName := map[string][]int{}
+	for _, candidate := range in {
+		idx, found := -1, false
+		if candidate.MBID != "" {
+			idx, found = byMBID[candidate.MBID]
+		}
+		name := recordingKey(candidate.Title, candidate.Artist)
+		if !found {
+			for _, existing := range byName[name] {
+				if out[existing].MBID == "" || candidate.MBID == "" || out[existing].MBID == candidate.MBID {
+					idx, found = existing, true
+					break
+				}
+			}
+		}
+		if found {
+			out[idx].Sources = appendUnique(out[idx].Sources, candidate.Sources...)
+			if out[idx].MBID == "" {
+				out[idx].MBID = candidate.MBID
+				if candidate.MBID != "" {
+					byMBID[candidate.MBID] = idx
+				}
+			}
+			continue
+		}
+		idx = len(out)
+		candidate.Sources = appendUnique(nil, candidate.Sources...)
+		out = append(out, candidate)
+		byName[name] = append(byName[name], idx)
+		if candidate.MBID != "" {
+			byMBID[candidate.MBID] = idx
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return len(out[i].Sources) > len(out[j].Sources) })
+	return out
+}
+
+func appendUnique(dst []string, values ...string) []string {
+	for _, value := range values {
+		found := false
+		for _, existing := range dst {
+			if existing == value {
+				found = true
+				break
+			}
+		}
+		if !found && value != "" {
+			dst = append(dst, value)
+		}
+	}
+	return dst
 }
 
 // matchCandidates turns candidates into playable tracks, keeping the source's
@@ -119,17 +239,18 @@ func (s *Service) matchCandidates(ctx context.Context, cands []TrackCandidate) [
 	wg.Wait()
 
 	out := []core.ExternalResult{}
-	seen := map[string]bool{}
+	seen := map[string]int{}
 	var owned []string
 	for _, r := range resolved {
 		if r == nil {
 			continue
 		}
 		id := r.Source + "\x00" + r.ExternalID
-		if seen[id] {
+		if previous, ok := seen[id]; ok {
+			out[previous].RecommendationSources = appendUnique(out[previous].RecommendationSources, r.RecommendationSources...)
 			continue
 		}
-		seen[id] = true
+		seen[id] = len(out)
 		if r.Source == "library" {
 			owned = append(owned, r.ExternalID)
 		}
@@ -169,7 +290,7 @@ func (s *Service) assignCatalogIDs(ctx context.Context, tracks []core.ExternalRe
 // resolveCandidate finds what a candidate plays as: the library copy when one
 // is owned, otherwise the first search result that is the same recording.
 func resolveCandidate(ctx context.Context, c TrackCandidate, sources []search.SearchSource, matcher Matcher) (core.ExternalResult, bool) {
-	probe := core.ExternalResult{Title: c.Title, Artist: c.Artist, DurationMs: c.DurationMs, Type: core.EntityTrack}
+	probe := core.ExternalResult{Title: c.Title, Artist: c.Artist, DurationMs: c.DurationMs, MBID: c.MBID, RecommendationSources: append([]string(nil), c.Sources...), Type: core.EntityTrack}
 	if owned, ok := ownedCopy(ctx, matcher, probe); ok {
 		return owned, true
 	}
@@ -183,8 +304,12 @@ func resolveCandidate(ctx context.Context, c TrackCandidate, sources []search.Se
 			if hit.Type != "" && hit.Type != core.EntityTrack {
 				continue
 			}
-			if !sameRecording(c, hit.Title, hit.Artist) {
+			if !candidateMatchesResult(c, hit) {
 				continue
+			}
+			hit.RecommendationSources = append([]string(nil), c.Sources...)
+			if hit.MBID == "" {
+				hit.MBID = c.MBID
 			}
 			// The hit carries an album and duration the bare candidate lacked,
 			// which can confirm a library copy the first match missed.
@@ -208,8 +333,23 @@ func ownedCopy(ctx context.Context, matcher Matcher, ext core.ExternalResult) (c
 	return core.ExternalResult{
 		Source: "library", ExternalID: m.LibraryTrackID,
 		Title: ext.Title, Artist: ext.Artist, Album: ext.Album, DurationMs: ext.DurationMs,
+		MBID: ext.MBID, RecommendationSources: append([]string(nil), ext.RecommendationSources...),
 		CoverArtID: m.CoverArtID, Type: core.EntityTrack, Match: &m,
 	}, true
+}
+
+func sameCandidate(a, b TrackCandidate) bool {
+	if a.MBID != "" && b.MBID != "" {
+		return a.MBID == b.MBID
+	}
+	return sameRecording(a, b.Title, b.Artist)
+}
+
+func candidateMatchesResult(candidate TrackCandidate, result core.ExternalResult) bool {
+	if candidate.MBID != "" && result.MBID != "" {
+		return candidate.MBID == result.MBID
+	}
+	return sameRecording(candidate, result.Title, result.Artist)
 }
 
 // sameRecording reports whether a title and artist name the candidate. The

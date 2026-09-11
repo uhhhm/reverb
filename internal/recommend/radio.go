@@ -22,6 +22,7 @@ const (
 type Seed struct {
 	Artist string `json:"artist"`
 	Title  string `json:"title,omitempty"`
+	MBID   string `json:"mbid,omitempty"`
 }
 
 // Radio returns the next tracks for a Radio session. An artist seed is first
@@ -31,7 +32,7 @@ type Seed struct {
 // order their sources gave. Radio is not a discovery surface, so owned tracks
 // stay, but other versions and duplicate recordings are dropped.
 func (s *Service) Radio(ctx context.Context, seeds []Seed) TrackResult {
-	if s.tracks == nil {
+	if len(s.tracks) == 0 {
 		return TrackResult{Tracks: []core.ExternalResult{}}
 	}
 	if len(seeds) > radioSeedLimit {
@@ -57,7 +58,7 @@ func (s *Service) Radio(ctx context.Context, seeds []Seed) TrackResult {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			lists[i] = s.SimilarTracks(ctx, sd.Artist, sd.Title)
+			lists[i] = s.SimilarTracksFor(ctx, TrackSeed{Artist: sd.Artist, Title: sd.Title, MBID: sd.MBID})
 		}()
 	}
 	wg.Wait()

@@ -697,15 +697,17 @@ paths:
               schema: { $ref: "#/components/schemas/SimilarArtists" }
   /recommendations/similar-tracks:
     get:
-      summary: Playable tracks similar to a seed track (Last.fm similar tracks)
+      summary: Playable tracks similar to a seed track
       description: >-
         Each candidate is matched to something playable: the library copy when
         owned, otherwise a search-source result that plays through external
         playback. Candidates nothing matches are dropped. available is false
-        when Last.fm is not configured.
+        when no similarity source is configured. Candidates several sources
+        agree on rank first and retain their source provenance.
       parameters:
         - { name: artist, in: query, required: true, schema: { type: string } }
         - { name: title, in: query, required: true, schema: { type: string } }
+        - { name: mbid, in: query, required: false, schema: { type: string }, description: MusicBrainz recording ID when known }
       responses:
         "200":
           description: similar tracks
@@ -1829,6 +1831,8 @@ components:
         source: { type: string }
         externalId: { type: string }
         name: { type: string }
+        mbid: { type: string }
+        recommendationSources: { type: array, items: { type: string } }
         coverUrl: { type: string }
         coverArtId: { type: string }
     SimilarArtists:
@@ -1857,6 +1861,8 @@ components:
         album: { type: string }
         durationMs: { type: integer }
         isrc: { type: string }
+        mbid: { type: string }
+        recommendationSources: { type: array, items: { type: string } }
         coverUrl: { type: string }
         coverArtId: { type: string }
         artistExternalId: { type: string }
@@ -1887,6 +1893,7 @@ components:
       properties:
         artist: { type: string }
         title: { type: string }
+        mbid: { type: string }
     RadioRequest:
       type: object
       required: [seeds]

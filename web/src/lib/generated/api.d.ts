@@ -2558,14 +2558,16 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Playable tracks similar to a seed track (Last.fm similar tracks)
-         * @description Each candidate is matched to something playable: the library copy when owned, otherwise a search-source result that plays through external playback. Candidates nothing matches are dropped. available is false when Last.fm is not configured.
+         * Playable tracks similar to a seed track
+         * @description Each candidate is matched to something playable: the library copy when owned, otherwise a search-source result that plays through external playback. Candidates nothing matches are dropped. available is false when no similarity source is configured. Candidates several sources agree on rank first and retain their source provenance.
          */
         get: {
             parameters: {
                 query: {
                     artist: string;
                     title: string;
+                    /** @description MusicBrainz recording ID when known */
+                    mbid?: string;
                 };
                 header?: never;
                 path?: never;
@@ -4919,6 +4921,8 @@ export interface components {
             source: string;
             externalId: string;
             name: string;
+            mbid?: string;
+            recommendationSources?: string[];
             coverUrl?: string;
             coverArtId?: string;
         };
@@ -4936,6 +4940,8 @@ export interface components {
             album: string;
             durationMs: number;
             isrc?: string;
+            mbid?: string;
+            recommendationSources?: string[];
             coverUrl?: string;
             coverArtId?: string;
             artistExternalId?: string;
@@ -4961,6 +4967,7 @@ export interface components {
         RadioSeed: {
             artist: string;
             title?: string;
+            mbid?: string;
         };
         RadioRequest: {
             seeds: components["schemas"]["RadioSeed"][];

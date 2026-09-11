@@ -48,9 +48,27 @@ func WithSleep(sleep func(context.Context, time.Duration) error) Option {
 	return func(s *Service) { s.sleep = sleep }
 }
 
-// WithTrackSource registers the source similar tracks come from. Without one,
-// similar tracks are unavailable.
-func WithTrackSource(src TrackSimilarity) Option { return func(s *Service) { s.tracks = src } }
+// WithTrackSource registers one source of similar recordings. Sources are
+// queried independently and their candidates are merged per request.
+func WithTrackSource(src TrackSimilarity) Option {
+	return func(s *Service) {
+		if src != nil {
+			s.tracks = append(s.tracks, src)
+		}
+	}
+}
+
+// WithArtistSource registers a dedicated artist-similarity source. Search
+// adapters that implement search.SimilarArtistsProvider are discovered live;
+// this option is for sources such as ListenBrainz that are not playable
+// catalogues themselves.
+func WithArtistSource(src ArtistSimilarity) Option {
+	return func(s *Service) {
+		if src != nil {
+			s.artists = append(s.artists, src)
+		}
+	}
+}
 
 // Matcher decides whether a track is already in the library.
 // *matching.Service satisfies it.
@@ -85,8 +103,9 @@ type Service struct {
 	recentPlays func(context.Context, time.Time) ([]TrackCandidate, error)
 	sources     func() []search.SearchSource
 	library     func() Library
-	tracks      TrackSimilarity
-	trackGate   gate
+	tracks      []TrackSimilarity
+	artists     []ArtistSimilarity
+	trackGates  map[string]*gate
 	matcher     func() Matcher
 	catalogIDs  func(context.Context, []string) map[string]string
 	timeout     time.Duration
@@ -103,6 +122,10 @@ func New(sources func() []search.SearchSource, opts ...Option) *Service {
 		opt(s)
 	}
 	s.cache = &cache{now: s.now, entries: map[string]cacheEntry{}}
+	s.trackGates = make(map[string]*gate, len(s.tracks))
+	for _, src := range s.tracks {
+		s.trackGates[src.Name()] = &gate{}
+	}
 	return s
 }
 

@@ -4,9 +4,9 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Runs as a make target or command against the fixture by default, or a given database
-- [ ] Network sources can be replayed from a recorded cache so runs are deterministic
-- [ ] Reports metrics per surface (Radio, similar tracks) and saves a baseline file to compare against
-- [ ] The fixture contains no personal data beyond what's needed (anonymised IDs are fine)
+- [x] Runs as a make target or command against the fixture by default, or a given database
+- [x] Network sources can be replayed from a recorded cache so runs are deterministic
+- [x] Reports metrics per surface (Radio, similar tracks) and saves a baseline file to compare against
+- [x] The fixture contains no personal data beyond what's needed (anonymised IDs are fine)

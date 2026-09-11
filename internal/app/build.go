@@ -41,6 +41,7 @@ import (
 	"github.com/uhhhm/reverb/internal/playlistcrdt"
 	"github.com/uhhhm/reverb/internal/playlistsync"
 	"github.com/uhhhm/reverb/internal/recommend"
+	"github.com/uhhhm/reverb/internal/recommend/listenbrainz"
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/resolver"
 	"github.com/uhhhm/reverb/internal/scrobble"
@@ -326,9 +327,12 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	deps.NotInterested = marks
 
 	// Recommendations read the LIVE sources, library and matcher, so an adapter
-	// reload changes what they can ask without rebuilding the module. Last.fm is
-	// the similar-tracks source; it reuses the scrobbling API key.
+	// reload changes what they can ask without rebuilding the module. Last.fm
+	// reuses the scrobbling API key; ListenBrainz's public datasets need no
+	// account. The same ListenBrainz instance shares its request limiter across
+	// recording and artist lookups.
 	liveMatcher := reloader.MatcherProvider()
+	listenbrainzSource := listenbrainz.New()
 	deps.Recommend = recommend.New(reloader.SearchSourcesProvider(),
 		recommend.WithLibrary(func() recommend.Library {
 			if lib := reloader.Current().Library; lib != nil {
@@ -337,6 +341,8 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 			return nil
 		}),
 		recommend.WithTrackSource(lastfm.NewSimilarity(lastfm.New(), func() string { return scrobbleCfg().APIKey })),
+		recommend.WithTrackSource(listenbrainzSource),
+		recommend.WithArtistSource(listenbrainzSource),
 		recommend.WithMatcher(func() recommend.Matcher {
 			if m := liveMatcher(); m != nil {
 				return m

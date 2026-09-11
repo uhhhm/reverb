@@ -1,0 +1,22 @@
+[
+  {
+    "recording_mbid": "d18a1284-d6a1-42d9-b0c1-b247e9f27b80",
+    "recording_name": "D.A.N.C.E.",
+    "artist_credit_name": "Justice",
+    "artist_credit_mbids": null,
+    "release_name": "Cross",
+    "release_mbid": "9da1a863-f3f2-4618-bdce-f0c88c055ba5",
+    "score": 265,
+    "reference_mbid": "7813d6e5-fe21-4cd0-8f8b-82b7c15662ae"
+  },
+  {
+    "recording_mbid": "bf7845cc-eac3-48a3-8b06-543b4b7ba117",
+    "recording_name": "Hey Boy Hey Girl",
+    "artist_credit_name": "The Chemical Brothers",
+    "artist_credit_mbids": null,
+    "release_name": "Surrender",
+    "release_mbid": "41b75b24-096d-4f36-a10d-7cd2766408dc",
+    "score": 235,
+    "reference_mbid": "7813d6e5-fe21-4cd0-8f8b-82b7c15662ae"
+  }
+]

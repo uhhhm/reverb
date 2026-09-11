@@ -1,0 +1,23 @@
+{
+  "fixture": "anonymised-v1",
+  "holdoutDays": 3,
+  "k": 10,
+  "trainingPlays": 10,
+  "hiddenPlays": 4,
+  "surfaces": {
+    "radio": {
+      "predictions": 7,
+      "hits": 4,
+      "hitRate": 1,
+      "recallAtK": 1,
+      "ndcgAtK": 0.9438661545147249
+    },
+    "similar_tracks": {
+      "predictions": 4,
+      "hits": 3,
+      "hitRate": 0.75,
+      "recallAtK": 0.75,
+      "ndcgAtK": 0.7536976112592702
+    }
+  }
+}

@@ -20,6 +20,10 @@ type Recommendations interface {
 	Radio(ctx context.Context, seeds []recommend.Seed) recommend.TrackResult
 }
 
+type seedRecommendations interface {
+	SimilarTracksFor(ctx context.Context, seed recommend.TrackSeed) recommend.TrackResult
+}
+
 type radioRequest struct {
 	Seeds []recommend.Seed `json:"seeds"`
 }
@@ -60,12 +64,17 @@ func (s *Server) handleSimilarArtists(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSimilarTracks(w http.ResponseWriter, r *http.Request) {
 	artist := strings.TrimSpace(r.URL.Query().Get("artist"))
 	title := strings.TrimSpace(r.URL.Query().Get("title"))
+	mbid := strings.TrimSpace(r.URL.Query().Get("mbid"))
 	if artist == "" || title == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "artist and title are required"})
 		return
 	}
 	if s.deps.Recommend == nil {
 		writeJSON(w, http.StatusOK, recommend.TrackResult{Tracks: []core.ExternalResult{}})
+		return
+	}
+	if seeded, ok := s.deps.Recommend.(seedRecommendations); ok {
+		writeJSON(w, http.StatusOK, seeded.SimilarTracksFor(r.Context(), recommend.TrackSeed{Artist: artist, Title: title, MBID: mbid}))
 		return
 	}
 	writeJSON(w, http.StatusOK, s.deps.Recommend.SimilarTracks(r.Context(), artist, title))
