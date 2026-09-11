@@ -173,6 +173,14 @@ paths:
         - { name: size, in: query, required: false, schema: { type: integer }, description: Maximum songs to return; omit for everything }
         - { name: offset, in: query, required: false, schema: { type: integer } }
       responses: { "200": { description: ok } }
+  /library/track/{id}:
+    delete:
+      summary: Remove a track from the built-in library and delete its managed audio file
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: track removed and library rescan scheduled }
+        "404": { description: track file not found }
+        "503": { description: track removal unavailable outside the built-in library }
   /library/track/{id}/name:
     put:
       summary: Rename a library track (Reverb-side display override; file tags are never rewritten)

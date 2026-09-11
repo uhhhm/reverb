@@ -403,6 +403,7 @@ func (s *Server) routes() {
 			pr.Get("/library/album/{id}", s.handleLibraryAlbum)
 			pr.Get("/library/albums", s.handleLibraryAlbums)
 			pr.Get("/library/songs", s.handleLibrarySongs)
+			pr.Delete("/library/track/{id}", s.handleRemoveLibraryTrack)
 			pr.Put("/library/track/{id}/name", s.handleRenameTrack)
 			pr.Put("/library/album/{id}/name", s.handleRenameAlbum)
 			pr.Put("/library/artist/{id}/name", s.handleRenameArtist)

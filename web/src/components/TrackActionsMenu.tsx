@@ -15,6 +15,7 @@ import type { Track } from '../lib/types'
 
 interface TrackActionsMenuProps {
   onRemove?: () => void
+  onRemoveFromLibrary?: (track: Track) => void
   track: Track
   /** Show the rename action. Omit to hide it. */
   onRename?: (track: Track) => void
@@ -71,7 +72,7 @@ function notInterestedRequest(track: Track): NotInterestedRequest {
  * self-explanatory from an icon alone (an upgrade re-downloads and replaces the
  * file), and the list is expected to grow.
  */
-export function TrackActionsMenu({ track, onRename, onRemove }: TrackActionsMenuProps) {
+export function TrackActionsMenu({ track, onRename, onRemove, onRemoveFromLibrary }: TrackActionsMenuProps) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
@@ -135,6 +136,12 @@ export function TrackActionsMenu({ track, onRename, onRemove }: TrackActionsMenu
     label: 'Crop',
     description: 'Trim the intro or outro — your file is never modified',
     onSelect: () => setCropOpen(true),
+  })
+  if (track.id && !track.externalStream && onRemoveFromLibrary) items.push({
+    icon: 'x',
+    label: 'Remove from library',
+    description: 'Permanently delete this track and its audio file',
+    onSelect: () => onRemoveFromLibrary(track),
   })
   if (upgrade.available) {
     items.push({

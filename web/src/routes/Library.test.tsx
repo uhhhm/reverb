@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { UseQueryResult } from '@tanstack/react-query'
@@ -109,6 +109,7 @@ vi.mock('../lib/libraryApi', async (importOriginal) => {
     useSongs: vi.fn(),
     useArtists: vi.fn(),
     useLibraryStatus: vi.fn(),
+    removeTrack: vi.fn(),
     coverUrl: vi.fn((id: string) => `/api/v1/cover/${id}`),
   }
 })
@@ -431,6 +432,43 @@ describe('Library page', () => {
     expect(screen.getByRole('dialog', { name: /rename track/i })).toBeInTheDocument()
     expect(screen.getByLabelText(/title/i)).toHaveValue('Idioteque')
     expect(screen.getByLabelText(/artist/i)).toHaveValue('Radiohead')
+  })
+
+  it('confirms before removing a track from the built-in library', async () => {
+    const { removeTrack, useSongs } = await import('../lib/libraryApi')
+    vi.mocked(removeTrack).mockResolvedValue({ removed: true, scanning: true })
+    vi.mocked(useSongs).mockReturnValue({
+      data: [makeTrack({ id: 't1', title: 'Idioteque', artist: 'Radiohead' })],
+      isLoading: false,
+      error: null,
+    } as unknown as UseQueryResult<Track[], Error>)
+
+    render(wrap(<Library />))
+    fireEvent.click(screen.getByRole('button', { name: /more actions for idioteque/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /remove from library/i }))
+
+    expect(screen.getByRole('dialog', { name: /remove track from library/i })).toHaveTextContent(/can.t be undone/i)
+    expect(removeTrack).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: /^remove track$/i }))
+    await waitFor(() => expect(removeTrack).toHaveBeenCalledWith('t1'))
+  })
+
+  it('does not offer file removal for an external library', async () => {
+    const { useLibraryStatus, useSongs } = await import('../lib/libraryApi')
+    vi.mocked(useLibraryStatus).mockReturnValue({
+      data: { mode: 'external', state: 'ready' },
+      isLoading: false,
+      error: null,
+    } as unknown as ReturnType<typeof useLibraryStatus>)
+    vi.mocked(useSongs).mockReturnValue({
+      data: [makeTrack({ id: 't1', title: 'Idioteque' })],
+      isLoading: false,
+      error: null,
+    } as unknown as UseQueryResult<Track[], Error>)
+
+    render(wrap(<Library />))
+    fireEvent.click(screen.getByRole('button', { name: /more actions for idioteque/i }))
+    expect(screen.queryByRole('menuitem', { name: /remove from library/i })).toBeNull()
   })
 })
 

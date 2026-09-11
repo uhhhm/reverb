@@ -6,6 +6,7 @@ import { useSyncedPlaylists } from '../lib/syncedPlaylistApi'
 import { Chip, MediaCard, Skeleton, EmptyState, Button, TrackRow } from '../components/ui'
 import { ImportPlaylistDialog } from '../components/ImportPlaylistDialog'
 import { RenameTrackDialog } from '../components/RenameTrackDialog'
+import { RemoveTrackDialog } from '../components/RemoveTrackDialog'
 import { usePlayer } from '../lib/playerStore'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
 import type { Track } from '../lib/types'
@@ -77,6 +78,7 @@ export default function Library() {
   const [filter, setFilter] = useState<Filter>('songs')
   const [importOpen, setImportOpen] = useState(false)
   const [renaming, setRenaming] = useState<Track | null>(null)
+  const [removing, setRemoving] = useState<Track | null>(null)
   const navigate = useNavigate()
   const playTrackList = usePlayer((s) => s.playTrackList)
   const currentTrack = usePlayer((s) => s.current)
@@ -167,6 +169,7 @@ export default function Library() {
                   playing={currentTrack?.id === t.id ? isPlaying : undefined}
                   onPlay={() => playTrackList(songs.data ?? [], i)}
                   onRename={setRenaming}
+                  onRemoveFromLibrary={libStatus.data?.mode === 'built-in' ? setRemoving : undefined}
                 />
               ))}
             </div>
@@ -265,6 +268,7 @@ export default function Library() {
 
       <ImportPlaylistDialog open={importOpen} onClose={() => setImportOpen(false)} />
       <RenameTrackDialog track={renaming} onClose={() => setRenaming(null)} />
+      <RemoveTrackDialog track={removing} onClose={() => setRemoving(null)} />
     </div>
   )
 }

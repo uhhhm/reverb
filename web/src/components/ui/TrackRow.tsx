@@ -11,6 +11,8 @@ import { Icon } from './Icon'
 interface TrackRowProps {
   playlist?: boolean
   onRemove?: () => void
+  /** Offer permanent removal from the built-in library. */
+  onRemoveFromLibrary?: (track: Track) => void
   track: Track
   index?: number
   active?: boolean
@@ -42,7 +44,7 @@ interface TrackRowProps {
   onIntent?: () => void
 }
 
-export function TrackRow({ playlist = false, onRemove, track, index, active = false, playing, onPlay, right, coverSrc, rightWidth = 'auto', artistNode, albumNode, artistTo, albumTo, caption, onRename, onIntent }: TrackRowProps) {
+export function TrackRow({ playlist = false, onRemove, onRemoveFromLibrary, track, index, active = false, playing, onPlay, right, coverSrc, rightWidth = 'auto', artistNode, albumNode, artistTo, albumTo, caption, onRename, onIntent }: TrackRowProps) {
   // coverSrc overrides (external Spotify images); otherwise use album cover directly
   // (album art reliably resolves; per-song embedded art is usually absent).
   const src = coverSrc ?? trackCoverUrl(track, 80)
@@ -154,7 +156,7 @@ export function TrackRow({ playlist = false, onRemove, track, index, active = fa
 
       {/* Row actions — only for owned tracks (truthy track.id) */}
       <span className="playlist-actions flex items-center justify-center">
-        <TrackActionsMenu track={track} onRename={onRename} onRemove={onRemove} />
+        <TrackActionsMenu track={track} onRename={onRename} onRemove={onRemove} onRemoveFromLibrary={onRemoveFromLibrary} />
       </span>
 
       {/* Duration */}

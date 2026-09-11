@@ -156,6 +156,11 @@ export function renameTrack(id: string, name: TrackName): Promise<TrackName> {
   return api.put<TrackName>(`/library/track/${encodeURIComponent(id)}/name`, name)
 }
 
+/** Permanently remove an owned track and its audio file from the built-in library. */
+export function removeTrack(id: string): Promise<{ removed: boolean; scanning: boolean }> {
+  return api.del(`/library/track/${encodeURIComponent(id)}`)
+}
+
 export function createPlaylist(name: string): Promise<SyncedPlaylistDetail> {
   return api.post<SyncedPlaylistDetail>('/playlists', { name })
 }

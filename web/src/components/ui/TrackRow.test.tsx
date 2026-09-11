@@ -353,4 +353,12 @@ describe('Row actions menu', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: /edit details/i }))
     expect(onRename).toHaveBeenCalled()
   })
+
+  it('reaches permanent library removal only when its callback is given', () => {
+    const onRemoveFromLibrary = vi.fn()
+    renderRow({ onPlay: vi.fn(), onRemoveFromLibrary })
+    fireEvent.click(screen.getByRole('button', { name: /more actions for/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /remove from library/i }))
+    expect(onRemoveFromLibrary).toHaveBeenCalledWith(track)
+  })
 })
