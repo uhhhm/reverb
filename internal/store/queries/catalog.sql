@@ -43,5 +43,11 @@ SELECT catalog_id FROM backend_binding WHERE backend_id = ? LIMIT 1;
 -- name: ListCatalogIDsByBackendIDs :many
 SELECT backend_id, catalog_id FROM backend_binding WHERE backend_id IN (sqlc.slice('backend_ids'));
 
+-- name: ListTrackIdentitiesByBackendIDs :many
+SELECT b.backend_id, c.isrc, c.mbid
+FROM backend_binding b
+JOIN catalog_entity c ON c.id = b.catalog_id
+WHERE b.backend_id IN (sqlc.slice('backend_ids')) AND c.kind = 'track';
+
 -- name: GetBackendIDByCatalogID :one
 SELECT backend_id FROM backend_binding WHERE catalog_id = ? LIMIT 1;

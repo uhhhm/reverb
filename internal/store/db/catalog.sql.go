@@ -245,6 +245,52 @@ func (q *Queries) ListCatalogIDsByBackendIDs(ctx context.Context, backendIds []s
 	return items, nil
 }
 
+const listTrackIdentitiesByBackendIDs = `-- name: ListTrackIdentitiesByBackendIDs :many
+SELECT b.backend_id, c.isrc, c.mbid
+FROM backend_binding b
+JOIN catalog_entity c ON c.id = b.catalog_id
+WHERE b.backend_id IN (/*SLICE:backend_ids*/?) AND c.kind = 'track'
+`
+
+type ListTrackIdentitiesByBackendIDsRow struct {
+	BackendID string `json:"backend_id"`
+	Isrc      string `json:"isrc"`
+	Mbid      string `json:"mbid"`
+}
+
+func (q *Queries) ListTrackIdentitiesByBackendIDs(ctx context.Context, backendIds []string) ([]ListTrackIdentitiesByBackendIDsRow, error) {
+	query := listTrackIdentitiesByBackendIDs
+	var queryParams []interface{}
+	if len(backendIds) > 0 {
+		for _, v := range backendIds {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:backend_ids*/?", strings.Repeat(",?", len(backendIds))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:backend_ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTrackIdentitiesByBackendIDsRow
+	for rows.Next() {
+		var i ListTrackIdentitiesByBackendIDsRow
+		if err := rows.Scan(&i.BackendID, &i.Isrc, &i.Mbid); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const repointAliases = `-- name: RepointAliases :exec
 UPDATE catalog_alias SET catalog_id = ? WHERE catalog_id = ?
 `

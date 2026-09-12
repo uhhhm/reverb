@@ -4,7 +4,12 @@ import (
 	"context"
 
 	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
+
+type trackIdentityLookup interface {
+	ListTrackIdentitiesByBackendIDs(ctx context.Context, backendIDs []string) ([]db.ListTrackIdentitiesByBackendIDsRow, error)
+}
 
 // The decorate* helpers are the one place library data passes through on its
 // way out of the API. Everything a user has changed about a track without
@@ -21,10 +26,43 @@ func (s *Server) decorateTracks(ctx context.Context, tracks []core.Track) {
 	if len(tracks) == 0 {
 		return
 	}
+	s.applyTrackIdentities(ctx, tracks)
 	s.deps.Covers.ApplyTracks(ctx, tracks)
 	s.deps.Entities.ApplyTracks(ctx, tracks)
 	s.deps.Overrides.ApplyTracks(ctx, tracks)
 	s.deps.Crop.ApplyTracks(ctx, tracks)
+}
+
+// applyTrackIdentities projects canonical recording identifiers onto adapter
+// tracks. Adapters are not required to know the catalog, but recommendation
+// actions on their API results should still use an MBID when Reverb has one.
+func (s *Server) applyTrackIdentities(ctx context.Context, tracks []core.Track) {
+	lookup, ok := s.deps.Catalog.(trackIdentityLookup)
+	if !ok || len(tracks) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(tracks))
+	for _, track := range tracks {
+		ids = append(ids, track.ID)
+	}
+	rows, err := lookup.ListTrackIdentitiesByBackendIDs(ctx, ids)
+	if err != nil {
+		return
+	}
+	byID := make(map[string]db.ListTrackIdentitiesByBackendIDsRow, len(rows))
+	for _, row := range rows {
+		byID[row.BackendID] = row
+	}
+	for i := range tracks {
+		if identity, found := byID[tracks[i].ID]; found {
+			if tracks[i].ISRC == "" {
+				tracks[i].ISRC = identity.Isrc
+			}
+			if tracks[i].MBID == "" {
+				tracks[i].MBID = identity.Mbid
+			}
+		}
+	}
 }
 
 func (s *Server) decorateAlbums(ctx context.Context, albums []core.Album) {
