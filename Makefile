@@ -38,8 +38,8 @@ check-full: check test-race
 	cd web && npm run e2e
 
 # Deterministic holdout evaluation against anonymised history and recorded
-# recommendation-source responses. Use ARGS="-db /path/to/reverb.db" for local
-# history, optionally with -fixture pointing at a matching recorded cache.
+# recommendation-source responses. A local database must either capture fresh
+# responses or explicitly name the matching recorded fixture used for replay.
 # Capture a real-history replay with:
 # make recommend-quality ARGS="-db /path/reverb.db -record-cache /path/recommend-cache.json"
 # Replay it later with:
