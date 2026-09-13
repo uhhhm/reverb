@@ -27,13 +27,14 @@ type Seed struct {
 
 // Radio returns the next tracks for a Radio session. An artist seed is first
 // turned into a few of that artist's own tracks, which lead the result; after
-// them come tracks similar to every seed, interleaved in seed order so no one
-// seed crowds out the rest. There is no personal ranking: candidates keep the
-// order, with candidates supported by several sources first. Radio is not a
-// discovery surface, so owned tracks stay, but other versions and duplicate
-// recordings are dropped.
+// them come tracks similar to every seed, ranked by the taste profile (see
+// rankWeights) and then balanced between new and known music by the
+// surface's share and Adventurousness. Radio is not a discovery surface, so
+// owned tracks stay, but other versions and duplicate recordings are dropped.
+// With online recommendations off, nothing is looked up.
 func (s *Service) Radio(ctx context.Context, seeds []Seed) TrackResult {
-	if len(s.tracks) == 0 {
+	settings := s.settings(ctx)
+	if len(s.tracks) == 0 || !settings.Online {
 		return TrackResult{Tracks: []core.ExternalResult{}}
 	}
 	if len(seeds) > radioSeedLimit {
@@ -48,6 +49,7 @@ func (s *Service) Radio(ctx context.Context, seeds []Seed) TrackResult {
 			continue
 		}
 		for _, t := range s.artistTracks(ctx, sd.Artist) {
+			t.Reason = &core.RecommendationReason{Kind: core.ReasonRadioArtist, Artist: sd.Artist}
 			lead = append(lead, t)
 			titled = append(titled, Seed{Artist: t.Artist, Title: t.Title})
 		}
@@ -59,7 +61,7 @@ func (s *Service) Radio(ctx context.Context, seeds []Seed) TrackResult {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			lists[i] = s.SimilarTracksFor(ctx, TrackSeed{Artist: sd.Artist, Title: sd.Title, MBID: sd.MBID})
+			lists[i] = s.similarTracks(ctx, TrackSeed{Artist: sd.Artist, Title: sd.Title, MBID: sd.MBID})
 		}()
 	}
 	wg.Wait()
@@ -85,7 +87,34 @@ func (s *Service) Radio(ctx context.Context, seeds []Seed) TrackResult {
 		return result
 	}
 	result.Available = true
-	tracks := append(s.withoutMarkedTracks(ctx, lead), filterTracks(merged, titled, radioSurface, nil)...)
+
+	// A recording proposed for several seeds gathers support from each, and
+	// its reason names the seed that ranked it highest.
+	support := map[string]float64{}
+	sources := map[string][]string{}
+	best := map[string]float64{}
+	reasonSeed := map[string]Seed{}
+	for i, l := range lists {
+		for pos, t := range l.Tracks {
+			key := recordingKey(t.Title, t.Artist)
+			v := 1 / float64(1+pos)
+			support[key] += v
+			sources[key] = appendUnique(sources[key], t.RecommendationSources...)
+			if v > best[key] {
+				best[key], reasonSeed[key] = v, titled[i]
+			}
+		}
+	}
+	profile := s.profile(ctx)
+	rest := filterTracks(merged, titled, radioSurface, nil)
+	for i := range rest {
+		key := recordingKey(rest[i].Title, rest[i].Artist)
+		rest[i].RecommendationSources = sources[key]
+		rest[i].Reason = trackReason(reasonSeed[key], profile)
+	}
+	rankTracks(rest, support, profile)
+	rest = mixNewAndKnown(rest, newShare(radioSurface.newShare, settings.Adventurousness), profile)
+	tracks := append(s.withoutMarkedTracks(ctx, lead), rest...)
 	if len(tracks) > radioLimit {
 		tracks = tracks[:radioLimit]
 	}

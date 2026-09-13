@@ -51,6 +51,7 @@ import (
 	"github.com/uhhhm/reverb/internal/store"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
 	"github.com/uhhhm/reverb/internal/syncemit"
+	"github.com/uhhhm/reverb/internal/tastesettings"
 	"github.com/uhhhm/reverb/internal/wiring"
 )
 
@@ -325,12 +326,17 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	// below applies a peer's marks without emitting them again.
 	marks := notinterested.New(st.Q(), emitter)
 	deps.NotInterested = marks
+	// Adventurousness and the Online recommendations switch belong to the
+	// household's taste profile, so they replicate the same way.
+	tasteSettings := tastesettings.New(st.Q(), emitter)
+	deps.TasteSettings = tasteSettings
 
 	// Recommendations read the LIVE sources, library and matcher, so an adapter
 	// reload changes what they can ask without rebuilding the module. Last.fm
 	// reuses the scrobbling API key; ListenBrainz's public datasets need no
 	// account. The same ListenBrainz instance shares its request limiter across
-	// recording and artist lookups.
+	// recording and artist lookups. Ranking reads the taste profile's inputs and
+	// the settings per request, so a peer's change applies to the next one.
 	liveMatcher := reloader.MatcherProvider()
 	listenbrainzSource := listenbrainz.New()
 	deps.Recommend = recommend.New(reloader.SearchSourcesProvider(),
@@ -364,6 +370,11 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 			}
 			return out, nil
 		}),
+		recommend.WithTaste(tasteInputs{q: st.Q(), marks: marks}),
+		recommend.WithSettings(func(ctx context.Context) (recommend.Settings, error) {
+			s, err := tasteSettings.Get(ctx)
+			return recommend.Settings{Adventurousness: s.Adventurousness, Online: s.OnlineRecommendations}, err
+		}),
 	)
 
 	playlistProjection := playlistcrdt.New(deps.SyncStore, wiring.NewSyncStore(st.Q()), authorDevice)
@@ -381,7 +392,8 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 			WithTrackStore(st.Q()).
 			WithEntities(deps.Entities).
 			WithCovers(coverSvc).
-			WithNotInterested(marks)
+			WithNotInterested(marks).
+			WithTasteSettings(tasteSettings)
 	}
 	projector := newMaterializer()
 	deps.SyncStore.SetMaterializer(projector)

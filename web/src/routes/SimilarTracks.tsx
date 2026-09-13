@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { EmptyState, Skeleton, TrackRow } from '../components/ui'
 import { usePlayer } from '../lib/playerStore'
-import { recommendedTrackToTrack, useSimilarTracks } from '../lib/recommendationsApi'
+import { reasonText, recommendedTrackToTrack, useSimilarTracks } from '../lib/recommendationsApi'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
 
 /**
@@ -40,8 +40,8 @@ export default function SimilarTracks() {
       ) : data && !data.available ? (
         <EmptyState
           icon="browse"
-          title="Similar tracks aren't set up"
-          hint="No online similarity source is available on this device."
+          title="Similar tracks aren't available"
+          hint="No online similarity source is set up on this device, or online recommendations are off in Settings."
         />
       ) : tracks.length === 0 ? (
         <EmptyState icon="browse" title="No similar tracks found" hint="Nothing similar could be matched to something playable." />
@@ -57,6 +57,7 @@ export default function SimilarTracks() {
                 active={currentTrackId === track.id}
                 coverSrc={r.coverUrl || undefined}
                 artistTo={r.source !== 'library' && r.artistExternalId ? `/artist/${r.source}/${r.artistExternalId}` : undefined}
+                caption={reasonText(r.reason)}
                 onPlay={() => playTrackList(tracks, i)}
               />
             )

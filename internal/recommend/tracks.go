@@ -66,7 +66,30 @@ func (s *Service) SimilarTracks(ctx context.Context, artist, title string) Track
 
 // SimilarTracksFor returns playable tracks similar to a seed, using its MBID
 // when one is available and retaining which sources proposed each candidate.
+// They are ranked by the taste profile and carry a reason. With online
+// recommendations off, nothing is looked up.
 func (s *Service) SimilarTracksFor(ctx context.Context, seed TrackSeed) TrackResult {
+	if !s.settings(ctx).Online {
+		return TrackResult{Tracks: []core.ExternalResult{}}
+	}
+	result := s.similarTracks(ctx, seed)
+	if len(result.Tracks) == 0 {
+		return result
+	}
+	p := s.profile(ctx)
+	support := map[string]float64{}
+	listSupport(support, result.Tracks)
+	rankTracks(result.Tracks, support, p)
+	reason := trackReason(Seed{Artist: seed.Artist, Title: seed.Title}, p)
+	for i := range result.Tracks {
+		result.Tracks[i].Reason = reason
+	}
+	return result
+}
+
+// similarTracks is the unranked list for one seed, in source order with
+// agreement first. The slice is the caller's to modify.
+func (s *Service) similarTracks(ctx context.Context, seed TrackSeed) TrackResult {
 	if len(s.tracks) == 0 {
 		return TrackResult{Tracks: []core.ExternalResult{}}
 	}

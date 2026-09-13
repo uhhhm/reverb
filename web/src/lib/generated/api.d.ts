@@ -2559,7 +2559,7 @@ export interface paths {
         };
         /**
          * Playable tracks similar to a seed track
-         * @description Each candidate is matched to something playable: the library copy when owned, otherwise a search-source result that plays through external playback. Candidates nothing matches are dropped. available is false when no similarity source is configured. Candidates several sources agree on rank first and retain their source provenance.
+         * @description Each candidate is matched to something playable: the library copy when owned, otherwise a search-source result that plays through external playback. Candidates nothing matches are dropped. They are ranked by source agreement and the household's taste profile, retain their source provenance, and carry a reason. available is false when no similarity source is configured or online recommendations are off.
          */
         get: {
             parameters: {
@@ -2612,7 +2612,7 @@ export interface paths {
         put?: never;
         /**
          * The next tracks for a Radio session
-         * @description An artist seed (no title) is first turned into a few of that artist's own tracks, which lead the result. Tracks similar to every seed follow, interleaved in seed order. Owned tracks stay; other versions (live, cover, remix, karaoke, instrumental) are dropped unless a seed is one, and duplicate recordings collapse. available is false when no similar-tracks source is configured.
+         * @description An artist seed (no title) is first turned into a few of that artist's own tracks, which lead the result. Tracks similar to every seed follow, ranked by the household's taste profile and balanced between new and known music by Adventurousness (Radio's default is half new). Owned tracks stay; other versions (live, cover, remix, karaoke, instrumental) are dropped unless a seed is one, and duplicate recordings collapse. Every track carries a reason. available is false when no similar-tracks source is configured or online recommendations are off.
          */
         post: {
             parameters: {
@@ -2645,6 +2645,93 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/recommendations/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The household's recommendation settings
+         * @description Adventurousness and the Online recommendations switch. Both replicate to every paired device.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description settings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RecommendationSettings"];
+                    };
+                };
+                /** @description recommendation settings unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        /**
+         * Change recommendation settings
+         * @description Only the fields sent change. The change replicates to every paired device.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RecommendationSettingsPatch"];
+                };
+            };
+            responses: {
+                /** @description settings after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RecommendationSettings"];
+                    };
+                };
+                /** @description an invalid body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description recommendation settings unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4923,10 +5010,18 @@ export interface components {
             name: string;
             mbid?: string;
             recommendationSources?: string[];
+            reason?: components["schemas"]["RecommendationReason"];
             coverUrl?: string;
             coverArtId?: string;
         };
-        /** @description available is false when no configured source can relate artists; an empty list with available set means nothing was found or the lookup failed. */
+        /** @description Why something was recommended. artist and title name the seed. played: "Because you played <title>". similar: "Similar to <title>". fansAlsoLike: "Fans of <artist> also like". radioArtist: one of the seed artist's own tracks, leading a Radio started from that artist. */
+        RecommendationReason: {
+            /** @enum {string} */
+            kind: "played" | "similar" | "fansAlsoLike" | "radioArtist";
+            artist: string;
+            title?: string;
+        };
+        /** @description available is false when no configured source can relate artists or online recommendations are off; an empty list with available set means nothing was found or the lookup failed. Artists are ranked by source agreement and the household's taste profile, and carry a reason. */
         SimilarArtists: {
             available: boolean;
             artists: components["schemas"]["ExternalArtist"][];
@@ -4942,6 +5037,7 @@ export interface components {
             isrc?: string;
             mbid?: string;
             recommendationSources?: string[];
+            reason?: components["schemas"]["RecommendationReason"];
             coverUrl?: string;
             coverArtId?: string;
             artistExternalId?: string;
@@ -4971,6 +5067,17 @@ export interface components {
         };
         RadioRequest: {
             seeds: components["schemas"]["RadioSeed"][];
+        };
+        /** @description The household's recommendation settings, shared by every paired device. */
+        RecommendationSettings: {
+            /** @description Shifts every surface's balance of new versus known music. 50 keeps each surface's default (Radio half new), 0 is only known music, 100 only new. */
+            adventurousness: number;
+            /** @description When on, seed artists and tracks are sent to Last.fm, ListenBrainz and Deezer for similarity lookups. When off, nothing is looked up and surfaces that need online data come back unavailable. */
+            onlineRecommendations: boolean;
+        };
+        RecommendationSettingsPatch: {
+            adventurousness?: number;
+            onlineRecommendations?: boolean;
         };
         NotInterestedMark: {
             key: string;

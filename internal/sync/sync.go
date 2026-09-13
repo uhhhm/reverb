@@ -110,6 +110,9 @@ const (
 	// EntityNotInterested carries one Not interested mark under a key every
 	// device derives the same way for the same track or artist.
 	EntityNotInterested = "notInterested"
+	// EntityTasteSettings carries the household's recommendation settings
+	// under the single key "household".
+	EntityTasteSettings = "tasteSettings"
 )
 
 // Field names carried by the change log. They are the wire format — renaming
@@ -148,4 +151,9 @@ const (
 	// null rather than a tombstone: delete-wins would stop a later re-mark
 	// from ever beating an earlier undo.
 	FieldMark = "mark"
+
+	// Recommendation settings, on EntityTasteSettings: Adventurousness as an
+	// integer from 0 to 100, and the Online recommendations switch as a bool.
+	FieldAdventurousness       = "adventurousness"
+	FieldOnlineRecommendations = "onlineRecommendations"
 )

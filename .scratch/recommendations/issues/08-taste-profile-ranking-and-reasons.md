@@ -9,10 +9,17 @@ Ranking features include source agreement, closeness to your taste, whether the 
 
 **Blocked by:** 07
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Profile is built only from replicated inputs, so devices with the same data rank identically (ADR 0001)
-- [ ] Ranking is a small, inspectable model (e.g. weighted features or logistic regression trained on your own history), not an opaque service
-- [ ] The quality test shows an improvement over the ticket 07 baseline, and the new baseline is saved
-- [ ] Reasons show in Radio, the similar tracks list, and wherever recommendations appear
-- [ ] Profile rebuilds incrementally and stays fast on a library of about 20k plays
+- [x] Profile is built only from replicated inputs, so devices with the same data rank identically (ADR 0001)
+- [x] Ranking is a small, inspectable model (e.g. weighted features or logistic regression trained on your own history), not an opaque service
+- [x] The quality test shows an improvement over the ticket 07 baseline, and the new baseline is saved
+- [x] Reasons show in Radio, the similar tracks list, and wherever recommendations appear
+- [x] Profile rebuilds incrementally and stays fast on a library of about 20k plays
+
+## Comments
+
+- Model: weighted features in `internal/recommend/rank.go`; profile in `taste.go`. Radio NDCG@10 on the fixture rose from 0.944 to 1.0; similar tracks is unchanged (its one miss is not among the candidates).
+- Only qualified plays are stored (half the track or four minutes), so the skip signal is a play that was not completed. Recording shorter skips would need a new replicated input.
+- Tracks added to the library are not an input: nothing replicated records a library addition. Playlist tracks are.
+- No source reports popularity; a source's rank stands in for it.

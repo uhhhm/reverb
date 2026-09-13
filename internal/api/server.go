@@ -202,6 +202,9 @@ type Deps struct {
 	// NotInterested records the owner's Not interested marks. Nil disables the
 	// endpoints (503).
 	NotInterested NotInterestedService
+	// TasteSettings holds Adventurousness and the Online recommendations
+	// switch. Nil disables the endpoints (503).
+	TasteSettings TasteSettingsService
 
 	// SyncEmit publishes locally-made per-track changes to paired devices. Nil
 	// when this device replicates nothing.
@@ -434,6 +437,8 @@ func (s *Server) routes() {
 			pr.Get("/recommendations/artists/{source}/{id}", s.handleSimilarArtists)
 			pr.Get("/recommendations/similar-tracks", s.handleSimilarTracks)
 			pr.Post("/recommendations/radio", s.handleRadio)
+			pr.Get("/recommendations/settings", s.handleGetRecommendationSettings)
+			pr.Put("/recommendations/settings", s.handleUpdateRecommendationSettings)
 			pr.Get("/not-interested", s.handleListNotInterested)
 			pr.Post("/not-interested", s.handleMarkNotInterested)
 			pr.Delete("/not-interested", s.handleUndoNotInterested)

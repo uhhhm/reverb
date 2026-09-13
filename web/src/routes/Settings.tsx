@@ -5,9 +5,10 @@ import { AppearanceSection } from '../components/account/AppearanceSection'
 import { DownloadsSection } from '../components/account/DownloadsSection'
 import { AudioSection } from '../components/account/AudioSection'
 import { NotInterestedSection } from '../components/account/NotInterestedSection'
+import { RecommendationsSection } from '../components/account/RecommendationsSection'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
 
-type Tab = 'integrations' | 'downloads' | 'audio' | 'appearance' | 'not-interested'
+type Tab = 'integrations' | 'downloads' | 'audio' | 'appearance' | 'recommendations' | 'not-interested'
 
 export default function Settings() {
   useDocumentTitle('Settings')
@@ -32,6 +33,9 @@ export default function Settings() {
         <Chip selected={tab === 'appearance'} onClick={() => setTab('appearance')}>
           Appearance
         </Chip>
+        <Chip selected={tab === 'recommendations'} onClick={() => setTab('recommendations')}>
+          Recommendations
+        </Chip>
         <Chip selected={tab === 'not-interested'} onClick={() => setTab('not-interested')}>
           Not interested
         </Chip>
@@ -48,6 +52,9 @@ export default function Settings() {
 
       {/* ── Appearance tab ───────────────────────────────────────────────────── */}
       {tab === 'appearance' && <AppearanceSection />}
+
+      {/* ── Recommendations tab ──────────────────────────────────────────────── */}
+      {tab === 'recommendations' && <RecommendationsSection />}
 
       {/* ── Not interested tab ───────────────────────────────────────────────── */}
       {tab === 'not-interested' && <NotInterestedSection />}

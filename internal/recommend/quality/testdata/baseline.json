@@ -10,7 +10,7 @@
       "hits": 4,
       "hitRate": 1,
       "recallAtK": 1,
-      "ndcgAtK": 0.9438661545147249
+      "ndcgAtK": 1
     },
     "similar_tracks": {
       "predictions": 4,

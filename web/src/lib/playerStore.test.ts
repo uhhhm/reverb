@@ -132,10 +132,11 @@ describe('Radio', () => {
     await flush()
     expect(ids()).toEqual(['seed', 'a1', 'b1', 'a2'])
 
+    // Moving straight on skips each track, which steers the session too; the
+    // exact order under neutral listening is covered in radio.test.ts.
     for (let i = 0; i < 6; i++) act(() => usePlayer.getState().next())
     await flush()
     expect(longestRun(artists())).toBeLessThanOrEqual(2)
-    expect(ids()).toEqual(['seed', 'a1', 'b1', 'a2', 'a3', 'c1', 'a4'])
   })
 
   it('never repeats a recording within a session', async () => {

@@ -71,7 +71,8 @@ type Report struct {
 }
 
 // Evaluate hides the most recent period, generates both current recommendation
-// surfaces from the remaining history, and scores their top-k results.
+// surfaces from the remaining history, ranked by a taste profile built from
+// that history, and scores their top-k results.
 func Evaluate(ctx context.Context, fixture Fixture) (Report, error) {
 	if fixture.HoldoutDays <= 0 {
 		return Report{}, errors.New("quality: holdoutDays must be positive")
@@ -89,6 +90,7 @@ func Evaluate(ctx context.Context, fixture Fixture) (Report, error) {
 		recommend.WithTimeout(time.Second),
 		recommend.WithClock(func() time.Time { return time.Unix(1_700_000_000, 0) }),
 		recommend.WithSleep(func(context.Context, time.Duration) error { return nil }),
+		recommend.WithTaste(historyTaste(training)),
 	}
 	for i := range fixture.Sources {
 		options = append(options, recommend.WithTrackSource(replaySource{source: &fixture.Sources[i]}))
@@ -275,6 +277,22 @@ func resultKey(result core.ExternalResult) string {
 
 func nameKey(artist, title string) string {
 	return "name:" + matching.Normalize(matching.PrimaryArtist(artist)) + "\x1f" + matching.Normalize(title)
+}
+
+// historyTaste feeds the training plays to the taste profile. The fixture
+// keeps only what the evaluator needs, so every play counts as completed.
+type historyTaste []Play
+
+func (h historyTaste) PlaysAfter(_ context.Context, after int64, limit int) ([]recommend.TastePlay, error) {
+	var out []recommend.TastePlay
+	for i := int(after); i < len(h) && len(out) < limit; i++ {
+		out = append(out, recommend.TastePlay{Seq: int64(i + 1), Artist: h[i].Artist, Title: h[i].Title, PlayedAt: h[i].PlayedAt, Completed: true})
+	}
+	return out, nil
+}
+func (h historyTaste) PlayCount(context.Context) (int64, error) { return int64(len(h)), nil }
+func (historyTaste) Signals(context.Context) ([]recommend.TasteSignal, error) {
+	return nil, nil
 }
 
 type replaySource struct{ source *RecordedSource }

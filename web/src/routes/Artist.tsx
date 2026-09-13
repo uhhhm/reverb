@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useArtistDetail } from '../lib/coverageApi'
-import { useSimilarArtists } from '../lib/recommendationsApi'
+import { reasonText, useSimilarArtists } from '../lib/recommendationsApi'
 import { useMarkNotInterested } from '../lib/notInterestedApi'
 import { usePlayer } from '../lib/playerStore'
 import { useCoverageStream } from '../lib/coverageStore'
@@ -396,7 +396,7 @@ export default function Artist() {
               <MediaCard
                 key={`${artist.source}:${artist.externalId}`}
                 title={artist.name}
-                subtitle="Artist"
+                subtitle={reasonText(artist.reason) ?? 'Artist'}
                 coverSrc={artist.coverUrl || undefined}
                 coverId={artist.coverArtId}
                 rounded="full"

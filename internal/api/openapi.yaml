@@ -701,9 +701,10 @@ paths:
       description: >-
         Each candidate is matched to something playable: the library copy when
         owned, otherwise a search-source result that plays through external
-        playback. Candidates nothing matches are dropped. available is false
-        when no similarity source is configured. Candidates several sources
-        agree on rank first and retain their source provenance.
+        playback. Candidates nothing matches are dropped. They are ranked by
+        source agreement and the household's taste profile, retain their
+        source provenance, and carry a reason. available is false when no
+        similarity source is configured or online recommendations are off.
       parameters:
         - { name: artist, in: query, required: true, schema: { type: string } }
         - { name: title, in: query, required: true, schema: { type: string } }
@@ -721,10 +722,12 @@ paths:
       description: >-
         An artist seed (no title) is first turned into a few of that artist's
         own tracks, which lead the result. Tracks similar to every seed follow,
-        interleaved in seed order. Owned tracks stay; other versions (live,
-        cover, remix, karaoke, instrumental) are dropped unless a seed is one,
-        and duplicate recordings collapse. available is false when no
-        similar-tracks source is configured.
+        ranked by the household's taste profile and balanced between new and
+        known music by Adventurousness (Radio's default is half new). Owned
+        tracks stay; other versions (live, cover, remix, karaoke, instrumental)
+        are dropped unless a seed is one, and duplicate recordings collapse.
+        Every track carries a reason. available is false when no
+        similar-tracks source is configured or online recommendations are off.
       requestBody:
         required: true
         content:
@@ -737,6 +740,35 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SimilarTracks" }
         "400": { description: at least one seed, each with an artist, is required }
+  /recommendations/settings:
+    get:
+      summary: The household's recommendation settings
+      description: >-
+        Adventurousness and the Online recommendations switch. Both replicate
+        to every paired device.
+      responses:
+        "200":
+          description: settings
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecommendationSettings" }
+        "503": { description: recommendation settings unavailable }
+    put:
+      summary: Change recommendation settings
+      description: Only the fields sent change. The change replicates to every paired device.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecommendationSettingsPatch" }
+      responses:
+        "200":
+          description: settings after the change
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecommendationSettings" }
+        "400": { description: an invalid body, or adventurousness outside 0 to 100 }
+        "503": { description: recommendation settings unavailable }
   /not-interested:
     get:
       summary: Every Not interested mark, most recent first
@@ -1833,14 +1865,28 @@ components:
         name: { type: string }
         mbid: { type: string }
         recommendationSources: { type: array, items: { type: string } }
+        reason: { $ref: "#/components/schemas/RecommendationReason" }
         coverUrl: { type: string }
         coverArtId: { type: string }
+    RecommendationReason:
+      type: object
+      description: >-
+        Why something was recommended. artist and title name the seed. played:
+        "Because you played <title>". similar: "Similar to <title>".
+        fansAlsoLike: "Fans of <artist> also like". radioArtist: one of the
+        seed artist's own tracks, leading a Radio started from that artist.
+      required: [kind, artist]
+      properties:
+        kind: { type: string, enum: [played, similar, fansAlsoLike, radioArtist] }
+        artist: { type: string }
+        title: { type: string }
     SimilarArtists:
       type: object
       description: >-
-        available is false when no configured source can relate artists; an
-        empty list with available set means nothing was found or the lookup
-        failed.
+        available is false when no configured source can relate artists or
+        online recommendations are off; an empty list with available set means
+        nothing was found or the lookup failed. Artists are ranked by source
+        agreement and the household's taste profile, and carry a reason.
       required: [available, artists]
       properties:
         available: { type: boolean }
@@ -1863,6 +1909,7 @@ components:
         isrc: { type: string }
         mbid: { type: string }
         recommendationSources: { type: array, items: { type: string } }
+        reason: { $ref: "#/components/schemas/RecommendationReason" }
         coverUrl: { type: string }
         coverArtId: { type: string }
         artistExternalId: { type: string }
@@ -1899,6 +1946,30 @@ components:
       required: [seeds]
       properties:
         seeds: { type: array, items: { $ref: "#/components/schemas/RadioSeed" } }
+    RecommendationSettings:
+      type: object
+      description: The household's recommendation settings, shared by every paired device.
+      required: [adventurousness, onlineRecommendations]
+      properties:
+        adventurousness:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: >-
+            Shifts every surface's balance of new versus known music. 50 keeps
+            each surface's default (Radio half new), 0 is only known music, 100
+            only new.
+        onlineRecommendations:
+          type: boolean
+          description: >-
+            When on, seed artists and tracks are sent to Last.fm, ListenBrainz
+            and Deezer for similarity lookups. When off, nothing is looked up
+            and surfaces that need online data come back unavailable.
+    RecommendationSettingsPatch:
+      type: object
+      properties:
+        adventurousness: { type: integer, minimum: 0, maximum: 100 }
+        onlineRecommendations: { type: boolean }
     NotInterestedMark:
       type: object
       required: [key, kind, artist, markedAt]

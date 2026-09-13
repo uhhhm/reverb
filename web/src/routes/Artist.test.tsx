@@ -13,7 +13,8 @@ vi.mock('../lib/coverageApi', () => ({
   useArtistDetail: vi.fn(),
 }))
 
-vi.mock('../lib/recommendationsApi', () => ({
+vi.mock('../lib/recommendationsApi', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/recommendationsApi')>()),
   useSimilarArtists: vi.fn(() => ({ data: undefined })),
 }))
 

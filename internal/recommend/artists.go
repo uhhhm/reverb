@@ -59,8 +59,18 @@ type similarArtistSource struct {
 }
 
 // SimilarArtists merges candidates from every capable search adapter and each
-// dedicated source. Agreement ranks ahead of single-source candidates.
+// dedicated source, then ranks them by agreement and the taste profile. With
+// online recommendations off, nothing is looked up.
 func (s *Service) SimilarArtists(ctx context.Context, source, id string) ArtistResult {
+	if !s.settings(ctx).Online {
+		return ArtistResult{Artists: []core.ExternalArtist{}}
+	}
+	result := s.similarArtists(ctx, source, id)
+	rankArtists(result.Artists, s.profile(ctx))
+	return result
+}
+
+func (s *Service) similarArtists(ctx context.Context, source, id string) ArtistResult {
 	var capable []similarArtistSource
 	for _, src := range s.liveSources() {
 		if provider, ok := src.(search.SimilarArtistsProvider); ok {
@@ -89,6 +99,12 @@ func (s *Service) SimilarArtists(ctx context.Context, source, id string) ArtistR
 	resolved := s.matchArtistCandidates(matchCtx, candidates)
 	if len(resolved) > similarArtistLimit {
 		resolved = resolved[:similarArtistLimit]
+	}
+	if seed.Name != "" {
+		reason := &core.RecommendationReason{Kind: core.ReasonFansAlsoLike, Artist: seed.Name}
+		for i := range resolved {
+			resolved[i].Reason = reason
+		}
 	}
 	if matchCtx.Err() == nil || len(resolved) > 0 {
 		s.cache.put(key, resolved)

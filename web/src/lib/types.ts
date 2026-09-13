@@ -29,7 +29,11 @@ export interface Track {
    * downloaded — id is then a display key, not a library track id.
    */
   externalStream?: { source: string; externalId: string }
+  /** Why a recommendation suggested this track. Radio steers by its seed. */
+  reason?: RecommendationReason
 }
+
+export type RecommendationReason = components['schemas']['RecommendationReason']
 
 export interface Album {
   id: string

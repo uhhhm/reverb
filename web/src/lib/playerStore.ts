@@ -48,6 +48,7 @@ export const usePlayer = create<PlayerStore>((set) => {
     getState: () => engine.getState(),
     play: (tracks) => engine.playTrackList(tracks, 0),
     append: (t) => engine.enqueue(t),
+    remove: (i) => engine.removeAt(i),
     prewarm: (t) => {
       if (t.externalStream) prewarmExternalStream(t.externalStream.source, t.externalStream.externalId, t.artist, t.title)
     },

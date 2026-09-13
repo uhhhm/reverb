@@ -95,6 +95,12 @@ type NotInterested interface {
 	Apply(ctx context.Context, key string, m *notinterested.Mark) error
 }
 
+// TasteSettings records recommendation settings a peer changed, without
+// emitting them again. *tastesettings.Service satisfies it.
+type TasteSettings interface {
+	Apply(ctx context.Context, field string, decode func(target any) error) error
+}
+
 type Service struct {
 	overrides     *override.Service
 	crops         *crop.Service
@@ -104,10 +110,14 @@ type Service struct {
 	entities      *override.Entities
 	covers        *cover.Service
 	notInterested NotInterested
+	tasteSettings TasteSettings
 }
 
 // WithNotInterested attaches Not interested marks.
 func (s *Service) WithNotInterested(n NotInterested) *Service { s.notInterested = n; return s }
+
+// WithTasteSettings attaches the household's recommendation settings.
+func (s *Service) WithTasteSettings(t TasteSettings) *Service { s.tasteSettings = t; return s }
 
 // WithEntities attaches album and artist renames. Without it those changes stay
 // in the log and are projected after an upgrade that supplies one.
@@ -155,6 +165,11 @@ func (s *Service) Apply(ctx context.Context, ch reverbsync.SyncChange) error {
 		return s.applyEntity(ctx, ch)
 	case reverbsync.EntityNotInterested:
 		return s.applyNotInterested(ctx, ch)
+	case reverbsync.EntityTasteSettings:
+		if s.tasteSettings == nil {
+			return nil
+		}
+		return s.tasteSettings.Apply(ctx, ch.Field, func(target any) error { return decodeValue(ch, target) })
 	default:
 		return nil
 	}

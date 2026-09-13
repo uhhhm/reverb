@@ -20,11 +20,15 @@ const recentPlayWindow = 30 * 24 * time.Hour
 // them. Every surface drops other versions and duplicate recordings.
 type surfacePolicy struct {
 	discovery bool
+	// newShare is the surface's default share of new music (neither owned nor
+	// played), which Adventurousness shifts. Zero leaves the ranked order as
+	// it is.
+	newShare float64
 }
 
 var (
 	similarTracksSurface = surfacePolicy{}
-	radioSurface         = surfacePolicy{}
+	radioSurface         = surfacePolicy{newShare: 0.5}
 )
 
 // WithRecentPlays lists what was played since a time, for discovery surfaces.

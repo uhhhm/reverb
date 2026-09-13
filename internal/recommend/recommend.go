@@ -99,19 +99,22 @@ func WithExclusions(load func(ctx context.Context) (Exclusions, error)) Option {
 }
 
 type Service struct {
-	exclusions  func(context.Context) (Exclusions, error)
-	recentPlays func(context.Context, time.Time) ([]TrackCandidate, error)
-	sources     func() []search.SearchSource
-	library     func() Library
-	tracks      []TrackSimilarity
-	artists     []ArtistSimilarity
-	trackGates  map[string]*gate
-	matcher     func() Matcher
-	catalogIDs  func(context.Context, []string) map[string]string
-	timeout     time.Duration
-	now         func() time.Time
-	sleep       func(context.Context, time.Duration) error
-	cache       *cache
+	exclusions   func(context.Context) (Exclusions, error)
+	recentPlays  func(context.Context, time.Time) ([]TrackCandidate, error)
+	loadSettings func(context.Context) (Settings, error)
+	taste        TasteInputs
+	tasteState   tasteState
+	sources      func() []search.SearchSource
+	library      func() Library
+	tracks       []TrackSimilarity
+	artists      []ArtistSimilarity
+	trackGates   map[string]*gate
+	matcher      func() Matcher
+	catalogIDs   func(context.Context, []string) map[string]string
+	timeout      time.Duration
+	now          func() time.Time
+	sleep        func(context.Context, time.Duration) error
+	cache        *cache
 }
 
 // New builds a Service. sources returns the live search sources, read per

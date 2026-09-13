@@ -14,6 +14,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePlayer } from '../../lib/playerStore'
+import { reasonText } from '../../lib/recommendationsApi'
 import { useUI } from '../../lib/uiStore'
 import { coverUrl, trackCoverUrl, useArtist } from '../../lib/libraryApi'
 import { useArtistProfile } from '../../lib/coverageApi'
@@ -169,6 +170,9 @@ export function NowPlayingPanel() {
               <div className="mt-1 truncate text-sm text-text-secondary">
                 {current?.artist ?? ''}
               </div>
+            )}
+            {current?.reason && (
+              <div className="mt-1 truncate text-xs text-text-muted">{reasonText(current.reason)}</div>
             )}
           </div>
           {current && (
