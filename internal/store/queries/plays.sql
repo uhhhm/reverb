@@ -175,6 +175,9 @@ GROUP BY p.catalog_id
 ORDER BY COUNT(*) DESC, SUM(p.ms_played) DESC
 LIMIT ?;
 
+-- name: CountPlays :one
+SELECT COUNT(*) FROM plays;
+
 -- name: CountPlaysByCatalog :one
 SELECT COUNT(*) FROM plays WHERE user_id = ? AND catalog_id = ?;
 

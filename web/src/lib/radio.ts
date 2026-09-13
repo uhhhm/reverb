@@ -82,10 +82,15 @@ function seedOf(t: Track): string | null {
   return t.reason?.title ? trackKey({ artist: t.reason.artist, title: t.reason.title }) : null
 }
 
-/** The track playing now, and how much of it has been heard. */
+/** A position change larger than this between updates is a seek, not listening (as in the play tracker). */
+const MAX_TICK_MS = 5_000
+
+/** The track playing now, and how much of it has actually been heard. */
 interface Listening {
   track: Track
+  /** Time played forward; seeks do not count. */
   heardMs: number
+  lastMs: number
   durationMs: number
   finished: boolean
 }
@@ -190,9 +195,12 @@ export class RadioSession {
     return this.host.getState().upNext.length
   }
 
-  /** Follows the current track to judge, when it changes, whether it was skipped. */
+  /**
+   * Follows the current track to judge, when it changes, whether it was
+   * skipped. A track of unknown length cannot be judged either way.
+   */
   private observe() {
-    const { current, currentTimeMs, durationMs } = this.host.getState()
+    const { current, currentTimeMs, durationMs, playing } = this.host.getState()
     const was = this.listening
     if (was && was.track.id !== current?.id) {
       this.listening = null
@@ -201,7 +209,7 @@ export class RadioSession {
     if (!current) return
     const now = this.listening
     if (!now) {
-      this.listening = { track: current, heardMs: currentTimeMs, durationMs: durationMs || current.durationMs, finished: false }
+      this.listening = { track: current, heardMs: 0, lastMs: currentTimeMs, durationMs: durationMs || current.durationMs, finished: false }
       // Going back to a track heard to the end is a repeat.
       if (this.finished.has(trackKey(current))) this.steer(current, FINISH_STEER)
       return
@@ -213,8 +221,14 @@ export class RadioSession {
       now.heardMs = 0
       this.steer(current, FINISH_STEER)
     }
-    now.heardMs = Math.max(now.heardMs, currentTimeMs)
-    if (!now.finished && now.heardMs > 0 && now.heardMs >= now.durationMs - FINISH_WITHIN_MS) {
+    const delta = currentTimeMs - now.lastMs
+    if (playing && delta > 0 && delta < MAX_TICK_MS) now.heardMs += delta
+    now.lastMs = currentTimeMs
+    // Finished: at the end, having heard at least half of it.
+    if (
+      !now.finished && now.durationMs > 0 &&
+      currentTimeMs >= now.durationMs - FINISH_WITHIN_MS && now.heardMs >= now.durationMs * SKIP_BEFORE
+    ) {
       now.finished = true
       this.finished.add(trackKey(current))
       this.steer(current, FINISH_STEER)

@@ -5,6 +5,7 @@ import (
 	"log"
 	"maps"
 	"math"
+	"slices"
 	"sync"
 	"time"
 
@@ -16,7 +17,9 @@ import (
 // never affects the result, which depends only on the plays themselves.
 //
 // Only plays that qualified are stored (half the track, or four minutes), so
-// the skip signal available here is a play that was not completed.
+// the closest stored signal to a skip is an unfinished play: one left after
+// half the track but before its end. Radio's session skips (web) are a
+// separate, shorter signal that is never stored.
 type TastePlay struct {
 	Seq       int64
 	Artist    string
@@ -61,77 +64,86 @@ type TasteInputs interface {
 // it, candidates keep source order and agreement.
 func WithTaste(in TasteInputs) Option { return func(s *Service) { s.taste = in } }
 
-// Input weights. A positive weight pulls towards a track or artist, a
-// negative one pushes away. Each input decays with its age (tasteHalfLife),
-// measured from the newest input rather than the clock, so the profile is a
-// function of the data alone.
+// Input weights, in quarters so they sum exactly as integers. A positive
+// weight pulls towards a track or artist, a negative one pushes away. Each
+// day's inputs decay with their age (tasteHalfLife), measured from the day of
+// the newest input rather than the clock, so the profile is a function of the
+// data alone.
 const (
-	completedTrack  = 1.0
-	completedArtist = 1.0
-	// A play left after half the track is the skip signal that is stored:
-	// the track counts against itself, and says nothing either way about the
-	// artist.
-	partialTrack   = -0.5
-	partialArtist  = 0.0
-	playlistTrack  = 2.0
-	playlistArtist = 1.0
+	completedTrack  = 4
+	completedArtist = 4
+	// An unfinished play counts against the track and says nothing either
+	// way about the artist.
+	unfinishedTrack  = -2
+	unfinishedArtist = 0
+	playlistTrack    = 8
+	playlistArtist   = 4
 	// Not interested is the one explicit rejection, so it outweighs a play.
-	markedTrack       = -3.0
-	markedTrackArtist = -2.0
-	markedArtist      = -3.0
+	markedTrack       = -12
+	markedTrackArtist = -8
+	markedArtist      = -12
+	quartersPerWeight = 4
 
 	tasteHalfLife = 90 * 24 * time.Hour
-	// tasteEpoch keeps the stored exponentials in range: weights are summed
-	// as w·e^(λ·(t−epoch)) and scaled back to the newest input when read.
-	tasteEpoch = 1_577_836_800 // 2020-01-01 UTC
+	secondsPerDay = 24 * 60 * 60
 
 	tasteBatch = 5000
 )
 
-var tasteDecay = math.Ln2 / tasteHalfLife.Seconds()
+var dayDecay = math.Ln2 / (tasteHalfLife.Hours() / 24)
 
-type affinity struct {
-	weight float64
-	plays  int
+// bucket is one track's or artist's inputs on one day.
+type bucket struct {
+	key string
+	day int64
 }
 
-// tally sums weighted, time-stamped inputs per track and per artist. Sums do
-// not depend on the order inputs arrive in, which is what lets plays be
-// folded in incrementally.
+// tally sums inputs per track and artist per day, as integer quarter-weights.
+// Integer sums do not depend on the order inputs arrive in, so devices that
+// stored the same inputs in a different order hold identical tallies, and
+// plays can be folded in incrementally.
 type tally struct {
-	tracks  map[string]affinity
-	artists map[string]affinity
-	latest  int64
+	weights map[bucket]int64
+	// days lists, per key, the days it has inputs on, in arrival order. A
+	// cloned tally shares these slices: appends never touch what an older
+	// copy can see.
+	days   map[string][]int64
+	plays  map[string]int
+	latest int64
 }
 
 func newTally() tally {
-	return tally{tracks: map[string]affinity{}, artists: map[string]affinity{}}
+	return tally{weights: map[bucket]int64{}, days: map[string][]int64{}, plays: map[string]int{}}
 }
 
-// clone copies the tally, so a profile handed out keeps its own maps while
+// clone copies the tally, so a profile handed out keeps its own view while
 // the next build adds to a copy.
 func (t tally) clone() tally {
-	return tally{tracks: maps.Clone(t.tracks), artists: maps.Clone(t.artists), latest: t.latest}
+	return tally{weights: maps.Clone(t.weights), days: maps.Clone(t.days), plays: maps.Clone(t.plays), latest: t.latest}
 }
 
-func (t *tally) add(artist, title string, at int64, trackW, artistW float64, played bool) {
-	scale := math.Exp(tasteDecay * float64(at-tasteEpoch))
-	n := 0
+func trackKey(title, artist string) string { return "t\x1f" + recordingKey(title, artist) }
+
+func artistKey(artist string) string {
+	return "a\x1f" + matching.Normalize(matching.PrimaryArtist(artist))
+}
+
+func (t *tally) addKey(key string, at int64, quarters int64, played bool) {
+	b := bucket{key, floorDiv(at, secondsPerDay)}
+	if _, ok := t.weights[b]; !ok {
+		t.days[key] = append(t.days[key], b.day)
+	}
+	t.weights[b] += quarters
 	if played {
-		n = 1
+		t.plays[key]++
 	}
+}
+
+func (t *tally) add(artist, title string, at int64, trackQ, artistQ int64, played bool) {
 	if title != "" {
-		key := recordingKey(title, artist)
-		a := t.tracks[key]
-		a.weight += trackW * scale
-		a.plays += n
-		t.tracks[key] = a
+		t.addKey(trackKey(title, artist), at, trackQ, played)
 	}
-	key := artistKey(artist)
-	a := t.artists[key]
-	a.weight += artistW * scale
-	a.plays += n
-	t.artists[key] = a
+	t.addKey(artistKey(artist), at, artistQ, played)
 	t.latest = max(t.latest, at)
 }
 
@@ -139,7 +151,7 @@ func (t *tally) addPlay(p TastePlay) {
 	if p.Completed {
 		t.add(p.Artist, p.Title, p.PlayedAt, completedTrack, completedArtist, true)
 	} else {
-		t.add(p.Artist, p.Title, p.PlayedAt, partialTrack, partialArtist, true)
+		t.add(p.Artist, p.Title, p.PlayedAt, unfinishedTrack, unfinishedArtist, true)
 	}
 }
 
@@ -154,49 +166,60 @@ func (t *tally) addSignal(sg TasteSignal) {
 	}
 }
 
-func artistKey(artist string) string {
-	return matching.Normalize(matching.PrimaryArtist(artist))
+// weight is a key's decayed weight as of today. Days are summed in date
+// order, so the float result is the same on every device.
+func (t tally) weight(key string, today int64) float64 {
+	days := slices.Clone(t.days[key])
+	slices.Sort(days)
+	w := 0.0
+	for _, d := range days {
+		w += float64(t.weights[bucket{key, d}]) / quartersPerWeight * math.Exp(-dayDecay*float64(today-d))
+	}
+	return w
+}
+
+func floorDiv(a, b int64) int64 {
+	q := a / b
+	if a%b != 0 && (a < 0) != (b < 0) {
+		q--
+	}
+	return q
 }
 
 // Profile is the household's taste profile: how much it likes each track and
 // artist it has played, collected or rejected. A nil Profile knows nothing.
 type Profile struct {
 	plays, signals tally
-	// scale brings stored weights to the newest input's time.
-	scale float64
+	// today is the day of the newest input, which ages are measured from.
+	today int64
 }
 
 // TrackTaste is the household's affinity for a recording, from -1 to 1.
 func (p *Profile) TrackTaste(title, artist string) float64 {
-	if p == nil {
-		return 0
-	}
-	key := recordingKey(title, artist)
-	return p.squash(p.plays.tracks[key].weight + p.signals.tracks[key].weight)
+	return p.taste(trackKey(title, artist))
 }
 
 // ArtistTaste is the household's affinity for an artist, from -1 to 1.
 func (p *Profile) ArtistTaste(artist string) float64 {
+	return p.taste(artistKey(artist))
+}
+
+func (p *Profile) taste(key string) float64 {
 	if p == nil {
 		return 0
 	}
-	key := artistKey(artist)
-	return p.squash(p.plays.artists[key].weight + p.signals.artists[key].weight)
+	w := p.plays.weight(key, p.today) + p.signals.weight(key, p.today)
+	return w / (1 + math.Abs(w))
 }
 
 // Played reports whether the household has played a recording.
 func (p *Profile) Played(title, artist string) bool {
-	return p != nil && p.plays.tracks[recordingKey(title, artist)].plays > 0
+	return p != nil && p.plays.plays[trackKey(title, artist)] > 0
 }
 
 // PlayedArtist reports whether the household has played an artist.
 func (p *Profile) PlayedArtist(artist string) bool {
-	return p != nil && p.plays.artists[artistKey(artist)].plays > 0
-}
-
-func (p *Profile) squash(w float64) float64 {
-	w *= p.scale
-	return w / (1 + math.Abs(w))
+	return p != nil && p.plays.plays[artistKey(artist)] > 0
 }
 
 // tasteState is the part of the profile kept between requests: plays are
@@ -230,8 +253,7 @@ func (s *Service) profile(ctx context.Context) *Profile {
 	for _, sg := range signals {
 		p.signals.addSignal(sg)
 	}
-	latest := max(p.plays.latest, p.signals.latest)
-	p.scale = math.Exp(-tasteDecay * float64(latest-tasteEpoch))
+	p.today = floorDiv(max(p.plays.latest, p.signals.latest), secondsPerDay)
 	return p
 }
 
@@ -240,7 +262,7 @@ func (s *Service) profile(ctx context.Context) *Profile {
 // rebuilt from the start.
 func (s *Service) foldPlays(ctx context.Context) error {
 	st := &s.tasteState
-	if st.plays.tracks == nil {
+	if st.plays.weights == nil {
 		st.plays = newTally()
 	}
 	for rebuilt := false; ; rebuilt = true {

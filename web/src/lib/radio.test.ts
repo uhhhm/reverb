@@ -52,18 +52,28 @@ class FakePlayer implements RadioHost {
   private changed() {
     this.session?.update()
   }
-  /** Moves on to the next track, having heard the current one for heardMs. */
-  next(heardMs = 0) {
-    this.timeMs = heardMs
+  /** Plays on to position toMs, one-second ticks at a time as the engine reports. */
+  listen(toMs: number) {
+    while (this.timeMs < toMs) {
+      this.timeMs = Math.min(toMs, this.timeMs + 1_000)
+      this.changed()
+    }
+  }
+  /** Jumps to a position without hearing what lies between. */
+  seek(ms: number) {
+    this.timeMs = ms
     this.changed()
+  }
+  /** Moves on to the next track, having played the current one on to toMs. */
+  next(toMs = 0) {
+    this.listen(toMs)
     this.index++
     this.timeMs = 0
     this.changed()
   }
   /** Hears the current track to its end. */
   finish() {
-    this.timeMs = this.queue[this.index].durationMs
-    this.changed()
+    this.listen(this.queue[this.index].durationMs)
   }
   /** A track the listener queues to play next. */
   enqueueNext(t: Track) {
@@ -132,6 +142,19 @@ describe('RadioSession steering', () => {
     for (let i = 0; i < 10 && player.index < player.queue.length - 1; i++) player.next(WHOLE)
     const radioAfterBlock = player.queue.slice(player.queue.findIndex((t) => t.id === 'kept') + 1)
     expect(radioAfterBlock.map((t) => t.artist)).not.toContain('X')
+  })
+
+  it('judges a skip by time listened, not by where the track was left', async () => {
+    const player = new FakePlayer([[
+      track('x1', 'X'), track('a1', 'A'), track('x2', 'X'), track('b1', 'B'), track('c1', 'C'), track('x3', 'X'),
+    ]])
+    await startRadio(player)
+    player.next(WHOLE)
+    player.seek(150_000) // x1: jumped past half, then left
+    player.next()
+    // Counted as a skip, so X's next track drops behind the others.
+    expect(player.currentId()).toBe('a1')
+    expect(player.upcoming()).toEqual(['b1', 'c1', 'x2'])
   })
 
   it('pulls a finished artist ahead of the rest of the queue', async () => {

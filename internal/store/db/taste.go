@@ -35,10 +35,3 @@ WHERE p.rowid > ? ORDER BY p.rowid LIMIT ?`, after, limit)
 	}
 	return out, rows.Err()
 }
-
-// CountPlays counts every stored play.
-func (q *Queries) CountPlays(ctx context.Context) (int64, error) {
-	var n int64
-	err := q.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM plays`).Scan(&n)
-	return n, err
-}

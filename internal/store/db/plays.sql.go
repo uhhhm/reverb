@@ -10,6 +10,17 @@ import (
 	"database/sql"
 )
 
+const countPlays = `-- name: CountPlays :one
+SELECT COUNT(*) FROM plays
+`
+
+func (q *Queries) CountPlays(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countPlays)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countPlaysByCatalog = `-- name: CountPlaysByCatalog :one
 SELECT COUNT(*) FROM plays WHERE user_id = ? AND catalog_id = ?
 `

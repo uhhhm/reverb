@@ -233,6 +233,7 @@ export function NowPlayingPanel() {
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-text-primary">{t.title}</div>
                     <div className="truncate text-xs text-text-secondary">{t.artist}</div>
+                    {t.reason && <div className="truncate text-xs text-text-muted">{reasonText(t.reason)}</div>}
                   </div>
                 </button>
               </li>

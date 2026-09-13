@@ -97,7 +97,7 @@ func (s *Service) Radio(ctx context.Context, seeds []Seed) TrackResult {
 	for i, l := range lists {
 		for pos, t := range l.Tracks {
 			key := recordingKey(t.Title, t.Artist)
-			v := 1 / float64(1+pos)
+			v := supportAt(pos)
 			support[key] += v
 			sources[key] = appendUnique(sources[key], t.RecommendationSources...)
 			if v > best[key] {
