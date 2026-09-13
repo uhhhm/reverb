@@ -4,6 +4,7 @@ import { EmptyState, Skeleton, TrackRow } from '../components/ui'
 import { usePlayer } from '../lib/playerStore'
 import { reasonText, recommendedTrackToTrack, useSimilarTracks } from '../lib/recommendationsApi'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
+import { DownloadAction } from '../components/download/DownloadAction'
 
 /**
  * Tracks similar to a seed, each already matched to something playable: the
@@ -21,7 +22,7 @@ export default function SimilarTracks() {
   const currentTrackId = usePlayer((s) => s.current?.id)
 
   const results = useMemo(() => data?.tracks ?? [], [data])
-  const tracks = useMemo(() => results.map(recommendedTrackToTrack), [results])
+  const tracks = useMemo(() => results.map((result) => recommendedTrackToTrack(result, 'similarTracks')), [results])
 
   return (
     <div className="space-y-6 pb-8">
@@ -29,6 +30,7 @@ export default function SimilarTracks() {
         <div className="text-xs font-semibold uppercase tracking-widest text-text-muted mb-1">Similar tracks</div>
         <h1 className="text-3xl font-black tracking-tight text-text-primary truncate">{title || 'Similar tracks'}</h1>
         {artist && <p className="mt-1 text-sm text-text-secondary">{artist}</p>}
+		{data?.offline && <p className="mt-1 text-xs text-text-muted">Offline · library results{data.updatedAt ? ` updated ${new Date(data.updatedAt * 1000).toLocaleString()}` : ''}</p>}
       </header>
 
       {isLoading ? (
@@ -58,6 +60,7 @@ export default function SimilarTracks() {
                 coverSrc={r.coverUrl || undefined}
                 artistTo={r.source !== 'library' && r.artistExternalId ? `/artist/${r.source}/${r.artistExternalId}` : undefined}
                 caption={reasonText(r.reason)}
+				right={r.source !== 'library' ? <DownloadAction compact result={{ source: r.source, externalId: r.externalId, title: r.title, artist: r.artist, album: r.album, durationMs: r.durationMs, isrc: r.isrc, mbid: r.mbid, coverUrl: r.coverUrl, coverArtId: r.coverArtId, artistExternalId: r.artistExternalId, albumExternalId: r.albumExternalId, type: 'track', recommendationOrigin: 'similarTracks' }} /> : undefined}
                 onPlay={() => playTrackList(tracks, i)}
               />
             )

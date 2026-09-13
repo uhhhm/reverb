@@ -18,7 +18,7 @@ type TastePlayRow struct {
 func (q *Queries) ListTastePlaysAfter(ctx context.Context, after int64, limit int) ([]TastePlayRow, error) {
 	rows, err := q.db.QueryContext(ctx, `SELECT p.rowid, e.title, e.artist, p.played_at, p.completed
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.rowid > ? ORDER BY p.rowid LIMIT ?`, after, limit)
+WHERE p.rowid > ? AND p.qualified = 1 ORDER BY p.rowid LIMIT ?`, after, limit)
 	if err != nil {
 		return nil, err
 	}

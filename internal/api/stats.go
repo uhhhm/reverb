@@ -166,6 +166,27 @@ func (s *Server) handleStatsSummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+// handleStatsRecommendations serves per-surface recommendation outcome rates.
+func (s *Server) handleStatsRecommendations(w http.ResponseWriter, r *http.Request) {
+	if s.nilStats(w) {
+		return
+	}
+	cu, ok := currentUser(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	result, err := s.deps.Stats.Recommendations(r.Context(), cu.ID, parseFrom(r), parseTo(r))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if result == nil {
+		result = []play.RecommendationStats{}
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 // handleStatsTopTracks serves GET /api/v1/stats/top/tracks?from&to&limit
 func (s *Server) handleStatsTopTracks(w http.ResponseWriter, r *http.Request) {
 	if s.nilStats(w) {

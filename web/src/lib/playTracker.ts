@@ -16,6 +16,8 @@ interface TrackState {
   lastTimeMs: number
   msPlayed: number
   fired: boolean
+	origin?: PlayInput['origin']
+	sessionId?: string
 }
 
 const QUALIFY_MIN_DURATION_MS = 30_000
@@ -57,20 +59,44 @@ function qualify(state: TrackState): boolean {
 export function startPlayTracker(
   engine: Enginelike,
   recordFn: (input: PlayInput) => Promise<void> = recordPlay,
+	sessionIDFactory: () => string = () => globalThis.crypto.randomUUID(),
 ): () => void {
   let track: TrackState | null = null
+	let sessionId: string | null = null
+
+	function submitRecommendation(state: TrackState): void {
+		if (!state.origin || state.fired) return
+		state.fired = true
+		void recordFn({
+			libraryTrackId: state.currentId,
+			title: state.title,
+			artist: state.artist,
+			album: state.album,
+			durationMs: state.durationMs,
+			...(state.isrc ? { isrc: state.isrc } : {}),
+			msPlayed: state.msPlayed,
+			completed: state.lastTimeMs >= state.durationMs - COMPLETE_WITHIN_MS,
+			origin: state.origin,
+			...(state.sessionId ? { sessionId: state.sessionId } : {}),
+			qualified: qualify(state),
+		})
+	}
 
   function handleState(s: PlayerState): void {
     const { current, playing, currentTimeMs, durationMs } = s
 
     // ── No current track ──────────────────────────────────────────────────
     if (!current) {
+		if (track) submitRecommendation(track)
       track = null
+		sessionId = null
       return
     }
 
     // ── Track changed ─────────────────────────────────────────────────────
     if (!track || track.currentId !== current.id) {
+		if (track) submitRecommendation(track)
+		if (sessionId === null) sessionId = sessionIDFactory()
       // Previous track: already fired or didn't qualify — discard; start fresh.
       // Seed durationMs from the Track metadata (set at load time) so we don't
       // have to wait for the engine's durationchange to settle; fall back to the
@@ -85,6 +111,8 @@ export function startPlayTracker(
         lastTimeMs: currentTimeMs,
         msPlayed: 0,
         fired: false,
+			origin: current.recommendationOrigin,
+			sessionId,
       }
       return
     }
@@ -119,9 +147,12 @@ export function startPlayTracker(
     }
 
     track.lastTimeMs = currentTimeMs
+	if (track.origin && currentTimeMs >= track.durationMs - COMPLETE_WITHIN_MS) {
+		submitRecommendation(track)
+	}
 
     // ── Check qualification ───────────────────────────────────────────────
-    if (!track.fired && track.durationMs > 0 && qualify(track)) {
+	if (!track.origin && !track.fired && track.durationMs > 0 && qualify(track)) {
       track.fired = true
       const completed = currentTimeMs >= track.durationMs - COMPLETE_WITHIN_MS
 
@@ -134,6 +165,7 @@ export function startPlayTracker(
         ...(track.isrc ? { isrc: track.isrc } : {}),
         msPlayed: track.msPlayed,
         completed,
+		...(track.sessionId ? { sessionId: track.sessionId } : {}),
       })
     }
   }

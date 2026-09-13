@@ -48,12 +48,12 @@ const TEST_TRACK: Track = {
   isrc: 'GBAYE9400347',
 }
 
-function renderMenu(onClose = vi.fn()) {
+function renderMenu(onClose = vi.fn(), track: Track = TEST_TRACK) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const utils = render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
-        <AddToPlaylistMenu track={TEST_TRACK} onClose={onClose} />
+        <AddToPlaylistMenu track={track} onClose={onClose} />
       </MemoryRouter>
     </QueryClientProvider>,
   )
@@ -112,6 +112,14 @@ describe('AddToPlaylistMenu', () => {
     })
     await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
+
+	it('attributes an external recommendation added to a playlist', async () => {
+		renderMenu(vi.fn(), { ...TEST_TRACK, id: 'display', externalStream: { source: 'deezer', externalId: 'remote-1' }, recommendationOrigin: 'similarTracks' })
+		fireEvent.click(screen.getByRole('button', { name: /add to chill mix/i }))
+		await waitFor(() => expect(addSyncedTrack).toHaveBeenCalledWith('p1', expect.objectContaining({
+			source: 'deezer', externalId: 'remote-1', recommendationOrigin: 'similarTracks',
+		})))
+	})
 
   it('typing a new name and pressing Enter creates the playlist then calls addSyncedTrack', async () => {
     renderMenu()

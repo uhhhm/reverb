@@ -4866,6 +4866,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/stats/recommendations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recommendation outcome rates per surface */
+        get: {
+            parameters: {
+                query?: {
+                    from?: number;
+                    to?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Per-surface recommendation stats */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RecommendationStats"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4962,6 +5001,8 @@ export interface components {
             quality?: string;
             /** @description Accepted for compatibility; this endpoint chooses through the configured fallback chain. */
             downloader?: string;
+            /** @enum {string} */
+            recommendationOrigin?: "radio" | "mix" | "shelf" | "similarTracks" | "similarArtists";
         };
         RealtimeEvent: {
             /** @enum {string} */
@@ -5021,10 +5062,23 @@ export interface components {
             artist: string;
             title?: string;
         };
+        RecommendationStats: {
+            Origin: string;
+            Plays: number;
+            /** Format: double */
+            SkipRate: number;
+            /** Format: double */
+            CompletionRate: number;
+            /** Format: double */
+            AddRate: number;
+        };
         /** @description available is false when no configured source can relate artists or online recommendations are off; an empty list with available set means nothing was found or the lookup failed. Artists are ranked by source agreement and the household's taste profile, and carry a reason. */
         SimilarArtists: {
             available: boolean;
             artists: components["schemas"]["ExternalArtist"][];
+            offline?: boolean;
+            /** Format: int64 */
+            updatedAt?: number;
         };
         /** @description A playable recommendation. A library track has source "library", externalId set to the backend track id, canonicalId set to its catalog id, and match.status "in_library"; anything else is a search-source result that plays through external playback. */
         RecommendedTrack: {
@@ -5058,6 +5112,9 @@ export interface components {
         SimilarTracks: {
             available: boolean;
             tracks: components["schemas"]["RecommendedTrack"][];
+            offline?: boolean;
+            /** Format: int64 */
+            updatedAt?: number;
         };
         /** @description A track, or an artist when title is omitted. */
         RadioSeed: {

@@ -4,9 +4,9 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Radio started offline plays only locally available tracks and never stalls trying to resolve an external track
-- [ ] A local similarity source is used automatically whenever online sources are unavailable
-- [ ] Cached shelves show when they were last updated and an offline note
-- [ ] Tests simulate network failure and assert library-only results
+- [x] Radio started offline plays only locally available tracks and never stalls trying to resolve an external track
+- [x] A local similarity source is used automatically whenever online sources are unavailable
+- [x] Cached shelves show when they were last updated and an offline note
+- [x] Tests simulate network failure and assert library-only results

@@ -106,6 +106,11 @@ type Play struct {
 	MsPlayed  int    `json:"msPlayed"`
 	Completed bool   `json:"completed"`
 	CreatedAt int64  `json:"createdAt"`
+	Origin    string `json:"origin,omitempty"`
+	SessionID string `json:"sessionId,omitempty"`
+	// Nil is the backward-compatible encoding used by older peers: a play they
+	// emitted had already passed the listening qualification threshold.
+	Qualified *bool `json:"qualified,omitempty"`
 }
 
 // EmitPlay publishes one play. Plays are immutable facts under unique ids, so
@@ -125,6 +130,25 @@ func (s *Service) EmitPlay(ctx context.Context, playID string, p Play) {
 
 // FieldRecord is the single field a play travels under.
 const FieldRecord = reverbsync.FieldRecord
+
+// RecommendationAdd is one durable conversion attributed to a surface.
+type RecommendationAdd struct {
+	UserID    string `json:"userId"`
+	Origin    string `json:"origin"`
+	Action    string `json:"action"`
+	CreatedAt int64  `json:"createdAt"`
+}
+
+func (s *Service) EmitRecommendationAdd(ctx context.Context, id string, add RecommendationAdd) {
+	if !s.ready() || id == "" {
+		return
+	}
+	device := s.device(ctx)
+	if device == "" {
+		return
+	}
+	s.append(ctx, device, reverbsync.EntityRecommendationAdd, id, FieldRecord, add)
+}
 
 // EmitTrackField publishes one per-track metadata field under a catalog id,
 // making sure the entity it names has been published first.

@@ -71,6 +71,7 @@ export interface SyncedTrackEntry {
   isrc?: string
   durationMs?: number
   coverArtId?: string
+	recommendationOrigin?: import('./types').RecommendationOrigin
 }
 
 export function addSyncedTrack(playlistId: string, entry: SyncedTrackEntry): Promise<SyncedPlaylistDetail> {

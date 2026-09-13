@@ -31,9 +31,12 @@ export interface Track {
   externalStream?: { source: string; externalId: string }
   /** Why a recommendation suggested this track. Radio steers by its seed. */
   reason?: RecommendationReason
+  /** Surface that supplied this track; carried into play and add attribution. */
+  recommendationOrigin?: RecommendationOrigin
 }
 
 export type RecommendationReason = components['schemas']['RecommendationReason']
+export type RecommendationOrigin = 'radio' | 'mix' | 'shelf' | 'similarTracks' | 'similarArtists'
 
 export interface Album {
   id: string
@@ -172,6 +175,7 @@ export interface ExternalResult {
   match?: MatchResult
   artistExternalId?: string
   albumExternalId?: string
+  recommendationOrigin?: RecommendationOrigin
 }
 
 export interface ExternalPlaylist {

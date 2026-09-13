@@ -215,6 +215,17 @@ type Play struct {
 	MsPlayed  int64  `json:"ms_played"`
 	Completed int64  `json:"completed"`
 	CreatedAt int64  `json:"created_at"`
+	Origin    string `json:"origin"`
+	SessionID string `json:"session_id"`
+	Qualified int64  `json:"qualified"`
+}
+
+type RecommendationAdd struct {
+	ID        string `json:"id"`
+	UserID    string `json:"user_id"`
+	Origin    string `json:"origin"`
+	Action    string `json:"action"`
+	CreatedAt int64  `json:"created_at"`
 }
 
 type ScrobbleLink struct {

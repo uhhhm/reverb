@@ -71,6 +71,16 @@ type EntityStats struct {
 	TopTracks   []TopRow
 }
 
+// RecommendationStats holds conversion and listening-quality rates for one
+// recommendation surface over the selected time range.
+type RecommendationStats struct {
+	Origin         string
+	Plays          int
+	SkipRate       float64
+	CompletionRate float64
+	AddRate        float64
+}
+
 // StatsQuerier is the narrow interface of generated query methods that Stats
 // needs. *db.Queries satisfies it.
 type StatsQuerier interface {
@@ -86,6 +96,28 @@ type StatsQuerier interface {
 	StatsTopTracksByArtist(ctx context.Context, arg db.StatsTopTracksByArtistParams) ([]db.StatsTopTracksByArtistRow, error)
 	StatsTopTracksByAlbum(ctx context.Context, arg db.StatsTopTracksByAlbumParams) ([]db.StatsTopTracksByAlbumRow, error)
 	StatsTopTracksByCatalogID(ctx context.Context, arg db.StatsTopTracksByCatalogIDParams) ([]db.StatsTopTracksByCatalogIDRow, error)
+	RecommendationStats(ctx context.Context, arg db.RecommendationStatsParams) ([]db.RecommendationStatsRow, error)
+}
+
+// Recommendations returns per-surface rates for recommendation outcomes in
+// [from,to). A short, unqualified attempt is a skip; completion is recorded at
+// the end of playback; additions include library and managed-playlist adds.
+func (s *Stats) Recommendations(ctx context.Context, userID string, from, to int64) ([]RecommendationStats, error) {
+	rows, err := s.q.RecommendationStats(ctx, db.RecommendationStatsParams{UserID: userID, FromTime: from, ToTime: to})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RecommendationStats, len(rows))
+	for i, row := range rows {
+		plays := float64(row.Plays)
+		out[i] = RecommendationStats{Origin: row.Origin, Plays: int(row.Plays)}
+		if plays > 0 {
+			out[i].SkipRate = row.Skips / plays
+			out[i].CompletionRate = row.Completions / plays
+			out[i].AddRate = float64(row.Additions) / plays
+		}
+	}
+	return out, nil
 }
 
 // Stats provides compute-on-read listening statistics.

@@ -70,6 +70,7 @@ func seedPlay(t *testing.T, st *store.Store, catalogID string) {
 		MsPlayed:  30000,
 		Completed: 1,
 		CreatedAt: 1000,
+		Qualified: 1,
 	}); err != nil {
 		t.Fatalf("insert play %q: %v", catalogID, err)
 	}

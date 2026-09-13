@@ -26,6 +26,10 @@ function mkTrack(id: string, durationMs: number): Track {
   }
 }
 
+function recommendedTrack(id: string, durationMs: number): Track {
+	return { ...mkTrack(id, durationMs), recommendationOrigin: 'radio' }
+}
+
 function baseState(): PlayerState {
   return {
     queue: [],
@@ -88,6 +92,19 @@ describe('playTracker', () => {
   beforeEach(() => {
     recordFn = vi.fn<(input: PlayInput) => Promise<void>>().mockResolvedValue(undefined)
   })
+
+	it('records a short recommended attempt as a skip with its origin and playback session', () => {
+		const eng = fakeEngine()
+		startPlayTracker(eng as any, recordFn, () => 'session-1')
+		const t = recommendedTrack('radio-skip', 120_000)
+		eng.emit({ ...baseState(), current: t, durationMs: 120_000, playing: true, currentTimeMs: 0 })
+		playFromTo(eng, t, 120_000, 0, 10_000)
+		eng.emit(baseState())
+
+		expect(recordFn).toHaveBeenCalledWith(expect.objectContaining({
+			origin: 'radio', sessionId: 'session-1', qualified: false, completed: false, msPlayed: 10_000,
+		}))
+	})
 
   // ── Test 1 ────────────────────────────────────────────────────────────────
   it('qualifies at >=50% of a >30 s track and calls recordFn exactly once', () => {

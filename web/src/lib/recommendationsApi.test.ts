@@ -23,7 +23,7 @@ describe('recommendedTrackToTrack', () => {
   })
 
   it('streams anything else from its source', () => {
-    const track = recommendedTrackToTrack({
+	const track = recommendedTrackToTrack({
       source: 'deezer',
       externalId: '3135556',
       title: 'D.A.N.C.E.',
@@ -33,8 +33,9 @@ describe('recommendedTrackToTrack', () => {
       mbid: 'recording-external',
       type: 'track',
       artistExternalId: '6404',
-    })
+	}, 'similarTracks')
     expect(track.externalStream).toEqual({ source: 'deezer', externalId: '3135556' })
     expect(track).toMatchObject({ title: 'D.A.N.C.E.', artist: 'Justice', album: 'Cross', artistExternalId: '6404', mbid: 'recording-external' })
+	expect(track.recommendationOrigin).toBe('similarTracks')
   })
 })

@@ -5,8 +5,8 @@ SELECT DISTINCT canonical_id FROM download_jobs WHERE canonical_id != ''
 LIMIT ?;
 
 -- name: InsertPlay :exec
-INSERT INTO plays (id, user_id, catalog_id, played_at, ms_played, completed, created_at)
-VALUES (?,?,?,?,?,?,?);
+INSERT INTO plays (id, user_id, catalog_id, played_at, ms_played, completed, created_at, origin, session_id, qualified)
+VALUES (?,?,?,?,?,?,?,?,?,?);
 
 -- name: RepointPlays :exec
 UPDATE plays SET catalog_id = ? WHERE catalog_id = ?;
@@ -18,12 +18,13 @@ DELETE FROM plays WHERE id = ? AND user_id = ?;
 SELECT p.id, p.catalog_id, p.played_at, e.title, e.artist, e.album
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
 WHERE p.user_id = ? AND p.played_at < ?
+  AND p.qualified = 1
 ORDER BY p.played_at DESC LIMIT ?;
 
 -- name: ListPlayedSince :many
 SELECT DISTINCT e.title, e.artist
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.played_at >= ?;
+WHERE p.played_at >= ? AND p.qualified = 1;
 
 -- name: StatsSummary :one
 SELECT
@@ -33,7 +34,7 @@ SELECT
     COUNT(DISTINCT e.album)     AS distinct_albums,
     COALESCE(SUM(p.ms_played), 0) AS ms_played
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ?;
+WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1;
 
 -- name: StatsTopTracks :many
 SELECT
@@ -46,7 +47,7 @@ SELECT
     COUNT(*)          AS plays,
     SUM(p.ms_played)  AS ms_played
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ?
+WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
 GROUP BY p.catalog_id
 ORDER BY COUNT(*) DESC, SUM(p.ms_played) DESC
 LIMIT ?;
@@ -59,7 +60,7 @@ WITH aggregated AS (
         COUNT(*)         AS plays,
         SUM(p.ms_played) AS ms_played
     FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-    WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ?
+    WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
     GROUP BY e.artist
 )
 SELECT
@@ -84,7 +85,7 @@ WITH aggregated AS (
         COUNT(*)         AS plays,
         SUM(p.ms_played) AS ms_played
     FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-    WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ?
+    WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
     GROUP BY e.album, e.artist
 )
 SELECT
@@ -103,7 +104,7 @@ LIMIT ?;
 -- name: StatsPlaysInWindow :many
 SELECT p.played_at, p.ms_played
 FROM plays p
-WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ?
+WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
 ORDER BY p.played_at ASC;
 
 -- name: StatsEntityArtist :one
@@ -113,7 +114,7 @@ SELECT
     MIN(p.played_at) AS first_played,
     MAX(p.played_at) AS last_played
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ?;
+WHERE p.user_id = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1;
 
 -- name: StatsEntityAlbum :one
 SELECT
@@ -122,7 +123,7 @@ SELECT
     MIN(p.played_at) AS first_played,
     MAX(p.played_at) AS last_played
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND e.album = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ?;
+WHERE p.user_id = ? AND e.album = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1;
 
 -- name: StatsEntityTrack :one
 SELECT
@@ -131,7 +132,7 @@ SELECT
     MIN(p.played_at) AS first_played,
     MAX(p.played_at) AS last_played
 FROM plays p
-WHERE p.user_id = ? AND p.catalog_id = ? AND p.played_at >= ? AND p.played_at < ?;
+WHERE p.user_id = ? AND p.catalog_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1;
 
 -- name: StatsTopTracksByArtist :many
 SELECT
@@ -142,7 +143,7 @@ SELECT
     COUNT(*)          AS plays,
     SUM(p.ms_played)  AS ms_played
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ?
+WHERE p.user_id = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
 GROUP BY p.catalog_id
 ORDER BY COUNT(*) DESC, SUM(p.ms_played) DESC
 LIMIT ?;
@@ -156,7 +157,7 @@ SELECT
     COUNT(*)          AS plays,
     SUM(p.ms_played)  AS ms_played
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND e.album = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ?
+WHERE p.user_id = ? AND e.album = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
 GROUP BY p.catalog_id
 ORDER BY COUNT(*) DESC, SUM(p.ms_played) DESC
 LIMIT ?;
@@ -170,23 +171,119 @@ SELECT
     COUNT(*)          AS plays,
     SUM(p.ms_played)  AS ms_played
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND p.catalog_id = ? AND p.played_at >= ? AND p.played_at < ?
+WHERE p.user_id = ? AND p.catalog_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
 GROUP BY p.catalog_id
 ORDER BY COUNT(*) DESC, SUM(p.ms_played) DESC
 LIMIT ?;
 
 -- name: CountPlays :one
-SELECT COUNT(*) FROM plays;
+SELECT COUNT(*) FROM plays WHERE qualified = 1;
 
 -- name: CountPlaysByCatalog :one
-SELECT COUNT(*) FROM plays WHERE user_id = ? AND catalog_id = ?;
+SELECT COUNT(*) FROM plays WHERE user_id = ? AND catalog_id = ? AND qualified = 1;
 
 -- name: InsertPlayIfAbsent :exec
-INSERT OR IGNORE INTO plays (id, user_id, catalog_id, played_at, ms_played, completed, created_at)
-VALUES (?,?,?,?,?,?,?);
+INSERT OR IGNORE INTO plays (id, user_id, catalog_id, played_at, ms_played, completed, created_at, origin, session_id, qualified)
+VALUES (?,?,?,?,?,?,?,?,?,?);
 
 -- name: GetPlay :one
 SELECT * FROM plays WHERE id = ?;
 
 -- name: ListAllPlays :many
 SELECT * FROM plays ORDER BY played_at ASC;
+
+-- name: RecommendationStats :many
+WITH origins AS (
+  SELECT p.origin FROM plays p
+  WHERE p.user_id = sqlc.arg(user_id) AND p.origin != '' AND p.played_at >= sqlc.arg(from_time) AND p.played_at < sqlc.arg(to_time)
+  UNION
+  SELECT a.origin FROM recommendation_add a
+  WHERE a.user_id = sqlc.arg(user_id) AND a.created_at >= sqlc.arg(from_time) AND a.created_at < sqlc.arg(to_time)
+), play_totals AS (
+  SELECT p.origin, COUNT(*) AS plays,
+         SUM(CASE WHEN p.qualified = 0 THEN 1 ELSE 0 END) AS skips,
+         SUM(CASE WHEN p.completed = 1 THEN 1 ELSE 0 END) AS completions
+  FROM plays p
+  WHERE p.user_id = sqlc.arg(user_id) AND p.origin != '' AND p.played_at >= sqlc.arg(from_time) AND p.played_at < sqlc.arg(to_time)
+  GROUP BY p.origin
+), add_totals AS (
+  SELECT a.origin, COUNT(*) AS additions
+  FROM recommendation_add a
+  WHERE a.user_id = sqlc.arg(user_id) AND a.created_at >= sqlc.arg(from_time) AND a.created_at < sqlc.arg(to_time)
+  GROUP BY a.origin
+)
+SELECT origins.origin,
+       COALESCE(play_totals.plays, 0) AS plays,
+       COALESCE(play_totals.skips, 0) AS skips,
+       COALESCE(play_totals.completions, 0) AS completions,
+       COALESCE(add_totals.additions, 0) AS additions
+FROM origins
+LEFT JOIN play_totals USING (origin)
+LEFT JOIN add_totals USING (origin)
+ORDER BY origins.origin;
+
+-- name: InsertRecommendationAddIfAbsent :exec
+INSERT OR IGNORE INTO recommendation_add (id, user_id, origin, action, created_at)
+VALUES (?, ?, ?, ?, ?);
+
+-- name: ListAllRecommendationAdds :many
+SELECT * FROM recommendation_add ORDER BY created_at, id;
+
+-- name: LocalRecommendationTracks :many
+WITH seed AS (
+  SELECT id, artist, album
+  FROM catalog_entity
+  WHERE kind = 'track' AND lower(trim(artist)) = lower(trim(sqlc.arg(seed_artist)))
+    AND (CAST(sqlc.arg(seed_title) AS TEXT) = '' OR lower(trim(title)) = lower(trim(CAST(sqlc.arg(seed_title) AS TEXT))))
+  LIMIT 1
+), candidates AS (
+  SELECT e.id, e.title, e.artist, e.album, e.duration_ms, e.isrc, e.mbid,
+         b.backend_id, b.cover_art_id,
+         CASE WHEN lower(e.artist) = lower(seed.artist) THEN 3 ELSE 0 END +
+         CASE WHEN seed.album != '' AND lower(e.album) = lower(seed.album) THEN 2 ELSE 0 END +
+         4 * EXISTS (
+           SELECT 1 FROM synced_playlists sp
+           WHERE EXISTS (SELECT 1 FROM json_each(sp.tracks_json) jt
+                         WHERE lower(json_extract(jt.value, '$.artist')) = lower(seed.artist)
+                           AND (CAST(sqlc.arg(seed_title) AS TEXT) = '' OR lower(json_extract(jt.value, '$.title')) = lower(CAST(sqlc.arg(seed_title) AS TEXT))))
+             AND EXISTS (SELECT 1 FROM json_each(sp.tracks_json) jt
+                         WHERE lower(json_extract(jt.value, '$.artist')) = lower(e.artist)
+                           AND lower(json_extract(jt.value, '$.title')) = lower(e.title))
+         ) +
+         4 * EXISTS (
+           SELECT 1 FROM plays ps JOIN plays pc ON pc.session_id = ps.session_id
+           WHERE ps.catalog_id = seed.id AND pc.catalog_id = e.id AND ps.session_id != ''
+         ) AS score
+  FROM catalog_entity e
+  JOIN backend_binding b ON b.catalog_id = e.id AND b.backend_id != '' AND b.known_absent = 0
+  JOIN seed
+  WHERE e.kind = 'track' AND (CAST(sqlc.arg(seed_title) AS TEXT) = '' OR e.id != seed.id)
+)
+SELECT * FROM candidates WHERE score > 0
+GROUP BY id ORDER BY score DESC, lower(artist), lower(title) LIMIT sqlc.arg(result_limit);
+
+-- name: LocalRecommendationArtists :many
+WITH candidate_artists AS (
+  SELECT e.artist,
+         4 * EXISTS (
+           SELECT 1 FROM synced_playlists sp
+           WHERE EXISTS (SELECT 1 FROM json_each(sp.tracks_json) jt
+                         WHERE lower(json_extract(jt.value, '$.artist')) = lower(sqlc.arg(seed_artist)))
+             AND EXISTS (SELECT 1 FROM json_each(sp.tracks_json) jt
+                         WHERE lower(json_extract(jt.value, '$.artist')) = lower(e.artist))
+         ) +
+         4 * EXISTS (
+           SELECT 1
+           FROM plays ps
+           JOIN catalog_entity se ON se.id = ps.catalog_id
+           JOIN plays pc ON pc.session_id = ps.session_id AND pc.session_id != ''
+           JOIN catalog_entity ce ON ce.id = pc.catalog_id
+           WHERE lower(se.artist) = lower(sqlc.arg(seed_artist)) AND lower(ce.artist) = lower(e.artist)
+         ) AS score
+  FROM catalog_entity e
+  JOIN backend_binding b ON b.catalog_id = e.id AND b.backend_id != '' AND b.known_absent = 0
+  WHERE e.kind = 'track' AND lower(e.artist) != lower(sqlc.arg(seed_artist))
+  GROUP BY e.artist
+)
+SELECT artist, score FROM candidate_artists WHERE score > 0
+ORDER BY score DESC, lower(artist) LIMIT sqlc.arg(result_limit);

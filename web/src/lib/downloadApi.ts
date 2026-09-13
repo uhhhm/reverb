@@ -16,6 +16,7 @@ export function reqFromResult(r: ExternalResult, downloader?: string): CreateDow
     isrc: r.isrc,
     durationMs: r.durationMs,
     downloader,
+		recommendationOrigin: r.recommendationOrigin,
   }
 }
 

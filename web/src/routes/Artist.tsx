@@ -100,7 +100,8 @@ function AlbumCard({ album, cov, resolved, onNavigate }: AlbumCardProps) {
 export default function Artist() {
   const { source = 'library', id = '' } = useParams()
   const { data: detail, isLoading, isError } = useArtistDetail(source, id)
-  const similarArtists = useSimilarArtists(source, id).data?.artists ?? []
+  const similarArtistsResult = useSimilarArtists(source, id).data
+  const similarArtists = similarArtistsResult?.artists ?? []
   const markNotInterested = useMarkNotInterested()
   const startRadio = usePlayer((s) => s.startRadio)
   // The page is reused across artists; a mark made on one must not show on the next.
@@ -391,6 +392,7 @@ export default function Artist() {
       {similarArtists.length > 0 && (
         <section aria-label="Fans also like">
           <h2 className="text-base font-bold text-text-primary mb-4">Fans also like</h2>
+		  {similarArtistsResult?.offline && <p className="-mt-3 mb-4 text-xs text-text-muted">Offline · library results{similarArtistsResult.updatedAt ? ` updated ${new Date(similarArtistsResult.updatedAt * 1000).toLocaleString()}` : ''}</p>}
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
             {similarArtists.map((artist) => (
               <MediaCard

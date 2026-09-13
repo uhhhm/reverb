@@ -42,6 +42,7 @@ import (
 	"github.com/uhhhm/reverb/internal/playlistsync"
 	"github.com/uhhhm/reverb/internal/recommend"
 	"github.com/uhhhm/reverb/internal/recommend/listenbrainz"
+	"github.com/uhhhm/reverb/internal/recommendationevent"
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/resolver"
 	"github.com/uhhhm/reverb/internal/scrobble"
@@ -321,6 +322,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	catalogSvc.WithEmitter(emitter)
 	playSvc.WithEmitter(emitter)
 	deps.SyncEmit = emitter
+	deps.RecommendationEvents = recommendationevent.New(st.Q(), emitter, time.Now, uuid.NewString)
 
 	// Not interested marks replicate through the change log; the projection
 	// below applies a peer's marks without emitting them again.
@@ -370,6 +372,12 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 			}
 			return out, nil
 		}),
+		recommend.WithLocalSimilarity(recommend.NewLocalSimilarity(st.Q(), func() recommend.LocalLibrary {
+			if lib := reloader.Current().Library; lib != nil {
+				return lib
+			}
+			return nil
+		})),
 		recommend.WithTaste(tasteInputs{q: st.Q(), marks: marks}),
 		recommend.WithSettings(func(ctx context.Context) (recommend.Settings, error) {
 			s, err := tasteSettings.Get(ctx)

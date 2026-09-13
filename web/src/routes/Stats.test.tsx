@@ -11,6 +11,7 @@ const mockTopTracks = vi.fn()
 const mockTopArtists = vi.fn()
 const mockTopAlbums = vi.fn()
 const mockRecent = vi.fn()
+const mockRecommendations = vi.fn()
 
 vi.mock('../lib/statsApi', () => ({
   summary: (...args: unknown[]) => mockSummary(...args),
@@ -20,6 +21,7 @@ vi.mock('../lib/statsApi', () => ({
   recent: (...args: unknown[]) => mockRecent(...args),
   timeline: vi.fn().mockResolvedValue([]),
   clock: vi.fn().mockResolvedValue([]),
+	recommendations: (...args: unknown[]) => mockRecommendations(...args),
 }))
 
 // ── libraryApi mock ───────────────────────────────────────────────────────────
@@ -104,6 +106,7 @@ describe('Stats page', () => {
     mockTopArtists.mockResolvedValue(TOP_ARTISTS)
     mockTopAlbums.mockResolvedValue(TOP_ALBUMS)
     mockRecent.mockResolvedValue(RECENT)
+	mockRecommendations.mockResolvedValue([{ Origin: 'radio', Plays: 20, SkipRate: 0.25, CompletionRate: 0.6, AddRate: 0.1 }])
     mockPlayTrackList.mockReturnValue(undefined)
   })
 
@@ -139,6 +142,15 @@ describe('Stats page', () => {
     renderStats()
     await waitFor(() => expect(screen.getByText('3')).toBeInTheDocument())
   })
+
+	it('shows recommendation quality per surface for the chosen range', async () => {
+		renderStats()
+		await waitFor(() => expect(screen.getByRole('heading', { name: 'Recommendations' })).toBeInTheDocument())
+		expect(screen.getByText('Radio')).toBeInTheDocument()
+		expect(screen.getByText('25%')).toBeInTheDocument()
+		expect(screen.getByText('60%')).toBeInTheDocument()
+		expect(screen.getByText('10%')).toBeInTheDocument()
+	})
 
   // ── Error state ───────────────────────────────────────────────────────────
 
@@ -325,6 +337,7 @@ describe('Stats page', () => {
     mockTopArtists.mockResolvedValue([])
     mockTopAlbums.mockResolvedValue([])
     mockRecent.mockResolvedValue([])
+	mockRecommendations.mockResolvedValue([])
     renderStats()
     await waitFor(() =>
       expect(screen.getByText(/no listening history/i)).toBeInTheDocument()

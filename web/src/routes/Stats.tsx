@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { presetRange } from '../lib/range'
 import type { Range } from '../lib/range'
-import { summary, topTracks, topArtists, topAlbums, recent, timeline, clock } from '../lib/statsApi'
+import { summary, topTracks, topArtists, topAlbums, recent, timeline, clock, recommendations } from '../lib/statsApi'
 import { RangeSelector } from '../components/stats/RangeSelector'
 import { SummaryCards } from '../components/stats/SummaryCards'
 import { TopList } from '../components/stats/TopList'
@@ -61,6 +61,12 @@ export default function Stats() {
     staleTime: 60_000,
   })
 
+	const recommendationsQ = useQuery({
+		queryKey: ['stats', 'recommendations', ...rangeKey(range)],
+		queryFn: () => recommendations(range),
+		staleTime: 60_000,
+	})
+
   const summaryData = summaryQ.data
   const tracks = topTracksQ.data ?? []
   const artists = topArtistsQ.data ?? []
@@ -68,12 +74,13 @@ export default function Stats() {
   const recentRows = recentQ.data ?? []
   const timelineBuckets = timelineQ.data ?? []
   const clockCells = clockQ.data ?? []
+	const recommendationRows = recommendationsQ.data ?? []
 
   const isLoading = summaryQ.isLoading
   const isError = summaryQ.isError
 
   // Empty state: loaded, but no plays recorded in this range
-  const isEmpty = !isLoading && !isError && summaryData !== undefined && summaryData.Plays === 0
+  const isEmpty = !isLoading && !isError && summaryData !== undefined && summaryData.Plays === 0 && recommendationRows.length === 0
 
   return (
     <div className="space-y-8">
@@ -123,6 +130,18 @@ export default function Stats() {
         <div className="space-y-8">
           {/* Summary cards */}
           <SummaryCards data={summaryData} />
+
+		  {recommendationRows.length > 0 && (
+			<section aria-label="Recommendations">
+			  <h2 className="text-base font-bold text-text-primary mb-3">Recommendations</h2>
+			  <div className="overflow-hidden rounded-lg bg-raised">
+				<table className="w-full text-sm">
+				  <thead className="text-left text-xs uppercase tracking-wider text-text-muted"><tr><th className="px-4 py-3">Surface</th><th className="px-4 py-3">Plays</th><th className="px-4 py-3">Skip rate</th><th className="px-4 py-3">Completion</th><th className="px-4 py-3">Added</th></tr></thead>
+				  <tbody>{recommendationRows.map((row) => <tr key={row.Origin} className="border-t border-border-subtle"><td className="px-4 py-3 font-semibold text-text-primary">{row.Origin === 'similarTracks' ? 'Similar tracks' : row.Origin.charAt(0).toUpperCase() + row.Origin.slice(1)}</td><td className="px-4 py-3 tabular-nums">{row.Plays}</td><td className="px-4 py-3 tabular-nums">{Math.round(row.SkipRate * 100)}%</td><td className="px-4 py-3 tabular-nums">{Math.round(row.CompletionRate * 100)}%</td><td className="px-4 py-3 tabular-nums">{Math.round(row.AddRate * 100)}%</td></tr>)}</tbody>
+				</table>
+			  </div>
+			</section>
+		  )}
 
           {/* Listening over time */}
           <section aria-label="Listening over time">

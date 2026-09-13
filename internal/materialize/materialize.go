@@ -86,6 +86,7 @@ type TrackStore interface {
 	DeleteTrackQualityOverrideByCatalogID(ctx context.Context, catalogID sql.NullString) error
 	UpsertTrackLoudnessByCatalogID(ctx context.Context, arg db.UpsertTrackLoudnessByCatalogIDParams) error
 	InsertPlayIfAbsent(ctx context.Context, arg db.InsertPlayIfAbsentParams) error
+	InsertRecommendationAddIfAbsent(ctx context.Context, arg db.InsertRecommendationAddIfAbsentParams) error
 	ListUnprojectedPlays(context.Context, string) ([]db.SyncChange, error)
 }
 
@@ -170,9 +171,24 @@ func (s *Service) Apply(ctx context.Context, ch reverbsync.SyncChange) error {
 			return nil
 		}
 		return s.tasteSettings.Apply(ctx, ch.Field, func(target any) error { return decodeValue(ch, target) })
+	case reverbsync.EntityRecommendationAdd:
+		return s.applyRecommendationAdd(ctx, ch)
 	default:
 		return nil
 	}
+}
+
+func (s *Service) applyRecommendationAdd(ctx context.Context, ch reverbsync.SyncChange) error {
+	if s.tracks == nil || ch.Field != reverbsync.FieldRecord {
+		return nil
+	}
+	var add syncemit.RecommendationAdd
+	if err := decodeValue(ch, &add); err != nil {
+		return err
+	}
+	return s.tracks.InsertRecommendationAddIfAbsent(ctx, db.InsertRecommendationAddIfAbsentParams{
+		ID: ch.EntityID, UserID: add.UserID, Origin: add.Origin, Action: add.Action, CreatedAt: add.CreatedAt,
+	})
 }
 
 func (s *Service) applyTrack(ctx context.Context, ch reverbsync.SyncChange) error {
@@ -262,6 +278,10 @@ func (s *Service) applyPlay(ctx context.Context, ch reverbsync.SyncChange) error
 	if createdAt == 0 {
 		createdAt = time.Now().Unix()
 	}
+	qualified := int64(1)
+	if p.Qualified != nil && !*p.Qualified {
+		qualified = 0
+	}
 	return s.tracks.InsertPlayIfAbsent(ctx, db.InsertPlayIfAbsentParams{
 		ID:        ch.EntityID,
 		UserID:    p.UserID,
@@ -270,6 +290,9 @@ func (s *Service) applyPlay(ctx context.Context, ch reverbsync.SyncChange) error
 		MsPlayed:  int64(p.MsPlayed),
 		Completed: completed,
 		CreatedAt: createdAt,
+		Origin:    p.Origin,
+		SessionID: p.SessionID,
+		Qualified: qualified,
 	})
 }
 

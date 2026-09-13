@@ -69,6 +69,29 @@ func TestRecord_MintsCatalogAndInsertsPlay(t *testing.T) {
 	}
 }
 
+func TestRecord_PersistsRecommendationContextWithoutCountingASkipAsAPlay(t *testing.T) {
+	s, q := newTestPlayService(t)
+	ctx := context.Background()
+	qualified := false
+	if err := s.Record(ctx, "user-1", play.PlayInput{
+		Title: "Skipped", Artist: "Artist", DurationMs: 180000, MsPlayed: 12000,
+		PlayedAt: 1719000000, Origin: "radio", SessionID: "session-1", Qualified: &qualified,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := q.ListAllPlays(ctx)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("plays = %+v, err = %v", rows, err)
+	}
+	if rows[0].Origin != "radio" || rows[0].SessionID != "session-1" || rows[0].Qualified != 0 {
+		t.Fatalf("play context = %+v", rows[0])
+	}
+	count, err := q.CountPlaysByCatalog(ctx, db.CountPlaysByCatalogParams{UserID: "user-1", CatalogID: rows[0].CatalogID})
+	if err != nil || count != 0 {
+		t.Fatalf("qualified play count = %d, err = %v; want zero", count, err)
+	}
+}
+
 func TestRecord_PerUserScoping(t *testing.T) {
 	s, q := newTestPlayService(t)
 	ctx := context.Background()

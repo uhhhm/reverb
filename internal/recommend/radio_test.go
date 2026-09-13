@@ -103,6 +103,17 @@ func TestRadioUnavailableWithoutTrackSource(t *testing.T) {
 	}
 }
 
+func TestRadioOfflineQueuesOnlyLocallyPlayableTracks(t *testing.T) {
+	local := &localSimilarity{tracks: []core.ExternalResult{{Source: "library", ExternalID: "lib-1", Title: "Offline", Artist: "Band", Type: core.EntityTrack}}}
+	svc := recommend.New(nil, recommend.WithLocalSimilarity(local), recommend.WithSettings(func(context.Context) (recommend.Settings, error) {
+		return recommend.Settings{Online: false}, nil
+	}))
+	got := svc.Radio(context.Background(), []recommend.Seed{{Artist: "Seed", Title: "Song"}})
+	if !got.Available || !got.Offline || len(got.Tracks) != 1 || got.Tracks[0].Source != "library" {
+		t.Fatalf("offline radio = %+v", got)
+	}
+}
+
 // artistTrackSource answers a search for the artist's name with byArtist and
 // defers everything else to trackSource.
 type artistTrackSource struct {

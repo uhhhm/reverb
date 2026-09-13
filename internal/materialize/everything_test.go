@@ -81,6 +81,22 @@ func TestPeerPlayLandsInHistory(t *testing.T) {
 	}
 }
 
+func TestPeerPlayCarriesRecommendationContextAndOlderPlayDefaultsToQualified(t *testing.T) {
+	st, ss, _ := newPeerStore(t)
+	ctx := context.Background()
+	qualified := false
+	receive(t, ss,
+		reverbsync.SyncChange{EntityType: reverbsync.EntityCatalog, EntityID: "trk_remote", Field: syncemit.FieldIdentity, Value: peerTrack},
+		reverbsync.SyncChange{EntityType: reverbsync.EntityPlay, EntityID: "play_skip", Field: syncemit.FieldRecord, Value: syncemit.Play{UserID: "local", CatalogID: "trk_remote", PlayedAt: 500, Origin: "radio", SessionID: "s1", Qualified: &qualified}},
+		reverbsync.SyncChange{EntityType: reverbsync.EntityPlay, EntityID: "play_legacy", Field: syncemit.FieldRecord, Value: syncemit.Play{UserID: "local", CatalogID: "trk_remote", PlayedAt: 501}},
+	)
+	skip, _ := st.Q().GetPlay(ctx, "play_skip")
+	legacy, _ := st.Q().GetPlay(ctx, "play_legacy")
+	if skip.Origin != "radio" || skip.SessionID != "s1" || skip.Qualified != 0 || legacy.Qualified != 1 {
+		t.Fatalf("skip=%+v legacy=%+v", skip, legacy)
+	}
+}
+
 // The same play arriving twice is one play. Re-sending a log is normal, and
 // double-counting it would corrupt the listening stats it feeds.
 func TestPeerPlayIsNotCountedTwice(t *testing.T) {

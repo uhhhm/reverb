@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -344,14 +345,15 @@ func (s *Server) handleDeleteSyncedPlaylist(w http.ResponseWriter, r *http.Reque
 
 // addSyncedTrackBody is the POST /synced-playlists/{id}/tracks request DTO.
 type addSyncedTrackBody struct {
-	Source     string `json:"source"`
-	ExternalID string `json:"externalId"`
-	Title      string `json:"title"`
-	Artist     string `json:"artist"`
-	Album      string `json:"album"`
-	ISRC       string `json:"isrc"`
-	DurationMs int    `json:"durationMs"`
-	CoverArtID string `json:"coverArtId"`
+	Source               string `json:"source"`
+	ExternalID           string `json:"externalId"`
+	Title                string `json:"title"`
+	Artist               string `json:"artist"`
+	Album                string `json:"album"`
+	ISRC                 string `json:"isrc"`
+	DurationMs           int    `json:"durationMs"`
+	CoverArtID           string `json:"coverArtId"`
+	RecommendationOrigin string `json:"recommendationOrigin"`
 }
 
 func (s *Server) handleAddSyncedTrack(w http.ResponseWriter, r *http.Request) {
@@ -388,6 +390,13 @@ func (s *Server) handleAddSyncedTrack(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, status, map[string]string{"error": err.Error()})
 		return
+	}
+	if body.RecommendationOrigin != "" && s.deps.RecommendationEvents != nil {
+		if cu, ok := currentUser(r); ok {
+			if err := s.deps.RecommendationEvents.Record(r.Context(), cu.ID, body.RecommendationOrigin, "playlist"); err != nil {
+				log.Printf("recommendation playlist attribution: %v", err)
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, det)
 }

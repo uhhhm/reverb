@@ -23,6 +23,21 @@ type similarTracks struct {
 	calls atomic.Int32
 }
 
+type localSimilarity struct {
+	tracks  []core.ExternalResult
+	artists []core.ExternalArtist
+	calls   atomic.Int32
+}
+
+func (l *localSimilarity) SimilarLocalTracks(context.Context, recommend.TrackSeed, int) ([]core.ExternalResult, error) {
+	l.calls.Add(1)
+	return l.tracks, nil
+}
+func (l *localSimilarity) SimilarLocalArtists(context.Context, recommend.ArtistSeed, int) ([]core.ExternalArtist, error) {
+	l.calls.Add(1)
+	return l.artists, nil
+}
+
 func (s *similarTracks) Name() string {
 	if s.name != "" {
 		return s.name
@@ -182,6 +197,29 @@ func TestSimilarTracksKeepHealthySourceWhenPeerFails(t *testing.T) {
 	got := svc.SimilarTracks(context.Background(), "Seed Artist", "Seed Track")
 	if !got.Available || len(got.Tracks) != 1 || got.Tracks[0].ExternalID != "a" {
 		t.Fatalf("got %+v, want the healthy source result", got)
+	}
+}
+
+func TestSimilarTracksFallBackToLibraryWhenNetworkFails(t *testing.T) {
+	failing := &similarTracks{name: "lastfm", err: errors.New("offline")}
+	local := &localSimilarity{tracks: []core.ExternalResult{{Source: "library", ExternalID: "local-1", Title: "Local", Artist: "Band", Type: core.EntityTrack}}}
+	svc := recommend.New(func() []search.SearchSource { return nil }, recommend.WithTrackSource(failing), recommend.WithLocalSimilarity(local))
+
+	got := svc.SimilarTracks(context.Background(), "Seed", "Song")
+	if !got.Available || !got.Offline || len(got.Tracks) != 1 || got.Tracks[0].Source != "library" {
+		t.Fatalf("fallback = %+v", got)
+	}
+}
+
+func TestSimilarTracksUseOnlyLibraryWhenOnlineRecommendationsAreOff(t *testing.T) {
+	online := &similarTracks{cands: []recommend.TrackCandidate{{Artist: "Online", Title: "Remote"}}}
+	local := &localSimilarity{tracks: []core.ExternalResult{{Source: "library", ExternalID: "local-1", Title: "Local", Artist: "Band", Type: core.EntityTrack}}}
+	svc := recommend.New(func() []search.SearchSource { return nil }, recommend.WithTrackSource(online), recommend.WithLocalSimilarity(local),
+		recommend.WithSettings(func(context.Context) (recommend.Settings, error) { return recommend.Settings{Online: false}, nil }))
+
+	got := svc.SimilarTracks(context.Background(), "Seed", "Song")
+	if !got.Available || len(got.Tracks) != 1 || online.calls.Load() != 0 {
+		t.Fatalf("offline result = %+v, online calls = %d", got, online.calls.Load())
 	}
 }
 

@@ -4,9 +4,9 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Play records carry an optional origin, which replicates with the play. Older plays and peers without the field still work
-- [ ] Adding a recommended track to a playlist or the library is attributed to the surface it came from
-- [ ] Stats shows per-surface skip, completion, and add rates for a chosen time range
-- [ ] Migration, sqlc, and contract regeneration pass their drift checks
+- [x] Play records carry an optional origin, which replicates with the play. Older plays and peers without the field still work
+- [x] Adding a recommended track to a playlist or the library is attributed to the surface it came from
+- [x] Stats shows per-surface skip, completion, and add rates for a chosen time range
+- [x] Migration, sqlc, and contract regeneration pass their drift checks

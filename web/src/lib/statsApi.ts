@@ -58,6 +58,14 @@ export interface EntityStats {
   TopTracks: TopRow[]
 }
 
+export interface RecommendationStats {
+	Origin: string
+	Plays: number
+	SkipRate: number
+	CompletionRate: number
+	AddRate: number
+}
+
 // ── play-counts request/response ──────────────────────────────────────────────
 // These match the backend's EXPLICIT lowercase json tags exactly. A casing
 // mismatch silently yields zero counts (the backend keys the response map on the
@@ -122,6 +130,10 @@ export function timeline(r: Range): Promise<TimeBucket[]> {
 
 export function clock(r: Range): Promise<ClockCell[]> {
   return api.get<ClockCell[]>(`/stats/clock${qs(rangeParams(r))}`)
+}
+
+export function recommendations(r: Range): Promise<RecommendationStats[]> {
+	return api.get<RecommendationStats[]>(`/stats/recommendations${qs(rangeParams(r))}`)
 }
 
 export function recent(before: number, limit = 20): Promise<RecentRow[]> {

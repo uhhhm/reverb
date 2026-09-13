@@ -1431,6 +1431,18 @@ paths:
         "500": { description: fetch failed or hash mismatch }
         "503": { description: p2p unavailable, file store unavailable, or local device not initialized }
 
+  /stats/recommendations:
+    get:
+      summary: Recommendation outcome rates per surface
+      parameters:
+        - { name: from, in: query, schema: { type: integer, format: int64 } }
+        - { name: to, in: query, schema: { type: integer, format: int64 } }
+      responses:
+        "200":
+          description: Per-surface recommendation stats
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/RecommendationStats" } }
 components:
   schemas:
     SyncRound:
@@ -1744,6 +1756,12 @@ components:
           type: string
           x-go-ignore: true
           description: Accepted for compatibility; this endpoint chooses through the configured fallback chain.
+        recommendationOrigin:
+          type: string
+          x-go-name: RecommendationOrigin
+          x-go-type: string
+          x-go-omitempty: true
+          enum: [radio, mix, shelf, similarTracks, similarArtists]
       required:
       - externalId
     RealtimeEvent:
@@ -1880,6 +1898,15 @@ components:
         kind: { type: string, enum: [played, similar, fansAlsoLike, radioArtist] }
         artist: { type: string }
         title: { type: string }
+    RecommendationStats:
+      type: object
+      required: [Origin, Plays, SkipRate, CompletionRate, AddRate]
+      properties:
+        Origin: { type: string }
+        Plays: { type: integer }
+        SkipRate: { type: number, format: double }
+        CompletionRate: { type: number, format: double }
+        AddRate: { type: number, format: double }
     SimilarArtists:
       type: object
       description: >-
@@ -1891,6 +1918,8 @@ components:
       properties:
         available: { type: boolean }
         artists: { type: array, items: { $ref: "#/components/schemas/ExternalArtist" } }
+        offline: { type: boolean }
+        updatedAt: { type: integer, format: int64 }
     RecommendedTrack:
       type: object
       description: >-
@@ -1933,6 +1962,8 @@ components:
       properties:
         available: { type: boolean }
         tracks: { type: array, items: { $ref: "#/components/schemas/RecommendedTrack" } }
+        offline: { type: boolean }
+        updatedAt: { type: integer, format: int64 }
     RadioSeed:
       type: object
       description: A track, or an artist when title is omitted.

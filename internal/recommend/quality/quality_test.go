@@ -103,7 +103,7 @@ func TestLoadDatabaseReadsCanonicalPlayIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.Q().InsertPlay(ctx, db.InsertPlayParams{
-		ID: "play-1", UserID: "owner", CatalogID: "track-1", PlayedAt: 123, CreatedAt: 123,
+		ID: "play-1", UserID: "owner", CatalogID: "track-1", PlayedAt: 123, CreatedAt: 123, Qualified: 1,
 	}); err != nil {
 		t.Fatal(err)
 	}

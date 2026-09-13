@@ -113,6 +113,9 @@ const (
 	// EntityTasteSettings carries the household's recommendation settings
 	// under the single key "household".
 	EntityTasteSettings = "tasteSettings"
+	// EntityRecommendationAdd carries attribution for a recommendation that
+	// was added to the library or a managed playlist.
+	EntityRecommendationAdd = "recommendationAdd"
 )
 
 // Field names carried by the change log. They are the wire format — renaming

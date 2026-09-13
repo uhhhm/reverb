@@ -11,7 +11,7 @@ import (
 )
 
 const countPlays = `-- name: CountPlays :one
-SELECT COUNT(*) FROM plays
+SELECT COUNT(*) FROM plays WHERE qualified = 1
 `
 
 func (q *Queries) CountPlays(ctx context.Context) (int64, error) {
@@ -22,7 +22,7 @@ func (q *Queries) CountPlays(ctx context.Context) (int64, error) {
 }
 
 const countPlaysByCatalog = `-- name: CountPlaysByCatalog :one
-SELECT COUNT(*) FROM plays WHERE user_id = ? AND catalog_id = ?
+SELECT COUNT(*) FROM plays WHERE user_id = ? AND catalog_id = ? AND qualified = 1
 `
 
 type CountPlaysByCatalogParams struct {
@@ -82,7 +82,7 @@ func (q *Queries) DistinctDurableCanonicalIDs(ctx context.Context, limit int64) 
 }
 
 const getPlay = `-- name: GetPlay :one
-SELECT id, user_id, catalog_id, played_at, ms_played, completed, created_at FROM plays WHERE id = ?
+SELECT id, user_id, catalog_id, played_at, ms_played, completed, created_at, origin, session_id, qualified FROM plays WHERE id = ?
 `
 
 func (q *Queries) GetPlay(ctx context.Context, id string) (Play, error) {
@@ -96,13 +96,16 @@ func (q *Queries) GetPlay(ctx context.Context, id string) (Play, error) {
 		&i.MsPlayed,
 		&i.Completed,
 		&i.CreatedAt,
+		&i.Origin,
+		&i.SessionID,
+		&i.Qualified,
 	)
 	return i, err
 }
 
 const insertPlay = `-- name: InsertPlay :exec
-INSERT INTO plays (id, user_id, catalog_id, played_at, ms_played, completed, created_at)
-VALUES (?,?,?,?,?,?,?)
+INSERT INTO plays (id, user_id, catalog_id, played_at, ms_played, completed, created_at, origin, session_id, qualified)
+VALUES (?,?,?,?,?,?,?,?,?,?)
 `
 
 type InsertPlayParams struct {
@@ -113,6 +116,9 @@ type InsertPlayParams struct {
 	MsPlayed  int64  `json:"ms_played"`
 	Completed int64  `json:"completed"`
 	CreatedAt int64  `json:"created_at"`
+	Origin    string `json:"origin"`
+	SessionID string `json:"session_id"`
+	Qualified int64  `json:"qualified"`
 }
 
 func (q *Queries) InsertPlay(ctx context.Context, arg InsertPlayParams) error {
@@ -124,13 +130,16 @@ func (q *Queries) InsertPlay(ctx context.Context, arg InsertPlayParams) error {
 		arg.MsPlayed,
 		arg.Completed,
 		arg.CreatedAt,
+		arg.Origin,
+		arg.SessionID,
+		arg.Qualified,
 	)
 	return err
 }
 
 const insertPlayIfAbsent = `-- name: InsertPlayIfAbsent :exec
-INSERT OR IGNORE INTO plays (id, user_id, catalog_id, played_at, ms_played, completed, created_at)
-VALUES (?,?,?,?,?,?,?)
+INSERT OR IGNORE INTO plays (id, user_id, catalog_id, played_at, ms_played, completed, created_at, origin, session_id, qualified)
+VALUES (?,?,?,?,?,?,?,?,?,?)
 `
 
 type InsertPlayIfAbsentParams struct {
@@ -141,6 +150,9 @@ type InsertPlayIfAbsentParams struct {
 	MsPlayed  int64  `json:"ms_played"`
 	Completed int64  `json:"completed"`
 	CreatedAt int64  `json:"created_at"`
+	Origin    string `json:"origin"`
+	SessionID string `json:"session_id"`
+	Qualified int64  `json:"qualified"`
 }
 
 func (q *Queries) InsertPlayIfAbsent(ctx context.Context, arg InsertPlayIfAbsentParams) error {
@@ -152,12 +164,39 @@ func (q *Queries) InsertPlayIfAbsent(ctx context.Context, arg InsertPlayIfAbsent
 		arg.MsPlayed,
 		arg.Completed,
 		arg.CreatedAt,
+		arg.Origin,
+		arg.SessionID,
+		arg.Qualified,
+	)
+	return err
+}
+
+const insertRecommendationAddIfAbsent = `-- name: InsertRecommendationAddIfAbsent :exec
+INSERT OR IGNORE INTO recommendation_add (id, user_id, origin, action, created_at)
+VALUES (?, ?, ?, ?, ?)
+`
+
+type InsertRecommendationAddIfAbsentParams struct {
+	ID        string `json:"id"`
+	UserID    string `json:"user_id"`
+	Origin    string `json:"origin"`
+	Action    string `json:"action"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+func (q *Queries) InsertRecommendationAddIfAbsent(ctx context.Context, arg InsertRecommendationAddIfAbsentParams) error {
+	_, err := q.db.ExecContext(ctx, insertRecommendationAddIfAbsent,
+		arg.ID,
+		arg.UserID,
+		arg.Origin,
+		arg.Action,
+		arg.CreatedAt,
 	)
 	return err
 }
 
 const listAllPlays = `-- name: ListAllPlays :many
-SELECT id, user_id, catalog_id, played_at, ms_played, completed, created_at FROM plays ORDER BY played_at ASC
+SELECT id, user_id, catalog_id, played_at, ms_played, completed, created_at, origin, session_id, qualified FROM plays ORDER BY played_at ASC
 `
 
 func (q *Queries) ListAllPlays(ctx context.Context) ([]Play, error) {
@@ -177,6 +216,42 @@ func (q *Queries) ListAllPlays(ctx context.Context) ([]Play, error) {
 			&i.MsPlayed,
 			&i.Completed,
 			&i.CreatedAt,
+			&i.Origin,
+			&i.SessionID,
+			&i.Qualified,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAllRecommendationAdds = `-- name: ListAllRecommendationAdds :many
+SELECT id, user_id, origin, "action", created_at FROM recommendation_add ORDER BY created_at, id
+`
+
+func (q *Queries) ListAllRecommendationAdds(ctx context.Context) ([]RecommendationAdd, error) {
+	rows, err := q.db.QueryContext(ctx, listAllRecommendationAdds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RecommendationAdd
+	for rows.Next() {
+		var i RecommendationAdd
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Origin,
+			&i.Action,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -194,7 +269,7 @@ func (q *Queries) ListAllPlays(ctx context.Context) ([]Play, error) {
 const listPlayedSince = `-- name: ListPlayedSince :many
 SELECT DISTINCT e.title, e.artist
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.played_at >= ?
+WHERE p.played_at >= ? AND p.qualified = 1
 `
 
 type ListPlayedSinceRow struct {
@@ -229,6 +304,7 @@ const listRecentPlays = `-- name: ListRecentPlays :many
 SELECT p.id, p.catalog_id, p.played_at, e.title, e.artist, e.album
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
 WHERE p.user_id = ? AND p.played_at < ?
+  AND p.qualified = 1
 ORDER BY p.played_at DESC LIMIT ?
 `
 
@@ -277,6 +353,227 @@ func (q *Queries) ListRecentPlays(ctx context.Context, arg ListRecentPlaysParams
 	return items, nil
 }
 
+const localRecommendationArtists = `-- name: LocalRecommendationArtists :many
+WITH candidate_artists AS (
+  SELECT e.artist,
+         4 * EXISTS (
+           SELECT 1 FROM synced_playlists sp
+           WHERE EXISTS (SELECT 1 FROM json_each(sp.tracks_json) jt
+                         WHERE lower(json_extract(jt.value, '$.artist')) = lower(?2))
+             AND EXISTS (SELECT 1 FROM json_each(sp.tracks_json) jt
+                         WHERE lower(json_extract(jt.value, '$.artist')) = lower(e.artist))
+         ) +
+         4 * EXISTS (
+           SELECT 1
+           FROM plays ps
+           JOIN catalog_entity se ON se.id = ps.catalog_id
+           JOIN plays pc ON pc.session_id = ps.session_id AND pc.session_id != ''
+           JOIN catalog_entity ce ON ce.id = pc.catalog_id
+           WHERE lower(se.artist) = lower(?2) AND lower(ce.artist) = lower(e.artist)
+         ) AS score
+  FROM catalog_entity e
+  JOIN backend_binding b ON b.catalog_id = e.id AND b.backend_id != '' AND b.known_absent = 0
+  WHERE e.kind = 'track' AND lower(e.artist) != lower(?2)
+  GROUP BY e.artist
+)
+SELECT artist, score FROM candidate_artists WHERE score > 0
+ORDER BY score DESC, lower(artist) LIMIT ?1
+`
+
+type LocalRecommendationArtistsParams struct {
+	ResultLimit int64  `json:"result_limit"`
+	SeedArtist  string `json:"seed_artist"`
+}
+
+type LocalRecommendationArtistsRow struct {
+	Artist string `json:"artist"`
+	Score  int64  `json:"score"`
+}
+
+func (q *Queries) LocalRecommendationArtists(ctx context.Context, arg LocalRecommendationArtistsParams) ([]LocalRecommendationArtistsRow, error) {
+	rows, err := q.db.QueryContext(ctx, localRecommendationArtists, arg.ResultLimit, arg.SeedArtist)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LocalRecommendationArtistsRow
+	for rows.Next() {
+		var i LocalRecommendationArtistsRow
+		if err := rows.Scan(&i.Artist, &i.Score); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const localRecommendationTracks = `-- name: LocalRecommendationTracks :many
+WITH seed AS (
+  SELECT id, artist, album
+  FROM catalog_entity
+  WHERE kind = 'track' AND lower(trim(artist)) = lower(trim(?2))
+    AND (CAST(?3 AS TEXT) = '' OR lower(trim(title)) = lower(trim(CAST(?3 AS TEXT))))
+  LIMIT 1
+), candidates AS (
+  SELECT e.id, e.title, e.artist, e.album, e.duration_ms, e.isrc, e.mbid,
+         b.backend_id, b.cover_art_id,
+         CASE WHEN lower(e.artist) = lower(seed.artist) THEN 3 ELSE 0 END +
+         CASE WHEN seed.album != '' AND lower(e.album) = lower(seed.album) THEN 2 ELSE 0 END +
+         4 * EXISTS (
+           SELECT 1 FROM synced_playlists sp
+           WHERE EXISTS (SELECT 1 FROM json_each(sp.tracks_json) jt
+                         WHERE lower(json_extract(jt.value, '$.artist')) = lower(seed.artist)
+                           AND (CAST(?3 AS TEXT) = '' OR lower(json_extract(jt.value, '$.title')) = lower(CAST(?3 AS TEXT))))
+             AND EXISTS (SELECT 1 FROM json_each(sp.tracks_json) jt
+                         WHERE lower(json_extract(jt.value, '$.artist')) = lower(e.artist)
+                           AND lower(json_extract(jt.value, '$.title')) = lower(e.title))
+         ) +
+         4 * EXISTS (
+           SELECT 1 FROM plays ps JOIN plays pc ON pc.session_id = ps.session_id
+           WHERE ps.catalog_id = seed.id AND pc.catalog_id = e.id AND ps.session_id != ''
+         ) AS score
+  FROM catalog_entity e
+  JOIN backend_binding b ON b.catalog_id = e.id AND b.backend_id != '' AND b.known_absent = 0
+  JOIN seed
+  WHERE e.kind = 'track' AND (CAST(?3 AS TEXT) = '' OR e.id != seed.id)
+)
+SELECT id, title, artist, album, duration_ms, isrc, mbid, backend_id, cover_art_id, score FROM candidates WHERE score > 0
+GROUP BY id ORDER BY score DESC, lower(artist), lower(title) LIMIT ?1
+`
+
+type LocalRecommendationTracksParams struct {
+	ResultLimit int64  `json:"result_limit"`
+	SeedArtist  string `json:"seed_artist"`
+	SeedTitle   string `json:"seed_title"`
+}
+
+type LocalRecommendationTracksRow struct {
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	Artist     string `json:"artist"`
+	Album      string `json:"album"`
+	DurationMs int64  `json:"duration_ms"`
+	Isrc       string `json:"isrc"`
+	Mbid       string `json:"mbid"`
+	BackendID  string `json:"backend_id"`
+	CoverArtID string `json:"cover_art_id"`
+	Score      int64  `json:"score"`
+}
+
+func (q *Queries) LocalRecommendationTracks(ctx context.Context, arg LocalRecommendationTracksParams) ([]LocalRecommendationTracksRow, error) {
+	rows, err := q.db.QueryContext(ctx, localRecommendationTracks, arg.ResultLimit, arg.SeedArtist, arg.SeedTitle)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LocalRecommendationTracksRow
+	for rows.Next() {
+		var i LocalRecommendationTracksRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Artist,
+			&i.Album,
+			&i.DurationMs,
+			&i.Isrc,
+			&i.Mbid,
+			&i.BackendID,
+			&i.CoverArtID,
+			&i.Score,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const recommendationStats = `-- name: RecommendationStats :many
+WITH origins AS (
+  SELECT p.origin FROM plays p
+  WHERE p.user_id = ?1 AND p.origin != '' AND p.played_at >= ?2 AND p.played_at < ?3
+  UNION
+  SELECT a.origin FROM recommendation_add a
+  WHERE a.user_id = ?1 AND a.created_at >= ?2 AND a.created_at < ?3
+), play_totals AS (
+  SELECT p.origin, COUNT(*) AS plays,
+         SUM(CASE WHEN p.qualified = 0 THEN 1 ELSE 0 END) AS skips,
+         SUM(CASE WHEN p.completed = 1 THEN 1 ELSE 0 END) AS completions
+  FROM plays p
+  WHERE p.user_id = ?1 AND p.origin != '' AND p.played_at >= ?2 AND p.played_at < ?3
+  GROUP BY p.origin
+), add_totals AS (
+  SELECT a.origin, COUNT(*) AS additions
+  FROM recommendation_add a
+  WHERE a.user_id = ?1 AND a.created_at >= ?2 AND a.created_at < ?3
+  GROUP BY a.origin
+)
+SELECT origins.origin,
+       COALESCE(play_totals.plays, 0) AS plays,
+       COALESCE(play_totals.skips, 0) AS skips,
+       COALESCE(play_totals.completions, 0) AS completions,
+       COALESCE(add_totals.additions, 0) AS additions
+FROM origins
+LEFT JOIN play_totals USING (origin)
+LEFT JOIN add_totals USING (origin)
+ORDER BY origins.origin
+`
+
+type RecommendationStatsParams struct {
+	UserID   string `json:"user_id"`
+	FromTime int64  `json:"from_time"`
+	ToTime   int64  `json:"to_time"`
+}
+
+type RecommendationStatsRow struct {
+	Origin      string  `json:"origin"`
+	Plays       int64   `json:"plays"`
+	Skips       float64 `json:"skips"`
+	Completions float64 `json:"completions"`
+	Additions   int64   `json:"additions"`
+}
+
+func (q *Queries) RecommendationStats(ctx context.Context, arg RecommendationStatsParams) ([]RecommendationStatsRow, error) {
+	rows, err := q.db.QueryContext(ctx, recommendationStats, arg.UserID, arg.FromTime, arg.ToTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RecommendationStatsRow
+	for rows.Next() {
+		var i RecommendationStatsRow
+		if err := rows.Scan(
+			&i.Origin,
+			&i.Plays,
+			&i.Skips,
+			&i.Completions,
+			&i.Additions,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const repointPlays = `-- name: RepointPlays :exec
 UPDATE plays SET catalog_id = ? WHERE catalog_id = ?
 `
@@ -298,7 +595,7 @@ SELECT
     MIN(p.played_at) AS first_played,
     MAX(p.played_at) AS last_played
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND e.album = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ?
+WHERE p.user_id = ? AND e.album = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
 `
 
 type StatsEntityAlbumParams struct {
@@ -341,7 +638,7 @@ SELECT
     MIN(p.played_at) AS first_played,
     MAX(p.played_at) AS last_played
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ?
+WHERE p.user_id = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
 `
 
 type StatsEntityArtistParams struct {
@@ -382,7 +679,7 @@ SELECT
     MIN(p.played_at) AS first_played,
     MAX(p.played_at) AS last_played
 FROM plays p
-WHERE p.user_id = ? AND p.catalog_id = ? AND p.played_at >= ? AND p.played_at < ?
+WHERE p.user_id = ? AND p.catalog_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
 `
 
 type StatsEntityTrackParams struct {
@@ -419,7 +716,7 @@ func (q *Queries) StatsEntityTrack(ctx context.Context, arg StatsEntityTrackPara
 const statsPlaysInWindow = `-- name: StatsPlaysInWindow :many
 SELECT p.played_at, p.ms_played
 FROM plays p
-WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ?
+WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
 ORDER BY p.played_at ASC
 `
 
@@ -465,7 +762,7 @@ SELECT
     COUNT(DISTINCT e.album)     AS distinct_albums,
     COALESCE(SUM(p.ms_played), 0) AS ms_played
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ?
+WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
 `
 
 type StatsSummaryParams struct {
@@ -504,7 +801,7 @@ WITH aggregated AS (
         COUNT(*)         AS plays,
         SUM(p.ms_played) AS ms_played
     FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-    WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ?
+    WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
     GROUP BY e.album, e.artist
 )
 SELECT
@@ -584,7 +881,7 @@ WITH aggregated AS (
         COUNT(*)         AS plays,
         SUM(p.ms_played) AS ms_played
     FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-    WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ?
+    WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
     GROUP BY e.artist
 )
 SELECT
@@ -667,7 +964,7 @@ SELECT
     COUNT(*)          AS plays,
     SUM(p.ms_played)  AS ms_played
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ?
+WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
 GROUP BY p.catalog_id
 ORDER BY COUNT(*) DESC, SUM(p.ms_played) DESC
 LIMIT ?
@@ -737,7 +1034,7 @@ SELECT
     COUNT(*)          AS plays,
     SUM(p.ms_played)  AS ms_played
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND e.album = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ?
+WHERE p.user_id = ? AND e.album = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
 GROUP BY p.catalog_id
 ORDER BY COUNT(*) DESC, SUM(p.ms_played) DESC
 LIMIT ?
@@ -807,7 +1104,7 @@ SELECT
     COUNT(*)          AS plays,
     SUM(p.ms_played)  AS ms_played
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ?
+WHERE p.user_id = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
 GROUP BY p.catalog_id
 ORDER BY COUNT(*) DESC, SUM(p.ms_played) DESC
 LIMIT ?
@@ -875,7 +1172,7 @@ SELECT
     COUNT(*)          AS plays,
     SUM(p.ms_played)  AS ms_played
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND p.catalog_id = ? AND p.played_at >= ? AND p.played_at < ?
+WHERE p.user_id = ? AND p.catalog_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
 GROUP BY p.catalog_id
 ORDER BY COUNT(*) DESC, SUM(p.ms_played) DESC
 LIMIT ?

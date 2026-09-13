@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 
@@ -46,6 +47,11 @@ func (s *Server) handleCreateDownload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 		return
+	}
+	if body.RecommendationOrigin != "" && s.deps.RecommendationEvents != nil {
+		if err := s.deps.RecommendationEvents.Record(r.Context(), cu.ID, body.RecommendationOrigin, "library"); err != nil {
+			log.Printf("recommendation library attribution: %v", err)
+		}
 	}
 	writeJSON(w, http.StatusOK, job)
 }

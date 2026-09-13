@@ -46,11 +46,13 @@ type ArtistSimilarity interface {
 	SimilarArtists(ctx context.Context, seed ArtistSeed, limit int) ([]ArtistCandidate, error)
 }
 
-// ArtistResult is the "Fans also like" section of an artist page. Available is
-// false when no configured source can relate artists.
+// ArtistResult is the "Fans also like" section of an artist page. Offline
+// results are derived locally or served from the last successful cache entry.
 type ArtistResult struct {
 	Available bool                  `json:"available"`
 	Artists   []core.ExternalArtist `json:"artists"`
+	Offline   bool                  `json:"offline,omitempty"`
+	UpdatedAt int64                 `json:"updatedAt,omitempty"`
 }
 
 type similarArtistSource struct {
@@ -63,10 +65,44 @@ type similarArtistSource struct {
 // online recommendations off, nothing is looked up.
 func (s *Service) SimilarArtists(ctx context.Context, source, id string) ArtistResult {
 	if !s.settings(ctx).Online {
-		return ArtistResult{Artists: []core.ExternalArtist{}}
+		if source == "library" {
+			return s.localArtists(ctx, s.artistSeed(ctx, source, id))
+		}
+		key := "artists\x1f" + source + "\x1f" + id
+		if cached, at, ok := s.cache.stale(key); ok {
+			return ArtistResult{Available: true, Artists: s.withoutMarkedArtists(ctx, cached.([]core.ExternalArtist)), Offline: true, UpdatedAt: at.Unix()}
+		}
+		return ArtistResult{Artists: []core.ExternalArtist{}, Offline: true, UpdatedAt: s.now().Unix()}
 	}
+	seed := s.artistSeed(ctx, source, id)
 	result := s.similarArtists(ctx, source, id)
+	if len(result.Artists) == 0 {
+		local := s.localArtists(ctx, seed)
+		if local.Available && len(local.Artists) > 0 {
+			return local
+		}
+		key := "artists\x1f" + source + "\x1f" + id
+		if cached, at, ok := s.cache.stale(key); ok {
+			return ArtistResult{Available: true, Artists: s.withoutMarkedArtists(ctx, cached.([]core.ExternalArtist)), Offline: true, UpdatedAt: at.Unix()}
+		}
+		return local
+	}
 	rankArtists(result.Artists, s.profile(ctx))
+	return result
+}
+
+func (s *Service) localArtists(ctx context.Context, seed ArtistSeed) ArtistResult {
+	result := ArtistResult{Artists: []core.ExternalArtist{}, Offline: true, UpdatedAt: s.now().Unix()}
+	if s.local == nil || seed.Name == "" {
+		return result
+	}
+	artists, err := s.local.SimilarLocalArtists(ctx, seed, similarArtistLimit)
+	if err != nil {
+		log.Printf("recommend: local similar artists for %q: %v", seed.Name, err)
+		return result
+	}
+	result.Available = true
+	result.Artists = s.withoutMarkedArtists(ctx, artists)
 	return result
 }
 

@@ -166,7 +166,7 @@ func TestMerge_AllThreeRefTypesConsolidate(t *testing.T) {
 	const userID = "user-all-three-test"
 	if err := q.InsertPlay(ctx, db.InsertPlayParams{
 		ID: "play-all-three-0001", UserID: userID, CatalogID: loser,
-		PlayedAt: 1_700_000_500, MsPlayed: 240000, Completed: 1, CreatedAt: 1_700_000_500,
+		PlayedAt: 1_700_000_500, MsPlayed: 240000, Completed: 1, CreatedAt: 1_700_000_500, Qualified: 1,
 	}); err != nil {
 		t.Fatalf("InsertPlay: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestRepointCanonicalRefs_AllRefsMovedLoserIntact(t *testing.T) {
 	// Plant a play on the loser.
 	if err := q.InsertPlay(ctx, db.InsertPlayParams{
 		ID: "play-repoint-direct-0001", UserID: "user-repoint-test", CatalogID: loser,
-		PlayedAt: 1_700_001_000, MsPlayed: 180000, Completed: 1, CreatedAt: 1_700_001_000,
+		PlayedAt: 1_700_001_000, MsPlayed: 180000, Completed: 1, CreatedAt: 1_700_001_000, Qualified: 1,
 	}); err != nil {
 		t.Fatalf("InsertPlay: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestRepointCanonicalRefs_PlaysRepointedBeforeDelete(t *testing.T) {
 	// would fail (FK violation) and this test would error rather than pass.
 	if err := q.InsertPlay(ctx, db.InsertPlayParams{
 		ID: "play-fk-safe-0001", UserID: "user-fk-test", CatalogID: loser,
-		PlayedAt: 1_700_002_000, MsPlayed: 120000, Completed: 1, CreatedAt: 1_700_002_000,
+		PlayedAt: 1_700_002_000, MsPlayed: 120000, Completed: 1, CreatedAt: 1_700_002_000, Qualified: 1,
 	}); err != nil {
 		t.Fatalf("InsertPlay: %v", err)
 	}
@@ -334,6 +334,7 @@ func TestMerge_RepointsPlays(t *testing.T) {
 		MsPlayed:  180000,
 		Completed: 1,
 		CreatedAt: 1_700_000_000,
+		Qualified: 1,
 	}); err != nil {
 		t.Fatalf("InsertPlay: %v", err)
 	}

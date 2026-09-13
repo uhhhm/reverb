@@ -21,6 +21,7 @@ import (
 	"github.com/uhhhm/reverb/internal/override"
 	"github.com/uhhhm/reverb/internal/p2p"
 	"github.com/uhhhm/reverb/internal/play"
+	"github.com/uhhhm/reverb/internal/recommendationevent"
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/resolver"
 	"github.com/uhhhm/reverb/internal/scrobble"
@@ -199,6 +200,9 @@ type Deps struct {
 	// Recommend gathers recommendations for artist and track pages. Nil hides
 	// every recommendation section.
 	Recommend Recommendations
+	// RecommendationEvents attributes durable additions to their originating
+	// recommendation surface. Nil leaves ordinary additions unchanged.
+	RecommendationEvents *recommendationevent.Service
 	// NotInterested records the owner's Not interested marks. Nil disables the
 	// endpoints (503).
 	NotInterested NotInterestedService
@@ -465,6 +469,7 @@ func (s *Server) routes() {
 			pr.Get("/stats/clock", s.handleStatsClock)
 			pr.Get("/stats/recent", s.handleStatsRecent)
 			pr.Get("/stats/entity", s.handleStatsEntity)
+			pr.Get("/stats/recommendations", s.handleStatsRecommendations)
 			pr.Post("/stats/play-counts", s.handlePlayCounts)
 
 			// offline-set (T6) — per-playlist offline set, local-only, never emits sync_change.

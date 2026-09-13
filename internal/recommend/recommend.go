@@ -2,9 +2,9 @@
 // sources and hands them to the surfaces that show them.
 //
 // Each device generates its own recommendations (ADR 0001): results are cached
-// here in memory and never written to the change log. A source that fails or
-// is slow yields an empty result rather than an error, so a recommendation
-// section can disappear without taking the page around it down.
+// here in memory and never written to the change log. If online sources fail or
+// are disabled, library signals and stale cache entries provide an offline
+// fallback without taking the page around the section down.
 package recommend
 
 import (
@@ -98,6 +98,17 @@ func WithExclusions(load func(ctx context.Context) (Exclusions, error)) Option {
 	return func(s *Service) { s.exclusions = load }
 }
 
+// LocalSimilarity derives library-only recommendations without network access.
+// Its results are already playable and therefore never pass through an online
+// search source or external-stream resolver.
+type LocalSimilarity interface {
+	SimilarLocalTracks(ctx context.Context, seed TrackSeed, limit int) ([]core.ExternalResult, error)
+	SimilarLocalArtists(ctx context.Context, seed ArtistSeed, limit int) ([]core.ExternalArtist, error)
+}
+
+// WithLocalSimilarity installs the device-local offline fallback.
+func WithLocalSimilarity(local LocalSimilarity) Option { return func(s *Service) { s.local = local } }
+
 type Service struct {
 	exclusions   func(context.Context) (Exclusions, error)
 	recentPlays  func(context.Context, time.Time) ([]TrackCandidate, error)
@@ -106,6 +117,7 @@ type Service struct {
 	tasteState   tasteState
 	sources      func() []search.SearchSource
 	library      func() Library
+	local        LocalSimilarity
 	tracks       []TrackSimilarity
 	artists      []ArtistSimilarity
 	trackGates   map[string]*gate
@@ -192,6 +204,7 @@ func (s *Service) liveLibrary() Library {
 
 type cacheEntry struct {
 	value   any
+	updated time.Time
 	expires time.Time
 }
 
@@ -208,7 +221,6 @@ func (c *cache) get(key string) (any, bool) {
 	defer c.mu.Unlock()
 	e, ok := c.entries[key]
 	if !ok || c.now().After(e.expires) {
-		delete(c.entries, key)
 		return nil, false
 	}
 	return e.value, true
@@ -217,5 +229,13 @@ func (c *cache) get(key string) (any, bool) {
 func (c *cache) put(key string, value any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.entries[key] = cacheEntry{value: value, expires: c.now().Add(cacheTTL)}
+	now := c.now()
+	c.entries[key] = cacheEntry{value: value, updated: now, expires: now.Add(cacheTTL)}
+}
+
+func (c *cache) stale(key string) (any, time.Time, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.entries[key]
+	return e.value, e.updated, ok
 }

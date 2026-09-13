@@ -20,6 +20,7 @@ type BackfillStore interface {
 	GetSetting(ctx context.Context, key string) (string, error)
 	UpsertSetting(ctx context.Context, arg db.UpsertSettingParams) error
 	ListAllPlays(ctx context.Context) ([]db.Play, error)
+	ListAllRecommendationAdds(ctx context.Context) ([]db.RecommendationAdd, error)
 	ListTrackCrops(ctx context.Context) ([]db.TrackCrop, error)
 	ListTrackQualityOverrides(ctx context.Context) ([]db.TrackQualityOverride, error)
 	ListTrackLoudness(ctx context.Context) ([]db.TrackLoudness, error)
@@ -65,6 +66,7 @@ func (s *Service) BackfillHistory(ctx context.Context, store BackfillStore, play
 		log.Printf("sync backfill: list plays: %v", err)
 	}
 	for _, p := range plays {
+		qualified := p.Qualified != 0
 		s.EmitPlay(ctx, p.ID, Play{
 			UserID:    p.UserID,
 			CatalogID: p.CatalogID,
@@ -72,7 +74,17 @@ func (s *Service) BackfillHistory(ctx context.Context, store BackfillStore, play
 			MsPlayed:  int(p.MsPlayed),
 			Completed: p.Completed != 0,
 			CreatedAt: p.CreatedAt,
+			Origin:    p.Origin,
+			SessionID: p.SessionID,
+			Qualified: &qualified,
 		})
+	}
+	adds, err := store.ListAllRecommendationAdds(ctx)
+	if err != nil {
+		log.Printf("sync backfill: list recommendation additions: %v", err)
+	}
+	for _, add := range adds {
+		s.EmitRecommendationAdd(ctx, add.ID, RecommendationAdd{UserID: add.UserID, Origin: add.Origin, Action: add.Action, CreatedAt: add.CreatedAt})
 	}
 
 	// Rows still keyed only on a backend track id are skipped: without a catalog

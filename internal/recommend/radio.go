@@ -34,8 +34,8 @@ type Seed struct {
 // With online recommendations off, nothing is looked up.
 func (s *Service) Radio(ctx context.Context, seeds []Seed) TrackResult {
 	settings := s.settings(ctx)
-	if len(s.tracks) == 0 || !settings.Online {
-		return TrackResult{Tracks: []core.ExternalResult{}}
+	if !settings.Online || len(s.tracks) == 0 {
+		return s.localRadio(ctx, seeds)
 	}
 	if len(seeds) > radioSeedLimit {
 		seeds = seeds[:radioSeedLimit]
@@ -84,7 +84,7 @@ func (s *Service) Radio(ctx context.Context, seeds []Seed) TrackResult {
 		}
 	}
 	if !result.Available && len(lead) == 0 {
-		return result
+		return s.localRadio(ctx, seeds)
 	}
 	result.Available = true
 
@@ -119,6 +119,36 @@ func (s *Service) Radio(ctx context.Context, seeds []Seed) TrackResult {
 		tracks = tracks[:radioLimit]
 	}
 	result.Tracks = tracks
+	if len(result.Tracks) == 0 {
+		return s.localRadio(ctx, seeds)
+	}
+	return result
+}
+
+func (s *Service) localRadio(ctx context.Context, seeds []Seed) TrackResult {
+	result := TrackResult{Tracks: []core.ExternalResult{}, Offline: true, UpdatedAt: s.now().Unix()}
+	if s.local == nil {
+		return result
+	}
+	seen := map[string]bool{}
+	for _, seed := range seeds {
+		tracks, err := s.local.SimilarLocalTracks(ctx, TrackSeed{Artist: seed.Artist, Title: seed.Title, MBID: seed.MBID}, radioLimit)
+		if err != nil {
+			continue
+		}
+		result.Available = true
+		for _, track := range tracks {
+			key := recordingKey(track.Title, track.Artist)
+			if !seen[key] {
+				seen[key] = true
+				result.Tracks = append(result.Tracks, track)
+			}
+		}
+	}
+	if len(result.Tracks) > radioLimit {
+		result.Tracks = result.Tracks[:radioLimit]
+	}
+	result.Tracks = s.withoutMarkedTracks(ctx, result.Tracks)
 	return result
 }
 

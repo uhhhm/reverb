@@ -72,14 +72,15 @@ export function AddToPlaylistMenu({ track, onClose }: AddToPlaylistMenuProps) {
 
   function buildEntry(): SyncedTrackEntry {
     return {
-      source: 'library',
-      externalId: track.id,
+		source: track.externalStream?.source ?? 'library',
+		externalId: track.externalStream?.externalId ?? track.id,
       title: track.title,
       artist: track.artist,
       album: track.album,
       isrc: track.isrc,
       durationMs: track.durationMs,
       coverArtId: track.coverArtId || undefined,
+		...(track.recommendationOrigin ? { recommendationOrigin: track.recommendationOrigin } : {}),
     }
   }
 

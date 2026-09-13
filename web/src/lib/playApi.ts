@@ -12,6 +12,9 @@ export interface PlayInput {
   durationMs: number
   msPlayed: number
   completed: boolean
+	origin?: import('./types').RecommendationOrigin
+	sessionId?: string
+	qualified?: boolean
 }
 
 // GoPlayInput is the wire format: PascalCase field names as decoded by the Go
@@ -25,6 +28,9 @@ interface GoPlayInput {
   DurationMs: number
   MsPlayed: number
   Completed: boolean
+	Origin?: string
+	SessionID?: string
+	Qualified?: boolean
 }
 
 export async function recordPlay(input: PlayInput): Promise<void> {
@@ -36,6 +42,9 @@ export async function recordPlay(input: PlayInput): Promise<void> {
     DurationMs: input.durationMs,
     MsPlayed: input.msPlayed,
     Completed: input.completed,
+		...(input.origin ? { Origin: input.origin } : {}),
+		...(input.sessionId ? { SessionID: input.sessionId } : {}),
+		...(input.qualified !== undefined ? { Qualified: input.qualified } : {}),
     ...(input.isrc ? { ISRC: input.isrc } : {}),
   }
   await api.post<null>('/plays', wire)

@@ -59,14 +59,15 @@ type QueueStateEvent struct {
 }
 
 type CreateDownloadRequest struct {
-	Source          string `json:"source"`
-	ExternalID      string `json:"externalId"`
-	Artist          string `json:"artist"`
-	Title           string `json:"title"`
-	Album           string `json:"album"`
-	ISRC            string `json:"isrc"`
-	DurationMs      int    `json:"durationMs"`
-	PlayWhenReady   bool   `json:"playWhenReady"`
-	AddToPlaylistID string `json:"addToPlaylistId,omitempty"`
-	Quality         string `json:"quality,omitempty"`
+	Source               string `json:"source"`
+	ExternalID           string `json:"externalId"`
+	Artist               string `json:"artist"`
+	Title                string `json:"title"`
+	Album                string `json:"album"`
+	ISRC                 string `json:"isrc"`
+	DurationMs           int    `json:"durationMs"`
+	PlayWhenReady        bool   `json:"playWhenReady"`
+	AddToPlaylistID      string `json:"addToPlaylistId,omitempty"`
+	Quality              string `json:"quality,omitempty"`
+	RecommendationOrigin string `json:"recommendationOrigin,omitempty"`
 }

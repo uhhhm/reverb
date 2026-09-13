@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
 import { externalTrackFromRef } from './externalTrack'
 import type { components } from './generated/api'
-import type { RecommendationReason, Track } from './types'
+import type { RecommendationOrigin, RecommendationReason, Track } from './types'
 
 export type SimilarArtists = components['schemas']['SimilarArtists']
 export type RecommendedTrack = components['schemas']['RecommendedTrack']
@@ -45,7 +45,7 @@ export function useSimilarTracks(artist: string, title: string, mbid?: string) {
 /** The next Radio tracks for some seeds, ready to queue. */
 export async function fetchRadio(seeds: RadioSeed[]): Promise<Track[]> {
   const res = await api.post<SimilarTracksResult>('/recommendations/radio', { seeds } satisfies RadioRequest)
-  return res.tracks.map(recommendedTrackToTrack)
+  return res.tracks.map((track) => recommendedTrackToTrack(track, 'radio'))
 }
 
 /** The short reason shown with a recommendation. */
@@ -91,8 +91,9 @@ export function useUpdateRecommendationSettings() {
  * The Track a recommendation plays as. An owned recommendation plays the
  * library copy by its backend id; anything else streams from its source.
  */
-export function recommendedTrackToTrack(r: RecommendedTrack): Track {
-  const reason = r.reason ? { reason: r.reason } : {}
+export function recommendedTrackToTrack(r: RecommendedTrack, origin?: RecommendationOrigin): Track {
+	const reason = r.reason ? { reason: r.reason } : {}
+	const attribution = origin ? { recommendationOrigin: origin } : {}
   if (r.source === 'library') {
     return {
       id: r.externalId,
@@ -111,6 +112,7 @@ export function recommendedTrackToTrack(r: RecommendedTrack): Track {
       ...(r.isrc ? { isrc: r.isrc } : {}),
       ...(r.mbid ? { mbid: r.mbid } : {}),
       ...reason,
+			...attribution,
     }
   }
   return {
@@ -119,5 +121,6 @@ export function recommendedTrackToTrack(r: RecommendedTrack): Track {
       r.artistExternalId ? { artistExternalId: r.artistExternalId } : {},
     ),
     ...reason,
+		...attribution,
   }
 }

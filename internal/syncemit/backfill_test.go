@@ -53,7 +53,7 @@ func TestBackfillPublishesExistingPlays(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := st.Q().InsertPlay(ctx, db.InsertPlayParams{
-		ID: "play_1", UserID: "local", CatalogID: cid, PlayedAt: 500, MsPlayed: 1000, CreatedAt: 500,
+		ID: "play_1", UserID: "local", CatalogID: cid, PlayedAt: 500, MsPlayed: 1000, CreatedAt: 500, Qualified: 1,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestBackfillRunsOnce(t *testing.T) {
 	st, emit := newBackfillStore(t)
 	ctx := context.Background()
 	if err := st.Q().InsertPlay(ctx, db.InsertPlayParams{
-		ID: "play_1", UserID: "local", CatalogID: "trk_x", PlayedAt: 500, CreatedAt: 500,
+		ID: "play_1", UserID: "local", CatalogID: "trk_x", PlayedAt: 500, CreatedAt: 500, Qualified: 1,
 	}); err != nil {
 		t.Skipf("plays has a foreign key on catalog_entity: %v", err)
 	}

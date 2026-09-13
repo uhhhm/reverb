@@ -16,10 +16,9 @@ import (
 // device stored plays in, so the profile can fold in only what is new; it
 // never affects the result, which depends only on the plays themselves.
 //
-// Only plays that qualified are stored (half the track, or four minutes), so
-// the closest stored signal to a skip is an unfinished play: one left after
-// half the track but before its end. Radio's session skips (web) are a
-// separate, shorter signal that is never stored.
+// Only qualified plays are returned to this model (half the track, or four
+// minutes), so a short recommendation skip can be retained for quality stats
+// without becoming a negative taste signal.
 type TastePlay struct {
 	Seq       int64
 	Artist    string

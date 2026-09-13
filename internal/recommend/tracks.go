@@ -57,6 +57,8 @@ const (
 type TrackResult struct {
 	Available bool                  `json:"available"`
 	Tracks    []core.ExternalResult `json:"tracks"`
+	Offline   bool                  `json:"offline,omitempty"`
+	UpdatedAt int64                 `json:"updatedAt,omitempty"`
 }
 
 // SimilarTracks returns playable tracks similar to the seed.
@@ -70,9 +72,12 @@ func (s *Service) SimilarTracks(ctx context.Context, artist, title string) Track
 // recommendations off, nothing is looked up.
 func (s *Service) SimilarTracksFor(ctx context.Context, seed TrackSeed) TrackResult {
 	if !s.settings(ctx).Online {
-		return TrackResult{Tracks: []core.ExternalResult{}}
+		return s.localTracks(ctx, seed)
 	}
 	result := s.similarTracks(ctx, seed)
+	if len(result.Tracks) == 0 {
+		return s.localTracksOrStale(ctx, seed, trackCacheKey(seed))
+	}
 	if len(result.Tracks) == 0 {
 		return result
 	}
@@ -85,6 +90,32 @@ func (s *Service) SimilarTracksFor(ctx context.Context, seed TrackSeed) TrackRes
 		result.Tracks[i].Reason = reason
 	}
 	return result
+}
+
+func (s *Service) localTracks(ctx context.Context, seed TrackSeed) TrackResult {
+	result := TrackResult{Tracks: []core.ExternalResult{}, Offline: true, UpdatedAt: s.now().Unix()}
+	if s.local == nil {
+		return result
+	}
+	tracks, err := s.local.SimilarLocalTracks(ctx, seed, similarTrackLimit)
+	if err != nil {
+		log.Printf("recommend: local similar tracks for %q by %q: %v", seed.Title, seed.Artist, err)
+		return result
+	}
+	result.Available = true
+	result.Tracks = s.withoutMarkedTracks(ctx, tracks)
+	return result
+}
+
+func (s *Service) localTracksOrStale(ctx context.Context, seed TrackSeed, key string) TrackResult {
+	local := s.localTracks(ctx, seed)
+	if local.Available && len(local.Tracks) > 0 {
+		return local
+	}
+	if cached, at, ok := s.cache.stale(key); ok {
+		return TrackResult{Available: true, Tracks: s.withoutMarkedTracks(ctx, cached.([]core.ExternalResult)), Offline: true, UpdatedAt: at.Unix()}
+	}
+	return local
 }
 
 // similarTracks is the unranked list for one seed, in source order with

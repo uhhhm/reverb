@@ -22,6 +22,13 @@ type PlayInput struct {
 	MsPlayed       int
 	Completed      bool
 	PlayedAt       int64 // unix seconds; 0 means "use now"
+	// Origin identifies the recommendation surface that supplied this track.
+	// Empty means ordinary playback. SessionID groups consecutive queue plays.
+	Origin    string
+	SessionID string
+	// Qualified is nil for older clients and ordinary plays, which preserves
+	// the historical default that a submitted play qualifies for listening stats.
+	Qualified *bool
 }
 
 // Querier is the narrow persistence slice play needs. *db.Queries satisfies it.
@@ -101,6 +108,10 @@ func (s *Service) Record(ctx context.Context, userID string, in PlayInput) error
 	if in.Completed {
 		completed = 1
 	}
+	qualified := int64(1)
+	if in.Qualified != nil && !*in.Qualified {
+		qualified = 0
+	}
 
 	id := s.idgen()
 	createdAt := s.now().Unix()
@@ -112,6 +123,9 @@ func (s *Service) Record(ctx context.Context, userID string, in PlayInput) error
 		MsPlayed:  int64(in.MsPlayed),
 		Completed: completed,
 		CreatedAt: createdAt,
+		Origin:    in.Origin,
+		SessionID: in.SessionID,
+		Qualified: qualified,
 	}); err != nil {
 		return err
 	}
@@ -123,6 +137,9 @@ func (s *Service) Record(ctx context.Context, userID string, in PlayInput) error
 			MsPlayed:  in.MsPlayed,
 			Completed: in.Completed,
 			CreatedAt: createdAt,
+			Origin:    in.Origin,
+			SessionID: in.SessionID,
+			Qualified: in.Qualified,
 		})
 	}
 	return nil
