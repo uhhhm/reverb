@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"log"
 
+	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/store/db"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
@@ -74,7 +75,7 @@ func (s *Service) BackfillHistory(ctx context.Context, store BackfillStore, play
 			MsPlayed:  int(p.MsPlayed),
 			Completed: p.Completed != 0,
 			CreatedAt: p.CreatedAt,
-			Origin:    p.Origin,
+			Origin:    core.RecommendationOrigin(p.Origin),
 			SessionID: p.SessionID,
 			Qualified: &qualified,
 		})

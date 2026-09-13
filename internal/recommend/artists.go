@@ -62,7 +62,7 @@ type similarArtistSource struct {
 
 // SimilarArtists merges candidates from every capable search adapter and each
 // dedicated source, then ranks them by agreement and the taste profile. With
-// online recommendations off, nothing is looked up.
+// online recommendations off, it uses local-library similarity or stale cache.
 func (s *Service) SimilarArtists(ctx context.Context, source, id string) ArtistResult {
 	if !s.settings(ctx).Online {
 		if source == "library" {
@@ -142,7 +142,9 @@ func (s *Service) similarArtists(ctx context.Context, source, id string) ArtistR
 			resolved[i].Reason = reason
 		}
 	}
-	if matchCtx.Err() == nil || len(resolved) > 0 {
+	// Preserve the last good cache entry when a refresh produces nothing; an
+	// expired entry is still useful as the explicit offline fallback.
+	if len(resolved) > 0 {
 		s.cache.put(key, resolved)
 	}
 	result.Artists = s.withoutMarkedArtists(ctx, resolved)

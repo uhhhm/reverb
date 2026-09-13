@@ -211,6 +211,26 @@ func TestSimilarTracksFallBackToLibraryWhenNetworkFails(t *testing.T) {
 	}
 }
 
+func TestSimilarTracksKeepLastGoodCacheWhenRefreshFails(t *testing.T) {
+	clock := &clock{t: time.Unix(1_700_000_000, 0)}
+	source := &similarTracks{cands: []recommend.TrackCandidate{{Artist: "Artist A", Title: "Track A", MBID: "mbid-a"}}}
+	catalog := &trackSource{plainSource: plainSource{name: "deezer"}, tracks: []core.ExternalResult{
+		{Source: "deezer", ExternalID: "a", Title: "Track A", Artist: "Artist A", MBID: "mbid-a", Type: core.EntityTrack},
+	}}
+	svc := newTrackService(source, libraryMatcher{}, clock, catalog)
+	if got := svc.SimilarTracks(context.Background(), "Seed", "Song"); len(got.Tracks) != 1 || got.Offline {
+		t.Fatalf("initial result = %+v", got)
+	}
+
+	clock.advance(25 * time.Hour)
+	source.cands = nil
+	source.err = errors.New("offline")
+	got := svc.SimilarTracks(context.Background(), "Seed", "Song")
+	if len(got.Tracks) != 1 || !got.Offline || got.UpdatedAt != 1_700_000_000 {
+		t.Fatalf("stale fallback = %+v", got)
+	}
+}
+
 func TestSimilarTracksUseOnlyLibraryWhenOnlineRecommendationsAreOff(t *testing.T) {
 	online := &similarTracks{cands: []recommend.TrackCandidate{{Artist: "Online", Title: "Remote"}}}
 	local := &localSimilarity{tracks: []core.ExternalResult{{Source: "library", ExternalID: "local-1", Title: "Local", Artist: "Band", Type: core.EntityTrack}}}

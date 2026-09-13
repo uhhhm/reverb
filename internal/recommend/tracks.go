@@ -69,14 +69,16 @@ func (s *Service) SimilarTracks(ctx context.Context, artist, title string) Track
 // SimilarTracksFor returns playable tracks similar to a seed, using its MBID
 // when one is available and retaining which sources proposed each candidate.
 // They are ranked by the taste profile and carry a reason. With online
-// recommendations off, nothing is looked up.
+// recommendations off, only the local-library similarity source is queried.
 func (s *Service) SimilarTracksFor(ctx context.Context, seed TrackSeed) TrackResult {
 	if !s.settings(ctx).Online {
 		return s.localTracks(ctx, seed)
 	}
 	result := s.similarTracks(ctx, seed)
 	if len(result.Tracks) == 0 {
-		return s.localTracksOrStale(ctx, seed, trackCacheKey(seed))
+		fallback := s.localTracksOrStale(ctx, seed, trackCacheKey(seed))
+		fallback.Available = fallback.Available || result.Available
+		return fallback
 	}
 	if len(result.Tracks) == 0 {
 		return result
@@ -148,9 +150,9 @@ func (s *Service) similarTracks(ctx context.Context, seed TrackSeed) TrackResult
 	matchCtx, cancelMatches := context.WithTimeout(ctx, s.timeout)
 	defer cancelMatches()
 	tracks := filterTracks(s.matchCandidates(matchCtx, kept), []Seed{{Artist: seed.Artist, Title: seed.Title, MBID: seed.MBID}}, similarTracksSurface, nil)
-	// A lookup cut short by the deadline keeps what it matched: re-asking the
-	// source on every reopen would be worse than a shorter list.
-	if matchCtx.Err() == nil || len(tracks) > 0 {
+	// Keep partial successes, but never replace the last good cache entry with
+	// an empty refresh: that entry is the offline fallback during an outage.
+	if len(tracks) > 0 {
 		s.cache.put(key, tracks)
 	}
 	result.Tracks = s.withoutMarkedTracks(ctx, tracks)

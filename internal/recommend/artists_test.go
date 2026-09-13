@@ -161,6 +161,24 @@ func TestSimilarArtistsAreCached(t *testing.T) {
 	}
 }
 
+func TestSimilarArtistsKeepLastGoodCacheWhenRefreshFails(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	deezer := &similarSource{plainSource: plainSource{name: "deezer"}, related: relatedN(3)}
+	svc := recommend.New(func() []search.SearchSource { return []search.SearchSource{deezer} },
+		recommend.WithClock(func() time.Time { return now }), recommend.WithTimeout(50*time.Millisecond))
+	if got := svc.SimilarArtists(context.Background(), "deezer", "27"); len(got.Artists) != 3 || got.Offline {
+		t.Fatalf("initial result = %+v", got)
+	}
+
+	now = now.Add(25 * time.Hour)
+	deezer.related = nil
+	deezer.err = errors.New("offline")
+	got := svc.SimilarArtists(context.Background(), "deezer", "27")
+	if len(got.Artists) != 3 || !got.Offline || got.UpdatedAt != 1_700_000_000 {
+		t.Fatalf("stale fallback = %+v", got)
+	}
+}
+
 func TestSimilarArtistsFailureAndTimeoutAreEmpty(t *testing.T) {
 	failing := &similarSource{plainSource: plainSource{name: "deezer"}, err: errors.New("boom")}
 	if got := newService(nil, failing).SimilarArtists(context.Background(), "deezer", "27"); len(got.Artists) != 0 {

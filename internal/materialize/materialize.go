@@ -290,7 +290,7 @@ func (s *Service) applyPlay(ctx context.Context, ch reverbsync.SyncChange) error
 		MsPlayed:  int64(p.MsPlayed),
 		Completed: completed,
 		CreatedAt: createdAt,
-		Origin:    p.Origin,
+		Origin:    string(p.Origin),
 		SessionID: p.SessionID,
 		Qualified: qualified,
 	})

@@ -349,6 +349,33 @@ func TestEnqueuePicksDownloaderViaFallback(t *testing.T) {
 	}
 }
 
+func TestCompletionHookReceivesSuccessfulRequest(t *testing.T) {
+	dl := &fakeDL{name: "dl", canDownload: true}
+	store := newMemStore()
+	m := NewManager(Config{Workers: 1, DebounceWindow: time.Hour}, wrapDownloaders([]Downloader{dl}), store,
+		events.New(), &fakeScanner{}, &fakeRematcher{trackID: "t1"}, &fakeVersion{v: 1}, RealClock{}, nil, nil)
+	completed := make(chan core.DownloadRequest, 1)
+	m.SetCompletionHook(func(_ context.Context, req core.DownloadRequest) { completed <- req })
+	m.Start()
+	t.Cleanup(m.Stop)
+
+	_, err := m.Enqueue(context.Background(), core.DownloadRequest{
+		Source: "spotify", ExternalID: "e1", Artist: "A", Title: "T",
+		RecommendationOrigin: "radio", InitiatedBy: "local",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-completed:
+		if got.RecommendationOrigin != "radio" || got.InitiatedBy != "local" {
+			t.Fatalf("completed request = %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("completion hook was not called")
+	}
+}
+
 func TestEnqueueNoDownloaderAccepts(t *testing.T) {
 	cant := &fakeDL{name: "cant", canDownload: false}
 	store := newMemStore()

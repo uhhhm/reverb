@@ -134,7 +134,7 @@ func TestSQLStoreInsertPersistsInitiatedBy(t *testing.T) {
 	// the id comes from the resolved session) so the attribution insert satisfies it.
 	mustSeedUser(t, path, "user-123")
 	job := core.DownloadJob{ID: "j-attr", DedupKey: "dk-attr", Status: core.DownloadQueued, DownloaderName: "spotdl", Source: "spotify", ExternalID: "e-attr"}
-	req := core.DownloadRequest{Source: "spotify", ExternalID: "e-attr", InitiatedBy: "user-123"}
+	req := core.DownloadRequest{Source: "spotify", ExternalID: "e-attr", InitiatedBy: "user-123", RecommendationOrigin: core.RecommendationRadio}
 	if err := s.Insert(ctx, job, req); err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +150,10 @@ func TestSQLStoreInsertPersistsInitiatedBy(t *testing.T) {
 	}
 	if !initiatedBy.Valid || initiatedBy.String != "user-123" {
 		t.Fatalf("initiated_by = %+v, want valid 'user-123'", initiatedBy)
+	}
+	persisted, ok, err := s.GetRequest(ctx, job.ID)
+	if err != nil || !ok || persisted.InitiatedBy != "user-123" || persisted.RecommendationOrigin != core.RecommendationRadio {
+		t.Fatalf("persisted request = %+v, ok=%v, err=%v", persisted, ok, err)
 	}
 }
 

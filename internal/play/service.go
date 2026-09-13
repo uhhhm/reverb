@@ -3,9 +3,11 @@ package play
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/uhhhm/reverb/internal/catalog"
+	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/store/db"
 	"github.com/uhhhm/reverb/internal/syncemit"
 	"github.com/uhhhm/reverb/internal/trackref"
@@ -24,12 +26,16 @@ type PlayInput struct {
 	PlayedAt       int64 // unix seconds; 0 means "use now"
 	// Origin identifies the recommendation surface that supplied this track.
 	// Empty means ordinary playback. SessionID groups consecutive queue plays.
-	Origin    string
+	Origin    core.RecommendationOrigin
 	SessionID string
 	// Qualified is nil for older clients and ordinary plays, which preserves
 	// the historical default that a submitted play qualifies for listening stats.
 	Qualified *bool
 }
+
+// ErrInvalidRecommendationOrigin rejects unknown surface names before they
+// enter persistence or replication.
+var ErrInvalidRecommendationOrigin = errors.New("invalid recommendation origin")
 
 // Querier is the narrow persistence slice play needs. *db.Queries satisfies it.
 type Querier interface {
@@ -84,6 +90,9 @@ func NewService(q Querier, cat CanonicalMinter, now func() time.Time, idgen func
 // entity — the norm/ISRC aliases still fuse the external play with the library
 // copy of the same track.
 func (s *Service) Record(ctx context.Context, userID string, in PlayInput) error {
+	if in.Origin != "" && !in.Origin.Valid() {
+		return ErrInvalidRecommendationOrigin
+	}
 	source, externalID, _ := trackref.DecodeExternalID(in.LibraryTrackID)
 	cid, err := s.cat.CanonicalFor(ctx, catalog.Identity{
 		Kind:       "track",
@@ -123,7 +132,7 @@ func (s *Service) Record(ctx context.Context, userID string, in PlayInput) error
 		MsPlayed:  int64(in.MsPlayed),
 		Completed: completed,
 		CreatedAt: createdAt,
-		Origin:    in.Origin,
+		Origin:    string(in.Origin),
 		SessionID: in.SessionID,
 		Qualified: qualified,
 	}); err != nil {

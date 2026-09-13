@@ -111,7 +111,7 @@ func downloadTestServer(t *testing.T, mgr DownloadManager) (*Server, *http.Cooki
 func TestCreateDownloadEnqueues(t *testing.T) {
 	mgr := newFakeManager()
 	srv, cookie := downloadTestServer(t, mgr)
-	body := `{"source":"spotify","externalId":"sp1","artist":"A","title":"T","album":"Al","playWhenReady":true}`
+	body := `{"source":"spotify","externalId":"sp1","artist":"A","title":"T","album":"Al","playWhenReady":true,"recommendationOrigin":"radio"}`
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/downloads", bytes.NewBufferString(body))
 	req.AddCookie(cookie)
@@ -128,6 +128,9 @@ func TestCreateDownloadEnqueues(t *testing.T) {
 	}
 	if !mgr.lastReq.PlayWhenReady {
 		t.Fatal("playWhenReady not forwarded to Enqueue")
+	}
+	if mgr.lastReq.RecommendationOrigin != "radio" {
+		t.Fatalf("recommendation origin = %q, want radio", mgr.lastReq.RecommendationOrigin)
 	}
 }
 

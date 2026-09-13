@@ -62,15 +62,19 @@ type DownloadRequest struct {
 	// skip it. Set by the quality-upgrade path, where an identical filename
 	// already sits in the output dir and skipping is exactly the wrong behaviour.
 	ForceOverwrite bool `json:"forceOverwrite,omitempty"`
+	// RecommendationOrigin identifies the surface whose result was downloaded.
+	// It stays with the persisted request so a successful completion can be
+	// attributed even after a restart.
+	RecommendationOrigin RecommendationOrigin `json:"recommendationOrigin,omitempty"`
 	// PreferDownloader names a downloader that should be tried first, ahead of the
 	// configured order, when it is present and its CanDownload accepts the request.
 	// Set server-side (hence json:"-") — e.g. a pasted YouTube link prefers "ytdlp"
 	// over spotDL's Spotify-metadata-first flow. Falls back to the normal chain.
 	PreferDownloader string `json:"-"`
 	// InitiatedBy is the id of the user who initiated this download. It is set
-	// server-side from the request context (never from the client body, hence
-	// json:"-") and persisted on the job as download_jobs.initiated_by.
-	InitiatedBy string `json:"-"`
+	// server-side from the request context (the HTTP DTO excludes it) and is also
+	// persisted in request_json so completion hooks survive a restart.
+	InitiatedBy string `json:"initiatedBy,omitempty"`
 }
 
 // Chapter is one internal chapter of a source video, as reported by the

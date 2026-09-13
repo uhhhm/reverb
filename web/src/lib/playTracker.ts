@@ -42,7 +42,8 @@ function qualify(state: TrackState): boolean {
 
 /**
  * startPlayTracker subscribes to the given engine and calls `recordFn` once per
- * qualified play event.  Returns an unsubscribe function.
+ * qualified ordinary play, plus once when each recommendation attempt ends so
+ * short skips remain measurable. Returns an unsubscribe function.
  *
  * Qualification rules:
  *  - Track must have durationMs > 30 000 ms.

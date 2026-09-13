@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"time"
@@ -31,6 +32,10 @@ func (s *Server) handlePlay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.deps.Play.Record(r.Context(), cu.ID, in); err != nil {
+		if errors.Is(err, play.ErrInvalidRecommendationOrigin) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}

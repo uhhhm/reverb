@@ -228,11 +228,12 @@ type Manager struct {
 	rematcher       Rematcher
 	version         VersionBumper
 	clock           Clock
-	playlists       PlaylistAdder                           // optional; non-nil only when a library is configured
-	resolve         func() BindingResolver                  // optional provider; Tasks 3-5 add call sites
-	canonicalMinter CanonicalMinter                         // optional; mints catalog IDs at link time (Task 3)
-	qualityFn       func(context.Context) core.AudioQuality // optional; supplies the configured default tier
-	trackEnricher   TrackEnricher                           // optional; recovers a missing ISRC at enqueue
+	playlists       PlaylistAdder                               // optional; non-nil only when a library is configured
+	resolve         func() BindingResolver                      // optional provider; Tasks 3-5 add call sites
+	canonicalMinter CanonicalMinter                             // optional; mints catalog IDs at link time (Task 3)
+	qualityFn       func(context.Context) core.AudioQuality     // optional; supplies the configured default tier
+	trackEnricher   TrackEnricher                               // optional; recovers a missing ISRC at enqueue
+	completionHook  func(context.Context, core.DownloadRequest) // optional; observes first successful completion
 
 	queue chan string // job IDs to process
 
@@ -329,6 +330,19 @@ func (m *Manager) SetCanonicalMinter(minter CanonicalMinter) {
 // if never called, enrichment is silently skipped.
 func (m *Manager) SetTrackEnricher(e TrackEnricher) {
 	m.trackEnricher = e
+}
+
+// SetCompletionHook installs an observer for the first successful completion
+// of a request. The persisted request is supplied so attribution survives a
+// manager restart. The hook must be quick and tolerate best-effort delivery.
+func (m *Manager) SetCompletionHook(fn func(context.Context, core.DownloadRequest)) {
+	m.completionHook = fn
+}
+
+func (m *Manager) notifyCompletion(ctx context.Context, req core.DownloadRequest) {
+	if m.completionHook != nil {
+		m.completionHook(ctx, req)
+	}
 }
 
 // enrichISRC fills in an ISRC the search payload omitted — Deezer returns one
@@ -706,11 +720,13 @@ func (m *Manager) reconcileOnce(ctx context.Context) {
 		}
 		switch st.State {
 		case core.DownloadCompleted:
+			req, _, _ := m.store.GetRequest(ctx, j.ID)
 			j.Status = core.DownloadCompleted
 			j.Progress = 100
 			j.FinishedAt = now
 			_ = m.store.Update(ctx, j)
 			m.publishEvent(TopicComplete, j, "")
+			m.notifyCompletion(ctx, req)
 			m.mu.Lock()
 			delete(m.reqs, j.ID)
 			m.mu.Unlock()
@@ -1291,6 +1307,7 @@ func (m *Manager) process(id string) {
 	cur.FinishedAt = m.clock.Now().Unix()
 	_ = m.store.Update(ctx, cur)
 	m.publishEvent(TopicComplete, cur, "")
+	m.notifyCompletion(ctx, req)
 	log.Printf("download completed: %q (job %s) -> %s", cur.Title, shortID(id), outPath)
 
 	// Clear the rehydrated request now the download is done.

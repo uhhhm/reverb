@@ -18,6 +18,7 @@ import (
 	"github.com/uhhhm/reverb/internal/auth"
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/playlistsync"
+	"github.com/uhhhm/reverb/internal/recommendationevent"
 	"github.com/uhhhm/reverb/internal/store/db"
 )
 
@@ -41,7 +42,7 @@ type SyncService interface {
 	DownloadMissing(ctx context.Context, id string) ([]core.DownloadJob, error)
 	UpdateSettings(ctx context.Context, id string, enabled bool, intervalSec int, autoDownload bool) error
 	Delete(ctx context.Context, id string) error
-	AddTrack(ctx context.Context, id string, entry core.ExternalResult) (core.SyncedPlaylistDetail, error)
+	AddTrackWithResult(ctx context.Context, id string, entry core.ExternalResult) (core.SyncedPlaylistDetail, bool, error)
 	RemoveTrack(ctx context.Context, id, source, externalID string) (core.SyncedPlaylistDetail, error)
 	SetCover(ctx context.Context, id, coverURL string) (core.SyncedPlaylistDetail, error)
 	ReorderTracks(ctx context.Context, id string, order []core.TrackKey) (core.SyncedPlaylistDetail, error)
@@ -345,15 +346,15 @@ func (s *Server) handleDeleteSyncedPlaylist(w http.ResponseWriter, r *http.Reque
 
 // addSyncedTrackBody is the POST /synced-playlists/{id}/tracks request DTO.
 type addSyncedTrackBody struct {
-	Source               string `json:"source"`
-	ExternalID           string `json:"externalId"`
-	Title                string `json:"title"`
-	Artist               string `json:"artist"`
-	Album                string `json:"album"`
-	ISRC                 string `json:"isrc"`
-	DurationMs           int    `json:"durationMs"`
-	CoverArtID           string `json:"coverArtId"`
-	RecommendationOrigin string `json:"recommendationOrigin"`
+	Source               string                    `json:"source"`
+	ExternalID           string                    `json:"externalId"`
+	Title                string                    `json:"title"`
+	Artist               string                    `json:"artist"`
+	Album                string                    `json:"album"`
+	ISRC                 string                    `json:"isrc"`
+	DurationMs           int                       `json:"durationMs"`
+	CoverArtID           string                    `json:"coverArtId"`
+	RecommendationOrigin core.RecommendationOrigin `json:"recommendationOrigin"`
 }
 
 func (s *Server) handleAddSyncedTrack(w http.ResponseWriter, r *http.Request) {
@@ -371,6 +372,10 @@ func (s *Server) handleAddSyncedTrack(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "source and externalId are required"})
 		return
 	}
+	if body.RecommendationOrigin != "" && !body.RecommendationOrigin.Valid() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid recommendationOrigin"})
+		return
+	}
 	entry := core.ExternalResult{
 		Source:     body.Source,
 		ExternalID: body.ExternalID,
@@ -382,7 +387,7 @@ func (s *Server) handleAddSyncedTrack(w http.ResponseWriter, r *http.Request) {
 		CoverArtID: body.CoverArtID,
 		Type:       core.EntityTrack,
 	}
-	det, err := svc.AddTrack(r.Context(), chi.URLParam(r, "id"), entry)
+	det, added, err := svc.AddTrackWithResult(r.Context(), chi.URLParam(r, "id"), entry)
 	if err != nil {
 		status := http.StatusUnprocessableEntity
 		if errors.Is(err, playlistsync.ErrNotEditable) {
@@ -391,9 +396,9 @@ func (s *Server) handleAddSyncedTrack(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, map[string]string{"error": err.Error()})
 		return
 	}
-	if body.RecommendationOrigin != "" && s.deps.RecommendationEvents != nil {
+	if added && body.RecommendationOrigin != "" && s.deps.RecommendationEvents != nil {
 		if cu, ok := currentUser(r); ok {
-			if err := s.deps.RecommendationEvents.Record(r.Context(), cu.ID, body.RecommendationOrigin, "playlist"); err != nil {
+			if err := s.deps.RecommendationEvents.Record(r.Context(), cu.ID, string(body.RecommendationOrigin), recommendationevent.ActionPlaylist); err != nil {
 				log.Printf("recommendation playlist attribution: %v", err)
 			}
 		}

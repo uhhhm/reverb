@@ -2,6 +2,7 @@ package play_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -89,6 +90,17 @@ func TestRecord_PersistsRecommendationContextWithoutCountingASkipAsAPlay(t *test
 	count, err := q.CountPlaysByCatalog(ctx, db.CountPlaysByCatalogParams{UserID: "user-1", CatalogID: rows[0].CatalogID})
 	if err != nil || count != 0 {
 		t.Fatalf("qualified play count = %d, err = %v; want zero", count, err)
+	}
+}
+
+func TestRecordRejectsUnknownRecommendationOrigin(t *testing.T) {
+	s, q := newTestPlayService(t)
+	err := s.Record(context.Background(), "user-1", play.PlayInput{Title: "T", Artist: "A", Origin: "unknown"})
+	if !errors.Is(err, play.ErrInvalidRecommendationOrigin) {
+		t.Fatalf("error = %v, want ErrInvalidRecommendationOrigin", err)
+	}
+	if plays, listErr := q.ListAllPlays(context.Background()); listErr != nil || len(plays) != 0 {
+		t.Fatalf("invalid origin persisted: plays=%+v err=%v", plays, listErr)
 	}
 }
 

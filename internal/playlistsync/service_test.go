@@ -792,9 +792,12 @@ func TestAddTrackAppendsAndDedupes(t *testing.T) {
 
 	// Add a new track.
 	newTrack := core.ExternalResult{Source: "spotify", ExternalID: "t-new", Title: "New", Type: core.EntityTrack}
-	det2, err := svc.AddTrack(context.Background(), det.ID, newTrack)
+	det2, added, err := svc.AddTrackWithResult(context.Background(), det.ID, newTrack)
 	if err != nil {
 		t.Fatalf("AddTrack: %v", err)
+	}
+	if !added {
+		t.Fatal("new member was reported as a duplicate")
 	}
 	if det2.TotalCount != 2 {
 		t.Fatalf("TotalCount = %d, want 2 after add", det2.TotalCount)
@@ -804,9 +807,12 @@ func TestAddTrackAppendsAndDedupes(t *testing.T) {
 	}
 
 	// Adding the same track again should be a no-op (dedupe).
-	det3, err := svc.AddTrack(context.Background(), det.ID, newTrack)
+	det3, added, err := svc.AddTrackWithResult(context.Background(), det.ID, newTrack)
 	if err != nil {
 		t.Fatalf("AddTrack dedupe: %v", err)
+	}
+	if added {
+		t.Fatal("duplicate member was reported as newly added")
 	}
 	if det3.TotalCount != 2 {
 		t.Fatalf("TotalCount = %d after dedupe, want 2", det3.TotalCount)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/store/db"
 	"github.com/uhhhm/reverb/internal/syncemit"
 )
@@ -38,12 +39,7 @@ func New(q Store, emitter Emitter, now func() time.Time, idgen func() string) *S
 }
 
 func ValidOrigin(origin string) bool {
-	switch origin {
-	case "radio", "mix", "shelf", "similarTracks", "similarArtists":
-		return true
-	default:
-		return false
-	}
+	return core.RecommendationOrigin(origin).Valid()
 }
 
 func (s *Service) Record(ctx context.Context, userID, origin, action string) error {

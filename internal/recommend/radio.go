@@ -31,7 +31,7 @@ type Seed struct {
 // rankWeights) and then balanced between new and known music by the
 // surface's share and Adventurousness. Radio is not a discovery surface, so
 // owned tracks stay, but other versions and duplicate recordings are dropped.
-// With online recommendations off, nothing is looked up.
+// With online recommendations off, only local-library similarity is queried.
 func (s *Service) Radio(ctx context.Context, seeds []Seed) TrackResult {
 	settings := s.settings(ctx)
 	if !settings.Online || len(s.tracks) == 0 {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/uhhhm/reverb/internal/catalog"
+	"github.com/uhhhm/reverb/internal/core"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
 
@@ -100,14 +101,14 @@ func (s *Service) EnsureCatalogEntity(ctx context.Context, catalogID string) {
 // log is not scoped to a user, and history that landed under a different id
 // would never be read back.
 type Play struct {
-	UserID    string `json:"userId"`
-	CatalogID string `json:"catalogId"`
-	PlayedAt  int64  `json:"playedAt"`
-	MsPlayed  int    `json:"msPlayed"`
-	Completed bool   `json:"completed"`
-	CreatedAt int64  `json:"createdAt"`
-	Origin    string `json:"origin,omitempty"`
-	SessionID string `json:"sessionId,omitempty"`
+	UserID    string                    `json:"userId"`
+	CatalogID string                    `json:"catalogId"`
+	PlayedAt  int64                     `json:"playedAt"`
+	MsPlayed  int                       `json:"msPlayed"`
+	Completed bool                      `json:"completed"`
+	CreatedAt int64                     `json:"createdAt"`
+	Origin    core.RecommendationOrigin `json:"origin,omitempty"`
+	SessionID string                    `json:"sessionId,omitempty"`
 	// Nil is the backward-compatible encoding used by older peers: a play they
 	// emitted had already passed the listening qualification threshold.
 	Qualified *bool `json:"qualified,omitempty"`

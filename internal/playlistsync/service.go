@@ -531,19 +531,28 @@ func (s *Service) DownloadMissing(ctx context.Context, id string) ([]core.Downlo
 // Deduplicates by source+externalId (no-op if already present).
 // Enqueues a download if the entry is not already a library track or matched.
 func (s *Service) AddTrack(ctx context.Context, id string, entry core.ExternalResult) (core.SyncedPlaylistDetail, error) {
+	detail, _, err := s.AddTrackWithResult(ctx, id, entry)
+	return detail, err
+}
+
+// AddTrackWithResult is AddTrack plus whether this call inserted a new member.
+// The API uses that bit to avoid counting duplicate no-ops as recommendation
+// conversions; AddTrack retains its original caller-facing contract.
+func (s *Service) AddTrackWithResult(ctx context.Context, id string, entry core.ExternalResult) (core.SyncedPlaylistDetail, bool, error) {
 	row, err := s.store.Get(ctx, id)
 	if err != nil {
-		return core.SyncedPlaylistDetail{}, err
+		return core.SyncedPlaylistDetail{}, false, err
 	}
 	if row.Mode != "once" {
-		return core.SyncedPlaylistDetail{}, ErrNotEditable
+		return core.SyncedPlaylistDetail{}, false, ErrNotEditable
 	}
 	var tracks []core.ExternalResult
 	_ = json.Unmarshal([]byte(row.TracksJSON), &tracks)
 	// Dedupe by source+externalId.
 	for _, t := range tracks {
 		if t.Source == entry.Source && t.ExternalID == entry.ExternalID {
-			return s.Detail(ctx, id)
+			detail, detailErr := s.Detail(ctx, id)
+			return detail, false, detailErr
 		}
 	}
 	// Task 5: for library-source tracks, mint a stable catalog entity id at persist
@@ -571,7 +580,7 @@ func (s *Service) AddTrack(ctx context.Context, id string, entry core.ExternalRe
 	tracks = append(tracks, entry)
 	tj, _ := json.Marshal(tracks)
 	if err := s.store.UpdateTracks(ctx, id, row.Name, row.CoverURL, string(tj), s.now()); err != nil {
-		return core.SyncedPlaylistDetail{}, err
+		return core.SyncedPlaylistDetail{}, false, err
 	}
 	s.publish(ctx, id)
 	// Enqueue download if missing (not a library entry and not matched).
@@ -589,7 +598,8 @@ func (s *Service) AddTrack(ctx context.Context, id string, entry core.ExternalRe
 			})
 		}
 	}
-	return s.Detail(ctx, id)
+	detail, err := s.Detail(ctx, id)
+	return detail, true, err
 }
 
 // RemoveTrack removes an entry from a mode='once' managed playlist's tracklist.

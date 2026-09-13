@@ -13,6 +13,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"fmt"
+	"log"
 	"path/filepath"
 	"time"
 
@@ -323,6 +324,17 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	playSvc.WithEmitter(emitter)
 	deps.SyncEmit = emitter
 	deps.RecommendationEvents = recommendationevent.New(st.Q(), emitter, time.Now, uuid.NewString)
+	if bundle.Manager != nil {
+		recommendationEvents := deps.RecommendationEvents
+		bundle.Manager.SetCompletionHook(func(ctx context.Context, req core.DownloadRequest) {
+			if req.RecommendationOrigin == "" {
+				return
+			}
+			if err := recommendationEvents.Record(ctx, req.InitiatedBy, string(req.RecommendationOrigin), recommendationevent.ActionLibrary); err != nil {
+				log.Printf("recommendation library attribution: %v", err)
+			}
+		})
+	}
 
 	// Not interested marks replicate through the change log; the projection
 	// below applies a peer's marks without emitting them again.

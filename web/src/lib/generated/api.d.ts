@@ -2971,6 +2971,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/plays": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record a completed or qualifying playback attempt */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PlayRequest"];
+                };
+            };
+            responses: {
+                /** @description play recorded */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description play service unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/plays/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete one play belonging to the household owner */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description play deleted or absent */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description play service unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/downloads/pause": {
         parameters: {
             query?: never;
@@ -3518,6 +3613,104 @@ export interface paths {
             };
         };
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/synced-playlists/{id}/tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a track to a managed playlist */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AddSyncedTrackRequest"];
+                };
+            };
+            responses: {
+                /** @description SyncedPlaylistDetail */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description source and externalId are required */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description playlist is not editable */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description playlist sync unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        /** Remove a track from a managed playlist */
+        delete: {
+            parameters: {
+                query: {
+                    source: string;
+                    externalId: string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description SyncedPlaylistDetail */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description playlist is not editable */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description playlist sync unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -4987,6 +5180,38 @@ export interface components {
         };
         QueueStateEvent: {
             paused: boolean;
+        };
+        /** @enum {string} */
+        RecommendationOrigin: "radio" | "mix" | "shelf" | "similarTracks" | "similarArtists";
+        PlayRequest: {
+            libraryTrackId?: string;
+            title?: string;
+            artist?: string;
+            album?: string;
+            isrc?: string;
+            durationMs?: number;
+            msPlayed?: number;
+            completed?: boolean;
+            /**
+             * Format: int64
+             * @description Unix seconds; zero or omitted uses server time.
+             */
+            playedAt?: number;
+            origin?: components["schemas"]["RecommendationOrigin"];
+            sessionId?: string;
+            /** @description Omitted for legacy clients; defaults to true. */
+            qualified?: boolean;
+        };
+        AddSyncedTrackRequest: {
+            source: string;
+            externalId: string;
+            title?: string;
+            artist?: string;
+            album?: string;
+            isrc?: string;
+            durationMs?: number;
+            coverArtId?: string;
+            recommendationOrigin?: components["schemas"]["RecommendationOrigin"];
         };
         CreateDownloadRequest: {
             source?: string;

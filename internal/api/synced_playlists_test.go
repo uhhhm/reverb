@@ -54,13 +54,14 @@ type fakeSync struct {
 	settingsErr    error
 	deleteErr      error
 
-	addTrackEntry core.ExternalResult
-	addTrackID    string
-	addTrackErr   error
-	removeTrackID string
-	removeSource  string
-	removeExtID   string
-	removeErr     error
+	addTrackEntry     core.ExternalResult
+	addTrackID        string
+	addTrackErr       error
+	addTrackDuplicate bool
+	removeTrackID     string
+	removeSource      string
+	removeExtID       string
+	removeErr         error
 
 	setCoverID  string
 	setCoverURL string
@@ -93,6 +94,10 @@ func (f *fakeSync) CreateManaged(_ context.Context, name string) (core.SyncedPla
 func (f *fakeSync) AddTrack(_ context.Context, id string, entry core.ExternalResult) (core.SyncedPlaylistDetail, error) {
 	f.addTrackID, f.addTrackEntry = id, entry
 	return f.detail, f.addTrackErr
+}
+func (f *fakeSync) AddTrackWithResult(_ context.Context, id string, entry core.ExternalResult) (core.SyncedPlaylistDetail, bool, error) {
+	f.addTrackID, f.addTrackEntry = id, entry
+	return f.detail, !f.addTrackDuplicate, f.addTrackErr
 }
 func (f *fakeSync) RemoveTrack(_ context.Context, id, source, externalID string) (core.SyncedPlaylistDetail, error) {
 	f.removeTrackID, f.removeSource, f.removeExtID = id, source, externalID

@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 
@@ -30,28 +29,29 @@ func (s *Server) handleCreateDownload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "externalId is required"})
 		return
 	}
+	origin := core.RecommendationOrigin(body.RecommendationOrigin)
+	if origin != "" && !origin.Valid() {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid recommendationOrigin"})
+		return
+	}
 	cu, _ := currentUser(r)
 	job, err := dl.Enqueue(r.Context(), core.DownloadRequest{
-		Source:          body.Source,
-		ExternalID:      body.ExternalID,
-		Artist:          body.Artist,
-		Title:           body.Title,
-		Album:           body.Album,
-		ISRC:            body.ISRC,
-		DurationMs:      body.DurationMs,
-		PlayWhenReady:   body.PlayWhenReady,
-		AddToPlaylistID: body.AddToPlaylistID,
-		Quality:         core.ParseAudioQuality(body.Quality, ""),
-		InitiatedBy:     cu.ID,
+		Source:               body.Source,
+		ExternalID:           body.ExternalID,
+		Artist:               body.Artist,
+		Title:                body.Title,
+		Album:                body.Album,
+		ISRC:                 body.ISRC,
+		DurationMs:           body.DurationMs,
+		PlayWhenReady:        body.PlayWhenReady,
+		AddToPlaylistID:      body.AddToPlaylistID,
+		RecommendationOrigin: origin,
+		Quality:              core.ParseAudioQuality(body.Quality, ""),
+		InitiatedBy:          cu.ID,
 	})
 	if err != nil {
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 		return
-	}
-	if body.RecommendationOrigin != "" && s.deps.RecommendationEvents != nil {
-		if err := s.deps.RecommendationEvents.Record(r.Context(), cu.ID, body.RecommendationOrigin, "library"); err != nil {
-			log.Printf("recommendation library attribution: %v", err)
-		}
 	}
 	writeJSON(w, http.StatusOK, job)
 }

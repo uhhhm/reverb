@@ -832,6 +832,25 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/CreateDownloadRequest' }
       responses: { "200": { description: DownloadJob, content: { application/json: { schema: { $ref: '#/components/schemas/DownloadJob' } } } }, "400": { description: invalid } }
+  /plays:
+    post:
+      summary: Record a completed or qualifying playback attempt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlayRequest' }
+      responses:
+        "204": { description: play recorded }
+        "400": { description: invalid request }
+        "503": { description: play service unavailable }
+  /plays/{id}:
+    delete:
+      summary: Delete one play belonging to the household owner
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "204": { description: play deleted or absent }
+        "503": { description: play service unavailable }
   /downloads/pause:
     post:
       summary: Pause the download queue (stop dispatching new jobs)
@@ -918,6 +937,30 @@ paths:
       responses:
         "200": { description: array of DownloadJob, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/DownloadJob' } } } } }
         "422": { description: could not enqueue }
+        "503": { description: playlist sync unavailable }
+  /synced-playlists/{id}/tracks:
+    post:
+      summary: Add a track to a managed playlist
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddSyncedTrackRequest' }
+      responses:
+        "200": { description: SyncedPlaylistDetail }
+        "400": { description: source and externalId are required }
+        "409": { description: playlist is not editable }
+        "503": { description: playlist sync unavailable }
+    delete:
+      summary: Remove a track from a managed playlist
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: source, in: query, required: true, schema: { type: string } }
+        - { name: externalId, in: query, required: true, schema: { type: string } }
+      responses:
+        "200": { description: SyncedPlaylistDetail }
+        "409": { description: playlist is not editable }
         "503": { description: playlist sync unavailable }
   /synced-playlists/{id}/settings:
     put:
@@ -1698,6 +1741,37 @@ components:
           x-go-type: bool
       required:
       - paused
+    RecommendationOrigin:
+      type: string
+      enum: [radio, mix, shelf, similarTracks, similarArtists]
+    PlayRequest:
+      type: object
+      properties:
+        libraryTrackId: { type: string }
+        title: { type: string }
+        artist: { type: string }
+        album: { type: string }
+        isrc: { type: string }
+        durationMs: { type: integer }
+        msPlayed: { type: integer }
+        completed: { type: boolean }
+        playedAt: { type: integer, format: int64, description: Unix seconds; zero or omitted uses server time. }
+        origin: { $ref: '#/components/schemas/RecommendationOrigin' }
+        sessionId: { type: string }
+        qualified: { type: boolean, description: Omitted for legacy clients; defaults to true. }
+    AddSyncedTrackRequest:
+      type: object
+      properties:
+        source: { type: string }
+        externalId: { type: string }
+        title: { type: string }
+        artist: { type: string }
+        album: { type: string }
+        isrc: { type: string }
+        durationMs: { type: integer }
+        coverArtId: { type: string }
+        recommendationOrigin: { $ref: '#/components/schemas/RecommendationOrigin' }
+      required: [source, externalId]
     CreateDownloadRequest:
       type: object
       x-go-generate: true
