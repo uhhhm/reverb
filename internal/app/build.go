@@ -324,16 +324,17 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	playSvc.WithEmitter(emitter)
 	deps.SyncEmit = emitter
 	deps.RecommendationEvents = recommendationevent.New(st.Q(), emitter, time.Now, uuid.NewString)
+	downloadCompletion := func(ctx context.Context, req core.DownloadRequest) {
+		if req.RecommendationOrigin == "" {
+			return
+		}
+		if err := deps.RecommendationEvents.Record(ctx, req.InitiatedBy, string(req.RecommendationOrigin), recommendationevent.ActionLibrary); err != nil {
+			log.Printf("recommendation library attribution: %v", err)
+		}
+	}
+	builder.SetDownloadCompletionHook(downloadCompletion)
 	if bundle.Manager != nil {
-		recommendationEvents := deps.RecommendationEvents
-		bundle.Manager.SetCompletionHook(func(ctx context.Context, req core.DownloadRequest) {
-			if req.RecommendationOrigin == "" {
-				return
-			}
-			if err := recommendationEvents.Record(ctx, req.InitiatedBy, string(req.RecommendationOrigin), recommendationevent.ActionLibrary); err != nil {
-				log.Printf("recommendation library attribution: %v", err)
-			}
-		})
+		bundle.Manager.SetCompletionHook(downloadCompletion)
 	}
 
 	// Not interested marks replicate through the change log; the projection

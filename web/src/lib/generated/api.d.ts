@@ -2980,7 +2980,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Record a completed or qualifying playback attempt */
+        /** Record a qualifying play or a completed recommendation attempt, including short skips */
         post: {
             parameters: {
                 query?: never;
@@ -3618,7 +3618,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/synced-playlists/{id}/tracks": {
+    "/playlists/{id}/tracks": {
         parameters: {
             query?: never;
             header?: never;

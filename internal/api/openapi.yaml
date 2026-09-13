@@ -834,7 +834,7 @@ paths:
       responses: { "200": { description: DownloadJob, content: { application/json: { schema: { $ref: '#/components/schemas/DownloadJob' } } } }, "400": { description: invalid } }
   /plays:
     post:
-      summary: Record a completed or qualifying playback attempt
+      summary: Record a qualifying play or a completed recommendation attempt, including short skips
       requestBody:
         required: true
         content:
@@ -938,7 +938,7 @@ paths:
         "200": { description: array of DownloadJob, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/DownloadJob' } } } } }
         "422": { description: could not enqueue }
         "503": { description: playlist sync unavailable }
-  /synced-playlists/{id}/tracks:
+  /playlists/{id}/tracks:
     post:
       summary: Add a track to a managed playlist
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]

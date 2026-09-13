@@ -80,9 +80,6 @@ func (s *Service) SimilarTracksFor(ctx context.Context, seed TrackSeed) TrackRes
 		fallback.Available = fallback.Available || result.Available
 		return fallback
 	}
-	if len(result.Tracks) == 0 {
-		return result
-	}
 	p := s.profile(ctx)
 	support := map[string]float64{}
 	listSupport(support, result.Tracks)

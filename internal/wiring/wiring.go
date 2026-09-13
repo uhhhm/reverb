@@ -560,6 +560,9 @@ type Builder struct {
 	// canonicalMinter is set by SetCanonicalMinter (Task 5) so BuildSyncService can
 	// forward it to playlistsync.Service via WithCanonicalMinter. Nil-safe.
 	canonicalMinter playlistsync.CanonicalMinter
+	// downloadCompletion is applied to every manager Build creates, including
+	// replacement managers produced by live adapter reloads.
+	downloadCompletion func(context.Context, core.DownloadRequest)
 }
 
 // SetResolverProvider injects the resolver provider into the Builder. Call this
@@ -576,6 +579,13 @@ func (b *Builder) SetResolverProvider(p func() BindingResolver) {
 // never called, minting is silently skipped in the sync service.
 func (b *Builder) SetCanonicalMinter(m playlistsync.CanonicalMinter) {
 	b.canonicalMinter = m
+}
+
+// SetDownloadCompletionHook installs the observer copied into every download
+// manager constructed from this builder. It may be set after the initial Build;
+// the composition root attaches the same hook to that first manager directly.
+func (b *Builder) SetDownloadCompletionHook(fn func(context.Context, core.DownloadRequest)) {
+	b.downloadCompletion = fn
 }
 
 // NewBuilder constructs a Builder. clock may be nil (download.NewManager applies
@@ -771,6 +781,7 @@ func (b *Builder) Build(ctx context.Context) (ServiceBundle, error) {
 			libAdapter, // PlaylistAdder (AddTracksToPlaylist) — subsonic adapter satisfies it
 			dlResolve,  // optional resolver provider; Tasks 3-5 add call sites
 		)
+		bundle.Manager.SetCompletionHook(b.downloadCompletion)
 		// The configured default quality tier, read per-request so a settings
 		// change takes effect without a rebuild. Applied to every enqueue path
 		// (search, coverage, playlist sync, add-from-link), not just the API.

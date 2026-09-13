@@ -74,8 +74,7 @@ func (s *Service) SimilarArtists(ctx context.Context, source, id string) ArtistR
 		}
 		return ArtistResult{Artists: []core.ExternalArtist{}, Offline: true, UpdatedAt: s.now().Unix()}
 	}
-	seed := s.artistSeed(ctx, source, id)
-	result := s.similarArtists(ctx, source, id)
+	result, seed := s.similarArtists(ctx, source, id)
 	if len(result.Artists) == 0 {
 		local := s.localArtists(ctx, seed)
 		if local.Available && len(local.Artists) > 0 {
@@ -106,7 +105,7 @@ func (s *Service) localArtists(ctx context.Context, seed ArtistSeed) ArtistResul
 	return result
 }
 
-func (s *Service) similarArtists(ctx context.Context, source, id string) ArtistResult {
+func (s *Service) similarArtists(ctx context.Context, source, id string) (ArtistResult, ArtistSeed) {
 	var capable []similarArtistSource
 	for _, src := range s.liveSources() {
 		if provider, ok := src.(search.SimilarArtistsProvider); ok {
@@ -114,13 +113,13 @@ func (s *Service) similarArtists(ctx context.Context, source, id string) ArtistR
 		}
 	}
 	if len(capable) == 0 && len(s.artists) == 0 {
-		return ArtistResult{Artists: []core.ExternalArtist{}}
+		return ArtistResult{Artists: []core.ExternalArtist{}}, ArtistSeed{}
 	}
 	result := ArtistResult{Available: true, Artists: []core.ExternalArtist{}}
 	key := "artists\x1f" + source + "\x1f" + id
 	if cached, ok := s.cache.get(key); ok {
 		result.Artists = s.withoutMarkedArtists(ctx, cached.([]core.ExternalArtist))
-		return result
+		return result, ArtistSeed{}
 	}
 
 	sourceCtx, cancelSources := context.WithTimeout(ctx, s.timeout)
@@ -128,7 +127,7 @@ func (s *Service) similarArtists(ctx context.Context, source, id string) ArtistR
 	candidates, available := s.artistCandidates(sourceCtx, seed, capable)
 	cancelSources()
 	if !available {
-		return ArtistResult{Artists: []core.ExternalArtist{}}
+		return ArtistResult{Artists: []core.ExternalArtist{}}, seed
 	}
 	matchCtx, cancelMatches := context.WithTimeout(ctx, s.timeout)
 	defer cancelMatches()
@@ -148,7 +147,7 @@ func (s *Service) similarArtists(ctx context.Context, source, id string) ArtistR
 		s.cache.put(key, resolved)
 	}
 	result.Artists = s.withoutMarkedArtists(ctx, resolved)
-	return result
+	return result, seed
 }
 
 func (s *Service) artistSeed(ctx context.Context, source, id string) ArtistSeed {
