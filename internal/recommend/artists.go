@@ -76,6 +76,9 @@ func (s *Service) SimilarArtists(ctx context.Context, source, id string) ArtistR
 	}
 	result, seed := s.similarArtists(ctx, source, id)
 	if len(result.Artists) == 0 {
+		if seed.Name == "" {
+			seed = s.artistSeed(ctx, source, id)
+		}
 		local := s.localArtists(ctx, seed)
 		if local.Available && len(local.Artists) > 0 {
 			return local

@@ -135,6 +135,18 @@ func TestSimilarArtistsUnavailableWithoutCapability(t *testing.T) {
 	}
 }
 
+func TestSimilarArtistsUseLocalSourceWithoutOnlineCapability(t *testing.T) {
+	local := &localSimilarity{artists: []core.ExternalArtist{{Source: "library", ExternalID: "ar-2", Name: "Justice"}}}
+	svc := recommend.New(func() []search.SearchSource { return nil },
+		recommend.WithLibrary(func() recommend.Library { return library{"ar-1": {ID: "ar-1", Name: "Daft Punk"}} }),
+		recommend.WithLocalSimilarity(local))
+
+	got := svc.SimilarArtists(context.Background(), "library", "ar-1")
+	if !got.Available || !got.Offline || len(got.Artists) != 1 || got.Artists[0].ExternalID != "ar-2" {
+		t.Fatalf("local fallback = %+v", got)
+	}
+}
+
 func TestSimilarArtistsForLibraryArtistResolvesByName(t *testing.T) {
 	deezer := &similarSource{
 		plainSource: plainSource{name: "deezer", artists: []core.ExternalResult{
