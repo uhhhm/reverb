@@ -125,7 +125,8 @@ func (s *Service) releaseRadar(ctx context.Context, start time.Time) Mix {
 
 // newReleases lists each artist's releases dated in [since, until] across the
 // sources, deduplicated by artist and title with the first source winning,
-// newest first. answered reports whether any discography lookup succeeded.
+// newest first. answered reports whether any source answered: a discography
+// lookup succeeded, or a search found the source has no such artist.
 func (s *Service) newReleases(ctx context.Context, artists []string, sources []discographySource, since, until string) ([]release, bool) {
 	var answered atomic.Bool
 	perArtist := make([][]release, len(artists))
@@ -139,7 +140,11 @@ func (s *Service) newReleases(ctx context.Context, artists []string, sources []d
 			defer func() { <-sem }()
 			for _, src := range sources {
 				lookupCtx, cancel := context.WithTimeout(ctx, s.timeout)
-				id := s.resolveArtistID(lookupCtx, ArtistSeed{Name: artist}, src.SearchSource)
+				id, err := s.resolveArtistID(lookupCtx, ArtistSeed{Name: artist}, src.SearchSource)
+				if err == nil && id == "" {
+					// The source answered: it just does not have this artist.
+					answered.Store(true)
+				}
 				var albums []core.ExternalAlbum
 				if id != "" {
 					var err error

@@ -31,8 +31,9 @@ func TestTrackedArtistsThresholds(t *testing.T) {
 type radarSource struct {
 	plainSource
 	discographies map[string][]core.ExternalAlbum
-	// err fails every discography lookup, as an outage would.
-	err error
+	// err fails every discography lookup and albumErr every album read, as
+	// an outage would.
+	err, albumErr error
 }
 
 func (s *radarSource) Search(_ context.Context, q string, t core.EntityType) ([]core.ExternalResult, error) {
@@ -53,6 +54,9 @@ func (s *radarSource) GetArtistDiscography(_ context.Context, id string) ([]core
 }
 
 func (s *radarSource) GetAlbum(_ context.Context, id string) (core.ExternalAlbum, error) {
+	if s.albumErr != nil {
+		return core.ExternalAlbum{}, s.albumErr
+	}
 	for _, albums := range s.discographies {
 		for _, al := range albums {
 			if al.ExternalID == id {
@@ -153,6 +157,26 @@ func TestReleaseRadarRetriesWhenNoSourceAnswers(t *testing.T) {
 	got := homeService(&clock{t: saturday}, l, nil, libraryMatcher{}, nil, deezer).RefreshMix(context.Background(), recommend.MixReleaseRadar)
 	if got.Available || got.Period != "" {
 		t.Fatalf("radar %+v, want an outage retried rather than stored empty", got)
+	}
+}
+
+func TestReleaseRadarRetriesWhenNoReleaseCanBeRead(t *testing.T) {
+	l := &fakeListening{plays: playsOf("Justice", "Genesis", 3, saturday.Add(-10*24*time.Hour))}
+	deezer := &radarSource{plainSource: plainSource{name: "deezer"}, albumErr: errors.New("503"), discographies: map[string][]core.ExternalAlbum{
+		"Justice": {album("deezer", "Hyperdrama", "Justice", "2026-09-05")},
+	}}
+	got := homeService(&clock{t: saturday}, l, nil, libraryMatcher{}, nil, deezer).RefreshMix(context.Background(), recommend.MixReleaseRadar)
+	if got.Available || got.Period != "" {
+		t.Fatalf("radar %+v, want unreadable releases retried rather than stored empty", got)
+	}
+}
+
+func TestReleaseRadarStoresAQuietWeekWhenArtistsAreNotOnTheSources(t *testing.T) {
+	l := &fakeListening{plays: playsOf("Local Band", "Demo", 3, saturday.Add(-10*24*time.Hour))}
+	deezer := &radarSource{plainSource: plainSource{name: "deezer"}, discographies: map[string][]core.ExternalAlbum{}}
+	got := homeService(&clock{t: saturday}, l, nil, libraryMatcher{}, nil, deezer).RefreshMix(context.Background(), recommend.MixReleaseRadar)
+	if !got.Available || got.Period != "2026-09-11" || len(got.Tracks) != 0 {
+		t.Fatalf("radar %+v, want an available empty Mix stored for the week", got)
 	}
 }
 

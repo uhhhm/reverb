@@ -206,7 +206,7 @@ func (s *Service) artistCandidates(ctx context.Context, seed ArtistSeed, capable
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			externalID := s.resolveArtistID(ctx, seed, src.SearchSource)
+			externalID, _ := s.resolveArtistID(ctx, seed, src.SearchSource)
 			if externalID == "" {
 				return
 			}
@@ -261,24 +261,26 @@ func (s *Service) artistCandidates(ctx context.Context, seed ArtistSeed, capable
 	return mergeArtistCandidates(all, seed), available
 }
 
-func (s *Service) resolveArtistID(ctx context.Context, seed ArtistSeed, target search.SearchSource) string {
+// resolveArtistID finds the seed artist's id on target. An empty id with a
+// nil error means the source answered and has no such artist.
+func (s *Service) resolveArtistID(ctx context.Context, seed ArtistSeed, target search.SearchSource) (string, error) {
 	if seed.Source == target.Name() && seed.ExternalID != "" {
-		return seed.ExternalID
+		return seed.ExternalID, nil
 	}
 	if seed.Name == "" {
-		return ""
+		return "", nil
 	}
 	want := matching.Normalize(seed.Name)
 	hits, err := target.Search(ctx, seed.Name, core.EntityArtist)
 	if err != nil {
-		return ""
+		return "", err
 	}
 	for _, hit := range hits {
 		if matching.Normalize(hit.Title) == want {
-			return hit.ExternalID
+			return hit.ExternalID, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 func mergeArtistCandidates(in []ArtistCandidate, seed ArtistSeed) []ArtistCandidate {
