@@ -464,6 +464,8 @@ func (s *Server) routes() {
 			pr.Post("/scrobble/lastfm/auth-url", s.handleScrobbleAuthURL)
 			pr.Post("/scrobble/lastfm/complete", s.handleScrobbleComplete)
 			pr.Delete("/scrobble/lastfm", s.handleScrobbleUnlink)
+			pr.Put("/scrobble/listenbrainz", s.handleListenBrainzConnect)
+			pr.Delete("/scrobble/listenbrainz", s.handleListenBrainzUnlink)
 			pr.Get("/scrobble/links", s.handleScrobbleLinks)
 			pr.Post("/scrobble/nowplaying", s.handleScrobbleNowPlaying)
 			pr.Get("/stats/summary", s.handleStatsSummary)

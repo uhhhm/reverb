@@ -5,6 +5,7 @@ import (
 	"log"
 	"maps"
 	"math"
+	"math/bits"
 	"slices"
 	"sync"
 	"time"
@@ -36,6 +37,11 @@ const (
 	// SignalNotInterested is a Not interested mark: on a track when Title is
 	// set, otherwise on the artist.
 	SignalNotInterested
+	// SignalHistory is listening history imported from a linked Last.fm
+	// account: Plays listens of a track, or of an artist when Title is empty.
+	// It is taste input only. It never counts as a play, so it makes nothing
+	// familiar or known, and it stays on the device that imported it.
+	SignalHistory
 )
 
 // TasteSignal is a taste input other than a play.
@@ -44,6 +50,8 @@ type TasteSignal struct {
 	Artist string
 	Title  string
 	At     int64 // unix seconds
+	// Plays is how many listens a SignalHistory records.
+	Plays int
 }
 
 // TasteInputs reads the replicated inputs the taste profile is derived from.
@@ -81,7 +89,12 @@ const (
 	markedTrack       = -12
 	markedTrackArtist = -8
 	markedArtist      = -12
-	quartersPerWeight = 4
+	// Imported history is weighed per doubling of its listens: a listen
+	// counts a quarter of a completed play, and a thousand about two and a
+	// half plays. It is a warm start that Reverb's own plays soon outweigh,
+	// and one track scrobbled a thousand times cannot drown out the rest.
+	historyPerDoubling = 1
+	quartersPerWeight  = 4
 
 	tasteHalfLife = 90 * 24 * time.Hour
 	secondsPerDay = 24 * 60 * 60
@@ -158,6 +171,15 @@ func (t *tally) addSignal(sg TasteSignal) {
 	switch {
 	case sg.Kind == SignalPlaylist:
 		t.add(sg.Artist, sg.Title, sg.At, playlistTrack, playlistArtist, false)
+	case sg.Kind == SignalHistory:
+		// A track's listens say nothing more about its artist: the artist's
+		// own listens arrive as an artist row.
+		q := historyPerDoubling * int64(bits.Len(uint(max(sg.Plays, 0))))
+		if sg.Title != "" {
+			t.add(sg.Artist, sg.Title, sg.At, q, 0, false)
+		} else {
+			t.add(sg.Artist, "", sg.At, 0, q, false)
+		}
 	case sg.Title != "":
 		t.add(sg.Artist, sg.Title, sg.At, markedTrack, markedTrackArtist, false)
 	default:

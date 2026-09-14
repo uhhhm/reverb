@@ -70,6 +70,17 @@ func WithArtistSource(src ArtistSimilarity) Option {
 	}
 }
 
+// WithPersonalSource registers a source of recommendations for the
+// household's own account, such as ListenBrainz's. Discover Weekly draws on
+// it alongside its seeds while an account is connected.
+func WithPersonalSource(src PersonalSource) Option {
+	return func(s *Service) {
+		if src != nil {
+			s.personal = append(s.personal, src)
+		}
+	}
+}
+
 // Matcher decides whether a track is already in the library.
 // *matching.Service satisfies it.
 type Matcher interface {
@@ -120,6 +131,7 @@ type Service struct {
 	local        LocalSimilarity
 	tracks       []TrackSimilarity
 	artists      []ArtistSimilarity
+	personal     []PersonalSource
 	trackGates   map[string]*gate
 	matcher      func() Matcher
 	catalogIDs   func(context.Context, []string) map[string]string
@@ -133,6 +145,7 @@ type Service struct {
 	background   func(func())
 	refreshMu    sync.Mutex
 	refreshing   map[string]bool
+	rerun        map[string]bool
 	attempts     map[string]time.Time
 }
 
@@ -145,7 +158,7 @@ func WithBackground(start func(run func())) Option { return func(s *Service) { s
 func New(sources func() []search.SearchSource, opts ...Option) *Service {
 	s := &Service{sources: sources, timeout: defaultTimeout, now: time.Now, sleep: sleepContext,
 		background: func(run func()) { go run() },
-		refreshing: map[string]bool{}, attempts: map[string]time.Time{}}
+		refreshing: map[string]bool{}, rerun: map[string]bool{}, attempts: map[string]time.Time{}}
 	for _, opt := range opts {
 		opt(s)
 	}

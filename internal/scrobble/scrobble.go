@@ -27,15 +27,30 @@ type Creds struct {
 	SessionKey string
 }
 
-// Scrobbler is the provider-agnostic scrobbling interface.
-// Task 3 (service/worker) depends on these exact method signatures.
-type Scrobbler interface {
+// Submitter uploads listens to one provider. Creds.SessionKey carries the
+// user's session key or token.
+type Submitter interface {
 	// NowPlaying updates the "now playing" status on the provider.
 	NowPlaying(ctx context.Context, c Creds, t Track) error
 
 	// Scrobble submits one or more completed plays to the provider.
 	// Returns the number of plays the provider accepted.
 	Scrobble(ctx context.Context, c Creds, plays []ScrobblePlay) (accepted int, err error)
+}
+
+// TokenProvider is a provider linked by pasting a user token, such as
+// ListenBrainz. It needs no app-level credentials.
+type TokenProvider interface {
+	Submitter
+	// ValidateToken returns the account name a token belongs to, or an error
+	// wrapping ErrAuth when the provider rejects it.
+	ValidateToken(ctx context.Context, token string) (username string, err error)
+}
+
+// Scrobbler is Last.fm's interface: a Submitter linked through Last.fm's
+// OAuth-style token flow with app-level credentials.
+type Scrobbler interface {
+	Submitter
 
 	// AuthURL starts the OAuth-style token flow: it fetches a request token
 	// from the provider and returns the URL the user must visit plus the token
@@ -46,6 +61,16 @@ type Scrobbler interface {
 	CompleteAuth(ctx context.Context, c Creds, token string) (sessionKey, username string, err error)
 }
 
+// Provider names, as stored on links and queue rows.
+const (
+	LastFM       = "lastfm"
+	ListenBrainz = "listenbrainz"
+)
+
 // ErrAuth is returned when the provider rejects the caller's credentials
 // (e.g. Last.fm error code 9 — invalid/expired session key).
 var ErrAuth = errors.New("scrobble: provider rejected credentials")
+
+// ErrUnknownProvider is returned for a provider that is not registered, or
+// that is not linked the way the caller asked.
+var ErrUnknownProvider = errors.New("scrobble: unknown provider")

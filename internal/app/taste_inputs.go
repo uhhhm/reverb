@@ -7,14 +7,17 @@ import (
 	"github.com/uhhhm/reverb/internal/notinterested"
 	"github.com/uhhhm/reverb/internal/recommend"
 	"github.com/uhhhm/reverb/internal/store/db"
+	"github.com/uhhhm/reverb/internal/tastehistory"
 )
 
 // tasteInputs reads the taste profile's inputs from the store: plays,
-// playlist tracks and Not interested marks. All of them replicate, so paired
-// devices build the same profile (ADR 0001).
+// playlist tracks and Not interested marks, which replicate so paired devices
+// build the same profile (ADR 0001), and imported Last.fm history, which
+// stays on the device holding the Last.fm link.
 type tasteInputs struct {
-	q     *db.Queries
-	marks *notinterested.Service
+	q       *db.Queries
+	marks   *notinterested.Service
+	history *tastehistory.Service
 }
 
 func (t tasteInputs) PlaysAfter(ctx context.Context, after int64, limit int) ([]recommend.TastePlay, error) {
@@ -63,6 +66,13 @@ func (t tasteInputs) Signals(ctx context.Context) ([]recommend.TasteSignal, erro
 			sg.Title = m.Title
 		}
 		out = append(out, sg)
+	}
+	if t.history != nil {
+		history, err := t.history.Signals(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, history...)
 	}
 	return out, nil
 }

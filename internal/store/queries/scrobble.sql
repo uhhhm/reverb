@@ -51,3 +51,22 @@ WHERE id = ?;
 UPDATE scrobble_queue
 SET status = 'failed'
 WHERE id = ?;
+
+-- name: ListActiveScrobbleLinksByProvider :many
+SELECT user_id, provider, session_key, username, status, created_at
+FROM scrobble_link
+WHERE provider = ? AND status = 'active'
+ORDER BY created_at, user_id;
+
+-- name: DeletePendingScrobbles :exec
+DELETE FROM scrobble_queue
+WHERE user_id = ? AND provider = ? AND status = 'pending';
+
+-- name: ListSentScrobbles :many
+SELECT artist, title, played_at
+FROM scrobble_queue
+WHERE provider = ? AND status = 'done';
+
+-- name: CountScrobbleLinksByProvider :one
+SELECT COUNT(*) FROM scrobble_link
+WHERE provider = ?;

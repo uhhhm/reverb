@@ -12,3 +12,8 @@ Two devices can show slightly different Mixes when one has not synced recently.
 Scheduled Mixes refresh at fixed local times using a seed shared per period, so
 devices with the same inputs produce the same results. Recommendation output is
 never written to the change log. Only the inputs sync.
+
+Two inputs come from an account linked on one device rather than from synced
+data: imported Last.fm history, and a connected ListenBrainz account's personal
+recommendations in Discover Weekly. Scrobbling links are per device, so a device
+without the link ranks without them.

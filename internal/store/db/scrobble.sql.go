@@ -9,6 +9,33 @@ import (
 	"context"
 )
 
+const countScrobbleLinksByProvider = `-- name: CountScrobbleLinksByProvider :one
+SELECT COUNT(*) FROM scrobble_link
+WHERE provider = ?
+`
+
+func (q *Queries) CountScrobbleLinksByProvider(ctx context.Context, provider string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countScrobbleLinksByProvider, provider)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const deletePendingScrobbles = `-- name: DeletePendingScrobbles :exec
+DELETE FROM scrobble_queue
+WHERE user_id = ? AND provider = ? AND status = 'pending'
+`
+
+type DeletePendingScrobblesParams struct {
+	UserID   string `json:"user_id"`
+	Provider string `json:"provider"`
+}
+
+func (q *Queries) DeletePendingScrobbles(ctx context.Context, arg DeletePendingScrobblesParams) error {
+	_, err := q.db.ExecContext(ctx, deletePendingScrobbles, arg.UserID, arg.Provider)
+	return err
+}
+
 const deleteScrobbleLink = `-- name: DeleteScrobbleLink :exec
 DELETE FROM scrobble_link
 WHERE user_id = ? AND provider = ?
@@ -89,6 +116,43 @@ func (q *Queries) InsertScrobbleQueue(ctx context.Context, arg InsertScrobbleQue
 	return err
 }
 
+const listActiveScrobbleLinksByProvider = `-- name: ListActiveScrobbleLinksByProvider :many
+SELECT user_id, provider, session_key, username, status, created_at
+FROM scrobble_link
+WHERE provider = ? AND status = 'active'
+ORDER BY created_at, user_id
+`
+
+func (q *Queries) ListActiveScrobbleLinksByProvider(ctx context.Context, provider string) ([]ScrobbleLink, error) {
+	rows, err := q.db.QueryContext(ctx, listActiveScrobbleLinksByProvider, provider)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ScrobbleLink
+	for rows.Next() {
+		var i ScrobbleLink
+		if err := rows.Scan(
+			&i.UserID,
+			&i.Provider,
+			&i.SessionKey,
+			&i.Username,
+			&i.Status,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listScrobbleLinks = `-- name: ListScrobbleLinks :many
 SELECT user_id, provider, session_key, username, status, created_at
 FROM scrobble_link
@@ -113,6 +177,41 @@ func (q *Queries) ListScrobbleLinks(ctx context.Context, userID string) ([]Scrob
 			&i.Status,
 			&i.CreatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSentScrobbles = `-- name: ListSentScrobbles :many
+SELECT artist, title, played_at
+FROM scrobble_queue
+WHERE provider = ? AND status = 'done'
+`
+
+type ListSentScrobblesRow struct {
+	Artist   string `json:"artist"`
+	Title    string `json:"title"`
+	PlayedAt int64  `json:"played_at"`
+}
+
+func (q *Queries) ListSentScrobbles(ctx context.Context, provider string) ([]ListSentScrobblesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listSentScrobbles, provider)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSentScrobblesRow
+	for rows.Next() {
+		var i ListSentScrobblesRow
+		if err := rows.Scan(&i.Artist, &i.Title, &i.PlayedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

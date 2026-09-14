@@ -157,3 +157,117 @@ func TestDiscoverWeeklyUnavailableOfflineKeepsNothing(t *testing.T) {
 		t.Fatalf("offline mix %+v, want unavailable and empty", got)
 	}
 }
+
+// fakePersonal stands in for ListenBrainz's recommendations for the account.
+type fakePersonal struct {
+	cands []recommend.TrackCandidate
+	err   error
+}
+
+func (fakePersonal) Name() string                     { return "listenbrainz" }
+func (f fakePersonal) Connected(context.Context) bool { return f.err == nil }
+func (f fakePersonal) Recommendations(context.Context, int) ([]recommend.TrackCandidate, error) {
+	return f.cands, f.err
+}
+
+func TestDiscoverWeeklyDrawsOnAConnectedPersonalSource(t *testing.T) {
+	l, taste, sim, deezer := discoverFixture()
+	deezer.tracks = append(deezer.tracks, deezerTrack("7", "Zed", "Zulu"))
+	personal := recommend.WithPersonalSource(fakePersonal{cands: []recommend.TrackCandidate{
+		{Artist: "Zulu", Title: "Zed"}, {Artist: "Heard", Title: "Already"},
+	}})
+	svc := homeService(&clock{t: wednesday}, l, sim, libraryMatcher{"owned song": "lib-1"}, []recommend.Option{recommend.WithTaste(taste), personal}, deezer)
+
+	got := svc.RefreshMix(context.Background(), recommend.MixDiscoverWeekly)
+	var zed *core.ExternalResult
+	for i, tr := range got.Tracks {
+		if tr.Title == "Already" {
+			t.Fatal("a played track came back from the personal source")
+		}
+		if tr.Title == "Zed" {
+			zed = &got.Tracks[i]
+		}
+	}
+	if zed == nil {
+		t.Fatalf("tracks %v, want the personal recommendation Zed", titles(got.Tracks))
+	}
+	if zed.Reason == nil || zed.Reason.Kind != core.ReasonPersonal || len(zed.RecommendationSources) != 1 || zed.RecommendationSources[0] != "listenbrainz" {
+		t.Fatalf("Zed reason %+v, sources %v", zed.Reason, zed.RecommendationSources)
+	}
+}
+
+func TestDiscoverWeeklyWithoutAPersonalAccountIsUnchanged(t *testing.T) {
+	ctx := context.Background()
+	want := discoverService(&clock{t: wednesday}).RefreshMix(ctx, recommend.MixDiscoverWeekly)
+	l, taste, sim, deezer := discoverFixture()
+	personal := recommend.WithPersonalSource(fakePersonal{err: recommend.ErrNotConfigured})
+	got := homeService(&clock{t: wednesday}, l, sim, libraryMatcher{"owned song": "lib-1"}, []recommend.Option{recommend.WithTaste(taste), personal}, deezer).
+		RefreshMix(ctx, recommend.MixDiscoverWeekly)
+
+	if !reflect.DeepEqual(titles(got.Tracks), titles(want.Tracks)) || got.Available != want.Available {
+		t.Fatalf("with a disconnected personal source %v, want %v", titles(got.Tracks), titles(want.Tracks))
+	}
+}
+
+// switchablePersonal is a personal source whose account can be connected
+// after the Mix was generated.
+type switchablePersonal struct {
+	connected bool
+	cands     []recommend.TrackCandidate
+}
+
+func (*switchablePersonal) Name() string                     { return "listenbrainz" }
+func (p *switchablePersonal) Connected(context.Context) bool { return p.connected }
+func (p *switchablePersonal) Recommendations(context.Context, int) ([]recommend.TrackCandidate, error) {
+	if !p.connected {
+		return nil, recommend.ErrNotConfigured
+	}
+	return p.cands, nil
+}
+
+func TestConnectingAPersonalAccountRegeneratesDiscoverWeekly(t *testing.T) {
+	ctx := context.Background()
+	l, taste, sim, deezer := discoverFixture()
+	deezer.tracks = append(deezer.tracks, deezerTrack("7", "Zed", "Zulu"))
+	src := &switchablePersonal{cands: []recommend.TrackCandidate{{Artist: "Zulu", Title: "Zed"}}}
+	svc := homeService(&clock{t: wednesday}, l, sim, libraryMatcher{"owned song": "lib-1"},
+		[]recommend.Option{recommend.WithTaste(taste), recommend.WithPersonalSource(src)}, deezer)
+	svc.Mix(ctx, recommend.MixDiscoverWeekly) // generates this week's Mix
+	if before := titles(svc.Mix(ctx, recommend.MixDiscoverWeekly).Tracks); reflect.DeepEqual(before, []string{}) || contains(before, "Zed") {
+		t.Fatalf("before connecting %v", before)
+	}
+
+	src.connected = true
+	svc.PersonalSourceChanged(ctx)
+	if after := titles(svc.Mix(ctx, recommend.MixDiscoverWeekly).Tracks); !contains(after, "Zed") {
+		t.Fatalf("after connecting %v, want Zed", after)
+	}
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+func TestDisconnectingHidesPersonalTracksFromAMixKeptOffline(t *testing.T) {
+	ctx := context.Background()
+	l, taste, sim, deezer := discoverFixture()
+	deezer.tracks = append(deezer.tracks, deezerTrack("7", "Zed", "Zulu"))
+	src := &switchablePersonal{connected: true, cands: []recommend.TrackCandidate{{Artist: "Zulu", Title: "Zed"}}}
+	svc := homeService(&clock{t: wednesday}, l, sim, libraryMatcher{"owned song": "lib-1"},
+		[]recommend.Option{recommend.WithTaste(taste), recommend.WithPersonalSource(src)}, deezer)
+	svc.Mix(ctx, recommend.MixDiscoverWeekly)
+	if got := titles(svc.Mix(ctx, recommend.MixDiscoverWeekly).Tracks); !contains(got, "Zed") {
+		t.Fatalf("connected mix %v, want Zed", got)
+	}
+
+	// The link breaks; no regeneration has happened yet.
+	src.connected = false
+	if got := titles(svc.Mix(ctx, recommend.MixDiscoverWeekly).Tracks); contains(got, "Zed") || len(got) == 0 {
+		t.Fatalf("after disconnecting %v, want the rest without Zed", got)
+	}
+}

@@ -261,8 +261,9 @@ describe('IntegrationsSection', () => {
 
     wrap(<IntegrationsSection />)
 
+    // One message per integration row.
     await waitFor(() => {
-      expect(screen.getByText(/couldn't load your integrations/i)).toBeInTheDocument()
+      expect(screen.getAllByText(/couldn't load your integrations/i)).toHaveLength(2)
     })
     expect(screen.queryByText(/loading/i)).not.toBeInTheDocument()
   })

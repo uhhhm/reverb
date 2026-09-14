@@ -40,6 +40,17 @@ type TrackSimilarity interface {
 	SimilarTracks(ctx context.Context, seed TrackSeed, limit int) ([]TrackCandidate, error)
 }
 
+// PersonalSource recommends recordings for the household's own account on a
+// service, rather than for a seed; ListenBrainz's collaborative filtering is
+// one. It returns ErrNotConfigured while no account is connected.
+type PersonalSource interface {
+	Name() string
+	Recommendations(ctx context.Context, limit int) ([]TrackCandidate, error)
+	// Connected reports, without a network call, whether an account is
+	// connected now.
+	Connected(ctx context.Context) bool
+}
+
 const (
 	// similarTrackCandidates is how many candidates are asked for: some never
 	// match anything playable, so more are fetched than are shown.

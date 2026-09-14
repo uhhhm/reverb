@@ -21,6 +21,10 @@ const (
 	// ReasonNewRelease: "New from <Artist> · <Title>" — a Release Radar
 	// track; Title names the release.
 	ReasonNewRelease ReasonKind = "newRelease"
+	// ReasonPersonal: "Recommended for you on ListenBrainz" — from the
+	// connected account's own recommendations rather than a seed; Artist is
+	// empty.
+	ReasonPersonal ReasonKind = "personal"
 )
 
 // RecommendationReason is the short reason shown with a recommendation.

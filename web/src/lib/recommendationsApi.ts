@@ -142,6 +142,8 @@ export function reasonText(reason: RecommendationReason | undefined): string | u
       return `More from ${reason.artist}`
     case 'newRelease':
       return reason.title ? `New from ${reason.artist} · ${reason.title}` : `New from ${reason.artist}`
+    case 'personal':
+      return 'Recommended for you on ListenBrainz'
     default:
       return undefined
   }

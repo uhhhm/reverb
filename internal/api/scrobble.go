@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"log"
 	"net/http"
 
@@ -163,5 +164,65 @@ func (s *Server) handleScrobbleNowPlaying(w http.ResponseWriter, r *http.Request
 		Album:      in.Album,
 		DurationMs: in.DurationMs,
 	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleListenBrainzConnect serves PUT /api/v1/scrobble/listenbrainz.
+// Body: {"token": "<ListenBrainz user token>"}. The token is checked with
+// ListenBrainz, then stored like a Last.fm session key: it is never returned
+// or logged. Uploads are opt-in, so nothing is sent until this succeeds.
+// Returns {"username"}; 400 {"error":"invalid_token"} when ListenBrainz
+// rejects the token, 502 {"error":"listenbrainz_unavailable"} when it cannot
+// be reached, and 503 when ListenBrainz uploads are not wired in.
+func (s *Server) handleListenBrainzConnect(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Scrobble == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "scrobble service unavailable"})
+		return
+	}
+	cu, ok := currentUser(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	var in struct {
+		Token string `json:"token"`
+	}
+	if err := decode(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	username, err := s.deps.Scrobble.ConnectToken(r.Context(), cu.ID, scrobble.ListenBrainz, in.Token)
+	switch {
+	case errors.Is(err, scrobble.ErrAuth):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_token"})
+		return
+	case errors.Is(err, scrobble.ErrUnknownProvider):
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "listenbrainz uploads unavailable"})
+		return
+	case err != nil:
+		log.Printf("scrobble: listenbrainz connect user=%s: %v", cu.ID, err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "listenbrainz_unavailable"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"username": username})
+}
+
+// handleListenBrainzUnlink serves DELETE /api/v1/scrobble/listenbrainz.
+// Removes the link and its pending uploads. Returns 204.
+func (s *Server) handleListenBrainzUnlink(w http.ResponseWriter, r *http.Request) {
+	if s.deps.Scrobble == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "scrobble service unavailable"})
+		return
+	}
+	cu, ok := currentUser(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if err := s.deps.Scrobble.Unlink(r.Context(), cu.ID, scrobble.ListenBrainz); err != nil {
+		log.Printf("scrobble: listenbrainz unlink user=%s: %v", cu.ID, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not disconnect"})
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

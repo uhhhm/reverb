@@ -2,10 +2,16 @@ import { api, ApiError } from './api'
 
 // ── Error type ────────────────────────────────────────────────────────────────
 
-export class ScrobbleError extends Error {
-  code: 'lastfm_not_configured' | 'lastfm_unavailable'
+export type ScrobbleErrorCode =
+  | 'lastfm_not_configured'
+  | 'lastfm_unavailable'
+  | 'invalid_token'
+  | 'listenbrainz_unavailable'
 
-  constructor(code: 'lastfm_not_configured' | 'lastfm_unavailable', message: string) {
+export class ScrobbleError extends Error {
+  code: ScrobbleErrorCode
+
+  constructor(code: ScrobbleErrorCode, message: string) {
     super(message)
     this.name = 'ScrobbleError'
     this.code = code
@@ -65,6 +71,33 @@ export function lastfmComplete(token: string): Promise<{ username: string }> {
 /** DELETE /api/v1/scrobble/lastfm → void */
 export function lastfmDisconnect(): Promise<void> {
   return api.del<void>('/scrobble/lastfm')
+}
+
+/**
+ * PUT /api/v1/scrobble/listenbrainz { token } → { username }
+ *
+ * Throws ScrobbleError with code 'invalid_token' when ListenBrainz rejects the
+ * token, and 'listenbrainz_unavailable' on any other error.
+ */
+export async function listenbrainzConnect(token: string): Promise<{ username: string }> {
+  try {
+    return await api.put<{ username: string }>('/scrobble/listenbrainz', { token })
+  } catch (e) {
+    if (
+      e instanceof ApiError &&
+      e.status === 400 &&
+      e.body &&
+      (e.body as Record<string, unknown>).error === 'invalid_token'
+    ) {
+      throw new ScrobbleError('invalid_token', 'ListenBrainz rejected the token')
+    }
+    throw new ScrobbleError('listenbrainz_unavailable', 'ListenBrainz is temporarily unavailable')
+  }
+}
+
+/** DELETE /api/v1/scrobble/listenbrainz → void. Stops uploads. */
+export function listenbrainzDisconnect(): Promise<void> {
+  return api.del<void>('/scrobble/listenbrainz')
 }
 
 /** POST /api/v1/scrobble/nowplaying → void (fire-and-forget) */

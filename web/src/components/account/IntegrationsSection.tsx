@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
+import type { FormEvent } from 'react'
 import { Button } from '../ui'
 import {
   getLinks,
   lastfmAuthUrl,
   lastfmComplete,
   lastfmDisconnect,
+  listenbrainzConnect,
+  listenbrainzDisconnect,
   ScrobbleError,
 } from '../../lib/scrobbleApi'
 import type { ScrobbleLink } from '../../lib/scrobbleApi'
@@ -207,12 +210,104 @@ function LastfmUserWidget({ state }: LastfmUserWidgetProps) {
   )
 }
 
+// ── ListenBrainz connect widget ──────────────────────────────────────────────
+
+const MSG_LB_INVALID = "ListenBrainz didn't accept that token — check it and try again."
+const MSG_LB_UNAVAILABLE = 'ListenBrainz is temporarily unavailable — try again.'
+
+function ErrorNote({ message }: { message: string | null }) {
+  if (!message) return null
+  return (
+    <span role="alert" className="text-xs text-text-secondary">
+      {message}
+    </span>
+  )
+}
+
+// Uploading to ListenBrainz is opt-in: nothing is sent until a token is
+// connected here. The token is sent once and never shown again.
+function ListenBrainzWidget({ link }: { link: ScrobbleLink | null }) {
+  const [username, setUsername] = useState<string | null>(
+    link?.status === 'active' ? link.username : null,
+  )
+  const [token, setToken] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleConnect(e: FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await listenbrainzConnect(token.trim())
+      setUsername(res.username)
+      setToken('')
+    } catch (err) {
+      setError(
+        err instanceof ScrobbleError && err.code === 'invalid_token'
+          ? MSG_LB_INVALID
+          : MSG_LB_UNAVAILABLE,
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function handleDisconnect() {
+    setBusy(true)
+    setError(null)
+    listenbrainzDisconnect()
+      .then(() => setUsername(null))
+      .catch(() => setError("Couldn't disconnect ListenBrainz — try again."))
+      .finally(() => setBusy(false))
+  }
+
+  if (username) {
+    return (
+      <div className="flex flex-col items-end gap-2">
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-text-primary">Connected as {username}</span>
+          <Button variant="secondary" disabled={busy} onClick={handleDisconnect}>
+            Disconnect
+          </Button>
+        </div>
+        <ErrorNote message={error} />
+      </div>
+    )
+  }
+
+  return (
+    <form onSubmit={(e) => void handleConnect(e)} className="flex flex-col items-end gap-2">
+      {link?.status === 'broken' && (
+        <span className="text-xs text-text-secondary">
+          {link.username} — ListenBrainz needs a new token
+        </span>
+      )}
+      <div className="flex items-center gap-2">
+        <input
+          type="password"
+          aria-label="ListenBrainz user token"
+          placeholder="User token"
+          autoComplete="off"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          className="w-48 h-9 px-3 rounded-md bg-input text-sm text-text-primary border border-border-subtle focus:outline-none focus:ring-2 focus:ring-accent"
+        />
+        <Button type="submit" variant="secondary" disabled={busy || !token.trim()}>
+          Connect
+        </Button>
+      </div>
+      <ErrorNote message={error} />
+    </form>
+  )
+}
+
 // ── IntegrationsSection ───────────────────────────────────────────────────────
 
 type LoadState =
   | { phase: 'loading' }
   | { phase: 'error' }
-  | { phase: 'ready'; data: LastfmLinkState }
+  | { phase: 'ready'; data: LastfmLinkState; listenbrainz: ScrobbleLink | null }
 
 export function IntegrationsSection() {
   const [load, setLoad] = useState<LoadState>({ phase: 'loading' })
@@ -221,7 +316,12 @@ export function IntegrationsSection() {
     void getLinks()
       .then((res) => {
         const lastfmLink = res.links.find((l) => l.provider === 'lastfm') ?? null
-        setLoad({ phase: 'ready', data: { configured: res.configured, link: lastfmLink } })
+        const lbLink = res.links.find((l) => l.provider === 'listenbrainz') ?? null
+        setLoad({
+          phase: 'ready',
+          data: { configured: res.configured, link: lastfmLink },
+          listenbrainz: lbLink,
+        })
       })
       .catch(() => setLoad({ phase: 'error' }))
   }
@@ -239,12 +339,42 @@ export function IntegrationsSection() {
         <div className="flex-1 min-w-0">
           <div className="text-sm font-bold text-text-primary">Last.fm</div>
           <div className="text-xs text-text-secondary mt-0.5">
-            Scrobble your listening history to Last.fm.
+            Scrobble your listening history to Last.fm. Your Last.fm history also shapes
+            recommendations on this device; disconnecting removes it.
           </div>
         </div>
         <div className="flex-none max-w-xs">
           {load.phase === 'ready' ? (
             <LastfmUserWidget key={String(load.data.configured)} state={load.data} />
+          ) : load.phase === 'error' ? (
+            <span className="text-xs text-text-secondary">
+              Couldn&apos;t load your integrations.
+            </span>
+          ) : (
+            <span className="text-xs text-text-secondary">Loading…</span>
+          )}
+        </div>
+      </div>
+
+      {/* ListenBrainz: opt-in uploads */}
+      <div className="flex items-start gap-5 py-5">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-bold text-text-primary">ListenBrainz</div>
+          <div className="text-xs text-text-secondary mt-0.5">
+            Upload your listens to ListenBrainz to get its personal recommendations in
+            Discover Weekly. Off until you connect.{' '}
+            <strong className="font-semibold text-text-primary">
+              Listens on ListenBrainz are public.
+            </strong>{' '}
+            Find your user token in your ListenBrainz settings.
+          </div>
+        </div>
+        <div className="flex-none max-w-xs">
+          {load.phase === 'ready' ? (
+            <ListenBrainzWidget
+              key={`${load.listenbrainz?.status ?? ''} ${load.listenbrainz?.username ?? ''}`}
+              link={load.listenbrainz}
+            />
           ) : load.phase === 'error' ? (
             <span className="text-xs text-text-secondary">
               Couldn&apos;t load your integrations.

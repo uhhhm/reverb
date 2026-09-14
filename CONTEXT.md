@@ -74,7 +74,8 @@ _Avoid_: Suggestion, pick
 **Taste profile**:
 The household's single model of what it likes, derived from plays, library and
 playlist contents, and not-interested marks. There is one per household, not per
-person or device.
+person or device. Linked Last.fm history adds a warm start, but only the device
+holding the Last.fm link has it.
 _Avoid_: User profile, preferences
 
 **Not interested**:

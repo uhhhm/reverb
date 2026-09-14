@@ -296,6 +296,46 @@ func apiSig(params map[string]string, secret string) string {
 	return fmt.Sprintf("%x", sum)
 }
 
+// getJSON makes an unsigned read with the app's API key and decodes the
+// response into dst.
+func (a *Adapter) getJSON(ctx context.Context, method, key string, q url.Values, dst any) error {
+	q.Set("method", method)
+	q.Set("api_key", key)
+	q.Set("format", "json")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.baseURL+"?"+q.Encode(), nil)
+	if err != nil {
+		return fmt.Errorf("lastfm: build request: %w", err)
+	}
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("lastfm: http: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("lastfm: read body: %w", err)
+	}
+	var e struct {
+		Error   int    `json:"error"`
+		Message string `json:"message"`
+	}
+	// Last.fm reports errors in the body, sometimes under a non-200 status, so
+	// the body is read before the status decides anything.
+	if err := json.Unmarshal(body, &e); err != nil {
+		return fmt.Errorf("lastfm: decode response (HTTP %d): %w", resp.StatusCode, err)
+	}
+	if e.Error != 0 {
+		return lastfmError(e.Error, e.Message)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("lastfm: %s: HTTP %d", method, resp.StatusCode)
+	}
+	if err := json.Unmarshal(body, dst); err != nil {
+		return fmt.Errorf("lastfm: %s: decode response: %w", method, err)
+	}
+	return nil
+}
+
 // lastfmError maps a Last.fm error code to the appropriate Go error.
 // Code 9 = Invalid session key → scrobble.ErrAuth.
 func lastfmError(code int, msg string) error {

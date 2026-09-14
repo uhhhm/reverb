@@ -5529,10 +5529,10 @@ export interface components {
             coverUrl?: string;
             coverArtId?: string;
         };
-        /** @description Why something was recommended. artist and title name the seed. played: "Because you played <title>". similar: "Similar to <title>". fansAlsoLike: "Fans of <artist> also like". radioArtist: one of the seed artist's own tracks, leading a Radio started from that artist. moreFrom: "More from <artist>". newRelease: a Release Radar track, with title naming the release. */
+        /** @description Why something was recommended. artist and title name the seed. played: "Because you played <title>". similar: "Similar to <title>". fansAlsoLike: "Fans of <artist> also like". radioArtist: one of the seed artist's own tracks, leading a Radio started from that artist. moreFrom: "More from <artist>". newRelease: a Release Radar track, with title naming the release. personal: from the connected ListenBrainz account's own recommendations, with no seed; artist is empty. */
         RecommendationReason: {
             /** @enum {string} */
-            kind: "played" | "similar" | "fansAlsoLike" | "radioArtist" | "moreFrom" | "newRelease";
+            kind: "played" | "similar" | "fansAlsoLike" | "radioArtist" | "moreFrom" | "newRelease" | "personal";
             artist: string;
             title?: string;
         };

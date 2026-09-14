@@ -1,0 +1,10 @@
+{
+  "5d4b9c52-3b87-4d1a-a0b8-2f5fb1d9a7f1": {
+    "artist": { "name": "Justice", "artist_credit_id": 11 },
+    "recording": { "name": "Genesis", "length": 234000 }
+  },
+  "d18a1284-d6a1-42d9-b0c1-b247e9f27b80": {
+    "artist": { "name": "Justice", "artist_credit_id": 11 },
+    "recording": { "name": "D.A.N.C.E.", "length": 242000 }
+  }
+}

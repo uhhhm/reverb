@@ -43,12 +43,24 @@ type RecordedSource struct {
 }
 
 // Fixture combines anonymised history and recorded network responses.
+// History is optional imported Last.fm history, fed to the taste profile
+// alongside the training plays.
 type Fixture struct {
 	Name        string           `json:"name"`
 	HoldoutDays int              `json:"holdoutDays"`
 	K           int              `json:"k"`
 	Plays       []Play           `json:"plays"`
+	History     []HistoryListens `json:"history,omitempty"`
 	Sources     []RecordedSource `json:"sources"`
+}
+
+// HistoryListens is one row of imported Last.fm history: listens of a track,
+// or of an artist when Title is empty.
+type HistoryListens struct {
+	Artist string `json:"artist"`
+	Title  string `json:"title,omitempty"`
+	Plays  int    `json:"plays"`
+	At     int64  `json:"at"`
 }
 
 // SurfaceMetrics measures one recommendation surface against the hidden plays.
@@ -90,7 +102,7 @@ func Evaluate(ctx context.Context, fixture Fixture) (Report, error) {
 		recommend.WithTimeout(time.Second),
 		recommend.WithClock(func() time.Time { return time.Unix(1_700_000_000, 0) }),
 		recommend.WithSleep(func(context.Context, time.Duration) error { return nil }),
-		recommend.WithTaste(historyTaste(training)),
+		recommend.WithTaste(historyTaste{plays: training, history: fixture.History}),
 	}
 	for i := range fixture.Sources {
 		options = append(options, recommend.WithTrackSource(replaySource{source: &fixture.Sources[i]}))
@@ -279,20 +291,29 @@ func nameKey(artist, title string) string {
 	return "name:" + matching.Normalize(matching.PrimaryArtist(artist)) + "\x1f" + matching.Normalize(title)
 }
 
-// historyTaste feeds the training plays to the taste profile. The fixture
-// keeps only what the evaluator needs, so every play counts as completed.
-type historyTaste []Play
+// historyTaste feeds the training plays, and any imported history, to the
+// taste profile. The fixture keeps only what the evaluator needs, so every
+// play counts as completed.
+type historyTaste struct {
+	plays   []Play
+	history []HistoryListens
+}
 
 func (h historyTaste) PlaysAfter(_ context.Context, after int64, limit int) ([]recommend.TastePlay, error) {
 	var out []recommend.TastePlay
-	for i := int(after); i < len(h) && len(out) < limit; i++ {
-		out = append(out, recommend.TastePlay{Seq: int64(i + 1), Artist: h[i].Artist, Title: h[i].Title, PlayedAt: h[i].PlayedAt, Completed: true})
+	for i := int(after); i < len(h.plays) && len(out) < limit; i++ {
+		p := h.plays[i]
+		out = append(out, recommend.TastePlay{Seq: int64(i + 1), Artist: p.Artist, Title: p.Title, PlayedAt: p.PlayedAt, Completed: true})
 	}
 	return out, nil
 }
-func (h historyTaste) PlayCount(context.Context) (int64, error) { return int64(len(h)), nil }
-func (historyTaste) Signals(context.Context) ([]recommend.TasteSignal, error) {
-	return nil, nil
+func (h historyTaste) PlayCount(context.Context) (int64, error) { return int64(len(h.plays)), nil }
+func (h historyTaste) Signals(context.Context) ([]recommend.TasteSignal, error) {
+	out := make([]recommend.TasteSignal, len(h.history))
+	for i, l := range h.history {
+		out[i] = recommend.TasteSignal{Kind: recommend.SignalHistory, Artist: l.Artist, Title: l.Title, Plays: l.Plays, At: l.At}
+	}
+	return out, nil
 }
 
 type replaySource struct{ source *RecordedSource }

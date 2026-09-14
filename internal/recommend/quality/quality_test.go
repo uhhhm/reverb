@@ -2,6 +2,8 @@ package quality_test
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"reflect"
 	"testing"
 
@@ -141,5 +143,37 @@ func TestDefaultAnonymisedFixtureMatchesCheckedInBaseline(t *testing.T) {
 		if play.MBID == "" || play.Artist == "" || play.Title == "" {
 			t.Fatalf("fixture play lacks anonymous identity: %+v", play)
 		}
+	}
+}
+
+// Linked Last.fm history must not make the checked-in fixture worse. The
+// fixture has no real Last.fm data, so its history is written to match the
+// training plays' taste: their artists and tracks, artists never played in
+// Reverb, and an artist the sources propose. It names no proposed track the
+// held-out plays lack: history saying such a track was played is meant to
+// lift it, which would score as a miss here only because the history is
+// invented.
+func TestLastfmHistoryIsNoWorseThanWithout(t *testing.T) {
+	fixture, err := quality.LoadFixture("testdata/history.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	without, err := quality.Evaluate(context.Background(), fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile("testdata/lastfm_history.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(body, &fixture.History); err != nil {
+		t.Fatal(err)
+	}
+	with, err := quality.Evaluate(context.Background(), fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if regressions := quality.Compare(with, without); len(regressions) != 0 {
+		t.Fatalf("Last.fm history made ranking worse: %v", regressions)
 	}
 }

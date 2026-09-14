@@ -29,6 +29,19 @@ const (
 // seeds gathers support from each, and its reason names the seed that ranked
 // it highest. available reports whether any source could be asked.
 func (s *Service) fromSeeds(ctx context.Context, lookup, exclude []Seed, policy surfacePolicy, recent map[string]bool, profile *Profile) ([]core.ExternalResult, bool) {
+	return s.fromSeedsWith(ctx, lookup, exclude, policy, recent, profile, nil)
+}
+
+// extraList is a ranked list of playable tracks drawn from no seed, such as a
+// personal source's, and the reason each of its tracks carries.
+type extraList struct {
+	tracks []core.ExternalResult
+	reason *core.RecommendationReason
+}
+
+// fromSeedsWith is fromSeeds with extra lists merged in as if each were one
+// more seed's.
+func (s *Service) fromSeedsWith(ctx context.Context, lookup, exclude []Seed, policy surfacePolicy, recent map[string]bool, profile *Profile, extra []extraList) ([]core.ExternalResult, bool) {
 	lists := make([]TrackResult, len(lookup))
 	var wg sync.WaitGroup
 	for i, sd := range lookup {
@@ -40,26 +53,32 @@ func (s *Service) fromSeeds(ctx context.Context, lookup, exclude []Seed, policy 
 	}
 	wg.Wait()
 
-	available := false
-	trackLists := make([][]core.ExternalResult, len(lists))
+	available := len(extra) > 0
+	trackLists := make([][]core.ExternalResult, 0, len(lists)+len(extra))
+	reasons := make([]*core.RecommendationReason, 0, len(lists)+len(extra))
 	for i, l := range lists {
 		available = available || l.Available
-		trackLists[i] = l.Tracks
+		trackLists = append(trackLists, l.Tracks)
+		reasons = append(reasons, trackReason(lookup[i], profile))
+	}
+	for _, e := range extra {
+		trackLists = append(trackLists, e.tracks)
+		reasons = append(reasons, e.reason)
 	}
 	merged := interleave(trackLists)
 
 	support := map[string]float64{}
 	sources := map[string][]string{}
 	best := map[string]float64{}
-	reasonSeed := map[string]Seed{}
-	for i, l := range lists {
-		for pos, t := range l.Tracks {
+	reason := map[string]*core.RecommendationReason{}
+	for i, l := range trackLists {
+		for pos, t := range l {
 			key := recordingKey(t.Title, t.Artist)
 			v := supportAt(pos)
 			support[key] += v
 			sources[key] = appendUnique(sources[key], t.RecommendationSources...)
 			if v > best[key] {
-				best[key], reasonSeed[key] = v, lookup[i]
+				best[key], reason[key] = v, reasons[i]
 			}
 		}
 	}
@@ -67,7 +86,7 @@ func (s *Service) fromSeeds(ctx context.Context, lookup, exclude []Seed, policy 
 	for i := range out {
 		key := recordingKey(out[i].Title, out[i].Artist)
 		out[i].RecommendationSources = sources[key]
-		out[i].Reason = trackReason(reasonSeed[key], profile)
+		out[i].Reason = reason[key]
 	}
 	rankTracks(out, support, profile)
 	return out, available
@@ -140,14 +159,22 @@ func (s *Service) startRefresh(ctx context.Context, key string, fn func(context.
 	s.attempts[key] = s.now()
 	s.refreshMu.Unlock()
 	s.background(func() {
-		defer func() {
+		ctx := context.WithoutCancel(ctx)
+		for {
+			// Each run gets its own time limit, so a rerun asked for late
+			// in a slow run still has all of it.
+			runCtx, cancel := context.WithTimeout(ctx, refreshTimeout)
+			fn(runCtx)
+			cancel()
 			s.refreshMu.Lock()
-			delete(s.refreshing, key)
+			if !s.rerun[key] {
+				delete(s.refreshing, key)
+				s.refreshMu.Unlock()
+				return
+			}
+			delete(s.rerun, key)
 			s.refreshMu.Unlock()
-		}()
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), refreshTimeout)
-		defer cancel()
-		fn(ctx)
+		}
 	})
 }
 

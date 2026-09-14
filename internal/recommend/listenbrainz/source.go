@@ -18,6 +18,7 @@ import (
 )
 
 const (
+	defaultAPIURL         = "https://api.listenbrainz.org"
 	defaultLabsURL        = "https://labs.api.listenbrainz.org"
 	defaultMusicBrainzURL = "https://musicbrainz.org/ws/2"
 	requestInterval       = time.Second
@@ -34,6 +35,7 @@ var (
 // limiter spaces every HTTP request, including metadata fallbacks, so Radio
 // fan-out cannot burst at the community service.
 type Source struct {
+	apiURL         string
 	labsURL        string
 	musicBrainzURL string
 	client         *http.Client
@@ -48,13 +50,13 @@ type Source struct {
 // New constructs the account-free production source.
 func New() *Source {
 	return &Source{
-		labsURL: defaultLabsURL, musicBrainzURL: defaultMusicBrainzURL,
+		apiURL: defaultAPIURL, labsURL: defaultLabsURL, musicBrainzURL: defaultMusicBrainzURL,
 		client: http.DefaultClient, interval: requestInterval, now: time.Now, sleep: sleepContext,
 	}
 }
 
 func newTestSource(labsURL, musicBrainzURL string, client *http.Client) *Source {
-	return &Source{labsURL: labsURL, musicBrainzURL: musicBrainzURL, client: client, now: time.Now, sleep: sleepContext}
+	return &Source{apiURL: labsURL, labsURL: labsURL, musicBrainzURL: musicBrainzURL, client: client, now: time.Now, sleep: sleepContext}
 }
 
 func (*Source) Name() string { return "listenbrainz" }
@@ -195,6 +197,10 @@ func (s *Source) getJSON(ctx context.Context, endpoint string, out any) error {
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("listenbrainz: HTTP %d", resp.StatusCode)
+	}
+	// No content leaves out untouched: nothing has been computed yet.
+	if resp.StatusCode == http.StatusNoContent {
+		return nil
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 		return fmt.Errorf("listenbrainz: decode response: %w", err)

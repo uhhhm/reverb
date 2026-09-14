@@ -48,11 +48,13 @@ import (
 	"github.com/uhhhm/reverb/internal/resolver"
 	"github.com/uhhhm/reverb/internal/scrobble"
 	"github.com/uhhhm/reverb/internal/scrobble/lastfm"
+	listenbrainzupload "github.com/uhhhm/reverb/internal/scrobble/listenbrainz"
 	"github.com/uhhhm/reverb/internal/search/deezer"
 	"github.com/uhhhm/reverb/internal/search/spotify"
 	"github.com/uhhhm/reverb/internal/store"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
 	"github.com/uhhhm/reverb/internal/syncemit"
+	"github.com/uhhhm/reverb/internal/tastehistory"
 	"github.com/uhhhm/reverb/internal/tastesettings"
 	"github.com/uhhhm/reverb/internal/wiring"
 )
@@ -87,6 +89,8 @@ type Runtime struct {
 	Store    *store.Store
 	Reloader *ServiceReloader
 	Scrobble *scrobble.Service
+	// TasteHistory keeps imported Last.fm history current once started.
+	TasteHistory *tastehistory.Service
 	// Recommend keeps Mixes and Home shelves current once started.
 	Recommend *recommend.Service
 	// Bus is the in-process event bus backing the WebSocket stream.
@@ -224,7 +228,10 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		secret, _ := st.Q().GetSetting(context.Background(), "scrobble:lastfm:api_secret")
 		return scrobble.Creds{APIKey: key, APISecret: secret}
 	}
-	scrobbleSvc := scrobble.NewService(st.Q(), lastfm.New(), scrobbleCfg, time.Now, uuid.NewString)
+	// ListenBrainz uploads are opt-in: nothing is queued for it until the
+	// owner pastes a user token in Settings.
+	scrobbleSvc := scrobble.NewService(st.Q(), lastfm.New(), scrobbleCfg, time.Now, uuid.NewString).
+		WithTokenProvider(scrobble.ListenBrainz, listenbrainzupload.New())
 
 	// LinkAdd planner owns the add-from-link flow (resolve, catalog, sync,
 	// chapter planning). It reads the LIVE aggregator for Spotify enrichment.
@@ -347,6 +354,17 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	// household's taste profile, so they replicate the same way.
 	tasteSettings := tastesettings.New(st.Q(), emitter)
 	deps.TasteSettings = tasteSettings
+	onlineAllowed := func(ctx context.Context) bool {
+		s, err := tasteSettings.Get(ctx)
+		return err == nil && s.OnlineRecommendations
+	}
+
+	// Linked Last.fm history feeds the taste profile on this device only and
+	// never becomes plays. Linking imports it, unlinking removes it, and like
+	// every online lookup it is read only while online recommendations are on.
+	tasteHistory := tastehistory.New(st.DB(),
+		lastfm.NewHistory(lastfm.New(), func() string { return scrobbleCfg().APIKey }), time.Now, onlineAllowed)
+	scrobbleSvc.OnLinkChange(tasteHistory.LinkChanged)
 
 	// Recommendations read the LIVE sources, library and matcher, so an adapter
 	// reload changes what they can ask without rebuilding the module. Last.fm
@@ -366,6 +384,14 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		recommend.WithTrackSource(lastfm.NewSimilarity(lastfm.New(), func() string { return scrobbleCfg().APIKey })),
 		recommend.WithTrackSource(listenbrainzSource),
 		recommend.WithArtistSource(listenbrainzSource),
+		// A connected ListenBrainz account adds its own recommendations.
+		recommend.WithPersonalSource(listenbrainzSource.Personal(func(ctx context.Context) (string, error) {
+			links, err := st.Q().ListActiveScrobbleLinksByProvider(ctx, scrobble.ListenBrainz)
+			if err != nil || len(links) == 0 {
+				return "", err
+			}
+			return links[0].Username, nil
+		})),
 		recommend.WithMatcher(func() recommend.Matcher {
 			if m := liveMatcher(); m != nil {
 				return m
@@ -393,7 +419,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 			}
 			return nil
 		})),
-		recommend.WithTaste(tasteInputs{q: st.Q(), marks: marks}),
+		recommend.WithTaste(tasteInputs{q: st.Q(), marks: marks, history: tasteHistory}),
 		// Shelves and Mixes are seeded from plays and the library, and kept
 		// in the local settings table between launches; they never replicate.
 		recommend.WithListening(recommend.NewListening(st.Q())),
@@ -404,6 +430,11 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		}),
 	)
 	deps.Recommend = recommender
+	scrobbleSvc.OnLinkChange(func(ctx context.Context, _, provider string, _ bool) {
+		if provider == scrobble.ListenBrainz {
+			recommender.PersonalSourceChanged(ctx)
+		}
+	})
 
 	playlistProjection := playlistcrdt.New(deps.SyncStore, wiring.NewSyncStore(st.Q()), authorDevice)
 	if bundle.Sync != nil {
@@ -464,15 +495,16 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	}
 
 	rt := &Runtime{
-		Deps:      deps,
-		Bus:       bus,
-		Bundle:    bundle,
-		Store:     st,
-		Reloader:  reloader,
-		Scrobble:  scrobbleSvc,
-		Recommend: recommender,
-		P2PPort:   opts.P2PPort,
-		Getenv:    opts.Getenv,
+		Deps:         deps,
+		Bus:          bus,
+		Bundle:       bundle,
+		Store:        st,
+		Reloader:     reloader,
+		Scrobble:     scrobbleSvc,
+		TasteHistory: tasteHistory,
+		Recommend:    recommender,
+		P2PPort:      opts.P2PPort,
+		Getenv:       opts.Getenv,
 
 		SyncEmit:  emitter,
 		Playlists: playlistProjection,
@@ -608,6 +640,9 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 	}
 	if r.Scrobble != nil {
 		go r.Scrobble.RunWorker(ctx, 30*time.Second)
+	}
+	if r.TasteHistory != nil {
+		go r.TasteHistory.Run(ctx, time.Hour)
 	}
 	// Mixes refresh at local midnight on their weekday; a device that was
 	// asleep then catches up here on launch.

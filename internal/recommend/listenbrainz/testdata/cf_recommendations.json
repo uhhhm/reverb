@@ -1,0 +1,15 @@
+{
+  "payload": {
+    "count": 3,
+    "entity": "recording",
+    "last_updated": 1757030400,
+    "mbids": [
+      { "recording_mbid": "d18a1284-d6a1-42d9-b0c1-b247e9f27b80", "score": 0.91 },
+      { "recording_mbid": "5d4b9c52-3b87-4d1a-a0b8-2f5fb1d9a7f1", "score": 0.84 },
+      { "recording_mbid": "0f1e2d3c-4b5a-4968-8776-655443322110", "score": 0.52 }
+    ],
+    "offset": 0,
+    "total_mbid_count": 3,
+    "user_name": "lb user"
+  }
+}

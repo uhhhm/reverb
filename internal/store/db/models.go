@@ -308,6 +308,14 @@ type SyncedPlaylist struct {
 	OwnerUserID     sql.NullString `json:"owner_user_id"`
 }
 
+type TasteHistory struct {
+	Provider string `json:"provider"`
+	Artist   string `json:"artist"`
+	Title    string `json:"title"`
+	Plays    int64  `json:"plays"`
+	At       int64  `json:"at"`
+}
+
 type TrackCrop struct {
 	TrackID   string         `json:"track_id"`
 	StartMs   int64          `json:"start_ms"`
