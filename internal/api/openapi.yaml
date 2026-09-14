@@ -740,6 +740,84 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SimilarTracks" }
         "400": { description: at least one seed, each with an artist, is required }
+  /recommendations/shelves:
+    get:
+      summary: Home's "For you" shelves
+      description: >-
+        Returns what this device last generated at once. When that is missing
+        or more than six hours old a refresh starts in the background and
+        refreshing is set; fetch again to receive it. Shelves are seeded from
+        recent heavy plays, or from the library before anything is played. Not
+        interested marks apply to cached shelves, and discovery shelves leave
+        out owned and recently played tracks.
+      responses:
+        "200":
+          description: shelves
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HomeShelves" }
+  /recommendations/mixes:
+    get:
+      summary: Every Mix as last generated on this device
+      description: >-
+        A Mix whose period has passed starts regenerating in the background
+        and has refreshing set. An empty Mix is hidden by the client.
+      responses:
+        "200":
+          description: mixes
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MixList" }
+  /recommendations/mixes/{kind}:
+    get:
+      summary: One Mix
+      parameters:
+        - { name: kind, in: path, required: true, schema: { $ref: "#/components/schemas/MixKind" } }
+      responses:
+        "200":
+          description: the Mix
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Mix" }
+        "404": { description: no such Mix }
+  /recommendations/mixes/{kind}/playlist:
+    post:
+      summary: Save a Mix as a managed playlist
+      description: >-
+        Creates an ordinary managed playlist holding the Mix's tracks,
+        search-source tracks included. The playlist replicates and can join an
+        offline set; the Mix itself does not change.
+      parameters:
+        - { name: kind, in: path, required: true, schema: { $ref: "#/components/schemas/MixKind" } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SaveMixRequest" }
+      responses:
+        "201": { description: SyncedPlaylistDetail }
+        "400": { description: invalid body }
+        "404": { description: no such Mix }
+        "409": { description: the Mix is empty }
+        "503": { description: playlist service unavailable }
+  /recommendations/playlists/{id}/suggestions:
+    get:
+      summary: Suggested songs for a managed playlist
+      description: >-
+        Seeded from tracks spread through the playlist and ranked by the taste
+        profile. Tracks already in the playlist are never suggested. page picks
+        the next best candidates and wraps round. A mirrored (synced-mode)
+        playlist gets an empty, unavailable result.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: suggestions
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SimilarTracks" }
+        "404": { description: playlist not found }
   /recommendations/settings:
     get:
       summary: The household's recommendation settings
@@ -1771,6 +1849,10 @@ components:
         durationMs: { type: integer }
         coverArtId: { type: string }
         recommendationOrigin: { $ref: '#/components/schemas/RecommendationOrigin' }
+        download:
+          type: boolean
+          default: true
+          description: Queue a search-source track the library lacks for download. False adds it as a streamed track.
       required: [source, externalId]
     CreateDownloadRequest:
       type: object
@@ -1967,9 +2049,11 @@ components:
         "Because you played <title>". similar: "Similar to <title>".
         fansAlsoLike: "Fans of <artist> also like". radioArtist: one of the
         seed artist's own tracks, leading a Radio started from that artist.
+        moreFrom: "More from <artist>". newRelease: a Release Radar track, with
+        title naming the release.
       required: [kind, artist]
       properties:
-        kind: { type: string, enum: [played, similar, fansAlsoLike, radioArtist] }
+        kind: { type: string, enum: [played, similar, fansAlsoLike, radioArtist, moreFrom, newRelease] }
         artist: { type: string }
         title: { type: string }
     RecommendationStats:
@@ -2038,6 +2122,56 @@ components:
         tracks: { type: array, items: { $ref: "#/components/schemas/RecommendedTrack" } }
         offline: { type: boolean }
         updatedAt: { type: integer, format: int64 }
+    ShelfKind:
+      type: string
+      description: >-
+        becauseYouPlayed and similarTo name their seed track (similarTo when
+        seeded from the library before anything is played).
+      enum: [becauseYouPlayed, similarTo, artistsYouMightLike, moreFromArtistsYouLove]
+    Shelf:
+      type: object
+      description: One "For you" row. It holds tracks or artists.
+      required: [kind, tracks, artists]
+      properties:
+        kind: { $ref: "#/components/schemas/ShelfKind" }
+        seed: { $ref: "#/components/schemas/RadioSeed" }
+        tracks: { type: array, items: { $ref: "#/components/schemas/RecommendedTrack" } }
+        artists: { type: array, items: { $ref: "#/components/schemas/ExternalArtist" } }
+    HomeShelves:
+      type: object
+      required: [shelves, refreshing]
+      properties:
+        shelves: { type: array, items: { $ref: "#/components/schemas/Shelf" } }
+        updatedAt: { type: integer, format: int64 }
+        offline: { type: boolean }
+        refreshing: { type: boolean }
+    MixKind:
+      type: string
+      enum: [discoverWeekly, releaseRadar]
+    Mix:
+      type: object
+      description: >-
+        A generated, regularly refreshed list of recommendations. Not a
+        playlist and never replicated. period is the local date its period
+        began on; available is false when nothing could be looked up.
+      required: [kind, period, tracks, available, refreshing]
+      properties:
+        kind: { $ref: "#/components/schemas/MixKind" }
+        period: { type: string }
+        tracks: { type: array, items: { $ref: "#/components/schemas/RecommendedTrack" } }
+        updatedAt: { type: integer, format: int64 }
+        available: { type: boolean }
+        offline: { type: boolean }
+        refreshing: { type: boolean }
+    MixList:
+      type: object
+      required: [mixes]
+      properties:
+        mixes: { type: array, items: { $ref: "#/components/schemas/Mix" } }
+    SaveMixRequest:
+      type: object
+      properties:
+        name: { type: string, description: The playlist's name; defaults to the Mix's }
     RadioSeed:
       type: object
       description: A track, or an artist when title is omitted.

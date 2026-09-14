@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/registry"
@@ -86,6 +87,14 @@ func yearFromReleaseDate(s string) int {
 		}
 	}
 	return 0
+}
+
+// dayFromReleaseDate keeps a release date only when it names the day.
+func dayFromReleaseDate(s string) string {
+	if _, err := time.Parse("2006-01-02", s); err != nil {
+		return ""
+	}
+	return s
 }
 
 // mapTrack converts a Deezer track. ISRC is present only on /track/{id}
@@ -217,8 +226,9 @@ func (a *Adapter) GetArtistDiscography(ctx context.Context, externalID string) (
 		albums = append(albums, core.ExternalAlbum{
 			Source: "deezer", ExternalID: id64(album.ID), Name: album.Title,
 			Artist: album.Artist.Name, CoverURL: album.CoverMedium,
-			Year:   yearFromReleaseDate(album.ReleaseDate),
-			Tracks: []core.ExternalResult{},
+			Year:        yearFromReleaseDate(album.ReleaseDate),
+			ReleaseDate: dayFromReleaseDate(album.ReleaseDate),
+			Tracks:      []core.ExternalResult{},
 		})
 	}
 	return albums, nil

@@ -127,14 +127,30 @@ type Service struct {
 	now          func() time.Time
 	sleep        func(context.Context, time.Duration) error
 	cache        *cache
+	listening    Listening
+	store        Store
+	storeMu      sync.Mutex
+	background   func(func())
+	refreshMu    sync.Mutex
+	refreshing   map[string]bool
+	attempts     map[string]time.Time
 }
+
+// WithBackground replaces how a background refresh is started (test seam).
+// By default each runs on its own goroutine.
+func WithBackground(start func(run func())) Option { return func(s *Service) { s.background = start } }
 
 // New builds a Service. sources returns the live search sources, read per
 // request so an adapter reload takes effect without rebuilding the service.
 func New(sources func() []search.SearchSource, opts ...Option) *Service {
-	s := &Service{sources: sources, timeout: defaultTimeout, now: time.Now, sleep: sleepContext}
+	s := &Service{sources: sources, timeout: defaultTimeout, now: time.Now, sleep: sleepContext,
+		background: func(run func()) { go run() },
+		refreshing: map[string]bool{}, attempts: map[string]time.Time{}}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if s.store == nil {
+		s.store = &memoryStore{values: map[string]string{}}
 	}
 	s.cache = &cache{now: s.now, entries: map[string]cacheEntry{}}
 	s.trackGates = make(map[string]*gate, len(s.tracks))

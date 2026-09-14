@@ -29,6 +29,8 @@ type surfacePolicy struct {
 var (
 	similarTracksSurface = surfacePolicy{}
 	radioSurface         = surfacePolicy{newShare: 0.5}
+	// discoverySurface is the Home shelves' and Discover Weekly's policy.
+	discoverySurface = surfacePolicy{discovery: true}
 )
 
 // WithRecentPlays lists what was played since a time, for discovery surfaces.

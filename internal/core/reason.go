@@ -15,6 +15,12 @@ const (
 	// ReasonRadioArtist: "Radio from <Artist>" — one of the seed artist's
 	// own tracks, leading a Radio started from that artist.
 	ReasonRadioArtist ReasonKind = "radioArtist"
+	// ReasonMoreFrom: "More from <Artist>" — a track by an artist the
+	// household plays a lot, on the Home shelf of that name.
+	ReasonMoreFrom ReasonKind = "moreFrom"
+	// ReasonNewRelease: "New from <Artist> · <Title>" — a Release Radar
+	// track; Title names the release.
+	ReasonNewRelease ReasonKind = "newRelease"
 )
 
 // RecommendationReason is the short reason shown with a recommendation.

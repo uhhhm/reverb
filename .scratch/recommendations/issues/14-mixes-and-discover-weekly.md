@@ -4,10 +4,10 @@
 
 **Blocked by:** 04, 05, 08
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Mix generation is deterministic for a given period seed and set of inputs, so two devices with the same synced data produce the same Discover Weekly (ADR 0001)
-- [ ] A refresh replaces the previous Mix. No history is kept
-- [ ] Save as playlist creates an ordinary managed playlist, including search-source tracks, which can then join an offline set
-- [ ] A device that was asleep at refresh time regenerates on next launch
-- [ ] At most N tracks per artist in one Mix
+- [x] Mix generation is deterministic for a given period seed and set of inputs, so two devices with the same synced data produce the same Discover Weekly (ADR 0001)
+- [x] A refresh replaces the previous Mix. No history is kept
+- [x] Save as playlist creates an ordinary managed playlist, including search-source tracks, which can then join an offline set
+- [x] A device that was asleep at refresh time regenerates on next launch
+- [x] At most N tracks per artist in one Mix

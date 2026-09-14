@@ -28,6 +28,7 @@ import { radioFromTracks } from '../lib/radio'
 import { useDownloads } from '../lib/downloadStore'
 import { RenameTrackDialog } from '../components/RenameTrackDialog'
 import { ManagePlaylistTracksDialog } from '../components/ManagePlaylistTracksDialog'
+import { PlaylistSuggestions } from '../components/PlaylistSuggestions'
 import { useToastStore } from '../lib/toastStore'
 import { useAlbumPalette } from '../lib/useAlbumPalette'
 import { rgbToCss } from '../lib/palette'
@@ -652,6 +653,9 @@ export default function SyncedPlaylist() {
           />
         )}
       </div>
+
+      {/* A mirrored playlist is rebuilt from upstream, so only managed ones get suggestions. */}
+      {detail.mode === 'once' && <PlaylistSuggestions playlistId={id} />}
 
       <RenameTrackDialog track={renaming} onClose={() => setRenaming(null)} />
 

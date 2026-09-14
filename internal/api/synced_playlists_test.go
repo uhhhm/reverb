@@ -58,6 +58,8 @@ type fakeSync struct {
 	addTrackID        string
 	addTrackErr       error
 	addTrackDuplicate bool
+	addTracksDownload bool
+	addTracksCount    int
 	removeTrackID     string
 	removeSource      string
 	removeExtID       string
@@ -95,9 +97,16 @@ func (f *fakeSync) AddTrack(_ context.Context, id string, entry core.ExternalRes
 	f.addTrackID, f.addTrackEntry = id, entry
 	return f.detail, f.addTrackErr
 }
-func (f *fakeSync) AddTrackWithResult(_ context.Context, id string, entry core.ExternalResult) (core.SyncedPlaylistDetail, bool, error) {
-	f.addTrackID, f.addTrackEntry = id, entry
-	return f.detail, !f.addTrackDuplicate, f.addTrackErr
+func (f *fakeSync) AddTracks(_ context.Context, id string, entries []core.ExternalResult, download bool) (core.SyncedPlaylistDetail, int, error) {
+	f.addTrackID, f.addTracksDownload, f.addTracksCount = id, download, len(entries)
+	if len(entries) > 0 {
+		f.addTrackEntry = entries[len(entries)-1]
+	}
+	added := len(entries)
+	if f.addTrackDuplicate {
+		added = 0
+	}
+	return f.detail, added, f.addTrackErr
 }
 func (f *fakeSync) RemoveTrack(_ context.Context, id, source, externalID string) (core.SyncedPlaylistDetail, error) {
 	f.removeTrackID, f.removeSource, f.removeExtID = id, source, externalID

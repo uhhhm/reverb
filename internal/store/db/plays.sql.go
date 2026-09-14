@@ -195,6 +195,105 @@ func (q *Queries) InsertRecommendationAddIfAbsent(ctx context.Context, arg Inser
 	return err
 }
 
+const libraryArtistTrackCounts = `-- name: LibraryArtistTrackCounts :many
+SELECT CAST(MIN(e.artist) AS TEXT) AS artist, COUNT(DISTINCT e.id) AS tracks
+FROM catalog_entity e
+JOIN backend_binding b ON b.catalog_id = e.id AND b.backend_id != '' AND b.known_absent = 0
+WHERE e.kind = 'track' AND e.artist != ''
+GROUP BY lower(e.artist)
+ORDER BY tracks DESC, lower(MIN(e.artist))
+LIMIT ?1
+`
+
+type LibraryArtistTrackCountsRow struct {
+	Artist string `json:"artist"`
+	Tracks int64  `json:"tracks"`
+}
+
+func (q *Queries) LibraryArtistTrackCounts(ctx context.Context, resultLimit int64) ([]LibraryArtistTrackCountsRow, error) {
+	rows, err := q.db.QueryContext(ctx, libraryArtistTrackCounts, resultLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LibraryArtistTrackCountsRow
+	for rows.Next() {
+		var i LibraryArtistTrackCountsRow
+		if err := rows.Scan(&i.Artist, &i.Tracks); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const libraryTracksByArtist = `-- name: LibraryTracksByArtist :many
+SELECT e.id, e.title, e.artist, e.album, e.duration_ms, e.isrc, e.mbid,
+       CAST(MIN(b.backend_id) AS TEXT) AS backend_id, CAST(MIN(b.cover_art_id) AS TEXT) AS cover_art_id
+FROM catalog_entity e
+JOIN backend_binding b ON b.catalog_id = e.id AND b.backend_id != '' AND b.known_absent = 0
+WHERE e.kind = 'track' AND lower(e.artist) = lower(?1)
+GROUP BY e.id
+ORDER BY lower(e.album), lower(e.title), e.id
+LIMIT ?2
+`
+
+type LibraryTracksByArtistParams struct {
+	Artist      string `json:"artist"`
+	ResultLimit int64  `json:"result_limit"`
+}
+
+type LibraryTracksByArtistRow struct {
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	Artist     string `json:"artist"`
+	Album      string `json:"album"`
+	DurationMs int64  `json:"duration_ms"`
+	Isrc       string `json:"isrc"`
+	Mbid       string `json:"mbid"`
+	BackendID  string `json:"backend_id"`
+	CoverArtID string `json:"cover_art_id"`
+}
+
+func (q *Queries) LibraryTracksByArtist(ctx context.Context, arg LibraryTracksByArtistParams) ([]LibraryTracksByArtistRow, error) {
+	rows, err := q.db.QueryContext(ctx, libraryTracksByArtist, arg.Artist, arg.ResultLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LibraryTracksByArtistRow
+	for rows.Next() {
+		var i LibraryTracksByArtistRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Artist,
+			&i.Album,
+			&i.DurationMs,
+			&i.Isrc,
+			&i.Mbid,
+			&i.BackendID,
+			&i.CoverArtID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAllPlays = `-- name: ListAllPlays :many
 SELECT id, user_id, catalog_id, played_at, ms_played, completed, created_at, origin, session_id, qualified FROM plays ORDER BY played_at ASC
 `
@@ -1218,6 +1317,95 @@ func (q *Queries) StatsTopTracksByCatalogID(ctx context.Context, arg StatsTopTra
 			&i.Plays,
 			&i.MsPlayed,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const topPlayedArtistsBetween = `-- name: TopPlayedArtistsBetween :many
+SELECT CAST(MIN(e.artist) AS TEXT) AS artist, COUNT(*) AS plays
+FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
+WHERE p.played_at >= ?1 AND p.played_at < ?2 AND p.qualified = 1
+  AND e.artist != ''
+GROUP BY lower(e.artist)
+ORDER BY plays DESC, lower(MIN(e.artist))
+LIMIT ?3
+`
+
+type TopPlayedArtistsBetweenParams struct {
+	Since       int64 `json:"since"`
+	Until       int64 `json:"until"`
+	ResultLimit int64 `json:"result_limit"`
+}
+
+type TopPlayedArtistsBetweenRow struct {
+	Artist string `json:"artist"`
+	Plays  int64  `json:"plays"`
+}
+
+func (q *Queries) TopPlayedArtistsBetween(ctx context.Context, arg TopPlayedArtistsBetweenParams) ([]TopPlayedArtistsBetweenRow, error) {
+	rows, err := q.db.QueryContext(ctx, topPlayedArtistsBetween, arg.Since, arg.Until, arg.ResultLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TopPlayedArtistsBetweenRow
+	for rows.Next() {
+		var i TopPlayedArtistsBetweenRow
+		if err := rows.Scan(&i.Artist, &i.Plays); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const topPlayedTracksBetween = `-- name: TopPlayedTracksBetween :many
+SELECT CAST(MIN(e.title) AS TEXT) AS title, CAST(MIN(e.artist) AS TEXT) AS artist, COUNT(*) AS plays
+FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
+WHERE p.played_at >= ?1 AND p.played_at < ?2 AND p.qualified = 1
+  AND e.title != '' AND e.artist != ''
+GROUP BY lower(e.artist), lower(e.title)
+ORDER BY plays DESC, lower(MIN(e.artist)), lower(MIN(e.title))
+LIMIT ?3
+`
+
+type TopPlayedTracksBetweenParams struct {
+	Since       int64 `json:"since"`
+	Until       int64 `json:"until"`
+	ResultLimit int64 `json:"result_limit"`
+}
+
+type TopPlayedTracksBetweenRow struct {
+	Title  string `json:"title"`
+	Artist string `json:"artist"`
+	Plays  int64  `json:"plays"`
+}
+
+func (q *Queries) TopPlayedTracksBetween(ctx context.Context, arg TopPlayedTracksBetweenParams) ([]TopPlayedTracksBetweenRow, error) {
+	rows, err := q.db.QueryContext(ctx, topPlayedTracksBetween, arg.Since, arg.Until, arg.ResultLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TopPlayedTracksBetweenRow
+	for rows.Next() {
+		var i TopPlayedTracksBetweenRow
+		if err := rows.Scan(&i.Title, &i.Artist, &i.Plays); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

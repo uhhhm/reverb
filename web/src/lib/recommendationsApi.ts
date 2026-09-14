@@ -1,20 +1,99 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './api'
 import { externalTrackFromRef } from './externalTrack'
 import type { components } from './generated/api'
-import type { RecommendationOrigin, RecommendationReason, Track } from './types'
+import type { RecommendationOrigin, RecommendationReason, SyncedPlaylistDetail, Track } from './types'
 
 export type SimilarArtists = components['schemas']['SimilarArtists']
 export type RecommendedTrack = components['schemas']['RecommendedTrack']
 export type SimilarTracksResult = components['schemas']['SimilarTracks']
 export type RecommendationSettings = components['schemas']['RecommendationSettings']
+export type HomeShelves = components['schemas']['HomeShelves']
+export type Shelf = components['schemas']['Shelf']
+export type Mix = components['schemas']['Mix']
+export type MixKind = components['schemas']['MixKind']
+type MixList = components['schemas']['MixList']
 type RecommendationSettingsPatch = components['schemas']['RecommendationSettingsPatch']
 type RadioRequest = components['schemas']['RadioRequest']
 type RadioSeed = components['schemas']['RadioSeed']
 
 /** Similarity data moves slowly and the server caches it too. */
 const STALE_MS = 60 * 60 * 1000
+/**
+ * While the server refreshes shelves or a Mix in the background, what it had
+ * cached shows and is fetched again this often until the refresh lands.
+ */
+const REFRESH_POLL_MS = 3000
 const SETTINGS_KEY = ['recommendation-settings']
+
+/** Home's "For you" shelves, from the server's cache at once. */
+export function useShelves() {
+  return useQuery({
+    queryKey: ['shelves'],
+    queryFn: () => api.get<HomeShelves>('/recommendations/shelves'),
+    refetchInterval: (query) => (query.state.data?.refreshing ? REFRESH_POLL_MS : false),
+    placeholderData: keepPreviousData,
+  })
+}
+
+/** Every Mix; an empty one is hidden by the caller. */
+export function useMixes() {
+  return useQuery({
+    queryKey: ['mixes'],
+    queryFn: () => api.get<MixList>('/recommendations/mixes'),
+    refetchInterval: (query) => ((query.state.data?.mixes ?? []).some((m) => m.refreshing) ? REFRESH_POLL_MS : false),
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function useMix(kind: MixKind) {
+  return useQuery({
+    queryKey: ['mix', kind],
+    queryFn: () => api.get<Mix>(`/recommendations/mixes/${encodeURIComponent(kind)}`),
+    refetchInterval: (query) => (query.state.data?.refreshing ? REFRESH_POLL_MS : false),
+  })
+}
+
+/** Copies a Mix into a new managed playlist, which can then go offline. */
+export function saveMixAsPlaylist(kind: MixKind, name?: string): Promise<SyncedPlaylistDetail> {
+  return api.post<SyncedPlaylistDetail>(`/recommendations/mixes/${encodeURIComponent(kind)}/playlist`, name ? { name } : {})
+}
+
+/** Suggested songs for a managed playlist; page asks for the next best. */
+export function usePlaylistSuggestions(playlistId: string, page: number, enabled: boolean) {
+  return useQuery({
+    queryKey: ['playlist-suggestions', playlistId, page],
+    queryFn: () =>
+      api.get<SimilarTracksResult>(`/recommendations/playlists/${encodeURIComponent(playlistId)}/suggestions?page=${page}`),
+    enabled: enabled && !!playlistId,
+    staleTime: STALE_MS,
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function mixTitle(kind: MixKind): string {
+  return kind === 'discoverWeekly' ? 'Discover Weekly' : 'Release Radar'
+}
+
+export function mixDescription(kind: MixKind): string {
+  return kind === 'discoverWeekly'
+    ? 'New music picked for you. Refreshes every Monday.'
+    : 'New releases from artists you listen to. Refreshes every Friday.'
+}
+
+/** A shelf's title, which carries its reason. */
+export function shelfTitle(shelf: Shelf): string {
+  switch (shelf.kind) {
+    case 'becauseYouPlayed':
+      return `Because you played ${shelf.seed?.title ?? shelf.seed?.artist ?? ''}`
+    case 'similarTo':
+      return `Similar to ${shelf.seed?.title ?? shelf.seed?.artist ?? ''}`
+    case 'artistsYouMightLike':
+      return 'Artists you might like'
+    case 'moreFromArtistsYouLove':
+      return 'More from artists you love'
+  }
+}
 
 /**
  * Artists related to one on a search source or in the library. The server
@@ -59,6 +138,10 @@ export function reasonText(reason: RecommendationReason | undefined): string | u
       return `Fans of ${reason.artist} also like`
     case 'radioArtist':
       return `Radio from ${reason.artist}`
+    case 'moreFrom':
+      return `More from ${reason.artist}`
+    case 'newRelease':
+      return reason.title ? `New from ${reason.artist} · ${reason.title}` : `New from ${reason.artist}`
     default:
       return undefined
   }

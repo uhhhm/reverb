@@ -72,6 +72,8 @@ export interface SyncedTrackEntry {
   durationMs?: number
   coverArtId?: string
 	recommendationOrigin?: import('./types').RecommendationOrigin
+  /** False adds a missing search-source track as a streamed track instead of downloading it. */
+  download?: boolean
 }
 
 export function addSyncedTrack(playlistId: string, entry: SyncedTrackEntry): Promise<SyncedPlaylistDetail> {

@@ -109,6 +109,23 @@ func (s *Service) localArtists(ctx context.Context, seed ArtistSeed) ArtistResul
 }
 
 func (s *Service) similarArtists(ctx context.Context, source, id string) (ArtistResult, ArtistSeed) {
+	return s.similarArtistsFor(ctx, "artists\x1f"+source+"\x1f"+id, func(ctx context.Context) ArtistSeed {
+		return s.artistSeed(ctx, source, id)
+	})
+}
+
+// similarArtistsByName relates an artist known only by name, as the Home
+// shelves' seeds are. It is ranked by source agreement only.
+func (s *Service) similarArtistsByName(ctx context.Context, name string) ArtistResult {
+	result, _ := s.similarArtistsFor(ctx, "artists\x1fname\x1f"+matching.Normalize(name), func(context.Context) ArtistSeed {
+		return ArtistSeed{Name: name}
+	})
+	return result
+}
+
+// similarArtistsFor looks up, or reads from cache under key, the artists
+// related to the seed that seedFor names.
+func (s *Service) similarArtistsFor(ctx context.Context, key string, seedFor func(context.Context) ArtistSeed) (ArtistResult, ArtistSeed) {
 	var capable []similarArtistSource
 	for _, src := range s.liveSources() {
 		if provider, ok := src.(search.SimilarArtistsProvider); ok {
@@ -119,14 +136,13 @@ func (s *Service) similarArtists(ctx context.Context, source, id string) (Artist
 		return ArtistResult{Artists: []core.ExternalArtist{}}, ArtistSeed{}
 	}
 	result := ArtistResult{Available: true, Artists: []core.ExternalArtist{}}
-	key := "artists\x1f" + source + "\x1f" + id
 	if cached, ok := s.cache.get(key); ok {
 		result.Artists = s.withoutMarkedArtists(ctx, cached.([]core.ExternalArtist))
 		return result, ArtistSeed{}
 	}
 
 	sourceCtx, cancelSources := context.WithTimeout(ctx, s.timeout)
-	seed := s.artistSeed(sourceCtx, source, id)
+	seed := seedFor(sourceCtx)
 	candidates, available := s.artistCandidates(sourceCtx, seed, capable)
 	cancelSources()
 	if !available {
@@ -223,6 +239,8 @@ func (s *Service) artistCandidates(ctx context.Context, seed ArtistSeed, capable
 				log.Printf("recommend: similar artists from %s for %q: %v", src.Name(), seed.Name, err)
 				return
 			}
+			// The source may hand back a list it keeps; label a copy.
+			artists = append([]ArtistCandidate(nil), artists...)
 			for k := range artists {
 				artists[k].Sources = []string{src.Name()}
 				if artists[k].Source == "" {

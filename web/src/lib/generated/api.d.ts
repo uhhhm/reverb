@@ -2651,6 +2651,250 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/recommendations/shelves": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Home's "For you" shelves
+         * @description Returns what this device last generated at once. When that is missing or more than six hours old a refresh starts in the background and refreshing is set; fetch again to receive it. Shelves are seeded from recent heavy plays, or from the library before anything is played. Not interested marks apply to cached shelves, and discovery shelves leave out owned and recently played tracks.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description shelves */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["HomeShelves"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/recommendations/mixes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every Mix as last generated on this device
+         * @description A Mix whose period has passed starts regenerating in the background and has refreshing set. An empty Mix is hidden by the client.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description mixes */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MixList"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/recommendations/mixes/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One Mix */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    kind: components["schemas"]["MixKind"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description the Mix */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Mix"];
+                    };
+                };
+                /** @description no such Mix */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/recommendations/mixes/{kind}/playlist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save a Mix as a managed playlist
+         * @description Creates an ordinary managed playlist holding the Mix's tracks, search-source tracks included. The playlist replicates and can join an offline set; the Mix itself does not change.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    kind: components["schemas"]["MixKind"];
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["SaveMixRequest"];
+                };
+            };
+            responses: {
+                /** @description SyncedPlaylistDetail */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description invalid body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description no such Mix */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description the Mix is empty */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description playlist service unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/recommendations/playlists/{id}/suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Suggested songs for a managed playlist
+         * @description Seeded from tracks spread through the playlist and ranked by the taste profile. Tracks already in the playlist are never suggested. page picks the next best candidates and wraps round. A mirrored (synced-mode) playlist gets an empty, unavailable result.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    page?: number;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description suggestions */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SimilarTracks"];
+                    };
+                };
+                /** @description playlist not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/recommendations/settings": {
         parameters: {
             query?: never;
@@ -5212,6 +5456,11 @@ export interface components {
             durationMs?: number;
             coverArtId?: string;
             recommendationOrigin?: components["schemas"]["RecommendationOrigin"];
+            /**
+             * @description Queue a search-source track the library lacks for download. False adds it as a streamed track.
+             * @default true
+             */
+            download: boolean;
         };
         CreateDownloadRequest: {
             source?: string;
@@ -5280,10 +5529,10 @@ export interface components {
             coverUrl?: string;
             coverArtId?: string;
         };
-        /** @description Why something was recommended. artist and title name the seed. played: "Because you played <title>". similar: "Similar to <title>". fansAlsoLike: "Fans of <artist> also like". radioArtist: one of the seed artist's own tracks, leading a Radio started from that artist. */
+        /** @description Why something was recommended. artist and title name the seed. played: "Because you played <title>". similar: "Similar to <title>". fansAlsoLike: "Fans of <artist> also like". radioArtist: one of the seed artist's own tracks, leading a Radio started from that artist. moreFrom: "More from <artist>". newRelease: a Release Radar track, with title naming the release. */
         RecommendationReason: {
             /** @enum {string} */
-            kind: "played" | "similar" | "fansAlsoLike" | "radioArtist";
+            kind: "played" | "similar" | "fansAlsoLike" | "radioArtist" | "moreFrom" | "newRelease";
             artist: string;
             title?: string;
         };
@@ -5340,6 +5589,45 @@ export interface components {
             offline?: boolean;
             /** Format: int64 */
             updatedAt?: number;
+        };
+        /**
+         * @description becauseYouPlayed and similarTo name their seed track (similarTo when seeded from the library before anything is played).
+         * @enum {string}
+         */
+        ShelfKind: "becauseYouPlayed" | "similarTo" | "artistsYouMightLike" | "moreFromArtistsYouLove";
+        /** @description One "For you" row. It holds tracks or artists. */
+        Shelf: {
+            kind: components["schemas"]["ShelfKind"];
+            seed?: components["schemas"]["RadioSeed"];
+            tracks: components["schemas"]["RecommendedTrack"][];
+            artists: components["schemas"]["ExternalArtist"][];
+        };
+        HomeShelves: {
+            shelves: components["schemas"]["Shelf"][];
+            /** Format: int64 */
+            updatedAt?: number;
+            offline?: boolean;
+            refreshing: boolean;
+        };
+        /** @enum {string} */
+        MixKind: "discoverWeekly" | "releaseRadar";
+        /** @description A generated, regularly refreshed list of recommendations. Not a playlist and never replicated. period is the local date its period began on; available is false when nothing could be looked up. */
+        Mix: {
+            kind: components["schemas"]["MixKind"];
+            period: string;
+            tracks: components["schemas"]["RecommendedTrack"][];
+            /** Format: int64 */
+            updatedAt?: number;
+            available: boolean;
+            offline?: boolean;
+            refreshing: boolean;
+        };
+        MixList: {
+            mixes: components["schemas"]["Mix"][];
+        };
+        SaveMixRequest: {
+            /** @description The playlist's name; defaults to the Mix's */
+            name?: string;
         };
         /** @description A track, or an artist when title is omitted. */
         RadioSeed: {

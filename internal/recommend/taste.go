@@ -256,6 +256,44 @@ func (s *Service) profile(ctx context.Context) *Profile {
 	return p
 }
 
+// profileBefore is the taste profile from inputs dated before t alone, so a
+// Mix generated late in its period ranks as one generated on time. It is
+// built whole: Mixes regenerate at most a few times a week. Unlike profile, a
+// failed read is returned: a Mix ranked without taste would stand all week.
+func (s *Service) profileBefore(ctx context.Context, t time.Time) (*Profile, error) {
+	if s.taste == nil {
+		return nil, nil
+	}
+	cutoff := t.Unix()
+	p := &Profile{plays: newTally(), signals: newTally()}
+	for after := int64(0); ; {
+		plays, err := s.taste.PlaysAfter(ctx, after, tasteBatch)
+		if err != nil {
+			return nil, err
+		}
+		for _, pl := range plays {
+			after = pl.Seq
+			if pl.PlayedAt < cutoff {
+				p.plays.addPlay(pl)
+			}
+		}
+		if len(plays) < tasteBatch {
+			break
+		}
+	}
+	signals, err := s.taste.Signals(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, sg := range signals {
+		if sg.At < cutoff {
+			p.signals.addSignal(sg)
+		}
+	}
+	p.today = floorDiv(max(p.plays.latest, p.signals.latest), secondsPerDay)
+	return p, nil
+}
+
 // foldPlays adds plays stored since the last build. When the stored count
 // falls below what was folded in, a play was removed, and the tally is
 // rebuilt from the start.

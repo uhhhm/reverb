@@ -87,6 +87,8 @@ type Runtime struct {
 	Store    *store.Store
 	Reloader *ServiceReloader
 	Scrobble *scrobble.Service
+	// Recommend keeps Mixes and Home shelves current once started.
+	Recommend *recommend.Service
 	// Bus is the in-process event bus backing the WebSocket stream.
 	Bus     *events.Bus
 	P2PPort int
@@ -354,7 +356,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	// the settings per request, so a peer's change applies to the next one.
 	liveMatcher := reloader.MatcherProvider()
 	listenbrainzSource := listenbrainz.New()
-	deps.Recommend = recommend.New(reloader.SearchSourcesProvider(),
+	recommender := recommend.New(reloader.SearchSourcesProvider(),
 		recommend.WithLibrary(func() recommend.Library {
 			if lib := reloader.Current().Library; lib != nil {
 				return lib
@@ -392,11 +394,16 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 			return nil
 		})),
 		recommend.WithTaste(tasteInputs{q: st.Q(), marks: marks}),
+		// Shelves and Mixes are seeded from plays and the library, and kept
+		// in the local settings table between launches; they never replicate.
+		recommend.WithListening(recommend.NewListening(st.Q())),
+		recommend.WithStore(st.Q()),
 		recommend.WithSettings(func(ctx context.Context) (recommend.Settings, error) {
 			s, err := tasteSettings.Get(ctx)
 			return recommend.Settings{Adventurousness: s.Adventurousness, Online: s.OnlineRecommendations}, err
 		}),
 	)
+	deps.Recommend = recommender
 
 	playlistProjection := playlistcrdt.New(deps.SyncStore, wiring.NewSyncStore(st.Q()), authorDevice)
 	if bundle.Sync != nil {
@@ -457,14 +464,15 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	}
 
 	rt := &Runtime{
-		Deps:     deps,
-		Bus:      bus,
-		Bundle:   bundle,
-		Store:    st,
-		Reloader: reloader,
-		Scrobble: scrobbleSvc,
-		P2PPort:  opts.P2PPort,
-		Getenv:   opts.Getenv,
+		Deps:      deps,
+		Bus:       bus,
+		Bundle:    bundle,
+		Store:     st,
+		Reloader:  reloader,
+		Scrobble:  scrobbleSvc,
+		Recommend: recommender,
+		P2PPort:   opts.P2PPort,
+		Getenv:    opts.Getenv,
 
 		SyncEmit:  emitter,
 		Playlists: playlistProjection,
@@ -600,6 +608,11 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 	}
 	if r.Scrobble != nil {
 		go r.Scrobble.RunWorker(ctx, 30*time.Second)
+	}
+	// Mixes refresh at local midnight on their weekday; a device that was
+	// asleep then catches up here on launch.
+	if r.Recommend != nil {
+		go r.Recommend.RunSchedule(ctx)
 	}
 }
 

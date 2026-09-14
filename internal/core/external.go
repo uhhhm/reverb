@@ -90,12 +90,15 @@ type ExternalArtist struct {
 
 // ExternalAlbum is an album fetched from a SearchSource (GetAlbum).
 type ExternalAlbum struct {
-	Source      string           `json:"source"`
-	ExternalID  string           `json:"externalId"`
-	Name        string           `json:"name"`
-	Artist      string           `json:"artist"`
-	CoverURL    string           `json:"coverUrl,omitempty"`
-	Year        int              `json:"year"`
+	Source     string `json:"source"`
+	ExternalID string `json:"externalId"`
+	Name       string `json:"name"`
+	Artist     string `json:"artist"`
+	CoverURL   string `json:"coverUrl,omitempty"`
+	Year       int    `json:"year"`
+	// ReleaseDate is "YYYY-MM-DD" when the source dates the release to the
+	// day, and empty otherwise.
+	ReleaseDate string           `json:"releaseDate,omitempty"`
 	Kind        string           `json:"kind,omitempty"` // "album" | "single"
 	TotalTracks int              `json:"totalTracks,omitempty"`
 	Tracks      []ExternalResult `json:"tracks"`

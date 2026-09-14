@@ -4,9 +4,9 @@
 
 **Blocked by:** 14
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Tracked artists are derived, not stored, and the thresholds are tested
-- [ ] New releases are found through the sources' discography capability and deduplicated across sources
-- [ ] Release Radar refreshes Friday at local midnight and is empty (and hidden) when there are no new releases
-- [ ] Not-interested artists never appear
+- [x] Tracked artists are derived, not stored, and the thresholds are tested
+- [x] New releases are found through the sources' discography capability and deduplicated across sources
+- [x] Release Radar refreshes Friday at local midnight and is empty (and hidden) when there are no new releases
+- [x] Not-interested artists never appear

@@ -2,7 +2,6 @@ package recommend
 
 import (
 	"context"
-	"sync"
 
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/matching"
@@ -48,71 +47,19 @@ func (s *Service) Radio(ctx context.Context, seeds []Seed) TrackResult {
 			titled = append(titled, sd)
 			continue
 		}
-		for _, t := range s.artistTracks(ctx, sd.Artist) {
+		for _, t := range s.artistTracks(ctx, sd.Artist, radioArtistTracks) {
 			t.Reason = &core.RecommendationReason{Kind: core.ReasonRadioArtist, Artist: sd.Artist}
 			lead = append(lead, t)
 			titled = append(titled, Seed{Artist: t.Artist, Title: t.Title})
 		}
 	}
 
-	lists := make([]TrackResult, len(titled))
-	var wg sync.WaitGroup
-	for i, sd := range titled {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			lists[i] = s.similarTracks(ctx, TrackSeed{Artist: sd.Artist, Title: sd.Title, MBID: sd.MBID})
-		}()
-	}
-	wg.Wait()
-
-	result := TrackResult{Tracks: []core.ExternalResult{}}
-	var merged []core.ExternalResult
-	for i := 0; ; i++ {
-		more := false
-		for _, l := range lists {
-			if l.Available {
-				result.Available = true
-			}
-			if i < len(l.Tracks) {
-				merged = append(merged, l.Tracks[i])
-				more = true
-			}
-		}
-		if !more {
-			break
-		}
-	}
-	if !result.Available && len(lead) == 0 {
+	profile := s.profile(ctx)
+	rest, available := s.fromSeeds(ctx, titled, titled, radioSurface, nil, profile)
+	if !available && len(lead) == 0 {
 		return s.localRadio(ctx, seeds)
 	}
-	result.Available = true
-
-	// A recording proposed for several seeds gathers support from each, and
-	// its reason names the seed that ranked it highest.
-	support := map[string]float64{}
-	sources := map[string][]string{}
-	best := map[string]float64{}
-	reasonSeed := map[string]Seed{}
-	for i, l := range lists {
-		for pos, t := range l.Tracks {
-			key := recordingKey(t.Title, t.Artist)
-			v := supportAt(pos)
-			support[key] += v
-			sources[key] = appendUnique(sources[key], t.RecommendationSources...)
-			if v > best[key] {
-				best[key], reasonSeed[key] = v, titled[i]
-			}
-		}
-	}
-	profile := s.profile(ctx)
-	rest := filterTracks(merged, titled, radioSurface, nil)
-	for i := range rest {
-		key := recordingKey(rest[i].Title, rest[i].Artist)
-		rest[i].RecommendationSources = sources[key]
-		rest[i].Reason = trackReason(reasonSeed[key], profile)
-	}
-	rankTracks(rest, support, profile)
+	result := TrackResult{Available: true, Tracks: []core.ExternalResult{}}
 	rest = mixNewAndKnown(rest, newShare(radioSurface.newShare, settings.Adventurousness), profile)
 	tracks := append(s.withoutMarkedTracks(ctx, lead), rest...)
 	if len(tracks) > radioLimit {
@@ -152,9 +99,9 @@ func (s *Service) localRadio(ctx context.Context, seeds []Seed) TrackResult {
 	return result
 }
 
-// artistTracks finds a few tracks by an artist in the first source that has
-// any, as the library copy where one is owned.
-func (s *Service) artistTracks(ctx context.Context, artist string) []core.ExternalResult {
+// artistTracks finds up to n tracks by an artist in the first source that
+// has any, as the library copy where one is owned.
+func (s *Service) artistTracks(ctx context.Context, artist string, n int) []core.ExternalResult {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 	matcher := s.liveMatcher()
@@ -181,7 +128,7 @@ func (s *Service) artistTracks(ctx context.Context, artist string) []core.Extern
 				hit = owned
 			}
 			out = append(out, hit)
-			if len(out) == radioArtistTracks {
+			if len(out) == n {
 				break
 			}
 		}

@@ -18,6 +18,7 @@ import {
 } from '../components/ui'
 import type { Album, DownloadJob, Track } from '../lib/types'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
+import { ForYouShelves, MixesRow } from '../components/home/ForYou'
 
 // Synthesize a minimal library Track from a completed download job so it can be
 // played. Only valid once the job has a libraryTrackId (i.e. the scan matched the
@@ -442,6 +443,11 @@ export default function Home() {
           </Carousel>
         </div>
       )}
+
+      {/* "For you" shelves, then Mixes. Last on the page, so shelves that
+          arrive or refresh push nothing else around. */}
+      <ForYouShelves />
+      <MixesRow />
     </div>
   )
 }

@@ -287,3 +287,40 @@ WITH candidate_artists AS (
 )
 SELECT artist, score FROM candidate_artists WHERE score > 0
 ORDER BY score DESC, lower(artist) LIMIT sqlc.arg(result_limit);
+
+-- name: TopPlayedTracksBetween :many
+SELECT CAST(MIN(e.title) AS TEXT) AS title, CAST(MIN(e.artist) AS TEXT) AS artist, COUNT(*) AS plays
+FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
+WHERE p.played_at >= sqlc.arg(since) AND p.played_at < sqlc.arg(until) AND p.qualified = 1
+  AND e.title != '' AND e.artist != ''
+GROUP BY lower(e.artist), lower(e.title)
+ORDER BY plays DESC, lower(MIN(e.artist)), lower(MIN(e.title))
+LIMIT sqlc.arg(result_limit);
+
+-- name: TopPlayedArtistsBetween :many
+SELECT CAST(MIN(e.artist) AS TEXT) AS artist, COUNT(*) AS plays
+FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
+WHERE p.played_at >= sqlc.arg(since) AND p.played_at < sqlc.arg(until) AND p.qualified = 1
+  AND e.artist != ''
+GROUP BY lower(e.artist)
+ORDER BY plays DESC, lower(MIN(e.artist))
+LIMIT sqlc.arg(result_limit);
+
+-- name: LibraryArtistTrackCounts :many
+SELECT CAST(MIN(e.artist) AS TEXT) AS artist, COUNT(DISTINCT e.id) AS tracks
+FROM catalog_entity e
+JOIN backend_binding b ON b.catalog_id = e.id AND b.backend_id != '' AND b.known_absent = 0
+WHERE e.kind = 'track' AND e.artist != ''
+GROUP BY lower(e.artist)
+ORDER BY tracks DESC, lower(MIN(e.artist))
+LIMIT sqlc.arg(result_limit);
+
+-- name: LibraryTracksByArtist :many
+SELECT e.id, e.title, e.artist, e.album, e.duration_ms, e.isrc, e.mbid,
+       CAST(MIN(b.backend_id) AS TEXT) AS backend_id, CAST(MIN(b.cover_art_id) AS TEXT) AS cover_art_id
+FROM catalog_entity e
+JOIN backend_binding b ON b.catalog_id = e.id AND b.backend_id != '' AND b.known_absent = 0
+WHERE e.kind = 'track' AND lower(e.artist) = lower(sqlc.arg(artist))
+GROUP BY e.id
+ORDER BY lower(e.album), lower(e.title), e.id
+LIMIT sqlc.arg(result_limit);

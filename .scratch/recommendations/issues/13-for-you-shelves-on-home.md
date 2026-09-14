@@ -4,9 +4,9 @@
 
 **Blocked by:** 04, 08
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] At least three shelf types, each with a reason in its title or on its cards
-- [ ] Shelves render from cache immediately and refresh in the background without the page jumping around
-- [ ] Not-interested items and discovery filters apply
-- [ ] A new install with no plays seeds shelves from library contents instead of showing nothing
+- [x] At least three shelf types, each with a reason in its title or on its cards
+- [x] Shelves render from cache immediately and refresh in the background without the page jumping around
+- [x] Not-interested items and discovery filters apply
+- [x] A new install with no plays seeds shelves from library contents instead of showing nothing

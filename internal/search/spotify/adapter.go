@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/registry"
@@ -121,6 +122,15 @@ func yearFromReleaseDate(s string) int {
 		}
 	}
 	return 0
+}
+
+// dayFromReleaseDate keeps a release date only when it names the day; Spotify
+// dates some releases to the month or year alone.
+func dayFromReleaseDate(s string) string {
+	if _, err := time.Parse("2006-01-02", s); err != nil {
+		return ""
+	}
+	return s
 }
 
 func artistName(arts []artistRefDTO) string {
@@ -278,6 +288,7 @@ func (a *Adapter) GetArtistDiscography(ctx context.Context, externalID string) (
 				Artist:      artistName(it.Artists),
 				CoverURL:    firstImage(it.Images),
 				Year:        yearFromReleaseDate(it.ReleaseDate),
+				ReleaseDate: dayFromReleaseDate(it.ReleaseDate),
 				Kind:        kind,
 				TotalTracks: it.TotalTracks,
 				Tracks:      []core.ExternalResult{},

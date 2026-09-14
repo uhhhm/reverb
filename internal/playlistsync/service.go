@@ -535,30 +535,86 @@ func (s *Service) AddTrack(ctx context.Context, id string, entry core.ExternalRe
 	return detail, err
 }
 
-// AddTrackWithResult is AddTrack plus whether this call inserted a new member.
-// The API uses that bit to avoid counting duplicate no-ops as recommendation
-// conversions; AddTrack retains its original caller-facing contract.
+// AddTrackWithResult is AddTrack plus whether this call inserted a new member,
+// so a duplicate no-op is not counted as a recommendation conversion.
 func (s *Service) AddTrackWithResult(ctx context.Context, id string, entry core.ExternalResult) (core.SyncedPlaylistDetail, bool, error) {
+	detail, added, err := s.AddTracks(ctx, id, []core.ExternalResult{entry}, true)
+	return detail, added > 0, err
+}
+
+// AddTracks appends entries to a mode='once' managed playlist in one edit,
+// skipping any already in it, and reports how many were added. With download,
+// a search-source entry not in the library is queued for download; without
+// it, the entry stays a streamed track (Add to playlist, no download).
+// Returns ErrNotEditable if the playlist is mode='synced'.
+func (s *Service) AddTracks(ctx context.Context, id string, entries []core.ExternalResult, download bool) (core.SyncedPlaylistDetail, int, error) {
 	row, err := s.store.Get(ctx, id)
 	if err != nil {
-		return core.SyncedPlaylistDetail{}, false, err
+		return core.SyncedPlaylistDetail{}, 0, err
 	}
 	if row.Mode != "once" {
-		return core.SyncedPlaylistDetail{}, false, ErrNotEditable
+		return core.SyncedPlaylistDetail{}, 0, ErrNotEditable
 	}
 	var tracks []core.ExternalResult
 	_ = json.Unmarshal([]byte(row.TracksJSON), &tracks)
 	// Dedupe by source+externalId.
+	present := make(map[core.TrackKey]bool, len(tracks)+len(entries))
 	for _, t := range tracks {
-		if t.Source == entry.Source && t.ExternalID == entry.ExternalID {
-			detail, detailErr := s.Detail(ctx, id)
-			return detail, false, detailErr
+		present[core.TrackKey{Source: t.Source, ExternalID: t.ExternalID}] = true
+	}
+	var added []core.ExternalResult
+	for _, entry := range entries {
+		key := core.TrackKey{Source: entry.Source, ExternalID: entry.ExternalID}
+		if present[key] {
+			continue
+		}
+		present[key] = true
+		added = append(added, s.withCanonicalID(ctx, entry))
+	}
+	if len(added) == 0 {
+		detail, detailErr := s.Detail(ctx, id)
+		return detail, 0, detailErr
+	}
+	tracks = append(tracks, added...)
+	tj, _ := json.Marshal(tracks)
+	if err := s.store.UpdateTracks(ctx, id, row.Name, row.CoverURL, string(tj), s.now()); err != nil {
+		return core.SyncedPlaylistDetail{}, 0, err
+	}
+	s.publish(ctx, id)
+	if download {
+		for _, entry := range added {
+			s.enqueueIfMissing(ctx, entry)
 		}
 	}
-	// Task 5: for library-source tracks, mint a stable catalog entity id at persist
-	// time so Detail() can resolve via the binding cache instead of re-running the
-	// fuzzy matcher. Scoped to library tracks only (external/unmatched tracks are
-	// browsed results, not durable references). Nil-minter-safe: silently skipped.
+	detail, err := s.Detail(ctx, id)
+	return detail, len(added), err
+}
+
+// enqueueIfMissing queues a download for a search-source entry the library
+// does not hold.
+func (s *Service) enqueueIfMissing(ctx context.Context, entry core.ExternalResult) {
+	if entry.Source == "library" {
+		return
+	}
+	res, _ := s.match.Match(ctx, entry)
+	if res.Status != core.MatchInLibrary {
+		_, _ = s.dl.Enqueue(ctx, core.DownloadRequest{
+			Source:     entry.Source,
+			ExternalID: entry.ExternalID,
+			Artist:     entry.Artist,
+			Title:      entry.Title,
+			Album:      entry.Album,
+			ISRC:       entry.ISRC,
+			DurationMs: entry.DurationMs,
+		})
+	}
+}
+
+// withCanonicalID mints a stable catalog entity id for a library-source track
+// at persist time, so Detail() can resolve via the binding cache instead of
+// re-running the fuzzy matcher. External/unmatched tracks are browsed results,
+// not durable references, and are returned unchanged. Nil-minter-safe.
+func (s *Service) withCanonicalID(ctx context.Context, entry core.ExternalResult) core.ExternalResult {
 	if entry.Source == "library" && s.canonicalMinter != nil {
 		cid, mErr := s.canonicalMinter.CanonicalFor(ctx, catalog.Identity{
 			Kind:       "track",
@@ -577,29 +633,7 @@ func (s *Service) AddTrackWithResult(ctx context.Context, id string, entry core.
 			entry.CanonicalID = cid
 		}
 	}
-	tracks = append(tracks, entry)
-	tj, _ := json.Marshal(tracks)
-	if err := s.store.UpdateTracks(ctx, id, row.Name, row.CoverURL, string(tj), s.now()); err != nil {
-		return core.SyncedPlaylistDetail{}, false, err
-	}
-	s.publish(ctx, id)
-	// Enqueue download if missing (not a library entry and not matched).
-	if entry.Source != "library" {
-		res, _ := s.match.Match(ctx, entry)
-		if res.Status != core.MatchInLibrary {
-			_, _ = s.dl.Enqueue(ctx, core.DownloadRequest{
-				Source:     entry.Source,
-				ExternalID: entry.ExternalID,
-				Artist:     entry.Artist,
-				Title:      entry.Title,
-				Album:      entry.Album,
-				ISRC:       entry.ISRC,
-				DurationMs: entry.DurationMs,
-			})
-		}
-	}
-	detail, err := s.Detail(ctx, id)
-	return detail, true, err
+	return entry
 }
 
 // RemoveTrack removes an entry from a mode='once' managed playlist's tracklist.

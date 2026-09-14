@@ -184,7 +184,7 @@ func (s *dbSettingsStore) UpsertSetting(ctx context.Context, key, value string) 
 
 // BuildSyncService constructs a *playlistsync.Service from the built services.
 // It requires a library adapter and a download Manager; both are needed for the
-// managed-playlist operations (CreateManaged, List, Detail, AddTrack, RemoveTrack)
+// managed-playlist operations (CreateManaged, List, Detail, AddTracks, RemoveTrack)
 // that work without any Spotify source. Returns nil only when the library or
 // Manager is absent. When a search source implementing search.PlaylistProvider
 // (spotify) is present it is wired in as src; otherwise src is nil and the
@@ -225,7 +225,7 @@ func (b *Builder) BuildSyncService(
 	svc := playlistsync.NewService(src, matcher, mgr, store, lib, nowUnix, uuid.NewString, syncResolve)
 	svc.WithLibraryReader(lib)
 	svc.WithSettingsStore(settings)
-	// Task 5: wire the canonical minter so AddTrack mints stable catalog ids for
+	// Task 5: wire the canonical minter so AddTracks mints stable catalog ids for
 	// library-source tracks at persist time. Nil-safe: WithCanonicalMinter skips
 	// minting when nil. The minter is set via builder.SetCanonicalMinter before Build.
 	if b.canonicalMinter != nil {

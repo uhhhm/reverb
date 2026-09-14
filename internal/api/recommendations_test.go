@@ -21,6 +21,10 @@ type fakeRecommendations struct {
 	gotTitle         string
 	gotTrackSeed     recommend.TrackSeed
 	gotSeeds         []recommend.Seed
+	gotPage          int
+	suggestionCalls  int
+	shelves          recommend.Shelves
+	mixes            map[recommend.MixKind]recommend.Mix
 }
 
 func (f *fakeRecommendations) SimilarTracks(_ context.Context, artist, title string) recommend.TrackResult {

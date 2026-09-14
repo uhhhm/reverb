@@ -18,6 +18,11 @@ type Recommendations interface {
 	SimilarArtists(ctx context.Context, source, id string) recommend.ArtistResult
 	SimilarTracks(ctx context.Context, artist, title string) recommend.TrackResult
 	Radio(ctx context.Context, seeds []recommend.Seed) recommend.TrackResult
+	// Shelves and Mix read what this device last generated and refresh it in
+	// the background, so Home never waits on a source.
+	Shelves(ctx context.Context) recommend.Shelves
+	Mix(ctx context.Context, kind recommend.MixKind) recommend.Mix
+	PlaylistSuggestions(ctx context.Context, playlist []recommend.Seed, page int) recommend.TrackResult
 }
 
 type seedRecommendations interface {

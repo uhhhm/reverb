@@ -42,7 +42,7 @@ type SyncService interface {
 	DownloadMissing(ctx context.Context, id string) ([]core.DownloadJob, error)
 	UpdateSettings(ctx context.Context, id string, enabled bool, intervalSec int, autoDownload bool) error
 	Delete(ctx context.Context, id string) error
-	AddTrackWithResult(ctx context.Context, id string, entry core.ExternalResult) (core.SyncedPlaylistDetail, bool, error)
+	AddTracks(ctx context.Context, id string, entries []core.ExternalResult, download bool) (core.SyncedPlaylistDetail, int, error)
 	RemoveTrack(ctx context.Context, id, source, externalID string) (core.SyncedPlaylistDetail, error)
 	SetCover(ctx context.Context, id, coverURL string) (core.SyncedPlaylistDetail, error)
 	ReorderTracks(ctx context.Context, id string, order []core.TrackKey) (core.SyncedPlaylistDetail, error)
@@ -355,6 +355,9 @@ type addSyncedTrackBody struct {
 	DurationMs           int                       `json:"durationMs"`
 	CoverArtID           string                    `json:"coverArtId"`
 	RecommendationOrigin core.RecommendationOrigin `json:"recommendationOrigin"`
+	// Download queues a missing search-source track for download; it defaults
+	// to true. False adds it as a streamed track.
+	Download *bool `json:"download"`
 }
 
 func (s *Server) handleAddSyncedTrack(w http.ResponseWriter, r *http.Request) {
@@ -387,7 +390,9 @@ func (s *Server) handleAddSyncedTrack(w http.ResponseWriter, r *http.Request) {
 		CoverArtID: body.CoverArtID,
 		Type:       core.EntityTrack,
 	}
-	det, added, err := svc.AddTrackWithResult(r.Context(), chi.URLParam(r, "id"), entry)
+	download := body.Download == nil || *body.Download
+	det, n, err := svc.AddTracks(r.Context(), chi.URLParam(r, "id"), []core.ExternalResult{entry}, download)
+	added := n > 0
 	if err != nil {
 		status := http.StatusUnprocessableEntity
 		if errors.Is(err, playlistsync.ErrNotEditable) {

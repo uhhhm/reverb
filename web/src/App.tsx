@@ -24,6 +24,7 @@ const AddFromLink = lazy(() => import('./routes/AddFromLink'))
 const ManageTracks = lazy(() => import('./routes/ManageTracks'))
 const P2P = lazy(() => import('./routes/P2P'))
 const SimilarTracks = lazy(() => import('./routes/SimilarTracks'))
+const Mix = lazy(() => import('./routes/Mix'))
 
 /** Redirect bare `/album/:id` or `/artist/:id` URLs to the source-qualified form
  *  `/album/library/:id` / `/artist/library/:id`. These old URLs may exist in
@@ -92,6 +93,7 @@ function Routed() {
         <Route path="/upgrade-quality" element={<Navigate to="/manage-tracks" replace />} />
         <Route path="/p2p" element={<P2P />} />
         <Route path="/similar-tracks" element={<SimilarTracks />} />
+        <Route path="/mix/:kind" element={<Mix />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

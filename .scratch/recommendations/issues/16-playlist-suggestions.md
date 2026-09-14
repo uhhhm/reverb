@@ -4,9 +4,9 @@
 
 **Blocked by:** 08
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Suggestions exclude tracks already in the playlist
-- [ ] Adding a suggestion replicates like any playlist edit, and it drops off the suggestion list
-- [ ] Refresh replaces the list with the next best candidates
-- [ ] Hidden for mirrored (synced-mode) playlists, which are rebuilt from upstream
+- [x] Suggestions exclude tracks already in the playlist
+- [x] Adding a suggestion replicates like any playlist edit, and it drops off the suggestion list
+- [x] Refresh replaces the list with the next best candidates
+- [x] Hidden for mirrored (synced-mode) playlists, which are rebuilt from upstream
