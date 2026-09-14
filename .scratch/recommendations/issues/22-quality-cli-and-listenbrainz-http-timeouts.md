@@ -4,7 +4,7 @@
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
 Evidence (verified at `5cd26ea`):
 
@@ -19,7 +19,7 @@ Acceptance criteria:
 - Optional: honour `429` / `Retry-After` in `getJSON` instead of only fixed spacing.
 - Add a test using a stalled `httptest` server that asserts the call returns a timeout error within the deadline.
 
-- [ ] HTTP timeout no longer relies on `http.DefaultClient`
-- [ ] CLI run is bounded; timeout returns an error
-- [ ] Stalled-server test asserts bounded failure
-- [ ] `go test ./internal/recommend/listenbrainz/... ./cmd/recommend-quality/...` passes
+- [x] HTTP timeout no longer relies on `http.DefaultClient`
+- [x] CLI run is bounded; timeout returns an error
+- [x] Stalled-server test asserts bounded failure
+- [x] `go test ./internal/recommend/listenbrainz/... ./cmd/recommend-quality/...` passes

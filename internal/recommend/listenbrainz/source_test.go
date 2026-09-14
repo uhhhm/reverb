@@ -2,6 +2,8 @@ package listenbrainz
 
 import (
 	"context"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -141,5 +143,29 @@ func TestSimilarArtistsFallBackToAnExactNameAndSpaceRequests(t *testing.T) {
 	}
 	if len(candidates) != 2 || len(clock.sleeps) != 1 || clock.sleeps[0] != time.Second {
 		t.Fatalf("candidates=%d sleeps=%v, want 2 candidates and one 1s rate-limit wait", len(candidates), clock.sleeps)
+	}
+}
+
+func TestNewSourceBoundsAStalledRequest(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-release }))
+	defer srv.Close()
+	defer close(release)
+
+	src := New()
+	if src.client == http.DefaultClient || src.client.Timeout <= 0 {
+		t.Fatalf("client %+v, want its own client with a timeout", src.client)
+	}
+	src.labsURL = srv.URL
+	src.client.Timeout = 50 * time.Millisecond
+
+	start := time.Now()
+	_, err := src.SimilarTracks(context.Background(), recommend.TrackSeed{MBID: "7813d6e5-fe21-4cd0-8f8b-82b7c15662ae"}, 1)
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() {
+		t.Fatalf("error = %v, want a timeout", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("stalled request took %s, want it bounded by the client timeout", elapsed)
 	}
 }

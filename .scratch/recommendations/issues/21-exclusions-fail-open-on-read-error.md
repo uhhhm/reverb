@@ -4,7 +4,7 @@
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
 Evidence (verified at `5cd26ea`):
 
@@ -18,6 +18,6 @@ Acceptance criteria:
 - Add a regression test that injects an erroring exclusion loader and asserts marked tracks/artists are not returned (and that the request surfaces an error rather than an empty-but-successful result).
 - Keep the unconfigured-loader case (feature disabled) filter-free.
 
-- [ ] Error path distinguished from unconfigured loader
-- [ ] Regression test for failing exclusion loader
-- [ ] `go test ./internal/recommend/...` passes
+- [x] Error path distinguished from unconfigured loader
+- [x] Regression test for failing exclusion loader
+- [x] `go test ./internal/recommend/...` passes

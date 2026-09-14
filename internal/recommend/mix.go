@@ -104,8 +104,13 @@ func periodSeed(kind MixKind, start time.Time) string {
 // Mix returns a Mix as last generated on this device. When its period has
 // passed, as when the device was asleep at the refresh time, a regeneration
 // starts in the background and Refreshing is set; the previous Mix shows only
-// until it lands.
+// until it lands. While Not interested marks cannot be read, the Mix is
+// unavailable rather than shown without them.
 func (s *Service) Mix(ctx context.Context, kind MixKind) Mix {
+	ctx, ok := s.withMarks(ctx)
+	if !ok {
+		return Mix{Kind: kind, Tracks: []core.ExternalResult{}}
+	}
 	var m Mix
 	if !s.load(ctx, mixKey(kind), &m) {
 		m = Mix{Kind: kind}
@@ -205,6 +210,10 @@ func (s *Service) discoverWeekly(ctx context.Context, start time.Time) Mix {
 	}
 	// Any failed read leaves the Mix unavailable, so it is retried rather than
 	// stored for the week without its taste, seeds or exclusions.
+	ctx, ok := s.withMarks(ctx)
+	if !ok {
+		return m
+	}
 	profile, err := s.profileBefore(ctx, start)
 	if err != nil {
 		log.Printf("recommend: reading Discover Weekly's taste profile: %v", err)

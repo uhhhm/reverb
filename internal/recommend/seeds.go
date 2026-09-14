@@ -147,7 +147,8 @@ func seededOrder[T any](items []T, seed string, key func(T) string) {
 
 // startRefresh runs fn in the background unless a refresh under key is
 // running or was started within refreshRetry. The refresh outlives the
-// request that started it.
+// request that started it, and reads Not interested marks afresh rather than
+// reusing the request's.
 func (s *Service) startRefresh(ctx context.Context, key string, fn func(context.Context)) {
 	s.refreshMu.Lock()
 	last, tried := s.attempts[key]
@@ -159,7 +160,7 @@ func (s *Service) startRefresh(ctx context.Context, key string, fn func(context.
 	s.attempts[key] = s.now()
 	s.refreshMu.Unlock()
 	s.background(func() {
-		ctx := context.WithoutCancel(ctx)
+		ctx := context.WithValue(context.WithoutCancel(ctx), marksKey{}, nil)
 		for {
 			// Each run gets its own time limit, so a rerun asked for late
 			// in a slow run still has all of it.

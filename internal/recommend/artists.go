@@ -64,6 +64,10 @@ type similarArtistSource struct {
 // dedicated source, then ranks them by agreement and the taste profile. With
 // online recommendations off, it uses local-library similarity or stale cache.
 func (s *Service) SimilarArtists(ctx context.Context, source, id string) ArtistResult {
+	ctx, ok := s.withMarks(ctx)
+	if !ok {
+		return ArtistResult{Artists: []core.ExternalArtist{}}
+	}
 	if !s.settings(ctx).Online {
 		if source == "library" {
 			return s.localArtists(ctx, s.artistSeed(ctx, source, id))

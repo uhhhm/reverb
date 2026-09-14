@@ -180,22 +180,52 @@ func (s *Service) liveSources() []search.SearchSource {
 	return s.sources()
 }
 
-// excluded returns the current marks, or nil when there are none to apply.
-func (s *Service) excluded(ctx context.Context) Exclusions {
+// excluded returns the current marks, or nil when no loader is configured and
+// nothing is filtered. A failed read returns the error together with marks
+// that exclude everything, so a caller that carries on still recommends
+// nothing the owner marked.
+// Marks already read for the request (see withMarks) are reused.
+func (s *Service) excluded(ctx context.Context) (Exclusions, error) {
+	if m, ok := ctx.Value(marksKey{}).(loadedMarks); ok {
+		return m.ex, nil
+	}
 	if s.exclusions == nil {
-		return nil
+		return nil, nil
 	}
 	ex, err := s.exclusions(ctx)
 	if err != nil {
 		log.Printf("recommend: reading not-interested marks: %v", err)
-		return nil
+		return excludeAll{}, err
 	}
-	return ex
+	return ex, nil
 }
+
+type marksKey struct{}
+
+type loadedMarks struct{ ex Exclusions }
+
+// withMarks reads the marks once at the start of a request and returns a
+// context carrying them, so every filter in the request applies the same
+// marks without reading them again. It reports false when they cannot be
+// read: the surface is then unavailable rather than shown without them.
+func (s *Service) withMarks(ctx context.Context) (context.Context, bool) {
+	ex, err := s.excluded(ctx)
+	if err != nil {
+		return ctx, false
+	}
+	return context.WithValue(ctx, marksKey{}, loadedMarks{ex: ex}), true
+}
+
+// excludeAll stands in for marks that could not be read, for a path that
+// filters without having checked them first.
+type excludeAll struct{}
+
+func (excludeAll) Track(core.ExternalResult) bool { return true }
+func (excludeAll) Artist(string) bool             { return true }
 
 // withoutMarkedArtists filters into a new slice: artists may be a cached list.
 func (s *Service) withoutMarkedArtists(ctx context.Context, artists []core.ExternalArtist) []core.ExternalArtist {
-	ex := s.excluded(ctx)
+	ex, _ := s.excluded(ctx)
 	out := make([]core.ExternalArtist, 0, len(artists))
 	for _, a := range artists {
 		if ex == nil || !ex.Artist(a.Name) {
@@ -207,7 +237,7 @@ func (s *Service) withoutMarkedArtists(ctx context.Context, artists []core.Exter
 
 // withoutMarkedTracks filters into a new slice: tracks may be a cached list.
 func (s *Service) withoutMarkedTracks(ctx context.Context, tracks []core.ExternalResult) []core.ExternalResult {
-	ex := s.excluded(ctx)
+	ex, _ := s.excluded(ctx)
 	out := make([]core.ExternalResult, 0, len(tracks))
 	for _, t := range tracks {
 		if ex == nil || !ex.Track(t) {

@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"time"
 
+	"github.com/uhhhm/reverb/internal/recommend"
 	"github.com/uhhhm/reverb/internal/recommend/listenbrainz"
 	"github.com/uhhhm/reverb/internal/recommend/quality"
 )
@@ -15,7 +18,13 @@ import (
 const (
 	defaultFixture  = "internal/recommend/quality/testdata/history.json"
 	defaultBaseline = "internal/recommend/quality/testdata/baseline.json"
+	// defaultTimeout bounds a whole run. Recording spaces ListenBrainz
+	// requests a second apart, so it leaves room for a large history.
+	defaultTimeout = 30 * time.Minute
 )
+
+// newSource is the source -record-cache captures (test seam).
+var newSource = func() recommend.TrackSimilarity { return listenbrainz.New() }
 
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -24,7 +33,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) (err error) {
 	flags := flag.NewFlagSet("recommend-quality", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	fixturePath := flags.String("fixture", defaultFixture, "anonymised history and recorded network responses")
@@ -32,9 +41,17 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	baselinePath := flags.String("baseline", defaultBaseline, "baseline report to compare against")
 	recordCache := flags.String("record-cache", "", "capture ListenBrainz responses to this fixture (requires -db)")
 	writeBaseline := flags.Bool("write-baseline", false, "replace the baseline with the current fixture report")
+	timeout := flags.Duration("timeout", defaultTimeout, "give up on the whole run after this long")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	ctx, cancel := context.WithTimeout(ctx, *timeout)
+	defer cancel()
+	defer func() {
+		if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			err = fmt.Errorf("timed out after %s (raise -timeout): %w", *timeout, err)
+		}
+	}()
 	fixtureExplicit := false
 	flags.Visit(func(item *flag.Flag) {
 		if item.Name == "fixture" {
@@ -61,7 +78,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("-record-cache requires -db")
 		}
 		fixture.Sources = nil
-		fixture, err = quality.RecordSource(ctx, fixture, listenbrainz.New())
+		fixture, err = quality.RecordSource(ctx, fixture, newSource())
 		if err != nil {
 			return fmt.Errorf("record ListenBrainz cache: %w", err)
 		}

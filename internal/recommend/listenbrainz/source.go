@@ -22,8 +22,11 @@ const (
 	defaultLabsURL        = "https://labs.api.listenbrainz.org"
 	defaultMusicBrainzURL = "https://musicbrainz.org/ws/2"
 	requestInterval       = time.Second
-	recordingAlgorithm    = "session_based_days_7500_session_300_contribution_5_threshold_15_limit_50_skip_30"
-	artistAlgorithm       = "session_based_days_7500_session_300_contribution_5_threshold_10_limit_100_filter_True_skip_30"
+	// requestTimeout bounds one HTTP request, so a stalled endpoint fails
+	// that request rather than holding a caller until its own deadline.
+	requestTimeout     = 30 * time.Second
+	recordingAlgorithm = "session_based_days_7500_session_300_contribution_5_threshold_15_limit_50_skip_30"
+	artistAlgorithm    = "session_based_days_7500_session_300_contribution_5_threshold_10_limit_100_filter_True_skip_30"
 )
 
 var (
@@ -51,7 +54,7 @@ type Source struct {
 func New() *Source {
 	return &Source{
 		apiURL: defaultAPIURL, labsURL: defaultLabsURL, musicBrainzURL: defaultMusicBrainzURL,
-		client: http.DefaultClient, interval: requestInterval, now: time.Now, sleep: sleepContext,
+		client: &http.Client{Timeout: requestTimeout}, interval: requestInterval, now: time.Now, sleep: sleepContext,
 	}
 }
 

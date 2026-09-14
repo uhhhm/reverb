@@ -65,8 +65,13 @@ type Shelves struct {
 
 // Shelves returns the cached shelves at once. Missing or old ones start a
 // refresh in the background rather than holding up Home. Not interested
-// marks apply to what was cached before they were made.
+// marks apply to what was cached before they were made; while they cannot be
+// read, no shelves show.
 func (s *Service) Shelves(ctx context.Context) Shelves {
+	ctx, ok := s.withMarks(ctx)
+	if !ok {
+		return Shelves{Shelves: []Shelf{}}
+	}
 	var cached Shelves
 	if !s.load(ctx, shelvesKey, &cached) || s.now().Sub(time.Unix(cached.UpdatedAt, 0)) >= shelfRefreshAfter {
 		s.startRefresh(ctx, shelvesKey, func(ctx context.Context) { s.RefreshShelves(ctx) })
@@ -78,8 +83,13 @@ func (s *Service) Shelves(ctx context.Context) Shelves {
 
 // RefreshShelves regenerates the shelves and stores them. When nothing can be
 // generated (offline with an empty library, say) the last shelves stay, marked
-// offline only if this refresh was, and a later read tries again.
+// offline only if this refresh was, and a later read tries again. Nothing is
+// stored while Not interested marks cannot be read.
 func (s *Service) RefreshShelves(ctx context.Context) Shelves {
+	ctx, ok := s.withMarks(ctx)
+	if !ok {
+		return Shelves{Shelves: []Shelf{}}
+	}
 	fresh := s.buildShelves(ctx)
 	var prev Shelves
 	if len(fresh.Shelves) == 0 && s.load(ctx, shelvesKey, &prev) && len(prev.Shelves) > 0 {
@@ -93,7 +103,7 @@ func (s *Service) RefreshShelves(ctx context.Context) Shelves {
 }
 
 func (s *Service) withoutMarkedShelves(ctx context.Context, shelves []Shelf) []Shelf {
-	ex := s.excluded(ctx)
+	ex, _ := s.excluded(ctx)
 	out := make([]Shelf, 0, len(shelves))
 	for _, sh := range shelves {
 		if sh.Seed != nil && markedSeed(ex, sh.Seed.Artist, sh.Seed.Title) {
@@ -153,7 +163,7 @@ func (s *Service) buildShelves(ctx context.Context) Shelves {
 // different artists and the most played artists. A new install with no plays
 // seeds from the artists the library holds most of instead.
 func (s *Service) shelfSeeds(ctx context.Context, now time.Time) ([]Seed, ShelfKind, []string) {
-	ex := s.excluded(ctx)
+	ex, _ := s.excluded(ctx)
 	var seeds []Seed
 	byArtist := map[string]bool{}
 	if top, err := s.listening.TopTracks(ctx, now.Add(-shelfSeedWindow), now, shelfSeedCandidates); err == nil {

@@ -26,6 +26,10 @@ func (s *Service) PlaylistSuggestions(ctx context.Context, playlist []Seed, page
 	if len(lookup) == 0 {
 		return result
 	}
+	ctx, ok := s.withMarks(ctx)
+	if !ok {
+		return result
+	}
 	var tracks []core.ExternalResult
 	if s.settings(ctx).Online && len(s.tracks) > 0 {
 		tracks, result.Available = s.fromSeeds(ctx, lookup, playlist, similarTracksSurface, nil, s.profile(ctx))
