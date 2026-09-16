@@ -18,9 +18,16 @@ const TopicUpdateState = events.TopicUpdate
 
 // checkInterval is how often the release feed is polled, and ytdlpInterval how
 // often yt-dlp is upgraded in place.
+//
+// assetRetryInterval applies while a newer release exists but carries no
+// build for this platform yet. Publishing a GitHub release is what starts the
+// desktop workflow, so for the first quarter of an hour or so the latest
+// release is real but its zips are still being built; waiting a full
+// checkInterval before looking again would hold the update back for hours.
 const (
-	checkInterval = 6 * time.Hour
-	ytdlpInterval = 24 * time.Hour
+	checkInterval      = 6 * time.Hour
+	assetRetryInterval = 15 * time.Minute
+	ytdlpInterval      = 24 * time.Hour
 )
 
 // State is what the UI knows about updates. It is a value: Status returns a
@@ -90,6 +97,9 @@ type Service struct {
 	state      State
 	opMu       sync.Mutex // serializes staging and installation, which share files
 	installing bool       // protected by opMu; prevents a second successor launch
+	// awaitingAsset is set when the newest release has no payload for this
+	// platform yet, so the next check comes sooner. Protected by mu.
+	awaitingAsset bool
 }
 
 // New builds a Service. It does not start any goroutines; call Start.
@@ -136,16 +146,26 @@ func (s *Service) pollReleases(ctx context.Context) {
 		return
 	}
 	s.CheckNow(ctx)
-	ticker := time.NewTicker(checkInterval)
-	defer ticker.Stop()
 	for {
+		timer := time.NewTimer(s.nextCheckIn())
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			s.CheckNow(ctx)
 		}
 	}
+}
+
+// nextCheckIn is how long to wait before reading the release feed again.
+func (s *Service) nextCheckIn() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.awaitingAsset {
+		return assetRetryInterval
+	}
+	return checkInterval
 }
 
 func (s *Service) pollYtDlp(ctx context.Context) {
@@ -193,15 +213,24 @@ func (s *Service) CheckNow(ctx context.Context) State {
 	})
 	if !IsNewer(s.opts.CurrentVersion, rel.Tag) {
 		s.update(func(st *State) { st.Available = ""; st.Notes = "" })
+		s.setAwaitingAsset(false)
 		return s.Status()
 	}
 	s.update(func(st *State) { st.Available = rel.Tag; st.Notes = rel.Body })
 
 	if su, ok := ReadStaged(s.opts.DataDir); ok && su.Tag == rel.Tag {
+		s.setAwaitingAsset(false)
 		return s.Status() // already downloaded and waiting for a restart
 	}
+	s.setAwaitingAsset(PickAsset(rel, runtime.GOOS, runtime.GOARCH) == nil)
 	s.stage(ctx, rel)
 	return s.Status()
+}
+
+func (s *Service) setAwaitingAsset(v bool) {
+	s.mu.Lock()
+	s.awaitingAsset = v
+	s.mu.Unlock()
 }
 
 // stage downloads the release asset for this platform and records it as the
@@ -210,7 +239,8 @@ func (s *Service) stage(ctx context.Context, rel *Release) {
 	asset := PickAsset(rel, runtime.GOOS, runtime.GOARCH)
 	if asset == nil {
 		s.update(func(st *State) {
-			st.Error = "release " + rel.Tag + " has no build for " + runtime.GOOS + "/" + runtime.GOARCH
+			st.Error = "release " + rel.Tag + " has no build for " + runtime.GOOS + "/" + runtime.GOARCH +
+				" yet; it will be checked again shortly"
 		})
 		return
 	}

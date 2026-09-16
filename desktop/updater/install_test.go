@@ -345,3 +345,40 @@ func TestUnzipRejectsTraversal(t *testing.T) {
 		t.Fatal("unzipSingle accepted an entry escaping the destination")
 	}
 }
+
+// A release published moments ago has no zips yet: the desktop workflow that
+// builds them starts on publish. The next check must not wait the full six
+// hours, and once a payload is staged the ordinary cadence resumes.
+func TestMissingAssetShortensTheNextCheck(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"tag_name": "v2.0.0", "assets": []any{}})
+	}))
+	defer srv.Close()
+	useServer(t, srv)
+
+	svc := New(Options{Repo: "owner/name", CurrentVersion: "v1.0.0", DataDir: t.TempDir()})
+	if got := svc.nextCheckIn(); got != checkInterval {
+		t.Fatalf("before any check: next check in %v, want %v", got, checkInterval)
+	}
+	svc.CheckNow(context.Background())
+	if got := svc.nextCheckIn(); got != assetRetryInterval {
+		t.Fatalf("release without a payload: next check in %v, want %v", got, assetRetryInterval)
+	}
+
+	// Current build: nothing is pending, so the short cadence must not stick.
+	current := New(Options{Repo: "owner/name", CurrentVersion: "v2.0.0", DataDir: t.TempDir()})
+	current.CheckNow(context.Background())
+	if got := current.nextCheckIn(); got != checkInterval {
+		t.Fatalf("up to date: next check in %v, want %v", got, checkInterval)
+	}
+
+	// The payload arrives: staged, back to the long cadence.
+	useServer(t, releaseServer(t, "v2.0.0", fakeBinary("v2")))
+	svc.CheckNow(context.Background())
+	if st := svc.Status(); st.Staged != "v2.0.0" {
+		t.Fatalf("staged=%q want v2.0.0 (error %q)", st.Staged, st.Error)
+	}
+	if got := svc.nextCheckIn(); got != checkInterval {
+		t.Fatalf("after staging: next check in %v, want %v", got, checkInterval)
+	}
+}

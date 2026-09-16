@@ -56,3 +56,30 @@ Existing paired-device authentication and HTTP Host/Origin guards still apply.
 The close preference is saved locally in `desktop.json`. Startup diagnostics go
 to `background.log` next to the database; if background startup fails, check that
 file. Files over 5 MiB are rotated on the next background launch.
+
+## Releases and auto-update
+
+The app checks GitHub Releases (`--update-repo`, default `uhhhm/reverb`) at
+start and every six hours, downloads a newer stable release in the background,
+verifies it, and installs it only when the user presses **Restart now**. Local
+builds report version `dev` and never update.
+
+A release becomes installable through `.github/workflows/desktop.yml`, which
+runs when a GitHub release is **published**:
+
+1. Tag the commit on `main` (`v1.2.3`) and publish a non-draft release for it.
+   A stable release must point at the current `main` commit; a prerelease may
+   point anywhere, but `/releases/latest` never serves prereleases, so only
+   stable tags reach the updater.
+2. The workflow first verifies that `ci.yml` succeeded for that commit. If CI
+   has not finished yet the run fails; re-run it with **Run workflow** and the
+   tag once CI is green.
+3. It builds `reverb-desktop-<version>-<os>-<arch>.zip` for macOS and Linux
+   (amd64 and arm64) and attaches all four to the release. Each zip holds the
+   bare `reverb-desktop` executable, which is the only file the updater swaps;
+   the bundled tools beside the app are left as they are.
+
+Between publishing and the assets landing, the updater sees the new tag with
+no payload for its platform and re-checks every fifteen minutes instead of
+waiting for the next six-hour cycle. There is no Windows build in the matrix.
+
