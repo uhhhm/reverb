@@ -27,12 +27,16 @@ func (t tasteInputs) PlaysAfter(ctx context.Context, after int64, limit int) ([]
 	}
 	out := make([]recommend.TastePlay, len(rows))
 	for i, r := range rows {
-		out[i] = recommend.TastePlay{Seq: r.Seq, Artist: r.Artist, Title: r.Title, PlayedAt: r.PlayedAt, Completed: r.Completed}
+		out[i] = recommend.TastePlay{ID: r.ID, Seq: r.Seq, Artist: r.Artist, Title: r.Title, PlayedAt: r.PlayedAt, Completed: r.Completed}
 	}
 	return out, nil
 }
 
 func (t tasteInputs) PlayCount(ctx context.Context) (int64, error) { return t.q.CountPlays(ctx) }
+
+func (t tasteInputs) PlayIDAt(ctx context.Context, seq int64) (string, error) {
+	return t.q.TastePlayIDAt(ctx, seq)
+}
 
 func (t tasteInputs) Signals(ctx context.Context) ([]recommend.TasteSignal, error) {
 	playlists, err := t.q.ListSyncedPlaylists(ctx)

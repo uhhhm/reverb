@@ -21,6 +21,9 @@ import (
 // minutes), so a short recommendation skip can be retained for quality stats
 // without becoming a negative taste signal.
 type TastePlay struct {
+	// ID identifies the play itself. Seq can be reused after a play is
+	// removed, so only ID tells two plays at the same Seq apart.
+	ID        string
 	Seq       int64
 	Artist    string
 	Title     string
@@ -62,6 +65,11 @@ type TasteInputs interface {
 	PlaysAfter(ctx context.Context, after int64, limit int) ([]TastePlay, error)
 	// PlayCount counts every stored play, so a removed play is noticed.
 	PlayCount(ctx context.Context) (int64, error)
+	// PlayIDAt returns the ID of the play stored at seq, or "" when no play
+	// holds it. Removing a play frees its Seq for the next play to take, and
+	// a substitution like that moves neither the fold's cursor nor the count;
+	// the ID at the cursor is what gives it away.
+	PlayIDAt(ctx context.Context, seq int64) (string, error)
 	// Signals returns every playlist track and Not interested mark. They are
 	// few and can be undone, so they are read whole on every build.
 	Signals(ctx context.Context) ([]TasteSignal, error)
@@ -249,7 +257,10 @@ type tasteState struct {
 	mu    sync.Mutex
 	plays tally
 	seq   int64
-	count int64
+	// lastID is the ID of the play at seq, which detects a play that took a
+	// removed play's Seq.
+	lastID string
+	count  int64
 }
 
 // profile returns the current taste profile, or nil when there is none. A
@@ -316,15 +327,29 @@ func (s *Service) profileBefore(ctx context.Context, t time.Time) (*Profile, err
 	return p, nil
 }
 
-// foldPlays adds plays stored since the last build. When the stored count
-// falls below what was folded in, a play was removed, and the tally is
-// rebuilt from the start.
+// foldPlays adds plays stored since the last build. The tally is rebuilt from
+// the start when a play was removed: either the stored count falls below what
+// was folded in, or a different play now holds the cursor's Seq. The second
+// check is what catches a removal that a new play covered for, since a freed
+// Seq goes to the next play recorded and the count then balances out.
 func (s *Service) foldPlays(ctx context.Context) error {
 	st := &s.tasteState
 	if st.plays.weights == nil {
 		st.plays = newTally()
 	}
 	for rebuilt := false; ; rebuilt = true {
+		// Whether the play the last build left the cursor on is still there.
+		// This has to be asked before folding: the plays read below start
+		// above the cursor, so a play that took a removed play's Seq sits
+		// behind them and folding first would move the cursor past it unseen.
+		replaced := false
+		if st.seq > 0 {
+			id, err := s.taste.PlayIDAt(ctx, st.seq)
+			if err != nil {
+				return err
+			}
+			replaced = id != st.lastID
+		}
 		copied := false
 		for {
 			plays, err := s.taste.PlaysAfter(ctx, st.seq, tasteBatch)
@@ -336,7 +361,7 @@ func (s *Service) foldPlays(ctx context.Context) error {
 			}
 			for _, p := range plays {
 				st.plays.addPlay(p)
-				st.seq = p.Seq
+				st.seq, st.lastID = p.Seq, p.ID
 			}
 			st.count += int64(len(plays))
 			if len(plays) < tasteBatch {
@@ -349,9 +374,10 @@ func (s *Service) foldPlays(ctx context.Context) error {
 		}
 		// More plays than folded means one arrived between the two reads; the
 		// next build picks it up.
-		if total >= st.count || rebuilt {
+		removed := total < st.count || replaced
+		if !removed || rebuilt {
 			return nil
 		}
-		st.plays, st.seq, st.count = newTally(), 0, 0
+		st.plays, st.seq, st.lastID, st.count = newTally(), 0, "", 0
 	}
 }

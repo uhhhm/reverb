@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -303,11 +304,20 @@ func (h historyTaste) PlaysAfter(_ context.Context, after int64, limit int) ([]r
 	var out []recommend.TastePlay
 	for i := int(after); i < len(h.plays) && len(out) < limit; i++ {
 		p := h.plays[i]
-		out = append(out, recommend.TastePlay{Seq: int64(i + 1), Artist: p.Artist, Title: p.Title, PlayedAt: p.PlayedAt, Completed: true})
+		out = append(out, recommend.TastePlay{ID: strconv.Itoa(i + 1), Seq: int64(i + 1), Artist: p.Artist, Title: p.Title, PlayedAt: p.PlayedAt, Completed: true})
 	}
 	return out, nil
 }
 func (h historyTaste) PlayCount(context.Context) (int64, error) { return int64(len(h.plays)), nil }
+
+// PlayIDAt mirrors PlaysAfter: the fixture's plays are a fixed slice indexed
+// from one, and nothing is ever removed from it.
+func (h historyTaste) PlayIDAt(_ context.Context, seq int64) (string, error) {
+	if seq < 1 || seq > int64(len(h.plays)) {
+		return "", nil
+	}
+	return strconv.FormatInt(seq, 10), nil
+}
 func (h historyTaste) Signals(context.Context) ([]recommend.TasteSignal, error) {
 	out := make([]recommend.TasteSignal, len(h.history))
 	for i, l := range h.history {

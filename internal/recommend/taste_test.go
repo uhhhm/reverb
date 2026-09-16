@@ -36,12 +36,23 @@ func (in *tasteInputs) PlaysAfter(_ context.Context, after int64, limit int) ([]
 	return out, nil
 }
 func (in *tasteInputs) PlayCount(context.Context) (int64, error) { return int64(len(in.plays)), nil }
+func (in *tasteInputs) PlayIDAt(_ context.Context, seq int64) (string, error) {
+	for _, p := range in.plays {
+		if p.Seq == seq {
+			return p.ID, nil
+		}
+	}
+	return "", nil
+}
 func (in *tasteInputs) Signals(context.Context) ([]recommend.TasteSignal, error) {
 	return in.signals, nil
 }
 
 func play(seq int64, artist, title string, completed bool) recommend.TastePlay {
-	return recommend.TastePlay{Seq: seq, Artist: artist, Title: title, PlayedAt: 1_700_000_000 + seq*60, Completed: completed}
+	return recommend.TastePlay{
+		ID: fmt.Sprintf("%d:%s:%s", seq, artist, title), Seq: seq, Artist: artist, Title: title,
+		PlayedAt: 1_700_000_000 + seq*60, Completed: completed,
+	}
 }
 
 // catalogFor makes every candidate playable from a search source.
@@ -154,6 +165,54 @@ func TestProfileFoldsInOnlyNewPlaysAndRebuildsAfterARemoval(t *testing.T) {
 
 	if want := []int64{0, 2, 3, 0}; !reflect.DeepEqual(in.afters, want) {
 		t.Fatalf("cursors = %v, want %v (everything, then only newer plays, then a rebuild)", in.afters, want)
+	}
+}
+
+// SQLite reuses a rowid once the row holding it is gone, so deleting the newest
+// play and recording another gives the new play the removed one's sequence
+// number. Neither the fold's high-water mark nor the stored count moves, so the
+// profile has to notice the substitution some other way.
+func TestProfileNoticesAPlayThatReusedARemovedSequenceNumber(t *testing.T) {
+	cands := []recommend.TrackCandidate{{Artist: "Stranger", Title: "Alpha"}, {Artist: "Loved", Title: "Bravo"}}
+	in := &tasteInputs{plays: []recommend.TastePlay{play(1, "Stranger", "One", true)}}
+	svc := tasteService(cands, libraryMatcher{}, recommend.WithTaste(in))
+	ctx := context.Background()
+
+	if got := titles(svc.SimilarTracksFor(ctx, seed).Tracks); !reflect.DeepEqual(got, []string{"Alpha", "Bravo"}) {
+		t.Fatalf("before the substitution got %v, want [Alpha Bravo]", got)
+	}
+
+	// The only play is removed and another recorded, reusing its sequence number.
+	in.plays = []recommend.TastePlay{play(1, "Loved", "Two", true)}
+
+	if got := titles(svc.SimilarTracksFor(ctx, seed).Tracks); !reflect.DeepEqual(got, []string{"Bravo", "Alpha"}) {
+		t.Fatalf("after the substitution got %v, want [Bravo Alpha] (the new play must shape the profile)", got)
+	}
+}
+
+// The replacement need not be the newest play. Recording several plays after a
+// removal puts one in the freed slot and the rest above it, so the count
+// balances out and the fold's cursor moves past the substitution unless the
+// cursor is checked before the newer plays are folded in.
+func TestProfileNoticesAReusedSequenceNumberBelowNewerPlays(t *testing.T) {
+	cands := []recommend.TrackCandidate{{Artist: "Stranger", Title: "Alpha"}, {Artist: "Loved", Title: "Bravo"}}
+	in := &tasteInputs{plays: []recommend.TastePlay{play(1, "Stranger", "One", true)}}
+	svc := tasteService(cands, libraryMatcher{}, recommend.WithTaste(in))
+	ctx := context.Background()
+
+	if got := titles(svc.SimilarTracksFor(ctx, seed).Tracks); !reflect.DeepEqual(got, []string{"Alpha", "Bravo"}) {
+		t.Fatalf("before the substitution got %v, want [Alpha Bravo]", got)
+	}
+
+	// The only play is removed and three more recorded: the first takes the
+	// freed sequence number, the others sit above it. More plays are stored
+	// than were folded in, so the count alone gives nothing away.
+	in.plays = []recommend.TastePlay{
+		play(1, "Loved", "Two", true), play(2, "Other", "Three", true), play(3, "Other", "Four", true),
+	}
+
+	if got := titles(svc.SimilarTracksFor(ctx, seed).Tracks); !reflect.DeepEqual(got, []string{"Bravo", "Alpha"}) {
+		t.Fatalf("after the substitution got %v, want [Bravo Alpha] (the play in the reused slot must count, the removed one must not)", got)
 	}
 }
 
