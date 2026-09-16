@@ -283,3 +283,101 @@ func TestDeletedListeningHistoryReplicatesAndStaysDeletedAfterRecovery(t *testin
 		}
 	}
 }
+
+// A peer can send a play whose value is not valid JSON. Stored, it made the
+// deferred-play recovery query -- which selects by json_extract on value_json
+// -- error for every catalog identity, so plays waiting on their identity were
+// never projected and the retry loop logged the same failure forever. The sync
+// boundary refuses the malformed change instead of storing it.
+func TestMalformedPlayValueIsRefusedAndRecoveryStillDrains(t *testing.T) {
+	st, ss, _ := newPeerStore(t)
+	ctx := context.Background()
+
+	_, _, rejected, err := ss.Reconcile(ctx, "dev_peer", 0, []reverbsync.SyncChange{{
+		EntityType: reverbsync.EntityPlay, EntityID: "play_bad", Field: syncemit.FieldRecord,
+		ValueJSON: `{"catalogId":"trk_late"`, UpdatedAt: 1000, DeviceID: "dev_peer",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rejected) != 1 {
+		t.Fatalf("rejected %d malformed changes, want 1", len(rejected))
+	}
+	if stored, err := ss.GetLatestForField(ctx, reverbsync.EntityPlay, "play_bad", syncemit.FieldRecord); err != nil {
+		t.Fatal(err)
+	} else if stored != nil {
+		t.Fatalf("malformed change was stored: %+v", stored)
+	}
+
+	// A play whose catalog identity has not arrived yet waits for it, and is
+	// projected when it does.
+	receive(t, ss, reverbsync.SyncChange{EntityType: reverbsync.EntityPlay, EntityID: "play_late", Field: syncemit.FieldRecord, Value: syncemit.Play{UserID: "local", CatalogID: "trk_late", PlayedAt: 500}})
+	receive(t, ss, reverbsync.SyncChange{EntityType: reverbsync.EntityCatalog, EntityID: "trk_late", Field: syncemit.FieldIdentity, Value: peerTrack})
+	if _, err := st.Q().GetPlay(ctx, "play_late"); err != nil {
+		t.Fatalf("deferred play never projected: %v", err)
+	}
+
+	if err := ss.RecoverProjection(ctx); err != nil {
+		t.Fatalf("projection recovery: %v", err)
+	}
+	pending, err := st.Q().ListPendingSyncProjections(ctx, db.ListPendingSyncProjectionsParams{Revision: 0, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending projections = %d, want the queue drained", len(pending))
+	}
+}
+
+// An earlier build stored malformed values before the boundary refused them.
+// Recovery must skip such a row rather than fail the query that finds every
+// other deferred play.
+func TestMalformedPlayRowStoredByAnOlderBuildIsSkippedByRecovery(t *testing.T) {
+	st, ss, cat := newPeerStore(t)
+	ctx := context.Background()
+	if _, err := st.Q().AppendSyncChangeWithHLC(ctx, db.AppendSyncChangeWithHLCParams{
+		DeviceID: "dev_peer", EntityType: reverbsync.EntityPlay, EntityID: "play_legacy_bad",
+		Field: syncemit.FieldRecord, ValueJson: `{"catalogId":"trk_late"`, UpdatedAt: 1000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	receive(t, ss, reverbsync.SyncChange{EntityType: reverbsync.EntityPlay, EntityID: "play_late", Field: syncemit.FieldRecord, Value: syncemit.Play{UserID: "local", CatalogID: "trk_late", PlayedAt: 500}})
+	receive(t, ss, reverbsync.SyncChange{EntityType: reverbsync.EntityCatalog, EntityID: "trk_late", Field: syncemit.FieldIdentity, Value: peerTrack})
+	if _, err := st.Q().GetPlay(ctx, "play_late"); err != nil {
+		t.Fatalf("deferred play never projected past the malformed row: %v", err)
+	}
+	if err := materialize.New(nil, nil).WithCatalog(cat).WithTrackStore(st.Q()).RecoverPlays(ctx); err != nil {
+		t.Fatalf("recover plays: %v", err)
+	}
+}
+
+// Clearing an unreadable play out of the projection queue must not depend on
+// the startup quarantine, which only runs once p2p signing is configured.
+// Projection recovery alone drains it, so the retry loop stops reporting a
+// failure that can never succeed.
+func TestUnreadablePlayLeavesTheProjectionQueueWithoutTheStartupQuarantine(t *testing.T) {
+	st, ss, _ := newPeerStore(t)
+	ctx := context.Background()
+	rev, err := st.Q().AppendSyncChangeWithHLC(ctx, db.AppendSyncChangeWithHLCParams{
+		DeviceID: "dev_peer", EntityType: reverbsync.EntityPlay, EntityID: "play_legacy_bad",
+		Field: syncemit.FieldRecord, ValueJson: `{"catalogId":"trk"`, UpdatedAt: 1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Q().MarkSyncProjectionPending(ctx, rev); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ss.RecoverProjection(ctx); err != nil {
+		t.Fatalf("projection recovery reports a failure that can never succeed: %v", err)
+	}
+	pending, err := st.Q().ListPendingSyncProjections(ctx, db.ListPendingSyncProjectionsParams{Revision: 0, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending projections = %d, want the queue drained", len(pending))
+	}
+}

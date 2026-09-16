@@ -585,10 +585,10 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 				if priv != nil {
 					if raw, rerr := priv.Raw(); rerr == nil && len(raw) == ed25519.PrivateKeySize {
 						r.Deps.SyncStore.SetSigner(ed25519.PrivateKey(raw), localID)
-						if n, err := r.Deps.SyncStore.RecoverInvalidRemoteChanges(ctx); err != nil {
-							logf("WARNING: sync: repair corrupt remote changes: %v", err)
+						if n, err := r.Deps.SyncStore.RecoverUnusableChanges(ctx); err != nil {
+							logf("WARNING: sync: repair unusable changes: %v", err)
 						} else if n > 0 {
-							logf("sync: quarantined %d corrupt remote changes; requesting authentic copies", n)
+							logf("sync: quarantined %d unusable change(s); requesting authentic copies where there are any", n)
 						}
 						if pubB64, perr := p2p.PublicKeyBase64(h.LibHost().ID()); perr == nil {
 							if err := r.Deps.SyncStore.RecordDeviceKey(ctx, localID, pubB64); err != nil {

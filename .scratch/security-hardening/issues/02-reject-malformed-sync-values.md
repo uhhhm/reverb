@@ -4,10 +4,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] After a peer sends a play record whose value is not valid JSON, later valid plays that were deferred until their catalog identity arrived are still projected.
-- [ ] A malformed value cannot cause the recovery pass for an unrelated catalog identity to fail.
-- [ ] Malformed values are refused or quarantined at the sync boundary rather than stored, and existing signature verification and non-emitting peer application are unchanged.
-- [ ] A regression test injects a malformed play change through the sync path and asserts projection drains and the pending-projection queue clears.
-- [ ] `go test ./internal/sync/... ./internal/materialize/... ./internal/p2p/...` passes.
+- [x] After a peer sends a play record whose value is not valid JSON, later valid plays that were deferred until their catalog identity arrived are still projected.
+- [x] A malformed value cannot cause the recovery pass for an unrelated catalog identity to fail.
+- [x] Malformed values are refused or quarantined at the sync boundary rather than stored, and existing signature verification and non-emitting peer application are unchanged.
+- [x] A regression test injects a malformed play change through the sync path and asserts projection drains and the pending-projection queue clears.
+- [x] `go test ./internal/sync/... ./internal/materialize/... ./internal/p2p/...` passes.

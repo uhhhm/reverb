@@ -494,9 +494,16 @@ SELECT s.revision, s.device_id, s.entity_type, s.entity_id, s.field, s.value_jso
        s.updated_at, s.created_at, s.hlc, s.seq, s.sig
 FROM sync_change s
 WHERE s.entity_type = 'play' AND s.field = 'record'
+  -- A row an older build stored unparsed can never project, and json_extract
+  -- raises on it, so it is skipped rather than allowed to fail this query for
+  -- every catalog identity. The CASE below guards the extract itself, so the
+  -- skip does not depend on the planner evaluating this term first.
+  AND json_valid(s.value_json)
   AND s.revision NOT IN (SELECT revision FROM sync_nonwinning)
   AND NOT EXISTS (SELECT 1 FROM sync_change d WHERE d.entity_type = 'play' AND d.entity_id = s.entity_id AND d.field = '__deleted')
-  AND (CAST(?1 AS TEXT) = '' OR json_extract(s.value_json, '$.catalogId') = ?1)
+  AND (CAST(?1 AS TEXT) = ''
+       OR CASE WHEN json_valid(s.value_json)
+               THEN json_extract(s.value_json, '$.catalogId') = ?1 END)
   AND NOT EXISTS (SELECT 1 FROM plays p WHERE p.id = s.entity_id)
   AND s.revision = (SELECT MAX(c.revision) FROM sync_change c
                    WHERE c.entity_type = s.entity_type AND c.entity_id = s.entity_id AND c.field = s.field
@@ -600,16 +607,17 @@ func (q *Queries) MarkSyncProjectionPending(ctx context.Context, revision int64)
 
 const quarantineSyncCopy = `-- name: QuarantineSyncCopy :exec
 INSERT INTO sync_quarantine(revision, change_json, reason)
-VALUES (?, ?, 'invalid remote signature') ON CONFLICT(revision) DO NOTHING
+VALUES (?, ?, ?) ON CONFLICT(revision) DO NOTHING
 `
 
 type QuarantineSyncCopyParams struct {
 	Revision   int64  `json:"revision"`
 	ChangeJson string `json:"change_json"`
+	Reason     string `json:"reason"`
 }
 
 func (q *Queries) QuarantineSyncCopy(ctx context.Context, arg QuarantineSyncCopyParams) error {
-	_, err := q.db.ExecContext(ctx, quarantineSyncCopy, arg.Revision, arg.ChangeJson)
+	_, err := q.db.ExecContext(ctx, quarantineSyncCopy, arg.Revision, arg.ChangeJson, arg.Reason)
 	return err
 }
 

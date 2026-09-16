@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -380,5 +382,69 @@ func TestMissingAssetShortensTheNextCheck(t *testing.T) {
 	}
 	if got := svc.nextCheckIn(); got != checkInterval {
 		t.Fatalf("after staging: next check in %v, want %v", got, checkInterval)
+	}
+}
+
+// A release asset becomes the running executable, so the download must stay on
+// GitHub: a redirect to anywhere else is refused and nothing is written.
+func TestDownloadAssetRefusesRedirectOffGitHub(t *testing.T) {
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(fakeBinary("hostile"))
+	}))
+	t.Cleanup(elsewhere.Close)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, elsewhere.URL+"/reverb-desktop", http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	destDir := t.TempDir()
+	_, err := DownloadAsset(context.Background(), Asset{Name: "reverb-desktop", URL: srv.URL + "/reverb-desktop"}, destDir, nil)
+	if err == nil {
+		t.Fatal("a redirect off GitHub was followed")
+	}
+	if !strings.Contains(err.Error(), "refusing redirect") {
+		t.Fatalf("error = %v, want the redirect to be named as the reason", err)
+	}
+	entries, rerr := os.ReadDir(destDir)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("wrote %d file(s) from a refused download, want none", len(entries))
+	}
+}
+
+// The redirect GitHub itself issues -- browser_download_url to its object
+// storage -- stays allowed.
+func TestAssetRedirectPolicyAllowsGitHubOverHTTPSOnly(t *testing.T) {
+	allowed := []string{
+		"https://github.com/owner/name/releases/download/v1/reverb-desktop-linux-amd64.zip",
+		"https://objects.githubusercontent.com/some/object",
+		"https://release-assets.githubusercontent.com/github-production-release-asset/1",
+	}
+	refused := []string{
+		"http://github.com/owner/name/releases/download/v1/x.zip",
+		"https://github.com.attacker.test/x.zip",
+		"https://githubusercontent.com.attacker.test/x.zip",
+		"https://cdn.example.com/x.zip",
+		"https://127.0.0.1:8080/x.zip",
+	}
+	for _, raw := range allowed {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !allowedAssetRedirect(u) {
+			t.Errorf("%s was refused, want it allowed", raw)
+		}
+	}
+	for _, raw := range refused {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if allowedAssetRedirect(u) {
+			t.Errorf("%s was allowed, want it refused", raw)
+		}
 	}
 }

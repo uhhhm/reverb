@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -127,10 +128,52 @@ func pollYtDlp(ctx context.Context) {
 	}
 }
 
+// assetRedirectHosts are the domains a release asset may be redirected to.
+// GitHub answers a browser_download_url with a redirect to its object storage,
+// so redirects cannot simply be refused -- but they must stay on GitHub. The
+// whole githubusercontent.com suffix is allowed rather than the two asset hosts
+// in use today, since GitHub has moved release downloads between hostnames
+// before and a stricter list would break updates when it does again.
+var assetRedirectHosts = []string{"github.com", "githubusercontent.com"}
+
+// allowedAssetRedirect reports whether a redirect target is still a GitHub host
+// reached over TLS. An asset becomes the running executable, so a redirect that
+// moves the download to another origin -- or downgrades it to plaintext, where
+// anyone on the path can answer -- is refused rather than followed.
+func allowedAssetRedirect(u *url.URL) bool {
+	if u.Scheme != "https" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	for _, domain := range assetRedirectHosts {
+		if host == domain || strings.HasSuffix(host, "."+domain) {
+			return true
+		}
+	}
+	return false
+}
+
+// maxAssetRedirects matches net/http's own default hop limit; CheckRedirect
+// replaces that default, so the limit has to be reimposed here.
+const maxAssetRedirects = 10
+
 // downloadClient fetches release assets. Separate from httpClient: an asset is
 // tens of megabytes, so it gets no overall timeout — cancellation is the
 // caller's context, and the transport still bounds connect and idle time.
-var downloadClient = &http.Client{}
+//
+// The first request goes wherever the release feed pointed; every redirect
+// after it has to stay on GitHub over HTTPS.
+var downloadClient = &http.Client{
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= maxAssetRedirects {
+			return fmt.Errorf("stopped after %d redirects", maxAssetRedirects)
+		}
+		if !allowedAssetRedirect(req.URL) {
+			return fmt.Errorf("refusing redirect to %s://%s: a release asset must come from GitHub over HTTPS", req.URL.Scheme, req.URL.Host)
+		}
+		return nil
+	},
+}
 
 // errNothingStaged is returned when an install is requested with no verified
 // payload waiting.

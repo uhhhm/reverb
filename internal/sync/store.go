@@ -99,9 +99,28 @@ func NewSyncStoreWithPolicy(q SyncQuerier, p MergePolicy) *SyncStore {
 	return &SyncStore{q: q, policy: p, hlc: NewHLC()}
 }
 
+// ErrMalformedValue means a change carried a value_json that is not valid
+// JSON. The log is read back as JSON -- by the projector, and by SQL that calls
+// json_extract on value_json -- so a row like this is not merely useless: it
+// fails every later read that touches it, including the recovery query that
+// finds plays waiting for their catalog identity. No retry can fix it, and the
+// sender cannot be asked to correct it, so it is stopped on the way in.
+var ErrMalformedValue = errors.New("change value is not valid JSON")
+
+// malformedValueJSON reports whether a stored or inbound value_json cannot be
+// read back. Empty is not malformed: it is how a legacy row holds a nil value,
+// and unmarshalValue reads it as one.
+func malformedValueJSON(valueJSON string) bool {
+	return valueJSON != "" && !json.Valid([]byte(valueJSON))
+}
+
 func marshalValue(ch SyncChange) (string, error) {
 	// A signed change carries the exact bytes its signature covers; re-encoding
-	// Value could produce different JSON and invalidate the signature.
+	// Value could produce different JSON and invalidate the signature. They
+	// still have to parse: the bytes are written verbatim into value_json.
+	if malformedValueJSON(ch.ValueJSON) {
+		return "", ErrMalformedValue
+	}
 	if ch.ValueJSON != "" {
 		return ch.ValueJSON, nil
 	}
@@ -896,6 +915,17 @@ func (s *SyncStore) materialize(ctx context.Context, accepted []SyncChange) erro
 				ch = tomb
 			}
 		}
+		if err == nil && ch != nil && malformedPlayRecord(ch.EntityType, ch.Field, ch.ValueJSON) {
+			// Retrying cannot help, and leaving it queued means reporting the
+			// same failure on every pass forever. The row itself is dropped
+			// when RecoverUnusableChanges next runs; taking it out of the
+			// queue here is what the rest of the queue needs.
+			log.Printf("sync: giving up on play %s: its value is not valid JSON", ch.EntityID)
+			if err := s.q.CompleteSyncProjection(ctx, queued.Revision); err != nil && first == nil {
+				first = err
+			}
+			continue
+		}
 		if err == nil && ch != nil {
 			err = m.Apply(ctx, *ch)
 		}
@@ -1031,7 +1061,22 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 		}
 		handled[author][seq] = true
 	}
+	var malformed int
 	for _, inc := range inbound {
+		// Refuse a value that is not valid JSON before it reaches the log;
+		// see ErrMalformedValue for what storing one costs. This is stricter
+		// than malformedPlayRecord, which is what an already-stored row is
+		// judged by: refusing an edit that cannot be read as it was meant
+		// costs only that edit, while deleting a stored row that today still
+		// projects through unmarshalValue's raw-string fallback would let an
+		// older value win. The wire format is JSON, so nothing a current build
+		// sends is refused here.
+		if malformedValueJSON(inc.ValueJSON) {
+			rejected = append(rejected, inc)
+			settle(inc.DeviceID, inc.Seq)
+			malformed++
+			continue
+		}
 		// A change with no HLC is a legacy row: PickWinner ranks it by
 		// UpdatedAt, so that is the clock the bound has to be applied to.
 		clock := inc.HLC
@@ -1051,6 +1096,9 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 		// sending device rather than anything the user did here.
 		log.Printf("WARNING: sync: refused %d change(s) from %q dated more than %s ahead of "+
 			"local time; check that device's clock", drifted, deviceID, maxHLCDrift)
+	}
+	if malformed > 0 {
+		log.Printf("WARNING: sync: refused %d change(s) from %q whose value is not valid JSON", malformed, deviceID)
 	}
 	inbound = kept
 	// Observe inbound HLCs to advance clock (P2P). Single pass before processing.

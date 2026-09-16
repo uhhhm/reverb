@@ -48,7 +48,7 @@ Issues live as local markdown files under `.scratch/<feature>/` (GitHub Issues i
 
 ### Triage labels
 
-Default five-role vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+Default five-role vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`, plus `done` for an implemented ticket. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 

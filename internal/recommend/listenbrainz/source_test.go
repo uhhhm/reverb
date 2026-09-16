@@ -169,3 +169,32 @@ func TestNewSourceBoundsAStalledRequest(t *testing.T) {
 		t.Fatalf("stalled request took %s, want it bounded by the client timeout", elapsed)
 	}
 }
+
+// A recommendation endpoint is an outside service. However much it sends, the
+// client buffers a bounded amount and fails, rather than growing until the
+// process is killed.
+func TestOversizedResponseIsBoundedAndSurfacesAnError(t *testing.T) {
+	chunk := []byte(strings.Repeat("x", 1<<20))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("["))
+		for sent := 0; sent < 4*maxResponseBytes; sent += len(chunk) {
+			if _, err := w.Write(chunk); err != nil {
+				return
+			}
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+	}))
+	defer srv.Close()
+
+	src := newTestSource(srv.URL, srv.URL, srv.Client())
+	_, err := src.SimilarTracks(context.Background(), recommend.TrackSeed{MBID: "3fa4b4e0-0000-0000-0000-000000000000", Artist: "Band", Title: "Song"}, 5)
+	if err == nil {
+		t.Fatal("an unbounded response was accepted")
+	}
+	if !strings.Contains(err.Error(), "larger than") {
+		t.Fatalf("error = %v, want the response size cap to be reported", err)
+	}
+}

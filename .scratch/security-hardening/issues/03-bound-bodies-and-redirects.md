@@ -4,9 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] An oversized or unbounded response from the recommendation source is bounded and surfaces an error instead of growing memory without limit, with a test covering it.
-- [ ] The updater refuses a redirect to a host or scheme outside the allowed set and does not write the artifact; a test covers it.
-- [ ] Normal successful recommendation fetches and normal desktop downloads/updates are unchanged.
-- [ ] `go test ./internal/recommend/... ./desktop/...` passes.
+- [x] An oversized or unbounded response from the recommendation source is bounded and surfaces an error instead of growing memory without limit, with a test covering it.
+- [x] The updater refuses a redirect to a host or scheme outside the allowed set and does not write the artifact; a test covers it.
+- [x] Normal successful recommendation fetches and normal desktop downloads/updates are unchanged.
+- [x] `go test ./internal/recommend/... ./desktop/...` passes.

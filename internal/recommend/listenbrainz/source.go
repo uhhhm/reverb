@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -24,7 +25,12 @@ const (
 	requestInterval       = time.Second
 	// requestTimeout bounds one HTTP request, so a stalled endpoint fails
 	// that request rather than holding a caller until its own deadline.
-	requestTimeout     = 30 * time.Second
+	requestTimeout = 30 * time.Second
+	// maxResponseBytes caps a response body at the same size the Last.fm
+	// scrobble client uses. A similarity page is orders of magnitude smaller, so
+	// this changes nothing for real responses and only stops an errant or
+	// hostile endpoint from being buffered without end.
+	maxResponseBytes   = 8 << 20
 	recordingAlgorithm = "session_based_days_7500_session_300_contribution_5_threshold_15_limit_50_skip_30"
 	artistAlgorithm    = "session_based_days_7500_session_300_contribution_5_threshold_10_limit_100_filter_True_skip_30"
 )
@@ -205,7 +211,14 @@ func (s *Source) getJSON(ctx context.Context, endpoint string, out any) error {
 	if resp.StatusCode == http.StatusNoContent {
 		return nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return fmt.Errorf("listenbrainz: read response: %w", err)
+	}
+	if len(body) > maxResponseBytes {
+		return fmt.Errorf("listenbrainz: response larger than %d bytes", maxResponseBytes)
+	}
+	if err := json.Unmarshal(body, out); err != nil {
 		return fmt.Errorf("listenbrainz: decode response: %w", err)
 	}
 	return nil
