@@ -73,6 +73,15 @@ describe('Mix page', () => {
     expect(saveMixAsPlaylist).toHaveBeenCalledWith('discoverWeekly')
   })
 
+  it('asks for no Mix and claims no title when the kind is unknown', () => {
+    renderMix('/mix/nonsense')
+    expect(screen.getByText('Mix not found')).toBeInTheDocument()
+    // No Mix was requested: a fallback fetch would show someone else's Mix
+    // under a URL that names none.
+    expect(vi.mocked(useMix)).toHaveBeenCalledWith(null)
+    expect(document.title).not.toContain('Discover Weekly')
+  })
+
   it('says so when Release Radar has nothing new', () => {
     vi.mocked(useMix).mockReturnValue({ data: { ...mix, kind: 'releaseRadar', tracks: [] }, isLoading: false } as unknown as UseQueryResult<Mix>)
     renderMix('/mix/releaseRadar')

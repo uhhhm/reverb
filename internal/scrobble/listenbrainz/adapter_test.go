@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/uhhhm/reverb/internal/scrobble"
 )
@@ -138,5 +139,38 @@ func TestValidateToken(t *testing.T) {
 	}
 	if _, err := a.ValidateToken(context.Background(), "other"); !errors.Is(err, scrobble.ErrAuth) {
 		t.Fatalf("invalid token err = %v, want ErrAuth", err)
+	}
+}
+
+// An upload runs on the scrobble worker's long-lived context, so a ListenBrainz
+// endpoint that accepts the connection and then never answers would otherwise
+// stall the whole queue.
+func TestUploadStopsWaitingOnAStalledEndpoint(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	t.Cleanup(func() { close(release); srv.Close() })
+
+	a := New()
+	if a.client.Timeout <= 0 {
+		t.Fatal("the upload client must carry its own timeout")
+	}
+	a.baseURL, a.client.Timeout = srv.URL, 50*time.Millisecond
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.Scrobble(context.Background(), scrobble.Creds{SessionKey: secretToken},
+			[]scrobble.ScrobblePlay{{Track: scrobble.Track{Title: "t", Artist: "a"}, PlayedAt: 1}})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a stalled endpoint must fail the upload, not succeed")
+		}
+		if strings.Contains(err.Error(), secretToken) {
+			t.Fatalf("the token must not appear in an error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the upload hung on a stalled endpoint")
 	}
 }

@@ -16,6 +16,8 @@ import {
 import type { Track } from '../lib/types'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
 
+const NOT_FOUND = 'Mix not found'
+
 function shuffled(tracks: Track[]): Track[] {
   const out = [...tracks]
   for (let i = out.length - 1; i > 0; i--) {
@@ -31,9 +33,10 @@ function shuffled(tracks: Track[]): Track[] {
  */
 export default function MixPage() {
   const { kind: param = '' } = useParams()
-  const kind = (param === 'releaseRadar' ? 'releaseRadar' : 'discoverWeekly') as MixKind
-  const known = param === 'discoverWeekly' || param === 'releaseRadar'
-  useDocumentTitle(mixTitle(kind))
+  // An unrecognised kind names no Mix: it must not fall back to one, which
+  // would show a Mix the URL never asked for under the wrong title.
+  const kind: MixKind | null = param === 'discoverWeekly' || param === 'releaseRadar' ? param : null
+  useDocumentTitle(kind ? mixTitle(kind) : NOT_FOUND)
   const { data, isLoading } = useMix(kind)
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -46,6 +49,7 @@ export default function MixPage() {
   const tracks = useMemo(() => results.map((r) => recommendedTrackToTrack(r, 'mix')), [results])
 
   async function handleSave() {
+    if (!kind) return
     setSaving(true)
     setSaveError(false)
     try {
@@ -59,7 +63,7 @@ export default function MixPage() {
     }
   }
 
-  if (!known) return <EmptyState icon="browse" title="Mix not found" />
+  if (!kind) return <EmptyState icon="browse" title={NOT_FOUND} />
 
   return (
     <div className="space-y-6 pb-8">

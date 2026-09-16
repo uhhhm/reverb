@@ -46,11 +46,16 @@ export function useMixes() {
   })
 }
 
-export function useMix(kind: MixKind) {
+/** A Mix by kind. A null kind names no Mix, so nothing is fetched. */
+export function useMix(kind: MixKind | null) {
   return useQuery({
     queryKey: ['mix', kind],
-    queryFn: () => api.get<Mix>(`/recommendations/mixes/${encodeURIComponent(kind)}`),
+    queryFn: () => {
+      if (kind === null) throw new Error('no Mix kind')
+      return api.get<Mix>(`/recommendations/mixes/${encodeURIComponent(kind)}`)
+    },
     refetchInterval: (query) => (query.state.data?.refreshing ? REFRESH_POLL_MS : false),
+    enabled: kind !== null,
   })
 }
 

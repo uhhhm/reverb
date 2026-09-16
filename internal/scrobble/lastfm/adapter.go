@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/uhhhm/reverb/internal/matching"
 	"github.com/uhhhm/reverb/internal/registry"
@@ -22,7 +23,29 @@ import (
 const (
 	defaultBase   = "https://ws.audioscrobbler.com/2.0/"
 	lastfmAuthURL = "https://www.last.fm/api/auth/"
+	// requestTimeout bounds one request. The scrobble worker uploads inline on
+	// the application's context, which lives as long as the process, so an
+	// endpoint that accepts the connection and never answers would stall the
+	// queue behind it without a timeout of its own.
+	requestTimeout = 15 * time.Second
+	// maxResponseBytes caps a response body. Last.fm answers a page of
+	// listens in well under this, so it changes nothing for real responses
+	// and only stops an errant or hostile endpoint from being buffered whole.
+	maxResponseBytes = 8 << 20
 )
+
+// readBody reads a response body up to maxResponseBytes, failing rather than
+// buffering more than that.
+func readBody(r io.Reader) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, maxResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxResponseBytes {
+		return nil, fmt.Errorf("response larger than %d bytes", maxResponseBytes)
+	}
+	return body, nil
+}
 
 // Adapter implements scrobble.Scrobbler for Last.fm.
 // Inject baseURL and client for tests; production callers use New() or Factory().
@@ -40,7 +63,7 @@ type Adapter struct {
 func New() *Adapter {
 	return &Adapter{
 		baseURL: defaultBase,
-		client:  &http.Client{},
+		client:  &http.Client{Timeout: requestTimeout},
 	}
 }
 
@@ -256,7 +279,7 @@ func (a *Adapter) post(ctx context.Context, params map[string]string, secret str
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readBody(resp.Body)
 	if err != nil {
 		return fmt.Errorf("lastfm: read body: %w", err)
 	}
@@ -311,7 +334,7 @@ func (a *Adapter) getJSON(ctx context.Context, method, key string, q url.Values,
 		return fmt.Errorf("lastfm: http: %w", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := readBody(resp.Body)
 	if err != nil {
 		return fmt.Errorf("lastfm: read body: %w", err)
 	}

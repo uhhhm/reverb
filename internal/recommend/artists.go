@@ -310,8 +310,11 @@ func mergeArtistCandidates(in []ArtistCandidate, seed ArtistSeed) []ArtistCandid
 		}
 		if found {
 			out[idx].Sources = appendUnique(out[idx].Sources, candidate.Sources...)
-			if out[idx].MBID == "" {
+			if out[idx].MBID == "" && candidate.MBID != "" {
 				out[idx].MBID = candidate.MBID
+				// Index the MBID this merge just learned, so a later candidate
+				// that names the artist differently still dedups by MBID.
+				byMBID[candidate.MBID] = idx
 			}
 			if out[idx].ExternalID == "" && candidate.ExternalID != "" {
 				out[idx].Source, out[idx].ExternalID = candidate.Source, candidate.ExternalID

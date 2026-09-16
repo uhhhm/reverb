@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/uhhhm/reverb/internal/scrobble"
 )
@@ -18,6 +19,15 @@ const (
 	defaultBase = "https://api.listenbrainz.org"
 	// maxListens is ListenBrainz's limit on listens in one submission.
 	maxListens = 1000
+	// maxResponseBytes caps a response body. ListenBrainz answers a submission
+	// with a short acknowledgement, so this changes nothing for real responses
+	// and only stops an errant or hostile endpoint from being read without end.
+	maxResponseBytes = 8 << 20
+	// requestTimeout bounds one upload. The scrobble worker submits inline on
+	// the application's context, which lives as long as the process, so an
+	// endpoint that accepts the connection and never answers would stall the
+	// queue behind it without a timeout of its own.
+	requestTimeout = 15 * time.Second
 )
 
 var _ scrobble.TokenProvider = (*Adapter)(nil)
@@ -29,7 +39,9 @@ type Adapter struct {
 }
 
 // New returns an Adapter for the public ListenBrainz service.
-func New() *Adapter { return &Adapter{baseURL: defaultBase, client: http.DefaultClient} }
+func New() *Adapter {
+	return &Adapter{baseURL: defaultBase, client: &http.Client{Timeout: requestTimeout}}
+}
 
 func newTestAdapter(baseURL string, client *http.Client) *Adapter {
 	return &Adapter{baseURL: baseURL, client: client}
@@ -130,11 +142,14 @@ func (a *Adapter) do(ctx context.Context, method, path, token string, body []byt
 	case resp.StatusCode < 200 || resp.StatusCode >= 300:
 		return fmt.Errorf("listenbrainz: HTTP %d", resp.StatusCode)
 	}
+	// The parameter `body` is the request; this is the response.
+	answer := io.LimitReader(resp.Body, maxResponseBytes)
 	if out == nil {
-		_, _ = io.Copy(io.Discard, resp.Body)
+		// Drained so the connection can be reused, but never without bound.
+		_, _ = io.Copy(io.Discard, answer)
 		return nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	if err := json.NewDecoder(answer).Decode(out); err != nil {
 		return fmt.Errorf("listenbrainz: decode response: %w", err)
 	}
 	return nil
