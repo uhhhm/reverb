@@ -22,7 +22,7 @@ func (u updateAdapter) Dismiss()                  { u.svc.Dismiss() }
 // once the successor process has been spawned, so this one shuts down cleanly
 // instead of racing the new window for the database and the bundled Navidrome
 // port.
-func newUpdater(repo, dataDir string, bus updater.Publisher, quit func()) *updater.Service {
+func newUpdater(repo, dataDir string, bus updater.Publisher, quit func(), args ...string) *updater.Service {
 	exe, err := os.Executable()
 	if err != nil {
 		log.Printf("updater: cannot locate the running binary, updates disabled: %v", err)
@@ -35,5 +35,6 @@ func newUpdater(repo, dataDir string, bus updater.Publisher, quit func()) *updat
 		ExePath:        exe,
 		Bus:            bus,
 		Quit:           quit,
+		Args:           append([]string(nil), args...),
 	})
 }

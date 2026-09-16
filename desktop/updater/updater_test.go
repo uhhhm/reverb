@@ -82,6 +82,7 @@ func TestPickAssetSelection(t *testing.T) {
 			{Name: "reverb-desktop-v1.2.3-linux-amd64.AppImage", URL: "https://example.com/appimage"},
 			{Name: "reverb-desktop-v1.2.3-darwin-arm64.zip", URL: "https://example.com/darwin-zip"},
 			{Name: "reverb-desktop-v1.2.3-darwin-amd64.zip", URL: "https://example.com/darwin-amd64"},
+			{Name: "reverb-desktop-v1.2.3-linux-amd64.zip", URL: "https://example.com/linux-zip"},
 			{Name: "other.txt", URL: "https://example.com/other"},
 		},
 	}
@@ -91,7 +92,7 @@ func TestPickAssetSelection(t *testing.T) {
 		wantName     string
 		wantNil      bool
 	}{
-		{"linux", "amd64", "reverb-desktop-v1.2.3-linux-amd64.deb", false},
+		{"linux", "amd64", "reverb-desktop-v1.2.3-linux-amd64.zip", false},
 		{"darwin", "arm64", "reverb-desktop-v1.2.3-darwin-arm64.zip", false},
 		{"darwin", "amd64", "reverb-desktop-v1.2.3-darwin-amd64.zip", false},
 		{"windows", "amd64", "", true},
@@ -126,7 +127,7 @@ func TestPickAssetSelection(t *testing.T) {
 }
 
 func TestPickAssetPriority(t *testing.T) {
-	// Linux should prefer .deb over .AppImage when both match.
+	// Linux only accepts the executable zip; packages need separate installers.
 	rel := &Release{
 		Tag: "v1.2.3",
 		Assets: []Asset{
@@ -135,8 +136,8 @@ func TestPickAssetPriority(t *testing.T) {
 		},
 	}
 	got := PickAsset(rel, "linux", "amd64")
-	if got == nil || got.Name != "reverb-desktop-v1.2.3-linux-amd64.deb" {
-		t.Fatalf("linux priority: got %v want deb", got)
+	if got != nil {
+		t.Fatalf("linux packages: got %v want nil", got)
 	}
 
 	// Darwin should prefer zip.

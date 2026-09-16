@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/uhhhm/reverb/internal/config"
 )
 
@@ -82,120 +84,31 @@ func LatestRelease(ctx context.Context, repo string) (*Release, error) {
 	return rel, nil
 }
 
-// PickAsset selects the asset matching the given GOOS/GOARCH.
-// Pattern: reverb-desktop-$VERSION-$GOOS-$GOARCH.{zip,deb,AppImage}
-// Returns nil if no match.
+// PickAsset selects the executable zip produced by the desktop workflow.
+// Packages such as .deb require a package manager, and an AppImage cannot be
+// installed by replacing the executable inside its read-only mount.
 func PickAsset(rel *Release, goos, goarch string) *Asset {
 	if rel == nil {
 		return nil
 	}
-	goos = strings.ToLower(goos)
-	goarch = strings.ToLower(goarch)
-	var best *Asset
-	bestScore := -1
+	suffix := "-" + strings.ToLower(goos) + "-" + strings.ToLower(goarch) + ".zip"
 	for i := range rel.Assets {
-		a := &rel.Assets[i]
-		nameLower := strings.ToLower(a.Name)
-		if !strings.Contains(nameLower, goos) {
-			continue
-		}
-		if !strings.Contains(nameLower, goarch) {
-			continue
-		}
-		if !strings.Contains(nameLower, "reverb-desktop") {
-			continue
-		}
-		// Must have expected extension.
-		hasExt := strings.HasSuffix(nameLower, ".zip") || strings.HasSuffix(nameLower, ".deb") || strings.HasSuffix(nameLower, ".appimage")
-		if !hasExt {
-			continue
-		}
-		score := 0
-		// Prefer zip for darwin/windows, deb for linux.
-		switch {
-		case strings.HasSuffix(nameLower, ".zip"):
-			score = 3
-		case strings.HasSuffix(nameLower, ".deb"):
-			score = 2
-		case strings.HasSuffix(nameLower, ".appimage"):
-			score = 1
-		}
-		// On darwin prefer zip, on linux prefer deb.
-		if goos == "darwin" && strings.HasSuffix(nameLower, ".zip") {
-			score += 10
-		}
-		if goos == "linux" && strings.HasSuffix(nameLower, ".deb") {
-			score += 10
-		}
-		if score > bestScore {
-			bestScore = score
-			best = a
+		name := strings.ToLower(rel.Assets[i].Name)
+		if strings.HasPrefix(name, "reverb-desktop-") && strings.HasSuffix(name, suffix) {
+			return &rel.Assets[i]
 		}
 	}
-	return best
+	return nil
 }
 
-// IsNewer reports whether latest is newer than current using semver comparison.
-// It strips a leading "v" and does numeric dot-separated comparison.
-// "dev" or empty versions are never considered newer.
+// IsNewer follows semantic-version precedence, ignoring build metadata and
+// rejecting development labels or malformed tags.
 func IsNewer(current, latest string) bool {
-	if latest == "" || current == "" {
-		return false
+	normalize := func(v string) string {
+		return "v" + strings.TrimPrefix(strings.TrimSpace(v), "v")
 	}
-	if latest == current {
-		return false
-	}
-	cur := strings.TrimSpace(current)
-	lat := strings.TrimSpace(latest)
-	if cur == "dev" || lat == "dev" {
-		return false
-	}
-	cur = strings.TrimPrefix(cur, "v")
-	lat = strings.TrimPrefix(lat, "v")
-	if cur == lat {
-		return false
-	}
-	// Split off pre-release/build metadata (e.g. 1.2.3-beta+001)
-	curCore := strings.SplitN(cur, "-", 2)[0]
-	latCore := strings.SplitN(lat, "-", 2)[0]
-	curCore = strings.SplitN(curCore, "+", 2)[0]
-	latCore = strings.SplitN(latCore, "+", 2)[0]
-
-	curParts := strings.Split(curCore, ".")
-	latParts := strings.Split(latCore, ".")
-
-	maxLen := len(curParts)
-	if len(latParts) > maxLen {
-		maxLen = len(latParts)
-	}
-	for i := 0; i < maxLen; i++ {
-		var curN, latN int
-		if i < len(curParts) {
-			fmt.Sscan(curParts[i], &curN)
-		}
-		if i < len(latParts) {
-			fmt.Sscan(latParts[i], &latN)
-		}
-		if latN > curN {
-			return true
-		}
-		if latN < curN {
-			return false
-		}
-	}
-	// Numeric core equal — if latest has pre-release and current doesn't, latest is not newer.
-	// Simple heuristic: release (no suffix) > pre-release.
-	curHasPre := strings.Contains(strings.TrimPrefix(current, "v"), "-")
-	latHasPre := strings.Contains(strings.TrimPrefix(latest, "v"), "-")
-	if curHasPre && !latHasPre {
-		// e.g. current 1.2.3-beta, latest 1.2.3 => newer
-		return true
-	}
-	if !curHasPre && latHasPre {
-		return false
-	}
-	// Fallback lexical compare for pre-release identifiers.
-	return lat > cur
+	current, latest = normalize(current), normalize(latest)
+	return semver.IsValid(current) && semver.IsValid(latest) && semver.Compare(latest, current) > 0
 }
 
 func pollYtDlp(ctx context.Context) {

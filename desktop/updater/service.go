@@ -2,6 +2,7 @@ package updater
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"runtime"
@@ -66,6 +67,8 @@ type Options struct {
 	DataDir string
 	// ExePath is the binary to replace. Defaults to os.Executable().
 	ExePath string
+	// Args are the original launch arguments, including any custom DB or ports.
+	Args []string
 	// Bus receives update:state events. Optional.
 	Bus Publisher
 	// Quit is called after the successor process has been spawned, to shut this
@@ -83,8 +86,10 @@ type Options struct {
 type Service struct {
 	opts Options
 
-	mu    sync.Mutex
-	state State
+	mu         sync.Mutex
+	state      State
+	opMu       sync.Mutex // serializes staging and installation, which share files
+	installing bool       // protected by opMu; prevents a second successor launch
 }
 
 // New builds a Service. It does not start any goroutines; call Start.
@@ -161,6 +166,13 @@ func (s *Service) pollYtDlp(ctx context.Context) {
 // and stages it. It blocks for the duration of the check and the download, so
 // callers that must not block (the HTTP handler) run it in a goroutine.
 func (s *Service) CheckNow(ctx context.Context) State {
+	if !s.opMu.TryLock() {
+		return s.Status()
+	}
+	defer s.opMu.Unlock()
+	if s.installing {
+		return s.Status()
+	}
 	if s.opts.Repo == "" {
 		return s.Status()
 	}
@@ -185,7 +197,7 @@ func (s *Service) CheckNow(ctx context.Context) State {
 	}
 	s.update(func(st *State) { st.Available = rel.Tag; st.Notes = rel.Body })
 
-	if s.Status().Staged == rel.Tag {
+	if su, ok := ReadStaged(s.opts.DataDir); ok && su.Tag == rel.Tag {
 		return s.Status() // already downloaded and waiting for a restart
 	}
 	s.stage(ctx, rel)
@@ -204,7 +216,25 @@ func (s *Service) stage(ctx context.Context, rel *Release) {
 	}
 	s.update(func(st *State) { st.Downloading = true; st.Progress = 0; st.Error = "" })
 
-	dir := StagingDir(s.opts.DataDir)
+	root := StagingDir(s.opts.DataDir)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		s.update(func(st *State) { st.Downloading = false; st.Error = err.Error() })
+		return
+	}
+	dir, err := os.MkdirTemp(root, "payload-")
+	if err != nil {
+		s.update(func(st *State) { st.Downloading = false; st.Error = err.Error() })
+		return
+	}
+	keep := false
+	defer func() {
+		if !keep {
+			_ = os.RemoveAll(dir)
+		}
+	}()
+	previous, hadPrevious := ReadStaged(s.opts.DataDir)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
 	path, err := DownloadAsset(ctx, *asset, dir, func(f float64) {
 		s.update(func(st *State) { st.Progress = f })
 	})
@@ -230,6 +260,10 @@ func (s *Service) stage(ctx context.Context, rel *Release) {
 		return
 	}
 	log.Printf("updater: %s downloaded and ready to install on restart", rel.Tag)
+	keep = true
+	if hadPrevious {
+		_ = os.Remove(previous.File)
+	}
 	s.update(func(st *State) {
 		st.Downloading = false
 		st.Progress = 1
@@ -241,6 +275,13 @@ func (s *Service) stage(ctx context.Context, rel *Release) {
 // the new one and quits this instance. It returns an error without touching
 // anything when no verified payload is staged.
 func (s *Service) InstallAndRestart() error {
+	if !s.opMu.TryLock() {
+		return fmt.Errorf("an update operation is already in progress")
+	}
+	defer s.opMu.Unlock()
+	if s.installing {
+		return fmt.Errorf("the updated app is already starting")
+	}
 	if s.Status().Staged == "" {
 		return errNothingStaged
 	}
@@ -248,10 +289,14 @@ func (s *Service) InstallAndRestart() error {
 		s.update(func(st *State) { st.Error = err.Error() })
 		return err
 	}
-	if err := Relaunch(s.opts.DataDir, s.opts.ExePath); err != nil {
+	if err := Relaunch(s.opts.DataDir, s.opts.ExePath, s.opts.Args...); err != nil {
+		if restoreErr := restoreBackup(s.opts.ExePath); restoreErr != nil {
+			err = fmt.Errorf("%w; restore previous binary: %v", err, restoreErr)
+		}
 		s.update(func(st *State) { st.Error = err.Error() })
 		return err
 	}
+	s.installing = true
 	if s.opts.Quit != nil {
 		// Let the HTTP response for this request reach the UI before the server
 		// it came from goes away.

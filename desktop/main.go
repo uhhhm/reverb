@@ -143,7 +143,7 @@ func boot(args []string) (*App, error) {
 	// The updater needs to quit the app once it has spawned the successor, and
 	// the App it quits does not exist yet — hence the indirection.
 	var appRef *App
-	upd := newUpdater(cfg.UpdateRepo, dataDir, rt.Bus, func() { quitApp(appRef) })
+	upd := newUpdater(cfg.UpdateRepo, dataDir, rt.Bus, func() { quitApp(appRef) }, args...)
 	if upd != nil {
 		deps.Update = updateAdapter{svc: upd}
 	}

@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,11 +20,18 @@ func buildProbe(t *testing.T, version, outPath string) {
 	src := filepath.Join(t.TempDir(), "main.go")
 	code := `package main
 
-import "os"
+import (
+ "os"
+ "strings"
+)
 
 func main() {
 	if p := os.Getenv("PROBE_MARK"); p != "" {
 		_ = os.WriteFile(p, []byte("` + version + `"), 0o644)
+	}
+	if p := os.Getenv("PROBE_ARGS"); p != "" {
+		cwd, _ := os.Getwd()
+		_ = os.WriteFile(p, []byte(strings.Join(append(os.Args[1:], cwd), "\n")), 0o644)
 	}
 }
 `
@@ -66,8 +74,10 @@ func TestInstallReplacesAndRelaunchesTheRealBinary(t *testing.T) {
 	}
 
 	mark := filepath.Join(t.TempDir(), "mark")
+	argsMark := filepath.Join(t.TempDir(), "args")
 	t.Setenv("PROBE_MARK", mark)
-	if err := Relaunch(dataDir, exe); err != nil {
+	t.Setenv("PROBE_ARGS", argsMark)
+	if err := Relaunch(dataDir, exe, "--db", "relative path/reverb.db", "--p2p-port", "4999"); err != nil {
 		t.Fatalf("Relaunch: %v", err)
 	}
 
@@ -77,7 +87,14 @@ func TestInstallReplacesAndRelaunchesTheRealBinary(t *testing.T) {
 			if string(b) != "v2" {
 				t.Fatalf("the relaunched binary reported %q, want v2", b)
 			}
-			break
+			if args, err := os.ReadFile(argsMark); err == nil {
+				cwd, _ := os.Getwd()
+				want := strings.Join([]string{"--db", "relative path/reverb.db", "--p2p-port", "4999", cwd}, "\n")
+				if string(args) != want {
+					t.Fatalf("restart changed launch settings: %q, want %q", args, want)
+				}
+				break
+			}
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("the relaunched binary never ran")

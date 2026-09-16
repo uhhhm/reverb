@@ -104,8 +104,8 @@ func DownloadAsset(ctx context.Context, a Asset, destDir string, onProgress func
 	return bin, nil
 }
 
-// unzipSingle extracts the largest regular file from the archive at zipPath —
-// the release zips hold exactly one executable — and returns its path.
+// unzipSingle extracts the named executable. Never infer it from size: a
+// bundled ffmpeg or debug symbol file can be larger than the application.
 func unzipSingle(zipPath, destDir string) (string, error) {
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
@@ -122,12 +122,19 @@ func unzipSingle(zipPath, destDir string) (string, error) {
 		if strings.Contains(f.Name, "..") || filepath.IsAbs(f.Name) {
 			return "", fmt.Errorf("unsafe zip entry %q", f.Name)
 		}
-		if best == nil || f.UncompressedSize64 > best.UncompressedSize64 {
-			best = f
+		if !f.Mode().IsRegular() {
+			continue
 		}
+		if f.Name != "reverb-desktop" {
+			continue
+		}
+		if best != nil {
+			return "", fmt.Errorf("archive contains duplicate executable entries")
+		}
+		best = f
 	}
 	if best == nil {
-		return "", fmt.Errorf("archive %s is empty", filepath.Base(zipPath))
+		return "", fmt.Errorf("archive %s has no reverb-desktop executable", filepath.Base(zipPath))
 	}
 	rc, err := best.Open()
 	if err != nil {

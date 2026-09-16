@@ -47,7 +47,7 @@ func ApplyStaged(dataDir, exePath string) error {
 	if err := copyFile(su.File, next, 0o755); err != nil {
 		return err
 	}
-	backup := exePath + backupSuffix
+	backup := backupPath(exePath)
 	_ = os.Remove(backup)
 	if err := os.Rename(exePath, backup); err != nil {
 		_ = os.Remove(next)
@@ -59,13 +59,39 @@ func ApplyStaged(dataDir, exePath string) error {
 		_ = os.Remove(next)
 		return err
 	}
+	if err := refreshBundleSignature(exePath); err != nil {
+		if restoreErr := restoreBackup(exePath); restoreErr != nil {
+			return fmt.Errorf("%w; rollback: %v", err, restoreErr)
+		}
+		return err
+	}
+	return nil
+}
+
+// Bundle resources are sealed by codesign. Keep the rollback copy outside the
+// bundle, so deleting it after a successful boot cannot invalidate that seal.
+func backupPath(exePath string) string {
+	if bundle := macAppBundle(exePath); bundle != "" {
+		return filepath.Join(filepath.Dir(bundle), "."+filepath.Base(bundle)+backupSuffix)
+	}
+	return exePath + backupSuffix
+}
+
+// Reverb's distributed bundles are ad-hoc signed (package-mac.sh). Re-seal the
+// bundle after changing its main executable, preserving its bundled tools.
+func refreshBundleSignature(exePath string) error {
+	if bundle := macAppBundle(exePath); bundle != "" {
+		if output, err := exec.Command("/usr/bin/codesign", "--force", "--sign", "-", bundle).CombinedOutput(); err != nil {
+			return fmt.Errorf("sign updated app: %w: %s", err, output)
+		}
+	}
 	return nil
 }
 
 // Relaunch starts the updated binary and returns once it has been spawned. The
 // caller is expected to quit immediately afterwards so the successor — which
 // waits on the marker this writes — can take over.
-func Relaunch(dataDir, exePath string) error {
+func Relaunch(dataDir, exePath string, args ...string) error {
 	if err := os.MkdirAll(StagingDir(dataDir), 0o755); err != nil {
 		return err
 	}
@@ -76,13 +102,23 @@ func Relaunch(dataDir, exePath string) error {
 	if bundle := macAppBundle(exePath); bundle != "" {
 		// Launching the bundle rather than the executable keeps the Dock icon,
 		// the app name and the activation behaviour macOS attaches to it.
-		cmd = exec.Command("open", "-n", bundle)
+		cmd = exec.Command("open", append([]string{"-n", bundle, "--args"}, args...)...)
 	} else {
-		cmd = exec.Command(exePath)
+		cmd = exec.Command(exePath, args...)
 	}
 	cmd.Env = os.Environ()
-	cmd.Dir = filepath.Dir(exePath)
+	// Inherit the working directory too: relative --db and other paths must
+	// keep naming the same files after restart.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if macAppBundle(exePath) != "" {
+		// open exits after handing the app to Launch Services. Observe its exit
+		// status so an invalid bundle triggers rollback instead of quitting.
+		if err := cmd.Run(); err != nil {
+			_ = os.Remove(relaunchMarker(dataDir))
+			return err
+		}
+		return nil
+	}
 	if err := cmd.Start(); err != nil {
 		_ = os.Remove(relaunchMarker(dataDir))
 		return err
@@ -91,6 +127,17 @@ func Relaunch(dataDir, exePath string) error {
 	// window before this process exits.
 	go func() { _ = cmd.Wait() }()
 	return nil
+}
+
+func restoreBackup(exePath string) error {
+	path, err := filepath.EvalSymlinks(exePath)
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(backupPath(path), path); err != nil {
+		return err
+	}
+	return refreshBundleSignature(path)
 }
 
 // macAppBundle returns the .app directory exePath lives in, or "" when the
@@ -158,7 +205,7 @@ func processAlive(pid int) bool {
 // update staged for a *newer* release than this one survives.
 func CleanupAfterUpdate(dataDir, exePath, currentVersion string) {
 	if resolved, err := filepath.EvalSymlinks(exePath); err == nil {
-		_ = os.Remove(resolved + backupSuffix)
+		_ = os.Remove(backupPath(resolved))
 		_ = os.Remove(resolved + ".new")
 	}
 	su, ok := ReadStaged(dataDir)
