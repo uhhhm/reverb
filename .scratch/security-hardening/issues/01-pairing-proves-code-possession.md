@@ -4,13 +4,13 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Pairing with a code and no explicit address still succeeds against the device that generated the code on the same LAN, and the new device appears in the paired-device list.
-- [ ] A connected peer that advertises the pairing protocol but does not hold the code cannot get itself trusted, even by returning a well-formed success response with a plausible device ID.
-- [ ] A peer that cannot prove possession of the code is refused rather than trusted (fail closed), so an older peer that cannot complete the proof is not silently trusted.
-- [ ] The plaintext pairing code is never sent to a peer that has not first proven it holds that code.
-- [ ] The explicit-address pairing path keeps the same proof requirement, so a user-supplied address cannot bypass it.
-- [ ] A regression test runs a rogue peer that always reports success and asserts it is neither trusted nor able to obtain a token; a companion test asserts pairing with the real code holder still succeeds end to end.
-- [ ] Pairing code single-use expiry and the existing per-peer/global attempt limiting are unchanged.
-- [ ] `go test ./internal/p2p/... ./internal/sync/... ./internal/api/...` passes.
+- [x] Pairing with a code and no explicit address still succeeds against the device that generated the code on the same LAN, and the new device appears in the paired-device list.
+- [x] A connected peer that advertises the pairing protocol but does not hold the code cannot get itself trusted, even by returning a well-formed success response with a plausible device ID.
+- [x] A peer that cannot prove possession of the code is refused rather than trusted (fail closed), so an older peer that cannot complete the proof is not silently trusted.
+- [x] The plaintext pairing code is never sent to a peer that has not first proven it holds that code.
+- [x] The explicit-address pairing path keeps the same proof requirement, so a user-supplied address cannot bypass it.
+- [x] A regression test runs a rogue peer that always reports success and asserts it is neither trusted nor able to obtain a token; a companion test asserts pairing with the real code holder still succeeds end to end.
+- [x] Pairing code single-use expiry and the existing per-peer/global attempt limiting are unchanged.
+- [x] `go test ./internal/p2p/... ./internal/sync/... ./internal/api/...` passes.
