@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"context"
+	"crypto/hmac"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,28 +14,57 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
+	"github.com/uhhhm/reverb/internal/sync"
 )
 
 // PairingService is the minimal seam needed for p2p pairing.
 // *sync.PairingService satisfies it.
 type PairingService interface {
 	GenerateCode(ctx context.Context) (string, int64, error)
+	// ActivePairingCodes lists the unused, unexpired codes in stripped form. A
+	// possession proof does not name the code it was computed from, so the
+	// responder tests it against every code that could still be the one the
+	// user typed.
+	ActivePairingCodes(ctx context.Context) ([]string, error)
 	// RedeemAs binds the pairing to the device ID the redeemer already authors
 	// under. An empty deviceID mints one.
 	RedeemAs(ctx context.Context, rawCode, deviceName, deviceID string) (string, string, error)
 }
 
-// pairRequest mirrors api.redeemRequest for libp2p.
-type pairRequest struct {
-	Code       string `json:"code"`
+// pairHello opens the exchange. It carries the redeemer's identity and a fresh
+// nonce, and deliberately no code material: the code itself never crosses the
+// wire, and the proof derived from it is only sent after the responder's
+// challenge nonce, so a peer that merely advertises the protocol learns nothing
+// it could redeem.
+type pairHello struct {
 	DeviceName string `json:"deviceName"`
 	// DeviceID is the redeemer's own device ID -- the identity it authors sync
 	// changes under. The responder binds the peer to it, so the sync handler's
-	// identity check matches what this peer will actually send. Empty from an
-	// older peer, which mints one instead.
+	// identity check matches what this peer will actually send. Empty from a
+	// redeemer that has no sync identity yet, in which case the responder
+	// mints one.
 	DeviceID string `json:"deviceId,omitempty"`
+	// Nonce is the redeemer's half of the possession exchange.
+	Nonce string `json:"nonce"`
 }
 
+// pairChallenge is the responder's nonce. It carries no code-derived value, so
+// a peer that cannot prove possession never receives anything it could attack
+// offline.
+type pairChallenge struct {
+	Nonce string `json:"nonce,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+// pairRedeemProof is the redeemer's proof that it holds the code, computed
+// over both nonces and the identities exchanged so far. The code itself never
+// crosses the wire.
+type pairRedeemProof struct {
+	Proof string `json:"proof"`
+}
+
+// pairResponse is the responder's final answer, sent only after the redeemer's
+// proof has been verified against a live code.
 type pairResponse struct {
 	DeviceID string `json:"deviceId"`
 	Token    string `json:"token"`
@@ -45,7 +75,13 @@ type pairResponse struct {
 	// PeerPublicKey is the responder's verification key, so the redeemer can
 	// check changes it later authors.
 	PeerPublicKey string `json:"peerPublicKey,omitempty"`
-	Error         string `json:"error,omitempty"`
+	// Proof is the responder's own possession proof for the same code. The
+	// redeemer verifies it before believing anything else in this response.
+	// The device and token fields above ride the authenticated stream of the
+	// very peer whose ID the proof is bound to, so no third party can splice
+	// them into it.
+	Proof string `json:"proof,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // pairLimiter throttles pairing attempts per remote peer and globally. Pairing
@@ -53,42 +89,86 @@ type pairResponse struct {
 // cannot be gated by Guard and needs its own brute-force bound.
 var pairLimiter = newAttemptLimiter(pairAttemptsPerPeer, pairAttemptsGlobal, pairAttemptWindow)
 
-// RegisterPairingHandler mounts /reverb/pair/1.0.0 on the host. This is the
+// RegisterPairingHandler mounts /reverb/pair/2.0.0 on the host. This is the
 // only handler open to unpaired peers — it is how trust is bootstrapped — so it
-// is rate limited and binds the caller's libp2p peer ID to the device row it
-// creates. localDeviceID supplies this node's own device ID for the response;
-// it may be nil, in which case the peer cannot bind us to a device.
+// is rate limited and both sides must prove they hold the pairing code before
+// either trusts the other or a session token changes hands:
+//
+//  1. the redeemer opens with a nonce, never the code;
+//  2. the responder answers with its own nonce;
+//  3. the redeemer proves possession with a MAC under a stretched code key;
+//  4. the responder verifies that proof against its live codes, redeems the
+//     matching one, and proves its own possession in the response.
+//
+// A peer that cannot complete the proof is refused. In particular, a peer that
+// speaks the old one-shot protocol, which offered the plaintext code and
+// accepted a bare success, is not trusted.
+//
+// localDeviceID supplies this node's own device ID for the response; it may be
+// nil, in which case the peer cannot bind us to a device.
 func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, keys DeviceKeyStore, localDeviceID func(context.Context) (string, error)) {
 	h.SetStreamHandler(pairProtocol, safeHandler("pair", func(s network.Stream) {
 		defer s.Close()
 		_ = s.SetDeadline(time.Now().Add(10 * time.Second))
 		remote := s.Conn().RemotePeer()
 		if !pairLimiter.Allow(remote.String()) {
-			_ = json.NewEncoder(s).Encode(pairResponse{Error: "too many pairing attempts; try again later"})
-			return
-		}
-		var req pairRequest
-		if err := decodeLimited(s, maxPairRequestBytes, &req); err != nil {
-			_ = json.NewEncoder(s).Encode(pairResponse{Error: fmt.Sprintf("decode: %v", err)})
+			_ = json.NewEncoder(s).Encode(pairChallenge{Error: "too many pairing attempts; try again later"})
 			return
 		}
 		ctx := context.Background()
+		var hello pairHello
+		if err := decodeLimited(s, maxPairRequestBytes, &hello); err != nil {
+			_ = json.NewEncoder(s).Encode(pairChallenge{Error: fmt.Sprintf("decode: %v", err)})
+			return
+		}
+		// Fail closed on a peer that does not open with a challenge nonce. A
+		// pre-proof redeemer offers the plaintext code here; that request is
+		// not evidence of possession and must not be redeemed.
+		if err := validPairNonce(hello.Nonce); err != nil {
+			_ = json.NewEncoder(s).Encode(pairChallenge{Error: "pairing requires a code-possession challenge"})
+			return
+		}
 		// A peer names the device it already authors under, but it may not name
 		// one that is spoken for: device IDs are not secret (they travel in the
 		// author field of every change), so a code holder could otherwise claim
 		// this node's own identity or another peer's and have its changes
 		// indistinguishable from theirs.
-		if req.DeviceID != "" {
+		if hello.DeviceID != "" {
 			var localID string
 			if localDeviceID != nil {
 				localID, _ = localDeviceID(ctx)
 			}
-			if taken, why := deviceIDTaken(ctx, guard, localID, remote, req.DeviceID); taken {
-				_ = json.NewEncoder(s).Encode(pairResponse{Error: why})
+			if taken, why := deviceIDTaken(ctx, guard, localID, remote, hello.DeviceID); taken {
+				_ = json.NewEncoder(s).Encode(pairChallenge{Error: why})
 				return
 			}
 		}
-		deviceID, token, err := pairing.RedeemAs(ctx, req.Code, req.DeviceName, req.DeviceID)
+		serverNonce, err := newPairNonce()
+		if err != nil {
+			_ = json.NewEncoder(s).Encode(pairChallenge{Error: "could not start pairing"})
+			return
+		}
+		if err := json.NewEncoder(s).Encode(pairChallenge{Nonce: serverNonce}); err != nil {
+			return
+		}
+
+		var presented pairRedeemProof
+		if err := decodeLimited(s, maxPairRequestBytes, &presented); err != nil {
+			_ = json.NewEncoder(s).Encode(pairResponse{Error: fmt.Sprintf("decode proof: %v", err)})
+			return
+		}
+		proof, err := decodePairProof(presented.Proof)
+		if err != nil {
+			_ = json.NewEncoder(s).Encode(pairResponse{Error: "invalid pairing proof"})
+			return
+		}
+		pairCtx := newPairContext(hello, serverNonce, pairPeers{redeemer: remote.String(), responder: h.ID().String()})
+		code, key, ok := matchPairProof(ctx, pairing, pairCtx, proof)
+		if !ok {
+			_ = json.NewEncoder(s).Encode(pairResponse{Error: "invalid pairing code"})
+			return
+		}
+		deviceID, token, err := pairing.RedeemAs(ctx, code, hello.DeviceName, hello.DeviceID)
 		if err != nil {
 			_ = json.NewEncoder(s).Encode(pairResponse{Error: err.Error()})
 			return
@@ -97,7 +177,7 @@ func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, k
 		// Without this the sync and file handlers have no way to tell who is
 		// calling, and the device ID alone would be the only credential.
 		if guard != nil {
-			if err := guard.Trust(ctx, remote, deviceID, req.DeviceName); err != nil {
+			if err := guard.Trust(ctx, remote, deviceID, hello.DeviceName); err != nil {
 				_ = json.NewEncoder(s).Encode(pairResponse{Error: fmt.Sprintf("trust peer: %v", err)})
 				return
 			}
@@ -113,7 +193,7 @@ func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, k
 		// exchange, and the binding is what lets us later verify this device's
 		// changes when another peer relays them.
 		if pubB64, kerr := PublicKeyBase64(remote); kerr == nil && keys != nil {
-			if err := RecordPeerDevice(ctx, keys, deviceID, req.DeviceName, pubB64); err != nil {
+			if err := RecordPeerDevice(ctx, keys, deviceID, hello.DeviceName, pubB64); err != nil {
 				log.Printf("p2p pair: record device key for %s: %v", deviceID, err)
 			}
 		}
@@ -125,8 +205,30 @@ func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, k
 				resp.PeerPublicKey, _ = PublicKeyBase64(h.ID())
 			}
 		}
+		resp.Proof = encodePairProof(pairCtx.proof(key, pairLabelResponder))
 		_ = json.NewEncoder(s).Encode(resp)
 	}))
+}
+
+// matchPairProof returns the live code the presented redeemer proof was
+// computed from, and the session key derived from it, so the caller can answer
+// with its own proof. Every comparison is constant time.
+func matchPairProof(ctx context.Context, pairing PairingService, pairCtx pairContext, presented []byte) (code string, sessionKey []byte, ok bool) {
+	codes, err := pairing.ActivePairingCodes(ctx)
+	if err != nil {
+		log.Printf("p2p pair: list active codes: %v", err)
+		return "", nil, false
+	}
+	for _, code := range codes {
+		key, err := pairCtx.key(code)
+		if err != nil {
+			continue
+		}
+		if hmac.Equal(presented, pairCtx.proof(key, pairLabelRedeemer)) {
+			return code, key, true
+		}
+	}
+	return "", nil, false
 }
 
 // deviceIDTaken reports whether want is an identity the peer on the other end of
@@ -164,6 +266,11 @@ func deviceIDTaken(ctx context.Context, guard *Guard, localID string, remote pee
 // multiaddr, since multicast does not cross the tunnel and the DHT advertises
 // addresses that are not routable there.
 //
+// The code never travels. The redeemer answers the responder's challenge with a
+// proof derived from the code, and only trusts the peer, its token and the
+// device ID it reports after the responder has proved possession of the same
+// code; a peer that cannot is refused.
+//
 // localDeviceID is this node's own device ID, the one its syncer sends on every
 // round. The responder binds the peer connection to it, so pushes from here are
 // recognised rather than refused as a mismatched identity.
@@ -181,6 +288,10 @@ func RedeemViaPeer(ctx context.Context, h host.Host, guard *Guard, keys DeviceKe
 		return "", "", err
 	}
 	pid := pi.ID
+	clientNonce, err := newPairNonce()
+	if err != nil {
+		return "", "", err
+	}
 	// Seed before dialing: with no addresses in the peerstore NewStream has
 	// nothing to resolve the peer ID to and fails without ever touching the
 	// network.
@@ -191,7 +302,26 @@ func RedeemViaPeer(ctx context.Context, h host.Host, guard *Guard, keys DeviceKe
 	}
 	defer s.Close()
 	_ = s.SetDeadline(time.Now().Add(10 * time.Second))
-	if err := json.NewEncoder(s).Encode(pairRequest{Code: code, DeviceName: deviceName, DeviceID: localDeviceID}); err != nil {
+	hello := pairHello{DeviceName: deviceName, DeviceID: localDeviceID, Nonce: clientNonce}
+	if err := json.NewEncoder(s).Encode(hello); err != nil {
+		return "", "", err
+	}
+	var challenge pairChallenge
+	if err := decodeLimited(s, maxPairRequestBytes, &challenge); err != nil {
+		return "", "", err
+	}
+	if challenge.Error != "" {
+		return "", "", fmt.Errorf("%s", challenge.Error)
+	}
+	if err := validPairNonce(challenge.Nonce); err != nil {
+		return "", "", fmt.Errorf("responder sent no pairing challenge")
+	}
+	pairCtx := newPairContext(hello, challenge.Nonce, pairPeers{redeemer: h.ID().String(), responder: pid.String()})
+	key, err := pairCtx.key(sync.NormalizePairingCode(code))
+	if err != nil {
+		return "", "", err
+	}
+	if err := json.NewEncoder(s).Encode(pairRedeemProof{Proof: encodePairProof(pairCtx.proof(key, pairLabelRedeemer))}); err != nil {
 		return "", "", err
 	}
 	// Close write side to signal EOF for some transports.
@@ -202,6 +332,13 @@ func RedeemViaPeer(ctx context.Context, h host.Host, guard *Guard, keys DeviceKe
 	}
 	if resp.Error != "" {
 		return "", "", fmt.Errorf("%s", resp.Error)
+	}
+	// The responder proves possession before anything it says is believed:
+	// otherwise a rogue that answers "success" would be trusted and its token
+	// used, which is exactly how pairing was forged before the proof existed.
+	responderProof, err := decodePairProof(resp.Proof)
+	if err != nil || !hmac.Equal(responderProof, pairCtx.proof(key, pairLabelResponder)) {
+		return "", "", fmt.Errorf("responder did not prove possession of the pairing code")
 	}
 	if resp.DeviceID == "" || resp.Token == "" {
 		return "", "", fmt.Errorf("invalid pair response")
@@ -245,8 +382,10 @@ func RedeemViaPeer(ctx context.Context, h host.Host, guard *Guard, keys DeviceKe
 	return resp.DeviceID, resp.Token, nil
 }
 
-// pairProtocol is the stream protocol the pairing handler is mounted on.
-const pairProtocol = "/reverb/pair/1.0.0"
+// pairProtocol is the stream protocol the pairing handler is mounted on. It is
+// versioned because the exchange is not compatible with 1.0.0, which sent the
+// code and trusted a bare success.
+const pairProtocol = "/reverb/pair/2.0.0"
 
 // RedeemViaDiscoveredPeers redeems code against whichever connected Reverb
 // device accepts it, for the common case where the user has only the code.
@@ -254,9 +393,10 @@ const pairProtocol = "/reverb/pair/1.0.0"
 // On a LAN, mDNS has already connected this host to every other Reverb on the
 // network, and identify has told us which of those speak the pairing protocol;
 // the code itself is single-use and bound to one device, so trying each
-// candidate in turn is safe: the wrong ones refuse it and the right one pairs.
-// A refusal on a wrong device costs one of that device's pairing attempts for
-// this peer, which a household-sized network never exhausts.
+// candidate in turn is safe: a peer that does not hold the code cannot answer
+// the challenge and the holder pairs. A refusal on a wrong device costs one of
+// that device's pairing attempts for this peer, which a household-sized
+// network never exhausts.
 //
 // Nothing is tried over a VPN, where discovery does not work and the
 // candidate list is empty: the caller then needs the other device's address.

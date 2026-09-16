@@ -13,7 +13,7 @@ import (
 // relative to legitimate traffic and exist to bound the worst case, not to
 // tune it.
 const (
-	maxPairRequestBytes = 4 << 10  // pairing: two short strings
+	maxPairRequestBytes = 4 << 10  // pairing: nonces, a proof, device name/id
 	maxFileRequestBytes = 8 << 10  // file request: a rel path and a hash
 	maxSyncMessageBytes = 32 << 20 // sync: up to 10k changes in one batch
 	maxFileBytes        = 8 << 30  // a single replicated media file
@@ -40,6 +40,8 @@ func decodeLimited(r io.Reader, limit int64, v any) error {
 // Pairing brute-force limits. A code is 8 chars from a 32-symbol alphabet
 // (2^40 keyspace) and lives for 10 minutes, so these bounds put an exhaustive
 // search far out of reach while leaving room for a user fumbling the code.
+// Proofs captured off the wire are stretched (pairproof.go), so the same
+// keyspace is out of reach for offline search too.
 const (
 	pairAttemptsPerPeer   = 5
 	pairAttemptsGlobal    = 30

@@ -207,6 +207,17 @@ func pairWith(t *testing.T, responder, redeemer *syncDevice, target string) {
 	if redeemed.DeviceID == "" {
 		t.Fatal("pairing returned no device id")
 	}
+	// The newly paired device is listed on the responder it paired with.
+	var devices []struct {
+		ID string `json:"id"`
+	}
+	responder.must(http.MethodGet, "/pairing/devices", nil, &devices, http.StatusOK)
+	for _, d := range devices {
+		if d.ID == redeemed.DeviceID {
+			return
+		}
+	}
+	t.Fatalf("%s paired as %s but is missing from %s's device list %v", redeemer.name, redeemed.DeviceID, responder.name, devices)
 }
 
 // restart stops the device and boots it again from the same database, the way

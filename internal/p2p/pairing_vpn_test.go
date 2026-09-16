@@ -8,6 +8,7 @@ import (
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/uhhhm/reverb/internal/store/db"
+	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
 
 // stubPairing is the minimal PairingService: it hands out one fixed code and
@@ -23,8 +24,12 @@ func (s *stubPairing) GenerateCode(context.Context) (string, int64, error) {
 	return s.code, time.Now().Add(time.Minute).Unix(), nil
 }
 
+func (s *stubPairing) ActivePairingCodes(context.Context) ([]string, error) {
+	return []string{s.code}, nil
+}
+
 func (s *stubPairing) RedeemAs(_ context.Context, rawCode, _, deviceID string) (string, string, error) {
-	if rawCode != s.code {
+	if reverbsync.NormalizePairingCode(rawCode) != s.code {
 		return "", "", errWrongCode
 	}
 	s.gotDeviceID = deviceID
@@ -64,7 +69,7 @@ func TestRedeemViaPeerWithMultiaddrNoDiscovery(t *testing.T) {
 	if err := serverQ.CreateDevice(ctx, db.CreateDeviceParams{ID: "dev_b", Name: "b", TokenHash: "h"}); err != nil {
 		t.Fatal(err)
 	}
-	pairing := &stubPairing{code: "AB12-CD34", deviceID: "dev_b"}
+	pairing := &stubPairing{code: strippedPairCode, deviceID: "dev_b"}
 	RegisterPairingHandler(server, pairing, NewGuard(serverQ), serverQ, nil)
 
 	clientGuard := NewGuard(newTrustStore(t))
@@ -72,7 +77,7 @@ func TestRedeemViaPeerWithMultiaddrNoDiscovery(t *testing.T) {
 
 	dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	deviceID, token, err := RedeemViaPeer(dialCtx, client, clientGuard, nil, serverAddr, "AB12-CD34", "laptop", "")
+	deviceID, token, err := RedeemViaPeer(dialCtx, client, clientGuard, nil, serverAddr, typedPairCode, "laptop", "")
 	if err != nil {
 		t.Fatalf("RedeemViaPeer with multiaddr: %v", err)
 	}
@@ -95,11 +100,11 @@ func TestRedeemViaPeerBarePeerIDFailsWithoutDiscovery(t *testing.T) {
 	ctx := context.Background()
 	server, client := newIsolatedHost(t), newIsolatedHost(t)
 	serverQ := newTrustStore(t)
-	RegisterPairingHandler(server, &stubPairing{code: "AB12-CD34", deviceID: "dev_b"}, NewGuard(serverQ), serverQ, nil)
+	RegisterPairingHandler(server, &stubPairing{code: strippedPairCode, deviceID: "dev_b"}, NewGuard(serverQ), serverQ, nil)
 
 	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	_, _, err := RedeemViaPeer(dialCtx, client, NewGuard(newTrustStore(t)), nil, server.ID().String(), "AB12-CD34", "laptop", "")
+	_, _, err := RedeemViaPeer(dialCtx, client, NewGuard(newTrustStore(t)), nil, server.ID().String(), typedPairCode, "laptop", "")
 	if err == nil {
 		t.Fatal("bare peer ID resolved without discovery; the multiaddr path is not being exercised")
 	}

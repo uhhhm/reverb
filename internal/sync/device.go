@@ -40,6 +40,7 @@ type Querier interface {
 	ListDevices(ctx context.Context) ([]db.Device, error)
 	CreatePairingCode(ctx context.Context, arg db.CreatePairingCodeParams) error
 	GetPairingCode(ctx context.Context, code string) (db.PairingCode, error)
+	ListActivePairingCodes(ctx context.Context) ([]db.PairingCode, error)
 	MarkPairingCodeUsed(ctx context.Context, arg db.MarkPairingCodeUsedParams) error
 	DeleteExpiredPairingCodes(ctx context.Context) error
 	GetSetting(ctx context.Context, key string) (string, error)

@@ -5115,7 +5115,7 @@ export interface paths {
         put?: never;
         /**
          * Redeem a pairing code against a peer over libp2p (manage-library capability required)
-         * @description Dials peerId and redeems code on it, or, with peerId empty, offers the code to each Reverb device discovered on the local network until one accepts it. On success both sides record each other as paired, binding the libp2p peer ID to a device row and its Ed25519 verification key, and persist the address used so later reconnects need no discovery. Rate limited per peer and globally.
+         * @description Dials peerId, or, with peerId empty, tries each Reverb device discovered on the local network, and pairs with a code-possession challenge: the code itself never crosses the wire, and a peer is only trusted, and a session token only issued, after it proves it holds the code. On success both sides record each other as paired, binding the libp2p peer ID to a device row and its Ed25519 verification key, and persist the address used so later reconnects need no discovery. Rate limited per peer and globally.
          */
         post: {
             parameters: {

@@ -83,10 +83,11 @@ func NewHost(ctx context.Context, priv crypto.PrivKey, port int) (*Host, error) 
 		log.Printf("WARNING: p2p mdns start failed: %v", err)
 	}
 
-	// Set stream handler for /reverb/sync/1.0.0 and /reverb/file/1.0.0 — no-ops for now,
-	// concrete handlers registered by Syncer/FileSyncer.
+	// No-op handlers until the concrete ones are registered by Syncer,
+	// FileSyncer, RegisterPairingHandler, and the cover service; a dial in that
+	// startup window closes cleanly instead of failing protocol negotiation.
 	h.SetStreamHandler("/reverb/sync/1.0.0", func(s network.Stream) { s.Close() })
-	h.SetStreamHandler("/reverb/pair/1.0.0", func(s network.Stream) { s.Close() })
+	h.SetStreamHandler(pairProtocol, func(s network.Stream) { s.Close() })
 	h.SetStreamHandler("/reverb/file/1.0.0", func(s network.Stream) { s.Close() })
 	h.SetStreamHandler(coverProtocol, func(s network.Stream) { s.Close() })
 

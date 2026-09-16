@@ -50,12 +50,12 @@ func (q *Queries) GetPairingCode(ctx context.Context, code string) (PairingCode,
 	return i, err
 }
 
-const listPairingCodes = `-- name: ListPairingCodes :many
-SELECT code, expires_at, used_at, used_by_device_id, created_at FROM pairing_code ORDER BY created_at DESC
+const listActivePairingCodes = `-- name: ListActivePairingCodes :many
+SELECT code, expires_at, used_at, used_by_device_id, created_at FROM pairing_code WHERE used_at IS NULL AND expires_at > unixepoch() ORDER BY created_at DESC
 `
 
-func (q *Queries) ListPairingCodes(ctx context.Context) ([]PairingCode, error) {
-	rows, err := q.db.QueryContext(ctx, listPairingCodes)
+func (q *Queries) ListActivePairingCodes(ctx context.Context) ([]PairingCode, error) {
+	rows, err := q.db.QueryContext(ctx, listActivePairingCodes)
 	if err != nil {
 		return nil, err
 	}

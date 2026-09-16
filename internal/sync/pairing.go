@@ -54,7 +54,11 @@ func generateStrippedCode() (string, error) {
 	return string(out), nil
 }
 
-func normalizeCode(raw string) string {
+// NormalizePairingCode strips separators and upper-cases a user-entered code,
+// producing the stripped form stored in pairing_code. Both sides of a pairing
+// derive their possession proof from this form, so a code proves the same typed
+// with or without its dash.
+func NormalizePairingCode(raw string) string {
 	var sb strings.Builder
 	sb.Grow(len(raw))
 	for _, r := range raw {
@@ -94,6 +98,20 @@ func (s *PairingService) GenerateCode(ctx context.Context) (string, int64, error
 		return formatCode(stripped), expiresAt, nil
 	}
 	return "", 0, errors.New("failed to generate unique pairing code")
+}
+
+// ActivePairingCodes returns the unused, unexpired codes in the stripped form
+// RedeemAs accepts.
+func (s *PairingService) ActivePairingCodes(ctx context.Context) ([]string, error) {
+	codes, err := s.q.ListActivePairingCodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(codes))
+	for _, pc := range codes {
+		out = append(out, pc.Code)
+	}
+	return out, nil
 }
 
 // deviceClaimer is the optional store capability for claiming a device row
@@ -163,7 +181,7 @@ func (s *PairingService) Redeem(ctx context.Context, rawCode, deviceName string)
 // is the credential in both cases: whoever holds a valid, unexpired, unused
 // pairing code is being granted a trusted device by the user typing it.
 func (s *PairingService) RedeemAs(ctx context.Context, rawCode, deviceName, deviceID string) (string, string, error) {
-	normalized := normalizeCode(rawCode)
+	normalized := NormalizePairingCode(rawCode)
 	if len(normalized) != 8 {
 		return "", "", ErrCodeInvalid
 	}

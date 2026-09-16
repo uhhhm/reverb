@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 
 	"github.com/uhhhm/reverb/internal/store"
@@ -84,7 +85,8 @@ func TestPairingBindsRedeemersOwnDeviceID(t *testing.T) {
 	}
 }
 
-// An older peer sends no device ID; pairing must still mint one for it.
+// A redeemer with no sync identity yet sends no device ID; pairing must mint
+// one for it.
 func TestPairingMintsDeviceIDWhenPeerOffersNone(t *testing.T) {
 	ctx := context.Background()
 	server, client := newLinkedHosts(t)
@@ -163,18 +165,9 @@ func TestRedeemRefusesResponderClaimingOurDeviceID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A responder that hands back a valid-looking pairing but claims the
-	// redeemer's identity for itself.
-	server.SetStreamHandler("/reverb/pair/1.0.0", func(s network.Stream) {
-		defer s.Close()
-		var req pairRequest
-		_ = json.NewDecoder(s).Decode(&req)
-		_ = json.NewEncoder(s).Encode(pairResponse{
-			DeviceID:     "minted-for-the-laptop",
-			Token:        "token",
-			PeerDeviceID: clientLocal,
-		})
-	})
+	// A responder that completes the possession proof with the code the
+	// redeemer typed, but claims the redeemer's identity for itself.
+	hostilePairHandler(t, server, "123456", clientLocal)
 
 	clientGuard := NewGuard(cq)
 	_, _, err = RedeemViaPeer(ctx, client, clientGuard, cq,
@@ -217,21 +210,33 @@ func TestRedeemRefusesResponderClaimingAnotherPeersDeviceID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	server.SetStreamHandler("/reverb/pair/1.0.0", func(s network.Stream) {
-		defer s.Close()
-		var req pairRequest
-		_ = json.NewDecoder(s).Decode(&req)
-		_ = json.NewEncoder(s).Encode(pairResponse{
-			DeviceID:     "minted-for-the-laptop",
-			Token:        "token",
-			PeerDeviceID: "phone-device",
-		})
-	})
+	hostilePairHandler(t, server, "123456", "phone-device")
 
 	if _, _, err := RedeemViaPeer(ctx, client, clientGuard, cq,
 		server.ID().String(), "123456", "desktop", clientLocal); err == nil {
 		t.Fatal("redeemer accepted a responder claiming another peer's device identity")
 	}
+}
+
+// hostilePairHandler answers the possession exchange with the code the
+// redeemer typed -- the test's stand-in for a code holder whose only lie is the
+// identity it reports for itself -- and returns selfDeviceID as its own device.
+func hostilePairHandler(t *testing.T, server host.Host, code, selfDeviceID string) {
+	t.Helper()
+	server.SetStreamHandler(pairProtocol, func(s network.Stream) {
+		answerPairChallenge(t, s, server.ID(), nil, func(pc pairContext, _ string) pairResponse {
+			key, err := pc.key(reverbsync.NormalizePairingCode(code))
+			if err != nil {
+				return pairResponse{Error: err.Error()}
+			}
+			return pairResponse{
+				DeviceID:     "minted-for-the-laptop",
+				Token:        "token",
+				PeerDeviceID: selfDeviceID,
+				Proof:        encodePairProof(pc.proof(key, pairLabelResponder)),
+			}
+		})
+	})
 }
 
 // Older pairing minted an alias while the same peer kept authoring under its

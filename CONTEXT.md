@@ -25,8 +25,13 @@ The authoritative copy of the music collection (files plus metadata), which live
 on the server. Every device's view is a copy or subset of it.
 
 **Pairing**:
-The act of granting a laptop a token to sync with the server, done by entering a
-one-time pairing code shown on the server's admin UI.
+The act of two devices granting each other sync access by entering a one-time
+code minted on one of them. The device that types the code is the *redeemer*;
+the device that minted it is the *responder*. Each side proves it holds the code
+before the other trusts it or issues a sync token, and pairing between devices
+proves possession with a derived proof, so the code itself does not cross the
+network.
+_Avoid_: Login, account, invite
 
 **Offline set**:
 The subset of the library a laptop keeps locally so it can be played with no

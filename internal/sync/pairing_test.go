@@ -116,6 +116,39 @@ func TestPairingRedeemSuccess(t *testing.T) {
 	}
 }
 
+// ActivePairingCodes is what a proof-carrying redeemer is matched against, so
+// it must offer only codes that can still redeem: unused and unexpired.
+func TestActivePairingCodesOffersOnlyRedeemable(t *testing.T) {
+	st := newTestStorePairing(t)
+	svc := syncpkg.NewPairingService(st.Q())
+	ctx := context.Background()
+
+	live, _, err := svc.GenerateCode(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spent, _, err := svc.GenerateCode(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := svc.Redeem(ctx, spent, "spent laptop"); err != nil {
+		t.Fatalf("redeem spent code: %v", err)
+	}
+	expired := "ABCD2345"
+	if err := st.Q().CreatePairingCode(ctx, db.CreatePairingCodeParams{Code: expired, ExpiresAt: time.Now().Unix() - 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.ActivePairingCodes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := syncpkg.NormalizePairingCode(live)
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("ActivePairingCodes = %v, want [%s]", got, want)
+	}
+}
+
 func TestPairingRedeemWithDashesAndCase(t *testing.T) {
 	st := newTestStorePairing(t)
 	svc := syncpkg.NewPairingService(st.Q())

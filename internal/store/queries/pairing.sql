@@ -13,5 +13,5 @@ UPDATE pairing_code SET used_at = unixepoch(), used_by_device_id = ? WHERE code 
 -- name: DeleteExpiredPairingCodes :exec
 DELETE FROM pairing_code WHERE expires_at < unixepoch() AND used_at IS NULL;
 
--- name: ListPairingCodes :many
-SELECT * FROM pairing_code ORDER BY created_at DESC;
+-- name: ListActivePairingCodes :many
+SELECT * FROM pairing_code WHERE used_at IS NULL AND expires_at > unixepoch() ORDER BY created_at DESC;
