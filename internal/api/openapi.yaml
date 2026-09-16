@@ -1843,7 +1843,7 @@ components:
         playedAt: { type: integer, format: int64, description: Unix seconds; zero or omitted uses server time. }
         origin: { $ref: '#/components/schemas/RecommendationOrigin' }
         sessionId: { type: string }
-        qualified: { type: boolean, description: Omitted for legacy clients; defaults to true. }
+        qualified: { type: boolean, description: "Whether the play counts as a listen. Omitted for legacy clients and ordinary playback, which defaults to true. False records the attempt for recommendation stats only: it is never uploaded to a linked scrobbling account." }
     AddSyncedTrackRequest:
       type: object
       properties:

@@ -40,9 +40,16 @@ func (s *Server) handlePlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A play the client explicitly marked unqualified is a recommendation
+	// attempt that was skipped before it became a listen: it stays recorded for
+	// outcome stats, but claiming it as a listen to Last.fm or ListenBrainz
+	// would be false. Qualified is absent for older clients and ordinary
+	// playback, which keeps the historical behaviour of scrobbling.
+	unqualified := in.Qualified != nil && !*in.Qualified
+
 	// Enqueue for scrobbling if the scrobble service is wired in.
-	// Resolve played_at: use the body value when set; fall back to now.
-	if s.deps.Scrobble != nil {
+	if s.deps.Scrobble != nil && !unqualified {
+		// Resolve played_at: use the body value when set; fall back to now.
 		playedAt := in.PlayedAt
 		if playedAt == 0 {
 			playedAt = time.Now().Unix()

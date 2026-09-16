@@ -106,6 +106,25 @@ describe('playTracker', () => {
 		}))
 	})
 
+	it('does not declare a recommendation completed while its duration is unknown', () => {
+		const eng = fakeEngine()
+		startPlayTracker(eng as any, recordFn, () => 'session-1')
+		const t = { ...mkTrack('radio-unknown', 0), recommendationOrigin: 'radio' } as Track
+
+		// The track loads with no known duration: neither the Track metadata nor
+		// the engine state carries one yet. Reaching "the end" is meaningless
+		// here, so nothing may be submitted on load.
+		eng.emit({ ...baseState(), current: t, durationMs: 0, playing: true, currentTimeMs: 0 })
+		eng.emit({ ...baseState(), current: t, durationMs: 0, playing: true, currentTimeMs: 500 })
+		expect(recordFn).not.toHaveBeenCalled()
+
+		// When the attempt ends it is still recorded as an unqualified skip, but
+		// never as a completed listen.
+		eng.emit(baseState())
+		expect(recordFn).toHaveBeenCalledTimes(1)
+		expect(recordFn.mock.calls[0][0]).toMatchObject({ completed: false, qualified: false })
+	})
+
   // ── Test 1 ────────────────────────────────────────────────────────────────
   it('qualifies at >=50% of a >30 s track and calls recordFn exactly once', () => {
     const eng = fakeEngine()

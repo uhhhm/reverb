@@ -76,7 +76,7 @@ export function startPlayTracker(
 			durationMs: state.durationMs,
 			...(state.isrc ? { isrc: state.isrc } : {}),
 			msPlayed: state.msPlayed,
-			completed: state.lastTimeMs >= state.durationMs - COMPLETE_WITHIN_MS,
+			completed: state.durationMs > 0 && state.lastTimeMs >= state.durationMs - COMPLETE_WITHIN_MS,
 			origin: state.origin,
 			...(state.sessionId ? { sessionId: state.sessionId } : {}),
 			qualified: qualify(state),
@@ -148,7 +148,9 @@ export function startPlayTracker(
     }
 
     track.lastTimeMs = currentTimeMs
-	if (track.origin && currentTimeMs >= track.durationMs - COMPLETE_WITHIN_MS) {
+	// Completion needs a known duration: without one, "within 1 500 ms of the
+	// end" is true from the first tick and would submit the attempt on load.
+	if (track.origin && track.durationMs > 0 && currentTimeMs >= track.durationMs - COMPLETE_WITHIN_MS) {
 		submitRecommendation(track)
 	}
 

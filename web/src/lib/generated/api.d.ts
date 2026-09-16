@@ -5446,7 +5446,7 @@ export interface components {
             playedAt?: number;
             origin?: components["schemas"]["RecommendationOrigin"];
             sessionId?: string;
-            /** @description Omitted for legacy clients; defaults to true. */
+            /** @description Whether the play counts as a listen. Omitted for legacy clients and ordinary playback, which defaults to true. False records the attempt for recommendation stats only: it is never uploaded to a linked scrobbling account. */
             qualified?: boolean;
         };
         AddSyncedTrackRequest: {

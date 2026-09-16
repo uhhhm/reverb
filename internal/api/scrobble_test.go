@@ -142,9 +142,15 @@ func scrobbleQueuePlayedAt(t *testing.T, st *store.Store, userID string) int64 {
 // seedLink inserts an active scrobble_link for userID (for linked-user tests).
 func seedLink(t *testing.T, st *store.Store, userID string) {
 	t.Helper()
+	seedProviderLink(t, st, userID, "lastfm")
+}
+
+// seedProviderLink seeds an active link for one provider.
+func seedProviderLink(t *testing.T, st *store.Store, userID, provider string) {
+	t.Helper()
 	err := st.Q().UpsertScrobbleLink(context.Background(), db.UpsertScrobbleLinkParams{
 		UserID:     userID,
-		Provider:   "lastfm",
+		Provider:   provider,
 		SessionKey: "test-session-key",
 		Username:   "testuser",
 		Status:     "active",
@@ -519,6 +525,38 @@ func TestPlays_LinkedUserEnqueuesScrobble(t *testing.T) {
 	playedAt := scrobbleQueuePlayedAt(t, st, ownerID)
 	if playedAt == 0 {
 		t.Fatal("scrobble_queue played_at must be non-zero")
+	}
+}
+
+// TestPlays_UnqualifiedPlayDoesNotEnqueue verifies that a play recorded with
+// qualified=false — a recommendation attempt that was skipped before it became
+// a listen — is stored for outcome stats but never claimed as a listen to an
+// external service, for every active link.
+func TestPlays_UnqualifiedPlayDoesNotEnqueue(t *testing.T) {
+	fs := &fakeScrobbler{}
+	srv, cookie, ownerID, st := scrobbleTestServer(t, fs, cfgConfigured)
+
+	seedProviderLink(t, st, ownerID, "lastfm")
+	seedProviderLink(t, st, ownerID, "listenbrainz")
+
+	body := `{
+		"Title": "Hurt",
+		"Artist": "Johnny Cash",
+		"Album": "American IV",
+		"DurationMs": 218000,
+		"MsPlayed": 4000,
+		"Completed": false,
+		"PlayedAt": 1719000000,
+		"Origin": "radio",
+		"Qualified": false
+	}`
+	rec := do(t, srv, cookie, http.MethodPost, "/api/v1/plays", body)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("POST /plays = %d, want 204; body: %s", rec.Code, rec.Body.String())
+	}
+
+	if n := countScrobbleQueueRows(t, st, ownerID); n != 0 {
+		t.Fatalf("expected 0 scrobble_queue rows for an unqualified play, got %d", n)
 	}
 }
 
