@@ -109,6 +109,7 @@ type Runtime struct {
 	SyncEmit  *syncemit.Service
 	Playlists *playlistcrdt.Service
 	projector *materialize.Service
+	files     *p2p.FileSyncer
 }
 
 // Build opens the store, runs migrations, constructs every service, and returns
@@ -444,8 +445,19 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	// Without a materializer, everything replicated would land in the change log
 	// and stay invisible: nothing would write a peer's rename, playlist or play
 	// into the tables the app reads.
+	musicDir := deps.MusicDir
+	if bundle.Supervisor != nil && bundle.Supervisor.Health() == embedded.HealthExternal {
+		musicDir = ""
+	}
+	localID, _ := reverbsync.LocalDeviceID(ctx, st.Q())
+	files := p2p.NewFileSyncer(st.Q(), localID, musicDir).WithOnChanged(func() {
+		if downloader, ok := reloader.Current().Downloads.(interface{ ScheduleScan() }); ok {
+			downloader.ScheduleScan()
+		}
+	})
 	newMaterializer := func() *materialize.Service {
 		return materialize.New(deps.Overrides, deps.Crop).
+			WithFiles(files).
 			WithCatalog(catalogSvc).
 			WithPlaylists(playlistProjection).
 			WithTrackStore(st.Q()).
@@ -509,6 +521,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		SyncEmit:  emitter,
 		Playlists: playlistProjection,
 		projector: projector,
+		files:     files,
 	}
 	rt.Deps.P2P = func() *p2p.Host { return rt.P2P }
 	rt.Deps.P2PGuard = func() *p2p.Guard { return rt.P2PGuard }
@@ -548,6 +561,9 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 				getenv = func(string) string { return "" }
 			}
 			musicDir := embedded.MusicDir(getenv)
+			if r.Bundle.Supervisor != nil && r.Bundle.Supervisor.Health() == embedded.HealthExternal {
+				musicDir = ""
+			}
 			coverDir := cover.Dir(r.Deps.DataDir)
 			if h.LibHost() != nil {
 				p2p.RegisterFileHandler(h.LibHost(), musicDir, guard)
@@ -586,8 +602,10 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 						}
 					}
 				}
-				fs := p2p.NewFileSyncer(r.Store.Q(), localID, musicDir)
-				p2p.SafeGoLoop(ctx, "file sync", func() { fs.Run(ctx) })
+				fs := r.files
+				if musicDir != "" {
+					p2p.SafeGoLoop(ctx, "file sync", func() { fs.Run(ctx) })
+				}
 				// Advertise what we hold and pull what paired peers hold.
 				if h.LibHost() != nil {
 					p2p.RegisterManifestHandler(h.LibHost(), r.Store.Q(), localID, guard)
@@ -610,6 +628,9 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 		if err := r.projector.RecoverPlays(ctx); err != nil {
 			logf("sync: recover play history: %v", err)
 		}
+	}
+	if r.Deps.SyncStore != nil {
+		p2p.SafeGoLoop(ctx, "projection recovery", func() { r.Deps.SyncStore.RunProjectionRecovery(ctx) })
 	}
 	if r.Bundle.Supervisor != nil {
 		r.Bundle.Supervisor.Start()

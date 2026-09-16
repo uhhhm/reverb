@@ -2,7 +2,10 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -81,11 +84,44 @@ func (s *Server) handleRemoveLibraryTrack(w http.ResponseWriter, r *http.Request
 	if s.deps.Overrides != nil {
 		catalogID = s.deps.Overrides.CatalogIDForTrack(r.Context(), trackID)
 	}
-	if err := os.Remove(target); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "track file not found"})
+	managed, err := os.OpenRoot(root)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not open music directory"})
+		return
+	}
+	defer managed.Close()
+	file, err := managed.Open(rel)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "track file not found"})
+		return
+	}
+	info, statErr := file.Stat()
+	if statErr != nil || !info.Mode().IsRegular() {
+		file.Close()
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "track is not a regular file"})
+		return
+	}
+	hash := sha256.New()
+	_, hashErr := io.Copy(hash, file)
+	_ = file.Close()
+	if hashErr != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not hash track"})
+		return
+	}
+	if s.deps.SyncStore != nil {
+		deviceID := s.resolveAuthorDeviceForSync(r.Context())
+		if deviceID == "" {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "sync identity unavailable"})
 			return
 		}
+		if _, err := s.deps.SyncStore.AppendChange(r.Context(), deviceID, reverbsync.SyncChange{
+			EntityType: reverbsync.EntityFile, EntityID: hex.EncodeToString(hash.Sum(nil)), Field: reverbsync.FieldDeleted, UpdatedAt: time.Now().UnixMilli(),
+		}); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not persist track deletion"})
+			return
+		}
+	}
+	if err := managed.Remove(rel); err != nil && !errors.Is(err, os.ErrNotExist) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not remove the track file"})
 		return
 	}

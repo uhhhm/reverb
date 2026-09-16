@@ -135,7 +135,7 @@ func (p *Puller) pullPeer(ctx context.Context, pid peer.ID) error {
 		p.pullCovers(ctx, pid)
 		p.guard.Touch(ctx, pid)
 	}()
-	if len(resp.Files) == 0 {
+	if len(resp.Files) == 0 || p.musicDir == "" {
 		return nil
 	}
 	local, err := p.localManifests(ctx)
@@ -143,6 +143,17 @@ func (p *Puller) pullPeer(ctx context.Context, pid peer.ID) error {
 		return err
 	}
 	want := MissingFiles(local, resp.Files, p.musicDir)
+	deleted, err := p.files.deletedHashes(ctx)
+	if err != nil {
+		return err
+	}
+	kept := want[:0]
+	for _, file := range want {
+		if !deleted[file.ContentHash] {
+			kept = append(kept, file)
+		}
+	}
+	want = kept
 	if len(want) == 0 {
 		return nil
 	}

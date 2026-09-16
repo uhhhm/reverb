@@ -4830,6 +4830,7 @@ export interface paths {
                         /** Format: int64 */
                         sinceRevision: number;
                         changes: {
+                            /** @description Entity namespace; file tombstones use a SHA-256 content hash as entityId, and play tombstones remove a listening-history event. Unknown namespaces are retained for compatibility. */
                             entityType: string;
                             entityId: string;
                             field: string;

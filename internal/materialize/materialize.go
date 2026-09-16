@@ -86,6 +86,8 @@ type TrackStore interface {
 	DeleteTrackQualityOverrideByCatalogID(ctx context.Context, catalogID sql.NullString) error
 	UpsertTrackLoudnessByCatalogID(ctx context.Context, arg db.UpsertTrackLoudnessByCatalogIDParams) error
 	InsertPlayIfAbsent(ctx context.Context, arg db.InsertPlayIfAbsentParams) error
+	DeleteReplicatedPlay(context.Context, string) error
+	ListDeletedPlays(context.Context) ([]string, error)
 	InsertRecommendationAddIfAbsent(ctx context.Context, arg db.InsertRecommendationAddIfAbsentParams) error
 	ListUnprojectedPlays(context.Context, string) ([]db.SyncChange, error)
 }
@@ -112,6 +114,16 @@ type Service struct {
 	covers        *cover.Service
 	notInterested NotInterested
 	tasteSettings TasteSettings
+	files         interface {
+		DeleteContent(context.Context, string) error
+	}
+}
+
+func (s *Service) WithFiles(f interface {
+	DeleteContent(context.Context, string) error
+}) *Service {
+	s.files = f
+	return s
 }
 
 // WithNotInterested attaches Not interested marks.
@@ -151,6 +163,11 @@ func (s *Service) Apply(ctx context.Context, ch reverbsync.SyncChange) error {
 		return nil
 	}
 	switch ch.EntityType {
+	case reverbsync.EntityFile:
+		if ch.Field == FieldDeleted && s.files != nil {
+			return s.files.DeleteContent(ctx, ch.EntityID)
+		}
+		return nil
 	case reverbsync.EntityCatalog:
 		return s.applyCatalogEntity(ctx, ch)
 	case reverbsync.EntityPlaylist:
@@ -251,7 +268,13 @@ func (s *Service) applyCatalogEntity(ctx context.Context, ch reverbsync.SyncChan
 // unique ids, so a repeat is the same play arriving twice and is ignored rather
 // than double-counted.
 func (s *Service) applyPlay(ctx context.Context, ch reverbsync.SyncChange) error {
-	if s.tracks == nil || ch.Field != reverbsync.FieldRecord {
+	if s.tracks == nil {
+		return nil
+	}
+	if ch.Field == reverbsync.FieldDeleted {
+		return s.tracks.DeleteReplicatedPlay(ctx, ch.EntityID)
+	}
+	if ch.Field != reverbsync.FieldRecord {
 		return nil
 	}
 	var p syncemit.Play
@@ -510,6 +533,17 @@ func (s *Service) RecoverPlays(ctx context.Context) error { return s.recoverPlay
 func (s *Service) recoverPlays(ctx context.Context, catalogID string) error {
 	if s.tracks == nil {
 		return nil
+	}
+	if catalogID == "" {
+		deleted, err := s.tracks.ListDeletedPlays(ctx)
+		if err != nil {
+			return err
+		}
+		for _, id := range deleted {
+			if err := s.tracks.DeleteReplicatedPlay(ctx, id); err != nil {
+				return err
+			}
+		}
 	}
 	rows, err := s.tracks.ListUnprojectedPlays(ctx, catalogID)
 	if err != nil {

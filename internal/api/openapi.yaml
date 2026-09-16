@@ -1346,7 +1346,9 @@ paths:
                   items:
                     type: object
                     properties:
-                      entityType: { type: string }
+                      entityType:
+                        type: string
+                        description: Entity namespace; file tombstones use a SHA-256 content hash as entityId, and play tombstones remove a listening-history event. Unknown namespaces are retained for compatibility.
                       entityId: { type: string }
                       field: { type: string }
                       value: {}

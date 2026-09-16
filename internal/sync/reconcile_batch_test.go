@@ -75,6 +75,28 @@ func TestReconcileBatchedWithNoChangesStillReturnsOutbound(t *testing.T) {
 	}
 }
 
+func TestRevisionCursorDoesNotSkipUnsentPage(t *testing.T) {
+	st := newTestStoreSync(t)
+	ctx := context.Background()
+	createDevice(t, st, "author", "author", 0)
+	ss := syncpkg.NewSyncStore(st.Q())
+	// Seed above the wire page limit without thousands of independent commits.
+	_, err := st.Q().UnderlyingDB().ExecContext(ctx, `WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x < 10005)
+	INSERT INTO sync_change(device_id, entity_type, entity_id, field, value_json, updated_at, hlc, seq)
+	SELECT 'author', 'play', CAST(x AS TEXT), 'record', '{}', x, x, x FROM n`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, cursor, _, err := ss.Reconcile(ctx, "author", 0, nil)
+	if err != nil || len(first) != 10000 {
+		t.Fatalf("first page: %d, %v", len(first), err)
+	}
+	second, _, _, err := ss.Reconcile(ctx, "author", cursor, nil)
+	if err != nil || len(second) != 5 {
+		t.Fatalf("cursor %d skipped tail: %d rows, %v", cursor, len(second), err)
+	}
+}
+
 // NoOutbound exists so the p2p syncer, which pulls separately, does not pay
 // for a full change-log read it discards.
 func TestReconcileNoOutboundSkipsOutbound(t *testing.T) {

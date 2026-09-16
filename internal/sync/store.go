@@ -39,8 +39,9 @@ type SyncStore struct {
 	// projections carries accepted batches to the background projector used by
 	// the network reconcile paths. It is FIFO and single-consumer, so batches
 	// project in the order their rounds committed.
-	projections chan []SyncChange
-	projectOnce sync.Once
+	projections  chan []SyncChange
+	projectOnce  sync.Once
+	projectionMu sync.Mutex
 }
 
 // Materializer applies a change that has been accepted into the log onto the
@@ -315,6 +316,28 @@ func (s *SyncStore) signatureFor(deviceID string, ch SyncChange, valueJSON strin
 func (s *SyncStore) AppendChange(ctx context.Context, deviceID string, ch SyncChange) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Author sequence and log row are one write. A failed insert must not
+	// consume a sequence that every downstream vector would wait for forever.
+	if conn, ok := s.q.UnderlyingDB().(*sql.DB); ok {
+		tx, err := conn.BeginTx(ctx, nil)
+		if err != nil {
+			return 0, err
+		}
+		defer tx.Rollback()
+		txStore := &SyncStore{q: s.q.WithTx(tx), hlc: s.hlc, signer: s.signer, localDeviceID: s.localDeviceID}
+		rev, err := txStore.appendLocal(ctx, deviceID, ch)
+		if err != nil {
+			return 0, err
+		}
+		if err := tx.Commit(); err != nil {
+			return 0, err
+		}
+		return rev, nil
+	}
+	return s.appendLocal(ctx, deviceID, ch)
+}
+
+func (s *SyncStore) appendLocal(ctx context.Context, deviceID string, ch SyncChange) (int64, error) {
 	valueJSON, err := marshalValue(ch)
 	if err != nil {
 		return 0, err
@@ -323,7 +346,7 @@ func (s *SyncStore) AppendChange(ctx context.Context, deviceID string, ch SyncCh
 	if err != nil {
 		return 0, err
 	}
-	return s.appendSyncChangeWithHLC(ctx, db.AppendSyncChangeWithHLCParams{
+	rev, err := s.appendSyncChangeWithHLC(ctx, db.AppendSyncChangeWithHLCParams{
 		DeviceID:   deviceID,
 		EntityType: ch.EntityType,
 		EntityID:   ch.EntityID,
@@ -334,6 +357,10 @@ func (s *SyncStore) AppendChange(ctx context.Context, deviceID string, ch SyncCh
 		Seq:        rowSeq,
 		Sig:        s.signatureFor(deviceID, ch, valueJSON, rowHLC, rowSeq),
 	})
+	if err != nil {
+		return 0, err
+	}
+	return rev, s.q.MarkSyncProjectionPending(ctx, rev)
 }
 
 func (s *SyncStore) appendChangeLocked(ctx context.Context, deviceID string, ch SyncChange) (int64, error) {
@@ -834,15 +861,17 @@ func (s *SyncStore) reconcileLocked(ctx context.Context, deviceID string, sinceR
 
 // materialize projects accepted changes onto the tables they describe. It runs
 // after the log has committed: the log is the source of truth, so a projection
-// failure is logged and left for the next change to correct rather than
-// discarding a change every peer has already accepted.
-func (s *SyncStore) materialize(ctx context.Context, accepted []SyncChange) {
+// failure stays in the durable pending queue for retry after a transient error
+// or restart.
+func (s *SyncStore) materialize(ctx context.Context, accepted []SyncChange) error {
+	s.projectionMu.Lock()
+	defer s.projectionMu.Unlock()
 	s.mu.Lock()
 	m := s.materializer
 	notify := s.afterProjection
 	s.mu.Unlock()
 	if m == nil || len(accepted) == 0 {
-		return
+		return nil
 	}
 	// Projection outlives the caller's deadline. A sync round runs under a
 	// short network timeout; the log commits inside it, and the local vector
@@ -855,14 +884,36 @@ func (s *SyncStore) materialize(ctx context.Context, accepted []SyncChange) {
 	defer cancel()
 	// Catalog entities first: a play or a rename names a track by its catalog
 	// id, so the entity has to exist before the row that points at it.
-	for _, ch := range catalogFirst(accepted) {
-		if err := m.Apply(ctx, ch); err != nil {
-			log.Printf("sync: could not apply %s/%s %s: %v", ch.EntityType, ch.EntityID, ch.Field, err)
+	var first error
+	for _, queued := range catalogFirst(accepted) {
+		// Work can wait behind another batch or survive a restart. Read the
+		// current winner so an old queued rename cannot undo a newer edit.
+		ch, err := s.GetLatestForField(ctx, queued.EntityType, queued.EntityID, queued.Field)
+		if err == nil && queued.Field != FieldDeleted {
+			var tomb *SyncChange
+			tomb, err = s.GetLatestForField(ctx, queued.EntityType, queued.EntityID, FieldDeleted)
+			if tomb != nil {
+				ch = tomb
+			}
+		}
+		if err == nil && ch != nil {
+			err = m.Apply(ctx, *ch)
+		}
+		if err != nil {
+			log.Printf("sync: could not apply %s/%s %s: %v", queued.EntityType, queued.EntityID, queued.Field, err)
+			if first == nil {
+				first = err
+			}
+			continue
+		}
+		if err := s.q.CompleteSyncProjection(ctx, queued.Revision); err != nil && first == nil {
+			first = err
 		}
 	}
 	if notify != nil {
 		notify()
 	}
+	return first
 }
 
 // advanceVectorSeq raises deviceID's vector to the highest seq below which
@@ -1026,6 +1077,14 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 			return nil, 0, nil, nil, err
 		}
 		settle(effectiveID, inc.Seq)
+		if inc.Seq > 0 {
+			if _, err := s.q.GetSyncChangeBySequence(ctx, db.GetSyncChangeBySequenceParams{DeviceID: effectiveID, Seq: inc.Seq}); err == nil {
+				rejected = append(rejected, inc)
+				continue
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				return nil, 0, nil, nil, err
+			}
+		}
 
 		if inc.Field != "__deleted" {
 			tomb, terr := s.GetLatestForField(ctx, inc.EntityType, inc.EntityID, "__deleted")
@@ -1033,6 +1092,9 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 				return nil, 0, nil, nil, terr
 			}
 			if tomb != nil {
+				if err := s.retainNonwinning(ctx, effectiveID, inc); err != nil {
+					return nil, 0, nil, nil, err
+				}
 				rejected = append(rejected, inc)
 				continue
 			}
@@ -1043,8 +1105,8 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 			return nil, 0, nil, nil, err
 		}
 		if existing == nil {
-			if _, aerr := s.appendChangeLocked(ctx, effectiveID, inc); aerr != nil {
-				return nil, 0, nil, nil, aerr
+			if inc, err = s.acceptChange(ctx, effectiveID, inc); err != nil {
+				return nil, 0, nil, nil, err
 			}
 			accepted = append(accepted, inc)
 			continue
@@ -1058,18 +1120,21 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 			continue
 		}
 		if !isExistingDeleted && isIncomingDeleted {
-			if _, aerr := s.appendChangeLocked(ctx, effectiveID, inc); aerr != nil {
-				return nil, 0, nil, nil, aerr
+			if inc, err = s.acceptChange(ctx, effectiveID, inc); err != nil {
+				return nil, 0, nil, nil, err
 			}
 			accepted = append(accepted, inc)
 			continue
 		}
 		if policy.PickWinner(*existing, inc) {
-			if _, aerr := s.appendChangeLocked(ctx, effectiveID, inc); aerr != nil {
-				return nil, 0, nil, nil, aerr
+			if inc, err = s.acceptChange(ctx, effectiveID, inc); err != nil {
+				return nil, 0, nil, nil, err
 			}
 			accepted = append(accepted, inc)
 		} else {
+			if err := s.retainNonwinning(ctx, effectiveID, inc); err != nil {
+				return nil, 0, nil, nil, err
+			}
 			rejected = append(rejected, inc)
 		}
 	}
@@ -1090,6 +1155,9 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 	if err != nil {
 		return nil, 0, nil, nil, err
 	}
+	if sinceRev >= 0 && len(outbound) > 0 {
+		newRev = outbound[len(outbound)-1].Revision
+	}
 	// Vector is maintained per-change via appendChangeLocked/nextSeqLocked; no global overwriting.
 	if cerr := s.SetCursor(ctx, deviceID, newRev); cerr != nil {
 		return nil, 0, nil, nil, cerr
@@ -1098,4 +1166,26 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 		rejected = []SyncChange{}
 	}
 	return outbound, newRev, rejected, accepted, nil
+}
+
+func (s *SyncStore) acceptChange(ctx context.Context, author string, ch SyncChange) (SyncChange, error) {
+	rev, err := s.appendChangeLocked(ctx, author, ch)
+	if err != nil {
+		return ch, err
+	}
+	ch.Revision = rev
+	return ch, s.q.MarkSyncProjectionPending(ctx, rev)
+}
+
+// Keep a losing author's sequence available to relays without changing the
+// winning field. Legacy unsequenced edits cannot fill a vector gap.
+func (s *SyncStore) retainNonwinning(ctx context.Context, author string, ch SyncChange) error {
+	if ch.Seq <= 0 {
+		return nil
+	}
+	rev, err := s.appendChangeLocked(ctx, author, ch)
+	if err != nil {
+		return err
+	}
+	return s.q.MarkSyncChangeNonwinning(ctx, rev)
 }

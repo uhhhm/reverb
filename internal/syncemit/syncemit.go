@@ -9,6 +9,7 @@ package syncemit
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
@@ -131,6 +132,21 @@ func (s *Service) EmitPlay(ctx context.Context, playID string, p Play) {
 
 // FieldRecord is the single field a play travels under.
 const FieldRecord = reverbsync.FieldRecord
+
+// EmitPlayDeletion records a durable deletion before the history row goes away.
+func (s *Service) EmitPlayDeletion(ctx context.Context, playID string) error {
+	if !s.ready() {
+		return fmt.Errorf("sync emitter unavailable")
+	}
+	device := s.device(ctx)
+	if device == "" {
+		return fmt.Errorf("sync identity unavailable")
+	}
+	_, err := s.log.AppendChange(ctx, device, reverbsync.SyncChange{
+		EntityType: reverbsync.EntityPlay, EntityID: playID, Field: reverbsync.FieldDeleted, UpdatedAt: s.now(),
+	})
+	return err
+}
 
 // RecommendationAdd is one durable conversion attributed to a surface.
 type RecommendationAdd struct {

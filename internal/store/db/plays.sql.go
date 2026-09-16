@@ -51,6 +51,15 @@ func (q *Queries) DeletePlay(ctx context.Context, arg DeletePlayParams) error {
 	return err
 }
 
+const deleteReplicatedPlay = `-- name: DeleteReplicatedPlay :exec
+DELETE FROM plays WHERE id = ?
+`
+
+func (q *Queries) DeleteReplicatedPlay(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteReplicatedPlay, id)
+	return err
+}
+
 const distinctDurableCanonicalIDs = `-- name: DistinctDurableCanonicalIDs :many
 SELECT DISTINCT catalog_id FROM plays WHERE catalog_id != ''
 UNION
@@ -355,6 +364,34 @@ func (q *Queries) ListAllRecommendationAdds(ctx context.Context) ([]Recommendati
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDeletedPlays = `-- name: ListDeletedPlays :many
+SELECT DISTINCT p.id FROM plays p JOIN sync_change s ON s.entity_id = p.id
+WHERE s.entity_type = 'play' AND s.field = '__deleted'
+`
+
+func (q *Queries) ListDeletedPlays(ctx context.Context) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listDeletedPlays)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

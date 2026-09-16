@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/uhhhm/reverb/internal/store/db"
+	syncpkg "github.com/uhhhm/reverb/internal/sync"
 )
 
 func hashOf(b []byte) string {
@@ -149,6 +150,19 @@ func TestPullReplicatesPeerLibrary(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("pulled file missing from local manifest: %+v", rows)
+	}
+	// The peer is offline from metadata sync and still advertises the old
+	// copy. Our durable deletion must nevertheless prevent resurrection.
+	ss := syncpkg.NewSyncStore(clientQ)
+	if _, err := ss.AppendChange(ctx, "client-device", syncpkg.SyncChange{EntityType: syncpkg.EntityFile, EntityID: hashOf(body), Field: syncpkg.FieldDeleted}); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientFS.ScanAndSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	puller.pullAll(ctx)
+	if _, err := os.Stat(filepath.Join(clientDir, "Artist", "Album", "01.flac")); !os.IsNotExist(err) {
+		t.Fatalf("deleted content was pulled back: %v", err)
 	}
 }
 

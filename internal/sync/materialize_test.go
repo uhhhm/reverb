@@ -2,6 +2,7 @@ package sync_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -10,6 +11,33 @@ import (
 	"github.com/uhhhm/reverb/internal/override"
 	syncpkg "github.com/uhhhm/reverb/internal/sync"
 )
+
+type failedProjection struct{}
+
+func (failedProjection) Apply(context.Context, syncpkg.SyncChange) error {
+	return errors.New("temporary failure")
+}
+
+func TestFailedProjectionIsRecoveredAfterRestart(t *testing.T) {
+	st := newTestStoreSync(t)
+	ctx := context.Background()
+	createDevice(t, st, "peer", "peer", 0)
+	ss := syncpkg.NewSyncStore(st.Q())
+	ss.SetMaterializer(failedProjection{})
+	if _, _, _, err := ss.Reconcile(ctx, "peer", 0, []syncpkg.SyncChange{{EntityType: "track", EntityID: "track", Field: "title", Value: "Renamed", UpdatedAt: 1000}}); err != nil {
+		t.Fatal(err)
+	}
+	fresh := syncpkg.NewSyncStore(st.Q())
+	overrides := override.New(st.Q())
+	fresh.SetMaterializer(materialize.New(overrides, nil))
+	if err := fresh.RecoverProjection(ctx); err != nil {
+		t.Fatal(err)
+	}
+	name, err := overrides.GetByCatalogID(ctx, "track")
+	if err != nil || name.Title != "Renamed" {
+		t.Fatalf("rename lost after restart: %+v, %v", name, err)
+	}
+}
 
 // A change is not synced until it is visible. Reconcile writes it into the log;
 // the materializer is what turns it into something the app reads back.

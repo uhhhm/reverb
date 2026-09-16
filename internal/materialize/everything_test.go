@@ -10,6 +10,7 @@ import (
 	"github.com/uhhhm/reverb/internal/crop"
 	"github.com/uhhhm/reverb/internal/materialize"
 	"github.com/uhhhm/reverb/internal/override"
+	"github.com/uhhhm/reverb/internal/play"
 	"github.com/uhhhm/reverb/internal/store"
 	"github.com/uhhhm/reverb/internal/store/db"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
@@ -233,5 +234,52 @@ func TestRecoverPlayHistoryAfterRestart(t *testing.T) {
 	plays, err := st.Q().ListAllPlays(ctx)
 	if err != nil || len(plays) != 1 {
 		t.Fatalf("plays = %d, %v", len(plays), err)
+	}
+}
+
+func TestDeletedListeningHistoryReplicatesAndStaysDeletedAfterRecovery(t *testing.T) {
+	ctx := context.Background()
+	local, log, cat := newPeerStore(t)
+	emitter := syncemit.New(log, cat, func(context.Context) string { return "dev_peer" })
+	plays := play.NewService(local.Q(), cat, time.Now, func() string { return "deleted_play" }).WithEmitter(emitter)
+	if err := plays.Record(ctx, "local", play.PlayInput{Title: "Song", Artist: "Band", MsPlayed: 60000}); err != nil {
+		t.Fatal(err)
+	}
+	remote, remoteLog, remoteCat := newPeerStore(t)
+	exchange := func() {
+		t.Helper()
+		changes, err := log.ListSince(ctx, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, _, err := remoteLog.Reconcile(ctx, "dev_peer", 0, changes); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exchange()
+	if _, err := remote.Q().GetPlay(ctx, "deleted_play"); err != nil {
+		t.Fatal(err)
+	}
+	// A different owner cannot emit a tombstone for this play.
+	if err := plays.Delete(ctx, "someone_else", "deleted_play"); err != nil {
+		t.Fatal(err)
+	}
+	if tomb, _ := log.GetLatestForField(ctx, reverbsync.EntityPlay, "deleted_play", reverbsync.FieldDeleted); tomb != nil {
+		t.Fatal("cross-owner tombstone")
+	}
+	if err := plays.Delete(ctx, "local", "deleted_play"); err != nil {
+		t.Fatal(err)
+	}
+	exchange()
+	for _, replica := range []struct {
+		q   *db.Queries
+		cat *catalog.Service
+	}{{local.Q(), cat}, {remote.Q(), remoteCat}} {
+		if err := materialize.New(nil, nil).WithCatalog(replica.cat).WithTrackStore(replica.q).RecoverPlays(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := replica.q.GetPlay(ctx, "deleted_play"); err != sql.ErrNoRows {
+			t.Errorf("deleted play resurrected: %v", err)
+		}
 	}
 }

@@ -14,6 +14,13 @@ UPDATE plays SET catalog_id = ? WHERE catalog_id = ?;
 -- name: DeletePlay :exec
 DELETE FROM plays WHERE id = ? AND user_id = ?;
 
+-- name: DeleteReplicatedPlay :exec
+DELETE FROM plays WHERE id = ?;
+
+-- name: ListDeletedPlays :many
+SELECT DISTINCT p.id FROM plays p JOIN sync_change s ON s.entity_id = p.id
+WHERE s.entity_type = 'play' AND s.field = '__deleted';
+
 -- name: ListRecentPlays :many
 SELECT p.id, p.catalog_id, p.played_at, e.title, e.artist, e.album
 FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id

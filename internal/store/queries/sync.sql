@@ -17,10 +17,32 @@ SELECT COALESCE(MAX(revision), 0) AS max_revision FROM sync_change;
 SELECT COALESCE(MAX(hlc), 0) AS max_hlc FROM sync_change;
 
 -- name: GetLatestSyncChangeForField :one
-SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq, sig FROM sync_change WHERE entity_type = ? AND entity_id = ? AND field = ? ORDER BY revision DESC LIMIT 1;
+SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq, sig FROM sync_change WHERE entity_type = ? AND entity_id = ? AND field = ? AND revision NOT IN (SELECT revision FROM sync_nonwinning) ORDER BY revision DESC LIMIT 1;
 
 -- name: GetLatestSyncChangeForFieldByHLC :one
-SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq, sig FROM sync_change WHERE entity_type = ? AND entity_id = ? AND field = ? ORDER BY hlc DESC, revision DESC LIMIT 1;
+SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq, sig FROM sync_change WHERE entity_type = ? AND entity_id = ? AND field = ? AND revision NOT IN (SELECT revision FROM sync_nonwinning) ORDER BY hlc DESC, revision DESC LIMIT 1;
+
+-- name: GetSyncChangeBySequence :one
+SELECT revision FROM sync_change WHERE device_id = ? AND seq = ? LIMIT 1;
+
+-- name: MarkSyncChangeNonwinning :exec
+INSERT INTO sync_nonwinning (revision) VALUES (?);
+
+-- name: ListDeletedFileHashes :many
+SELECT DISTINCT entity_id FROM sync_change WHERE entity_type = 'file' AND field = '__deleted'
+AND revision NOT IN (SELECT revision FROM sync_nonwinning);
+
+-- name: MarkSyncProjectionPending :exec
+INSERT INTO sync_projection_pending(revision) VALUES (?);
+
+-- name: CompleteSyncProjection :exec
+DELETE FROM sync_projection_pending WHERE revision = ?;
+
+-- name: ListPendingSyncProjections :many
+SELECT c.revision, c.device_id, c.entity_type, c.entity_id, c.field, c.value_json,
+       c.updated_at, c.created_at, c.hlc, c.seq, c.sig
+FROM sync_change c JOIN sync_projection_pending p ON p.revision = c.revision
+WHERE c.revision > ? ORDER BY c.revision LIMIT ?;
 
 -- name: CountSyncChanges :one
 SELECT COUNT(*) FROM sync_change;
@@ -54,15 +76,14 @@ UPDATE sync_change SET sig = ?2 WHERE revision = ?1;
 
 -- name: ListLatestSyncFieldsForEntity :many
 -- Highest revision per field, matching GetLatestSyncChangeForField. Reconcile
--- only appends a change that beat what was there, so the last row appended for
--- a field IS the winner; ordering by hlc instead could pick a row the merge
--- policy rejected.
+-- excludes changes retained only to relay author sequence numbers.
 SELECT c.revision, c.device_id, c.entity_type, c.entity_id, c.field, c.value_json, c.updated_at, c.created_at, c.hlc, c.seq, c.sig
 FROM sync_change c
 WHERE c.entity_type = ? AND c.entity_id = ?
   AND c.revision = (
     SELECT c2.revision FROM sync_change c2
     WHERE c2.entity_type = c.entity_type AND c2.entity_id = c.entity_id AND c2.field = c.field
+      AND c2.revision NOT IN (SELECT revision FROM sync_nonwinning)
     ORDER BY c2.revision DESC LIMIT 1
   )
 ORDER BY c.field ASC;
@@ -74,10 +95,13 @@ SELECT s.revision, s.device_id, s.entity_type, s.entity_id, s.field, s.value_jso
        s.updated_at, s.created_at, s.hlc, s.seq, s.sig
 FROM sync_change s
 WHERE s.entity_type = 'play' AND s.field = 'record'
+  AND s.revision NOT IN (SELECT revision FROM sync_nonwinning)
+  AND NOT EXISTS (SELECT 1 FROM sync_change d WHERE d.entity_type = 'play' AND d.entity_id = s.entity_id AND d.field = '__deleted')
   AND (CAST(sqlc.arg(catalog_id) AS TEXT) = '' OR json_extract(s.value_json, '$.catalogId') = sqlc.arg(catalog_id))
   AND NOT EXISTS (SELECT 1 FROM plays p WHERE p.id = s.entity_id)
   AND s.revision = (SELECT MAX(c.revision) FROM sync_change c
-                   WHERE c.entity_type = s.entity_type AND c.entity_id = s.entity_id AND c.field = s.field)
+                   WHERE c.entity_type = s.entity_type AND c.entity_id = s.entity_id AND c.field = s.field
+                     AND c.revision NOT IN (SELECT revision FROM sync_nonwinning))
 ORDER BY s.revision;
 
 -- name: QuarantineSyncCopy :exec

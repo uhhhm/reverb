@@ -10,9 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/google/uuid"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/uhhhm/reverb/internal/store/db"
@@ -39,10 +41,35 @@ func validateRelPath(relPath string) (string, error) {
 // Full replication: every file under the music dir is hashed (sha256) and
 // advertised via /reverb/file/1.0.0 want/have. Peer fetch is Phase 4 final.
 type FileSyncer struct {
-	store    FileStore
-	deviceID string
-	musicDir string
+	mu        sync.Mutex
+	store     FileStore
+	deviceID  string
+	musicDir  string
+	onChanged func()
 }
+
+// WithOnChanged refreshes the library after incoming files or deletions land.
+func (f *FileSyncer) WithOnChanged(fn func()) *FileSyncer { f.onChanged = fn; return f }
+
+func (f *FileSyncer) deletedHashes(ctx context.Context) (map[string]bool, error) {
+	deleted := map[string]bool{}
+	if q, ok := f.store.(interface {
+		ListDeletedFileHashes(context.Context) ([]string, error)
+	}); ok {
+		hashes, err := q.ListDeletedFileHashes(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, h := range hashes {
+			deleted[h] = true
+		}
+	}
+	return deleted, nil
+}
+
+// DeleteContent applies persisted content tombstones without trusting a peer's
+// path. ScanAndSync verifies local bytes before removing any matching file.
+func (f *FileSyncer) DeleteContent(ctx context.Context, _ string) error { return f.ScanAndSync(ctx) }
 
 func NewFileSyncer(store FileStore, deviceID, musicDir string) *FileSyncer {
 	return &FileSyncer{store: store, deviceID: deviceID, musicDir: musicDir}
@@ -57,6 +84,18 @@ func (f *FileSyncer) ScanAndSync(ctx context.Context) error {
 	if f == nil || f.store == nil || f.musicDir == "" {
 		return nil
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	deleted, err := f.deletedHashes(ctx)
+	if err != nil {
+		return err
+	}
+	removed := false
+	defer func() {
+		if removed && f.onChanged != nil {
+			f.onChanged()
+		}
+	}()
 	// Build existing map for fast mtime/size short-circuit and delete detection.
 	existing, err := f.store.ListFileManifests(ctx)
 	if err != nil {
@@ -87,7 +126,7 @@ func (f *FileSyncer) ScanAndSync(ctx context.Context) error {
 			return nil
 		}
 		// Skip symlinks to avoid loops.
-		if d.Type()&os.ModeSymlink != 0 {
+		if !d.Type().IsRegular() || strings.HasPrefix(d.Name(), ".") {
 			return nil
 		}
 		if err := ctx.Err(); err != nil {
@@ -112,7 +151,7 @@ func (f *FileSyncer) ScanAndSync(ctx context.Context) error {
 		mtime := info.ModTime().UnixMilli()
 		seen[canonicalID] = true
 		seenRel[relSlash] = true
-		if prev, ok := existingByID[canonicalID]; ok && prev.Mtime == mtime && prev.Size == size && prev.DeviceID == f.deviceID {
+		if prev, ok := existingByID[canonicalID]; ok && prev.Mtime == mtime && prev.Size == size && prev.DeviceID == f.deviceID && !deleted[prev.ContentHash] {
 			// Unchanged — skip hashing.
 			return nil
 		}
@@ -131,6 +170,22 @@ func (f *FileSyncer) ScanAndSync(ctx context.Context) error {
 			return err
 		}
 		hash := hex.EncodeToString(h.Sum(nil))
+		if deleted[hash] {
+			root, err := os.OpenRoot(f.musicDir)
+			if err != nil {
+				return err
+			}
+			err = root.Remove(rel)
+			_ = root.Close()
+			if err != nil {
+				return err
+			}
+			if err := f.store.DeleteFileManifest(ctx, canonicalID); err != nil {
+				return err
+			}
+			removed = true
+			return nil
+		}
 		if err := f.store.UpsertFileManifest(ctx, db.UpsertFileManifestParams{
 			CanonicalID: canonicalID,
 			ContentHash: hash,
@@ -310,6 +365,13 @@ func (f *FileSyncer) FetchFileViaPeer(ctx context.Context, h host.Host, peerIDSt
 	if expHash == "" {
 		return fmt.Errorf("contentHash is required to fetch %q", relPath)
 	}
+	deleted, err := f.deletedHashes(ctx)
+	if err != nil {
+		return err
+	}
+	if deleted[expHash] {
+		return fmt.Errorf("file was deleted from the library")
+	}
 	dstPath := filepath.Join(f.musicDir, cleanRel)
 	// Defense in depth: ensure dstPath is within musicDir.
 	rel, err := filepath.Rel(f.musicDir, dstPath)
@@ -333,17 +395,22 @@ func (f *FileSyncer) FetchFileViaPeer(ctx context.Context, h host.Host, peerIDSt
 	}
 	_ = s.CloseWrite()
 
-	if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(dstPath), ".reverb-fetch-*")
+	root, err := os.OpenRoot(f.musicDir)
 	if err != nil {
 		return err
 	}
-	tmpPath := tmp.Name()
+	defer root.Close()
+	if err := root.MkdirAll(filepath.Dir(cleanRel), 0o755); err != nil {
+		return err
+	}
+	tmpPath := filepath.Join(filepath.Dir(cleanRel), ".reverb-fetch-"+uuid.NewString())
+	tmp, err := root.OpenFile(tmpPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer root.Remove(tmpPath)
 	cleanup := func() {
 		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
 	}
 	// Hash while copying so the file is read once.
 	digest := sha256.New()
@@ -357,20 +424,18 @@ func (f *FileSyncer) FetchFileViaPeer(ctx context.Context, h host.Host, peerIDSt
 		return fmt.Errorf("file %q exceeds %d byte limit", relPath, int64(maxFileBytes))
 	}
 	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
 		return err
 	}
 	if got := hex.EncodeToString(digest.Sum(nil)); got != expHash {
-		_ = os.Remove(tmpPath)
 		return fmt.Errorf("hash mismatch for %q: expected %s got %s", relPath, expHash, got)
 	}
-	if err := os.Chmod(tmpPath, 0o644); err != nil {
-		_ = os.Remove(tmpPath)
+	// Linking is atomic and refuses an occupied destination, including when
+	// two peers fetched the same path concurrently. Root confines symlinks.
+	if err := root.Link(tmpPath, cleanRel); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpPath, dstPath); err != nil {
-		_ = os.Remove(tmpPath)
-		return err
+	if f.onChanged != nil {
+		f.onChanged()
 	}
 	// After fetch, re-hash and upsert manifest.
 	return f.ScanAndSync(ctx)

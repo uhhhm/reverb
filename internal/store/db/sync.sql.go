@@ -69,6 +69,15 @@ func (q *Queries) AppendSyncChangeWithHLC(ctx context.Context, arg AppendSyncCha
 	return revision, err
 }
 
+const completeSyncProjection = `-- name: CompleteSyncProjection :exec
+DELETE FROM sync_projection_pending WHERE revision = ?
+`
+
+func (q *Queries) CompleteSyncProjection(ctx context.Context, revision int64) error {
+	_, err := q.db.ExecContext(ctx, completeSyncProjection, revision)
+	return err
+}
+
 const countSyncChanges = `-- name: CountSyncChanges :one
 SELECT COUNT(*) FROM sync_change
 `
@@ -108,7 +117,7 @@ func (q *Queries) DeleteSyncVector(ctx context.Context, deviceID string) error {
 }
 
 const getLatestSyncChangeForField = `-- name: GetLatestSyncChangeForField :one
-SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq, sig FROM sync_change WHERE entity_type = ? AND entity_id = ? AND field = ? ORDER BY revision DESC LIMIT 1
+SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq, sig FROM sync_change WHERE entity_type = ? AND entity_id = ? AND field = ? AND revision NOT IN (SELECT revision FROM sync_nonwinning) ORDER BY revision DESC LIMIT 1
 `
 
 type GetLatestSyncChangeForFieldParams struct {
@@ -137,7 +146,7 @@ func (q *Queries) GetLatestSyncChangeForField(ctx context.Context, arg GetLatest
 }
 
 const getLatestSyncChangeForFieldByHLC = `-- name: GetLatestSyncChangeForFieldByHLC :one
-SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq, sig FROM sync_change WHERE entity_type = ? AND entity_id = ? AND field = ? ORDER BY hlc DESC, revision DESC LIMIT 1
+SELECT revision, device_id, entity_type, entity_id, field, value_json, updated_at, created_at, hlc, seq, sig FROM sync_change WHERE entity_type = ? AND entity_id = ? AND field = ? AND revision NOT IN (SELECT revision FROM sync_nonwinning) ORDER BY hlc DESC, revision DESC LIMIT 1
 `
 
 type GetLatestSyncChangeForFieldByHLCParams struct {
@@ -187,6 +196,22 @@ func (q *Queries) GetMaxSyncRevision(ctx context.Context) (interface{}, error) {
 	return max_revision, err
 }
 
+const getSyncChangeBySequence = `-- name: GetSyncChangeBySequence :one
+SELECT revision FROM sync_change WHERE device_id = ? AND seq = ? LIMIT 1
+`
+
+type GetSyncChangeBySequenceParams struct {
+	DeviceID string `json:"device_id"`
+	Seq      int64  `json:"seq"`
+}
+
+func (q *Queries) GetSyncChangeBySequence(ctx context.Context, arg GetSyncChangeBySequenceParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getSyncChangeBySequence, arg.DeviceID, arg.Seq)
+	var revision int64
+	err := row.Scan(&revision)
+	return revision, err
+}
+
 const getSyncCursor = `-- name: GetSyncCursor :one
 SELECT device_id, revision, updated_at FROM sync_cursor WHERE device_id = ?
 `
@@ -214,6 +239,34 @@ func (q *Queries) GetSyncVector(ctx context.Context, deviceID string) (SyncVecto
 	return i, err
 }
 
+const listDeletedFileHashes = `-- name: ListDeletedFileHashes :many
+SELECT DISTINCT entity_id FROM sync_change WHERE entity_type = 'file' AND field = '__deleted'
+AND revision NOT IN (SELECT revision FROM sync_nonwinning)
+`
+
+func (q *Queries) ListDeletedFileHashes(ctx context.Context) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listDeletedFileHashes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var entity_id string
+		if err := rows.Scan(&entity_id); err != nil {
+			return nil, err
+		}
+		items = append(items, entity_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLatestSyncFieldsForEntity = `-- name: ListLatestSyncFieldsForEntity :many
 SELECT c.revision, c.device_id, c.entity_type, c.entity_id, c.field, c.value_json, c.updated_at, c.created_at, c.hlc, c.seq, c.sig
 FROM sync_change c
@@ -221,6 +274,7 @@ WHERE c.entity_type = ? AND c.entity_id = ?
   AND c.revision = (
     SELECT c2.revision FROM sync_change c2
     WHERE c2.entity_type = c.entity_type AND c2.entity_id = c.entity_id AND c2.field = c.field
+      AND c2.revision NOT IN (SELECT revision FROM sync_nonwinning)
     ORDER BY c2.revision DESC LIMIT 1
   )
 ORDER BY c.field ASC
@@ -232,11 +286,56 @@ type ListLatestSyncFieldsForEntityParams struct {
 }
 
 // Highest revision per field, matching GetLatestSyncChangeForField. Reconcile
-// only appends a change that beat what was there, so the last row appended for
-// a field IS the winner; ordering by hlc instead could pick a row the merge
-// policy rejected.
+// excludes changes retained only to relay author sequence numbers.
 func (q *Queries) ListLatestSyncFieldsForEntity(ctx context.Context, arg ListLatestSyncFieldsForEntityParams) ([]SyncChange, error) {
 	rows, err := q.db.QueryContext(ctx, listLatestSyncFieldsForEntity, arg.EntityType, arg.EntityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SyncChange
+	for rows.Next() {
+		var i SyncChange
+		if err := rows.Scan(
+			&i.Revision,
+			&i.DeviceID,
+			&i.EntityType,
+			&i.EntityID,
+			&i.Field,
+			&i.ValueJson,
+			&i.UpdatedAt,
+			&i.CreatedAt,
+			&i.Hlc,
+			&i.Seq,
+			&i.Sig,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingSyncProjections = `-- name: ListPendingSyncProjections :many
+SELECT c.revision, c.device_id, c.entity_type, c.entity_id, c.field, c.value_json,
+       c.updated_at, c.created_at, c.hlc, c.seq, c.sig
+FROM sync_change c JOIN sync_projection_pending p ON p.revision = c.revision
+WHERE c.revision > ? ORDER BY c.revision LIMIT ?
+`
+
+type ListPendingSyncProjectionsParams struct {
+	Revision int64 `json:"revision"`
+	Limit    int64 `json:"limit"`
+}
+
+func (q *Queries) ListPendingSyncProjections(ctx context.Context, arg ListPendingSyncProjectionsParams) ([]SyncChange, error) {
+	rows, err := q.db.QueryContext(ctx, listPendingSyncProjections, arg.Revision, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -395,10 +494,13 @@ SELECT s.revision, s.device_id, s.entity_type, s.entity_id, s.field, s.value_jso
        s.updated_at, s.created_at, s.hlc, s.seq, s.sig
 FROM sync_change s
 WHERE s.entity_type = 'play' AND s.field = 'record'
+  AND s.revision NOT IN (SELECT revision FROM sync_nonwinning)
+  AND NOT EXISTS (SELECT 1 FROM sync_change d WHERE d.entity_type = 'play' AND d.entity_id = s.entity_id AND d.field = '__deleted')
   AND (CAST(?1 AS TEXT) = '' OR json_extract(s.value_json, '$.catalogId') = ?1)
   AND NOT EXISTS (SELECT 1 FROM plays p WHERE p.id = s.entity_id)
   AND s.revision = (SELECT MAX(c.revision) FROM sync_change c
-                   WHERE c.entity_type = s.entity_type AND c.entity_id = s.entity_id AND c.field = s.field)
+                   WHERE c.entity_type = s.entity_type AND c.entity_id = s.entity_id AND c.field = s.field
+                     AND c.revision NOT IN (SELECT revision FROM sync_nonwinning))
 ORDER BY s.revision
 `
 
@@ -476,6 +578,24 @@ func (q *Queries) ListUnsignedSyncChangesForDevice(ctx context.Context, deviceID
 		return nil, err
 	}
 	return items, nil
+}
+
+const markSyncChangeNonwinning = `-- name: MarkSyncChangeNonwinning :exec
+INSERT INTO sync_nonwinning (revision) VALUES (?)
+`
+
+func (q *Queries) MarkSyncChangeNonwinning(ctx context.Context, revision int64) error {
+	_, err := q.db.ExecContext(ctx, markSyncChangeNonwinning, revision)
+	return err
+}
+
+const markSyncProjectionPending = `-- name: MarkSyncProjectionPending :exec
+INSERT INTO sync_projection_pending(revision) VALUES (?)
+`
+
+func (q *Queries) MarkSyncProjectionPending(ctx context.Context, revision int64) error {
+	_, err := q.db.ExecContext(ctx, markSyncProjectionPending, revision)
+	return err
 }
 
 const quarantineSyncCopy = `-- name: QuarantineSyncCopy :exec

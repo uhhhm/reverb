@@ -278,6 +278,14 @@ type SyncCursor struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
+type SyncNonwinning struct {
+	Revision int64 `json:"revision"`
+}
+
+type SyncProjectionPending struct {
+	Revision int64 `json:"revision"`
+}
+
 type SyncQuarantine struct {
 	Revision      int64  `json:"revision"`
 	ChangeJson    string `json:"change_json"`

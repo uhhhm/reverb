@@ -97,6 +97,8 @@ const (
 	EntityCatalog = "catalogEntity"
 	// EntityTrack carries per-track metadata under a catalog id.
 	EntityTrack = "track"
+	// EntityFile carries managed-file deletion under the SHA-256 of its bytes.
+	EntityFile = "file"
 	// EntityPlaylist carries a managed playlist under its playlist id.
 	EntityPlaylist = "playlist"
 	// EntityPlay carries one play event under its play id.

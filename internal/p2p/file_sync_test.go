@@ -5,7 +5,35 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	syncpkg "github.com/uhhhm/reverb/internal/sync"
 )
+
+func TestDeletedFileIsRemovedAndCannotBePulledBack(t *testing.T) {
+	ctx := context.Background()
+	q := newTrustStore(t)
+	mkDevice(t, q, "me")
+	dir := t.TempDir()
+	body := []byte("deleted audio")
+	writeTrack(t, dir, "track.flac", body)
+	fs := NewFileSyncer(q, "me", dir)
+	if err := fs.ScanAndSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ss := syncpkg.NewSyncStore(q)
+	if _, err := ss.AppendChange(ctx, "me", syncpkg.SyncChange{EntityType: "file", EntityID: hashOf(body), Field: "__deleted"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fs.ScanAndSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "track.flac")); !os.IsNotExist(err) {
+		t.Fatalf("deleted file still exists: %v", err)
+	}
+	if n := manifestCount(t, fs); n != 0 {
+		t.Fatalf("still advertising %d deleted files", n)
+	}
+}
 
 func manifestCount(t *testing.T, f *FileSyncer) int {
 	t.Helper()

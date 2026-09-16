@@ -3,6 +3,7 @@ package play
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
@@ -40,6 +41,7 @@ var ErrInvalidRecommendationOrigin = errors.New("invalid recommendation origin")
 // Querier is the narrow persistence slice play needs. *db.Queries satisfies it.
 type Querier interface {
 	InsertPlay(ctx context.Context, arg db.InsertPlayParams) error
+	GetPlay(ctx context.Context, id string) (db.Play, error)
 	DeletePlay(ctx context.Context, arg db.DeletePlayParams) error
 	CountPlaysByCatalog(ctx context.Context, arg db.CountPlaysByCatalogParams) (int64, error)
 }
@@ -56,6 +58,7 @@ type CanonicalMinter interface {
 // one listening history. *syncemit.Service satisfies it.
 type Emitter interface {
 	EmitPlay(ctx context.Context, playID string, p syncemit.Play)
+	EmitPlayDeletion(ctx context.Context, playID string) error
 }
 
 // Service records user play events.
@@ -208,5 +211,22 @@ func (s *Service) PlayCounts(ctx context.Context, userID string, items []PlayCou
 // query (WHERE id = ? AND user_id = ?): a request for another user's play id
 // matches zero rows and is a no-op — a user can NEVER delete another user's play.
 func (s *Service) Delete(ctx context.Context, userID, playID string) error {
+	p, err := s.q.GetPlay(ctx, playID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if p.UserID != userID {
+		return nil
+	}
+	// Persist the tombstone first: recovery must not recreate this play if the
+	// process exits between the two writes. A retry can finish the local delete.
+	if s.emitter != nil {
+		if err := s.emitter.EmitPlayDeletion(ctx, playID); err != nil {
+			return err
+		}
+	}
 	return s.q.DeletePlay(ctx, db.DeletePlayParams{ID: playID, UserID: userID})
 }

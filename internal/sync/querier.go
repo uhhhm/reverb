@@ -12,6 +12,11 @@ import (
 type SyncQuerier interface {
 	ServerDeviceQuerier
 	AppendSyncChangeWithHLC(context.Context, db.AppendSyncChangeWithHLCParams) (int64, error)
+	GetSyncChangeBySequence(context.Context, db.GetSyncChangeBySequenceParams) (int64, error)
+	MarkSyncChangeNonwinning(context.Context, int64) error
+	MarkSyncProjectionPending(context.Context, int64) error
+	CompleteSyncProjection(context.Context, int64) error
+	ListPendingSyncProjections(context.Context, db.ListPendingSyncProjectionsParams) ([]db.SyncChange, error)
 	ListSyncChangesSince(context.Context, db.ListSyncChangesSinceParams) ([]db.SyncChange, error)
 	GetLatestSyncChangeForField(context.Context, db.GetLatestSyncChangeForFieldParams) (db.SyncChange, error)
 	GetSyncCursor(context.Context, string) (db.SyncCursor, error)
