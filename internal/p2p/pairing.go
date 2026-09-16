@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/host"
@@ -57,7 +59,7 @@ var pairLimiter = newAttemptLimiter(pairAttemptsPerPeer, pairAttemptsGlobal, pai
 // creates. localDeviceID supplies this node's own device ID for the response;
 // it may be nil, in which case the peer cannot bind us to a device.
 func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, keys DeviceKeyStore, localDeviceID func(context.Context) (string, error)) {
-	h.SetStreamHandler("/reverb/pair/1.0.0", safeHandler("pair", func(s network.Stream) {
+	h.SetStreamHandler(pairProtocol, safeHandler("pair", func(s network.Stream) {
 		defer s.Close()
 		_ = s.SetDeadline(time.Now().Add(10 * time.Second))
 		remote := s.Conn().RemotePeer()
@@ -183,7 +185,7 @@ func RedeemViaPeer(ctx context.Context, h host.Host, guard *Guard, keys DeviceKe
 	// nothing to resolve the peer ID to and fails without ever touching the
 	// network.
 	SeedAddrs(h, pi)
-	s, err := h.NewStream(ctx, pid, "/reverb/pair/1.0.0")
+	s, err := h.NewStream(ctx, pid, pairProtocol)
 	if err != nil {
 		return "", "", fmt.Errorf("open stream: %w", err)
 	}
@@ -241,6 +243,63 @@ func RedeemViaPeer(ctx context.Context, h host.Host, guard *Guard, keys DeviceKe
 		}
 	}
 	return resp.DeviceID, resp.Token, nil
+}
+
+// pairProtocol is the stream protocol the pairing handler is mounted on.
+const pairProtocol = "/reverb/pair/1.0.0"
+
+// RedeemViaDiscoveredPeers redeems code against whichever connected Reverb
+// device accepts it, for the common case where the user has only the code.
+//
+// On a LAN, mDNS has already connected this host to every other Reverb on the
+// network, and identify has told us which of those speak the pairing protocol;
+// the code itself is single-use and bound to one device, so trying each
+// candidate in turn is safe: the wrong ones refuse it and the right one pairs.
+// A refusal on a wrong device costs one of that device's pairing attempts for
+// this peer, which a household-sized network never exhausts.
+//
+// Nothing is tried over a VPN, where discovery does not work and the
+// candidate list is empty: the caller then needs the other device's address.
+func RedeemViaDiscoveredPeers(ctx context.Context, h host.Host, guard *Guard, keys DeviceKeyStore, code, deviceName, localDeviceID string) (string, string, error) {
+	if h == nil {
+		return "", "", fmt.Errorf("host is nil")
+	}
+	candidates := pairablePeers(h)
+	if len(candidates) == 0 {
+		return "", "", fmt.Errorf("no other Reverb device was found on this network; if it is on a VPN, enter its address as well as the code")
+	}
+	var refusals []string
+	for _, pid := range candidates {
+		deviceID, token, err := RedeemViaPeer(ctx, h, guard, keys, pid.String(), code, deviceName, localDeviceID)
+		if err == nil {
+			return deviceID, token, nil
+		}
+		if ctx.Err() != nil {
+			return "", "", err
+		}
+		refusals = append(refusals, fmt.Sprintf("%s: %v", pid, err))
+	}
+	return "", "", fmt.Errorf("no device on this network accepted the code (%s); check the code on the other device, or enter its address if it is on a VPN", strings.Join(refusals, "; "))
+}
+
+// pairablePeers lists the connected peers that advertise the pairing protocol,
+// in a stable order. Connections come from mDNS and the DHT alike, and the
+// DHT's public nodes must not be asked to pair, so the protocol filter is what
+// narrows the set to Reverb devices.
+func pairablePeers(h host.Host) []peer.ID {
+	var out []peer.ID
+	for _, pid := range h.Network().Peers() {
+		if pid == h.ID() {
+			continue
+		}
+		supported, err := h.Peerstore().SupportsProtocols(pid, pairProtocol)
+		if err != nil || len(supported) == 0 {
+			continue
+		}
+		out = append(out, pid)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].String() < out[j].String() })
+	return out
 }
 
 // addrStrings renders pi's addresses as full dial strings including /p2p/<id>.

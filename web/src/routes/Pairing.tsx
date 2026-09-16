@@ -1,18 +1,13 @@
 import { useEffect, useState } from 'react'
 import {
   generatePairingCode,
-  redeemPairingCode,
   listDevices,
   deleteDevice,
   getSyncStatus,
-  storeSyncCredentials,
-  getSyncToken,
-  getSyncDeviceId,
-  clearSyncCredentials,
   type PairingCode,
   type DeviceInfo,
 } from '../lib/pairingApi'
-import { getP2PStatus } from '../lib/p2pApi'
+import { getP2PStatus, redeemViaPeer } from '../lib/p2pApi'
 import { ManualSyncControl } from '../components/ManualSyncControl'
 import { useSyncStore } from '../lib/syncStore'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
@@ -43,8 +38,10 @@ function formatExpiry(seconds: number): string {
 export default function Pairing() {
   useDocumentTitle('Pairing')
 
-  const [paired, setPaired] = useState(() => getSyncToken() !== null)
-  const [thisDeviceId, setThisDeviceId] = useState(() => getSyncDeviceId())
+  // The identity this device authors changes under, for the "this device"
+  // badge in the paired list. It comes from the p2p status, so it is empty
+  // until that has loaded and stays empty when p2p is unavailable.
+  const [thisDeviceId, setThisDeviceId] = useState<string | null>(null)
 
   const [pairingCode, setPairingCode] = useState<PairingCode | null>(null)
   const [genLoading, setGenLoading] = useState(false)
@@ -58,6 +55,9 @@ export default function Pairing() {
   const [copiedAddr, setCopiedAddr] = useState(false)
 
   const [redeemInput, setRedeemInput] = useState('')
+  // The other device's address, only needed across a VPN: on a LAN the device
+  // that issued the code is found by discovery and this can stay empty.
+  const [peerAddress, setPeerAddress] = useState('')
   const [deviceName, setDeviceName] = useState(() => {
     if (typeof navigator !== 'undefined' && navigator.userAgent) return navigator.userAgent.slice(0, 80) || 'Laptop'
     return 'Laptop'
@@ -110,7 +110,10 @@ export default function Pairing() {
     // Best-effort: p2p may be unavailable, in which case there is simply no
     // address to show and the LAN path is all that is on offer.
     void getP2PStatus()
-      .then((s) => setDialAddrs(s.dialAddrs ?? []))
+      .then((s) => {
+        setDialAddrs(s.dialAddrs ?? [])
+        setThisDeviceId(s.deviceId ?? null)
+      })
       .catch(() => setDialAddrs([]))
   }, [])
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -171,12 +174,13 @@ export default function Pairing() {
     }
     setRedeemLoading(true)
     try {
-      const result = await redeemPairingCode(redeemInput, deviceName.trim())
-      storeSyncCredentials(result.token, result.deviceId)
-      setThisDeviceId(result.deviceId)
-      setPaired(true)
-      setRedeemSuccess(`Device paired. Sync token stored for device ${result.deviceId}.`)
+      // Pairing happens over libp2p against the device that issued the code.
+      // Redeeming it against this device's own API could never work: the code
+      // lives only in the issuing device's database.
+      await redeemViaPeer(peerAddress.trim(), redeemInput, deviceName.trim())
+      setRedeemSuccess('Device paired. It now syncs with the device that issued the code.')
       setRedeemInput('')
+      setPeerAddress('')
       void refreshDevices()
       void refreshSync()
     } catch (err) {
@@ -200,13 +204,6 @@ export default function Pairing() {
     } finally {
       setUnpairingId(null)
     }
-  }
-
-  function onClearPaired() {
-    clearSyncCredentials()
-    setThisDeviceId(null)
-    setPaired(false)
-    setRedeemSuccess(null)
   }
 
   async function onCopyAddr() {
@@ -240,7 +237,7 @@ export default function Pairing() {
         <h1 className="text-3xl font-black tracking-tight text-text-primary">Pairing</h1>
         <p className="mt-1 text-sm text-text-secondary">
           Connect two devices with a one-time code. One device generates the code, the other enters it — no
-          passwords to type twice. A sync token is stored on the new device to authorize future sync.
+          passwords to type twice. Once paired, the two devices find each other and sync directly.
         </p>
       </header>
 
@@ -443,106 +440,106 @@ export default function Pairing() {
           </span>
         </div>
         <h2 className="text-lg font-extrabold tracking-tight text-text-primary">Enter pairing code</h2>
-        {paired ? (
-          <div className="space-y-3">
-            <p className="text-sm text-text-secondary">
-              This device is paired. A sync token is stored on this device.
+        <form onSubmit={onRedeem} className="space-y-4">
+          <div className="space-y-1">
+            <label htmlFor="pairing-code-input" className="text-sm font-semibold text-text-primary">
+              Pairing code from your other device
+            </label>
+            <p className="text-xs leading-relaxed text-text-muted">
+              Paste the <span className="font-mono font-semibold">XXXX-XXXX</span> code you generated in Step 1 on
+              Device A. This field is on the <span className="font-semibold">new</span> device (Device B).
             </p>
-            {redeemSuccess && (
-              <p role="status" className="text-sm text-green-400">
-                {redeemSuccess}
-              </p>
-            )}
-            <Button variant="secondary" size="sm" onClick={onClearPaired}>
-              Clear sync token
-            </Button>
-            <p className="text-xs text-text-muted">Clear the sync token to pair this device again with a new pairing code.</p>
+            <input
+              id="pairing-code-input"
+              aria-label="Pairing code"
+              placeholder="XXXX-XXXX"
+              value={redeemInput}
+              onChange={(e) => setRedeemInput(formatPairingInput(e.target.value))}
+              maxLength={9}
+              className="w-full rounded-md border border-border-subtle bg-surface px-3 py-2 text-sm font-mono tracking-widest text-text-primary placeholder:text-text-muted outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+            />
+            <p className="text-xs text-text-muted">Accepts with or without dash; auto-uppercases to XXXX-XXXX.</p>
           </div>
-        ) : (
-          <form onSubmit={onRedeem} className="space-y-4">
-            <div className="space-y-1">
-              <label htmlFor="pairing-code-input" className="text-sm font-semibold text-text-primary">
-                Pairing code from your other device
-              </label>
-              <p className="text-xs leading-relaxed text-text-muted">
-                Paste the <span className="font-mono font-semibold">XXXX-XXXX</span> code you generated in Step 1 on
-                Device A. This field is on the <span className="font-semibold">new</span> device (Device B).
-              </p>
-              <input
-                id="pairing-code-input"
-                aria-label="Pairing code"
-                placeholder="XXXX-XXXX"
-                value={redeemInput}
-                onChange={(e) => setRedeemInput(formatPairingInput(e.target.value))}
-                maxLength={9}
-                className="w-full rounded-md border border-border-subtle bg-surface px-3 py-2 text-sm font-mono tracking-widest text-text-primary placeholder:text-text-muted outline-none focus:border-accent focus:ring-1 focus:ring-accent"
-              />
-              <p className="text-xs text-text-muted">Accepts with or without dash; auto-uppercases to XXXX-XXXX.</p>
-            </div>
-            <div className="space-y-1">
-              <label htmlFor="device-name-input" className="text-sm font-semibold text-text-primary">
-                Device name for this device
-              </label>
-              <p className="text-xs leading-relaxed text-text-muted">
-                How <em>this</em> device (Device B) will appear in the Paired devices list. Use any name you will
-                recognise later.
-              </p>
-              <input
-                id="device-name-input"
-                aria-label="Device name"
-                placeholder="e.g. Work Laptop"
-                value={deviceName}
-                onChange={(e) => setDeviceName(e.target.value)}
-                className="w-full rounded-md border border-border-subtle bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent focus:ring-1 focus:ring-accent"
-              />
-              <details className="group rounded-md border border-border-subtle bg-surface/60 px-3 py-2">
-                <summary className="cursor-pointer list-none text-xs font-semibold text-text-secondary group-open:text-text-primary">
-                  <span className="inline-flex items-center gap-1">
-                    <span className="transition-transform group-open:rotate-90">›</span> How to find your device name
-                  </span>
-                </summary>
-                <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-relaxed text-text-muted">
-                  <li>
-                    <span className="font-semibold text-text-secondary">Windows:</span> Settings → System → About →
-                    Device name
-                  </li>
-                  <li>
-                    <span className="font-semibold text-text-secondary">macOS:</span> System Settings → General →
-                    About → Name
-                  </li>
-                  <li>
-                    <span className="font-semibold text-text-secondary">Linux:</span> run{' '}
-                    <code className="rounded bg-raised px-1 py-0.5 font-mono">hostname</code> in a terminal
-                  </li>
-                  <li>
-                    <span className="font-semibold text-text-secondary">iPhone / iPad:</span> Settings → General →
-                    About → Name
-                  </li>
-                  <li>
-                    <span className="font-semibold text-text-secondary">Android:</span> Settings → About phone →
-                    Device name
-                  </li>
-                  <li className="list-none pl-0 pt-1 text-text-muted">
-                    Or just pick anything memorable, e.g. “Kitchen Tablet” or “John’s Phone”.
-                  </li>
-                </ul>
-              </details>
-            </div>
-            {redeemError && (
-              <p role="alert" className="text-sm text-error">
-                {redeemError}
-              </p>
-            )}
-            {redeemSuccess && (
-              <p role="status" className="text-sm text-green-400">
-                {redeemSuccess}
-              </p>
-            )}
-            <Button type="submit" variant="primary" size="sm" disabled={redeemLoading}>
-              {redeemLoading ? 'Pairing...' : 'Pair device'}
-            </Button>
-          </form>
-        )}
+          <div className="space-y-1">
+            <label htmlFor="peer-address-input" className="text-sm font-semibold text-text-primary">
+              Other device&apos;s address (only across a VPN)
+            </label>
+            <p className="text-xs leading-relaxed text-text-muted">
+              On the same network leave this empty: the device that generated the code is found automatically.
+              Across a VPN paste the address shown under the code on Device A.
+            </p>
+            <input
+              id="peer-address-input"
+              aria-label="Other device address"
+              placeholder="/ip4/…/tcp/4331/p2p/… (optional)"
+              value={peerAddress}
+              onChange={(e) => setPeerAddress(e.target.value)}
+              className="w-full rounded-md border border-border-subtle bg-surface px-3 py-2 text-sm font-mono text-text-primary placeholder:text-text-muted outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+            />
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="device-name-input" className="text-sm font-semibold text-text-primary">
+              Device name for this device
+            </label>
+            <p className="text-xs leading-relaxed text-text-muted">
+              How <em>this</em> device (Device B) will appear in the Paired devices list. Use any name you will
+              recognise later.
+            </p>
+            <input
+              id="device-name-input"
+              aria-label="Device name"
+              placeholder="e.g. Work Laptop"
+              value={deviceName}
+              onChange={(e) => setDeviceName(e.target.value)}
+              className="w-full rounded-md border border-border-subtle bg-surface px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+            />
+            <details className="group rounded-md border border-border-subtle bg-surface/60 px-3 py-2">
+              <summary className="cursor-pointer list-none text-xs font-semibold text-text-secondary group-open:text-text-primary">
+                <span className="inline-flex items-center gap-1">
+                  <span className="transition-transform group-open:rotate-90">›</span> How to find your device name
+                </span>
+              </summary>
+              <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-relaxed text-text-muted">
+                <li>
+                  <span className="font-semibold text-text-secondary">Windows:</span> Settings → System → About →
+                  Device name
+                </li>
+                <li>
+                  <span className="font-semibold text-text-secondary">macOS:</span> System Settings → General →
+                  About → Name
+                </li>
+                <li>
+                  <span className="font-semibold text-text-secondary">Linux:</span> run{' '}
+                  <code className="rounded bg-raised px-1 py-0.5 font-mono">hostname</code> in a terminal
+                </li>
+                <li>
+                  <span className="font-semibold text-text-secondary">iPhone / iPad:</span> Settings → General →
+                  About → Name
+                </li>
+                <li>
+                  <span className="font-semibold text-text-secondary">Android:</span> Settings → About phone →
+                  Device name
+                </li>
+                <li className="list-none pl-0 pt-1 text-text-muted">
+                  Or just pick anything memorable, e.g. “Kitchen Tablet” or “John’s Phone”.
+                </li>
+              </ul>
+            </details>
+          </div>
+          {redeemError && (
+            <p role="alert" className="text-sm text-error">
+              {redeemError}
+            </p>
+          )}
+          {redeemSuccess && (
+            <p role="status" className="text-sm text-green-400">
+              {redeemSuccess}
+            </p>
+          )}
+          <Button type="submit" variant="primary" size="sm" disabled={redeemLoading}>
+            {redeemLoading ? 'Pairing...' : 'Pair device'}
+          </Button>
+        </form>
       </section>
     </div>
   )

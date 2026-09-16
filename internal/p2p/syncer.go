@@ -244,6 +244,12 @@ func (s *Syncer) syncAll(ctx context.Context) {
 }
 
 func (s *Syncer) syncPeer(ctx context.Context, pid peer.ID) error {
+	// The deadline bounds the network exchange only. Applying what the peer
+	// sent is local database work that can outlast it on a first sync -- a
+	// paired library's whole history arrives in one round -- and a deadline
+	// that expired mid-transaction would roll the batch back and reproduce
+	// the same oversized round every 30 seconds forever.
+	applyCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	st, err := s.host.NewStream(ctx, pid, "/reverb/sync/1.0.0")
@@ -336,7 +342,7 @@ func (s *Syncer) syncPeer(ctx context.Context, pid peer.ID) error {
 				}
 				// The syncer pulls in its own step, so the outbound half of a
 				// reconcile is read and thrown away; ask for none.
-				if _, _, _, err := s.store.ReconcileBatchedAsync(ctx, did, reverbsync.NoOutbound, part); err != nil {
+				if _, _, _, err := s.store.ReconcileBatchedAsync(applyCtx, did, reverbsync.NoOutbound, part); err != nil {
 					return fmt.Errorf("apply changes: %w", err)
 				}
 			}

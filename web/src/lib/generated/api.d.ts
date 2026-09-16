@@ -5016,6 +5016,8 @@ export interface paths {
                         "application/json": {
                             /** @description Stable libp2p peer ID; also this device's Ed25519 verification key */
                             peerId: string;
+                            /** @description The device ID this instance authors sync changes under; empty until an identity exists */
+                            deviceId?: string;
                             /** @description Raw listen multiaddrs */
                             addrs: string[];
                             /** @description Complete /p2p/-terminated addresses another device can dial this one on, with wildcard and loopback addresses removed. Give one of these to a device on a VPN, where mDNS and the DHT cannot resolve a bare peer ID. */
@@ -5113,7 +5115,7 @@ export interface paths {
         put?: never;
         /**
          * Redeem a pairing code against a peer over libp2p (manage-library capability required)
-         * @description Dials peerId and redeems code on it. On success both sides record each other as paired, binding the libp2p peer ID to a device row and its Ed25519 verification key, and persist the address used so later reconnects need no discovery. Rate limited per peer and globally.
+         * @description Dials peerId and redeems code on it, or, with peerId empty, offers the code to each Reverb device discovered on the local network until one accepts it. On success both sides record each other as paired, binding the libp2p peer ID to a device row and its Ed25519 verification key, and persist the address used so later reconnects need no discovery. Rate limited per peer and globally.
          */
         post: {
             parameters: {
@@ -5126,10 +5128,10 @@ export interface paths {
                 content: {
                     "application/json": {
                         /**
-                         * @description Either a bare peer ID or a full multiaddr ending in /p2p/<peerID>. The bare form only resolves where discovery has already found the peer (a LAN, via mDNS); over a VPN the full multiaddr from the other device's dialAddrs is required.
+                         * @description Either a bare peer ID or a full multiaddr ending in /p2p/<peerID>, or empty to try every Reverb device discovered on the local network. The bare form only resolves where discovery has already found the peer (a LAN, via mDNS); over a VPN the full multiaddr from the other device's dialAddrs is required.
                          * @example /ip4/10.8.0.2/tcp/4331/p2p/12D3KooW...
                          */
-                        peerId: string;
+                        peerId?: string;
                         /** @example AB12-CD34 */
                         code: string;
                         deviceName: string;
@@ -5149,7 +5151,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description peerId */
+                /** @description code and deviceName are required */
                 400: {
                     headers: {
                         [name: string]: unknown;

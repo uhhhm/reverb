@@ -2,6 +2,8 @@ import { api } from './api'
 
 export interface P2PStatus {
   peerId: string
+  /** The device ID this instance authors sync changes under, when known. */
+  deviceId?: string
   addrs: string[]
   /**
    * Complete /p2p/-terminated addresses another device can dial this one on.
@@ -38,9 +40,13 @@ export function getP2PPeers(): Promise<P2PPeer[]> {
   return api.get<P2PPeer[]>('/p2p/peers')
 }
 
-/** peerId is a bare peer ID or a full multiaddr ending in /p2p/<peerID>. */
+/**
+ * peerId is a bare peer ID or a full multiaddr ending in /p2p/<peerID>, or
+ * empty to offer the code to every Reverb device discovered on the local
+ * network. Over a VPN discovery finds nothing, so the address is required there.
+ */
 export function redeemViaPeer(peerId: string, code: string, deviceName: string): Promise<{ deviceId: string; token: string }> {
-  return api.post<{ deviceId: string; token: string }>('/p2p/pair/redeem', { peerId, code, deviceName })
+  return api.post<{ deviceId: string; token: string }>('/p2p/pair/redeem', { peerId: peerId.trim(), code, deviceName })
 }
 
 export function getFileManifests(): Promise<FileManifest[]> {

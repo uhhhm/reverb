@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"strings"
 
 	"github.com/uhhhm/reverb/internal/p2p"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
@@ -38,7 +39,10 @@ func (s *Server) handleP2PStatus(w http.ResponseWriter, r *http.Request) {
 	peerCount := len(peers)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"peerId": h.ID(),
-		"addrs":  h.Addrs(),
+		// deviceId is the identity this instance authors changes under, so the
+		// UI can mark it in the paired-device list.
+		"deviceId": s.localSyncDeviceID(r.Context()),
+		"addrs":    h.Addrs(),
 		// dialAddrs are the complete /p2p/-terminated addresses another device
 		// can be given to reach this one. They are what the pairing UI shows,
 		// because on a VPN the peer ID alone is not dialable: mDNS multicast
@@ -79,6 +83,8 @@ type p2pRedeemRequest struct {
 	// PeerID is either a bare peer ID or a full multiaddr ending in
 	// /p2p/<peerID>. The bare form works only where discovery has already found
 	// the peer (a LAN, via mDNS); over a VPN the full multiaddr is required.
+	// Empty asks every discovered Reverb device on the network in turn, so on
+	// a LAN the code alone is enough.
 	PeerID     string `json:"peerId"`
 	Code       string `json:"code"`
 	DeviceName string `json:"deviceName"`
@@ -91,8 +97,8 @@ func (s *Server) handleP2PRedeem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body p2pRedeemRequest
-	if err := decode(r, &body); err != nil || body.PeerID == "" || body.Code == "" || body.DeviceName == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "peerId, code and deviceName are required"})
+	if err := decode(r, &body); err != nil || body.Code == "" || body.DeviceName == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "code and deviceName are required"})
 		return
 	}
 	var guard *p2p.Guard
@@ -103,7 +109,14 @@ func (s *Server) handleP2PRedeem(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "peer trust store unavailable"})
 		return
 	}
-	deviceID, token, err := p2p.RedeemViaPeer(r.Context(), h.LibHost(), guard, s.deps.DeviceKeys, body.PeerID, body.Code, body.DeviceName, s.localSyncDeviceID(r.Context()))
+	localID := s.localSyncDeviceID(r.Context())
+	var deviceID, token string
+	var err error
+	if strings.TrimSpace(body.PeerID) == "" {
+		deviceID, token, err = p2p.RedeemViaDiscoveredPeers(r.Context(), h.LibHost(), guard, s.deps.DeviceKeys, body.Code, body.DeviceName, localID)
+	} else {
+		deviceID, token, err = p2p.RedeemViaPeer(r.Context(), h.LibHost(), guard, s.deps.DeviceKeys, body.PeerID, body.Code, body.DeviceName, localID)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return

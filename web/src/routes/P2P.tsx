@@ -177,9 +177,13 @@ export default function P2P() {
           </button>
           {code && <code className="rounded bg-input px-2 py-1 text-sm">{code}</code>}
         </div>
+        <p className="text-xs text-text-secondary">
+          On the same network the code is enough: leave the peer field empty and the device that issued the
+          code is found automatically. Over a VPN, paste the other device&apos;s address as well.
+        </p>
         <div className="grid gap-2 sm:grid-cols-3">
           <input
-            placeholder="Peer ID or /ip4/…/p2p/…"
+            placeholder="Peer ID or /ip4/…/p2p/… (optional on a LAN)"
             aria-label="Peer ID or multiaddr"
             value={peerId}
             onChange={(e) => setPeerId(e.target.value)}
@@ -201,7 +205,7 @@ export default function P2P() {
         <button
           type="button"
           onClick={() => redeem.mutate()}
-          disabled={redeem.isPending || !peerId || !code}
+          disabled={redeem.isPending || !code}
           className="rounded bg-accent px-3 py-1.5 text-sm font-semibold text-on-accent disabled:opacity-50"
         >
           Redeem via peer

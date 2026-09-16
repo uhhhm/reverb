@@ -6,14 +6,11 @@ import Pairing from './Pairing'
 import { useSyncStore } from '../lib/syncStore'
 
 const mockGeneratePairingCode = vi.fn()
-const mockRedeemPairingCode = vi.fn()
+const mockRedeemViaPeer = vi.fn()
+const mockGetP2PStatus = vi.fn()
 const mockListDevices = vi.fn()
 const mockDeleteDevice = vi.fn()
 const mockGetSyncStatus = vi.fn()
-const mockStoreSyncCredentials = vi.fn()
-const mockGetSyncToken = vi.fn()
-const mockGetSyncDeviceId = vi.fn()
-const mockClearSyncCredentials = vi.fn()
 const mockTriggerSync = vi.fn()
 
 vi.mock('../lib/syncApi', async (orig) => ({
@@ -24,16 +21,14 @@ vi.mock('../lib/syncApi', async (orig) => ({
 
 vi.mock('../lib/pairingApi', () => ({
   generatePairingCode: (...args: unknown[]) => mockGeneratePairingCode(...args),
-  redeemPairingCode: (...args: unknown[]) => mockRedeemPairingCode(...args),
   listDevices: (...args: unknown[]) => mockListDevices(...args),
   deleteDevice: (...args: unknown[]) => mockDeleteDevice(...args),
   getSyncStatus: (...args: unknown[]) => mockGetSyncStatus(...args),
-  storeSyncCredentials: (...args: unknown[]) => mockStoreSyncCredentials(...args),
-  getSyncToken: (...args: unknown[]) => mockGetSyncToken(...args),
-  getSyncDeviceId: () => mockGetSyncDeviceId(),
-  clearSyncCredentials: (...args: unknown[]) => mockClearSyncCredentials(...args),
-  SYNC_TOKEN_KEY: 'reverb:syncToken',
-  SYNC_DEVICE_ID_KEY: 'reverb:syncDeviceId',
+}))
+
+vi.mock('../lib/p2pApi', () => ({
+  getP2PStatus: (...args: unknown[]) => mockGetP2PStatus(...args),
+  redeemViaPeer: (...args: unknown[]) => mockRedeemViaPeer(...args),
 }))
 
 function wrap() {
@@ -49,8 +44,9 @@ function wrap() {
 
 describe('Pairing', () => {
   beforeEach(() => {
-    mockGetSyncToken.mockReturnValue(null)
-    mockGetSyncDeviceId.mockReturnValue('dev_1')
+    mockGetP2PStatus.mockResolvedValue({
+      peerId: '12D3KooWlocal', deviceId: 'dev_1', addrs: [], dialAddrs: ['/ip4/10.8.0.2/tcp/4331/p2p/12D3KooWlocal'], peerCount: 0,
+    })
     mockListDevices.mockResolvedValue([
       { id: 'srv_1', name: 'Reverb Server', isServer: true, createdAt: 1000, lastSeen: 2000 },
       { id: 'dev_1', name: 'My Laptop', isServer: false, createdAt: 1100, lastSeen: 2100 },
@@ -59,7 +55,7 @@ describe('Pairing', () => {
     mockTriggerSync.mockResolvedValue({ status: 'started' })
     useSyncStore.setState({ syncing: false })
     mockGeneratePairingCode.mockResolvedValue({ code: 'AB12-CD34', expiresAt: Math.floor(Date.now() / 1000) + 600 })
-    mockRedeemPairingCode.mockResolvedValue({ deviceId: 'dev_new', token: 'tok123', serverDeviceId: 'srv_1' })
+    mockRedeemViaPeer.mockResolvedValue({ deviceId: 'dev_new', token: 'tok123' })
     mockDeleteDevice.mockResolvedValue({ ok: true })
     // stub clipboard
     Object.assign(navigator, {
@@ -145,21 +141,20 @@ describe('Pairing', () => {
     await waitFor(() => expect(mockDeleteDevice).toHaveBeenCalledWith('dev_1'))
   })
 
-  it('renders Enter pairing code form when not paired', async () => {
-    mockGetSyncToken.mockReturnValue(null)
+  it('renders the Enter pairing code form with an optional address field', async () => {
     wrap()
     expect(await screen.findByRole('heading', { name: /enter pairing code/i })).toBeInTheDocument()
     expect(screen.getByLabelText(/pairing code/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/other device address/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/device name/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /pair device/i })).toBeInTheDocument()
   })
 
-  it('shows paired state when sync token exists', async () => {
-    mockGetSyncToken.mockReturnValue('tok')
+  it('shows this device\'s dial address next to a generated code', async () => {
     wrap()
-    expect(await screen.findByText(/this device is paired/i)).toBeInTheDocument()
-    expect(screen.getAllByText(/sync token is stored on this device/i).length).toBeGreaterThan(0)
-    expect(screen.queryByRole('button', { name: /^pair device$/i })).not.toBeInTheDocument()
+    await screen.findByText('My Laptop')
+    fireEvent.click(screen.getByRole('button', { name: /generate pairing code/i }))
+    expect(await screen.findByTestId('dial-addr')).toHaveTextContent('/ip4/10.8.0.2/tcp/4331/p2p/12D3KooWlocal')
   })
 
   it('pairing code input auto-uppercases and formats with dash', async () => {
@@ -177,7 +172,10 @@ describe('Pairing', () => {
     expect(input.value).toBe('AB12-CD34')
   })
 
-  it('redeems pairing code and stores sync token on success', async () => {
+  // The code lives only in the database of the device that generated it, so
+  // redeeming has to go over libp2p to that device. With no address given the
+  // backend finds it on the local network.
+  it('redeems the code over p2p by discovery when no address is entered', async () => {
     wrap()
     await screen.findByText('My Laptop')
     const codeInput = await screen.findByLabelText(/pairing code/i)
@@ -185,24 +183,25 @@ describe('Pairing', () => {
     fireEvent.change(codeInput, { target: { value: 'AB12-CD34' } })
     fireEvent.change(nameInput, { target: { value: 'Work Laptop' } })
     fireEvent.click(screen.getByRole('button', { name: /pair device/i }))
-    await waitFor(() => expect(mockRedeemPairingCode).toHaveBeenCalledWith('AB12-CD34', 'Work Laptop'))
-    await waitFor(() => expect(mockStoreSyncCredentials).toHaveBeenCalledWith('tok123', 'dev_new'))
+    await waitFor(() => expect(mockRedeemViaPeer).toHaveBeenCalledWith('', 'AB12-CD34', 'Work Laptop'))
     expect(await screen.findByText(/device paired/i)).toBeInTheDocument()
+    expect(mockListDevices.mock.calls.length).toBeGreaterThan(1)
   })
 
-  it('redeem strips dashes before sending', async () => {
+  it('passes the other device\'s address through when one is entered', async () => {
     wrap()
     const codeInput = await screen.findByLabelText(/pairing code/i)
     fireEvent.change(codeInput, { target: { value: 'AB12-CD34' } })
+    fireEvent.change(screen.getByLabelText(/other device address/i), {
+      target: { value: ' /ip4/10.8.0.3/tcp/4331/p2p/12D3KooWremote ' },
+    })
     fireEvent.click(screen.getByRole('button', { name: /pair device/i }))
-    await waitFor(() => expect(mockRedeemPairingCode).toHaveBeenCalled())
-    const sentCode = mockRedeemPairingCode.mock.calls[0][0] as string
-    // the component passes the displayed value; the API helper strips it — but we verify the component passes XXXX-XXXX
-    expect(sentCode).toBe('AB12-CD34')
+    await waitFor(() => expect(mockRedeemViaPeer).toHaveBeenCalled())
+    expect(mockRedeemViaPeer.mock.calls[0][0]).toBe('/ip4/10.8.0.3/tcp/4331/p2p/12D3KooWremote')
   })
 
   it('shows error when redeem fails', async () => {
-    mockRedeemPairingCode.mockRejectedValue(new Error('invalid pairing code'))
+    mockRedeemViaPeer.mockRejectedValue(new Error('invalid pairing code'))
     wrap()
     const codeInput = await screen.findByLabelText(/pairing code/i)
     fireEvent.change(codeInput, { target: { value: 'ZZZZ-ZZZZ' } })
@@ -236,14 +235,6 @@ describe('Pairing', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/network error/i)
   })
 
-  it('clear sync token button clears stored credentials', async () => {
-    mockGetSyncToken.mockReturnValue('tok')
-    wrap()
-    await screen.findByText(/this device is paired/i)
-    fireEvent.click(screen.getByRole('button', { name: /clear sync token/i }))
-    expect(mockClearSyncCredentials).toHaveBeenCalled()
-  })
-
   it('device name defaults to Laptop when navigator unavailable and is editable', async () => {
     wrap()
     const nameInput = (await screen.findByLabelText(/device name/i)) as HTMLInputElement
@@ -253,20 +244,18 @@ describe('Pairing', () => {
     expect(nameInput.value).toBe('My Tablet')
   })
 
-  it('uses pairing code vocabulary and device/server/sync token terms', async () => {
+  it('uses pairing code vocabulary and device/server terms', async () => {
     wrap()
     await screen.findByText('My Laptop')
     expect(screen.getAllByText(/pairing code/i).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/server/i).length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/sync token/i).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/device/i).length).toBeGreaterThan(0)
   })
 })
 
 describe('Pairing — manual sync', () => {
   beforeEach(() => {
-    mockGetSyncToken.mockReturnValue(null)
-    mockGetSyncDeviceId.mockReturnValue('dev_1')
+    mockGetP2PStatus.mockResolvedValue({ peerId: '12D3KooWlocal', deviceId: 'dev_1', addrs: [], dialAddrs: [], peerCount: 0 })
     mockListDevices.mockResolvedValue([])
     mockGetSyncStatus.mockResolvedValue({ revision: 5, deviceCount: 2 })
     mockTriggerSync.mockResolvedValue({ status: 'started' })

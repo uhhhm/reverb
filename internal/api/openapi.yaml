@@ -1420,6 +1420,7 @@ paths:
                 type: object
                 properties:
                   peerId: { type: string, description: Stable libp2p peer ID; also this device's Ed25519 verification key }
+                  deviceId: { type: string, description: The device ID this instance authors sync changes under; empty until an identity exists }
                   addrs: { type: array, items: { type: string }, description: Raw listen multiaddrs, including wildcards }
                   dialAddrs:
                     type: array
@@ -1464,10 +1465,12 @@ paths:
     post:
       summary: Redeem a pairing code against a peer over libp2p (manage-library capability required)
       description: >
-        Dials peerId and redeems code on it. On success both sides record each
-        other as paired, binding the libp2p peer ID to a device row and its
-        Ed25519 verification key, and persist the address used so later
-        reconnects need no discovery. Rate limited per peer and globally.
+        Dials peerId and redeems code on it, or, with peerId empty, offers the
+        code to each Reverb device discovered on the local network until one
+        accepts it. On success both sides record each other as paired, binding
+        the libp2p peer ID to a device row and its Ed25519 verification key,
+        and persist the address used so later reconnects need no discovery.
+        Rate limited per peer and globally.
       requestBody:
         required: true
         content:
@@ -1479,13 +1482,15 @@ paths:
                   type: string
                   description: >
                     Either a bare peer ID or a full multiaddr ending in
-                    /p2p/<peerID>. The bare form only resolves where discovery
-                    has already found the peer (a LAN, via mDNS); over a VPN the
-                    full multiaddr from the other device's dialAddrs is required.
+                    /p2p/<peerID>, or empty to try every Reverb device
+                    discovered on the local network. The bare form only
+                    resolves where discovery has already found the peer (a
+                    LAN, via mDNS); over a VPN the full multiaddr from the
+                    other device's dialAddrs is required.
                   example: "/ip4/10.8.0.2/tcp/4331/p2p/12D3KooW..."
                 code: { type: string, example: "AB12-CD34" }
                 deviceName: { type: string }
-              required: [peerId, code, deviceName]
+              required: [code, deviceName]
       responses:
         "200":
           description: paired
@@ -1497,7 +1502,7 @@ paths:
                   deviceId: { type: string }
                   token: { type: string }
                 required: [deviceId, token]
-        "400": { description: peerId, code and deviceName are required }
+        "400": { description: code and deviceName are required }
         "500": { description: pairing failed }
         "503": { description: p2p unavailable or peer trust store unavailable }
   /p2p/manifests:
