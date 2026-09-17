@@ -21,7 +21,7 @@ func newHTTPServer(handler http.Handler) *http.Server {
 }
 
 // serveWithShutdown serves until `stop` is closed, then gracefully shuts the
-// HTTP server down and runs onShutdown (e.g. to SIGTERM the Navidrome child).
+// HTTP server down and runs onShutdown (e.g. to stop the Navidrome child).
 func serveWithShutdown(srv *http.Server, ln net.Listener, stop <-chan struct{}, onShutdown func(context.Context) error) error {
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.Serve(ln) }()

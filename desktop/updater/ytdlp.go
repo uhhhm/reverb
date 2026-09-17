@@ -4,12 +4,14 @@ import (
 	"context"
 	"log"
 	"os"
-	"os/exec"
+
+	"github.com/uhhhm/reverb/internal/childproc"
 )
 
-// ExecCommand is the exec command constructor, exposed for tests to mock.
-// Default is exec.CommandContext.
-var ExecCommand = exec.CommandContext
+// ExecCommand is the child-process constructor, exposed for tests to mock. It
+// defaults to childproc.CommandContext so the pip run inherits the platform's
+// spawn configuration.
+var ExecCommand = childproc.CommandContext
 
 // DefaultPythonBin is the fallback python binary when none is supplied.
 const DefaultPythonBin = "python3"

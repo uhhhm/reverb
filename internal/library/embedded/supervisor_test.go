@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
+
+	"github.com/uhhhm/reverb/internal/childproc"
 )
 
 // fakeProcess returns from Wait when its ctx is canceled or crash is signaled.
@@ -230,18 +230,16 @@ func TestSupervisor_LongHealthyRun_ResetsBudget(t *testing.T) {
 // A force-quit leaves navidrome holding its fixed port. The next run reaps it
 // from the pid file before starting its own child.
 func TestReapOrphanKillsRecordedProcess(t *testing.T) {
-	cmd := exec.Command("sleep", "30")
-	if err := cmd.Start(); err != nil {
-		t.Skipf("cannot start helper process: %v", err)
-	}
-	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	cmd, program := startHelperProcess(t)
 
 	pidPath := filepath.Join(t.TempDir(), "navidrome.pid")
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	reapOrphan(pidPath, "/opt/tools/sleep")
+	// The pid file names the process that is actually running, as it would
+	// after a force-quit of a real navidrome.
+	reapOrphan(pidPath, filepath.Join("/opt/tools", program))
 
 	done := make(chan struct{})
 	go func() { _ = cmd.Wait(); close(done) }()
@@ -258,11 +256,7 @@ func TestReapOrphanKillsRecordedProcess(t *testing.T) {
 // Pids are reused. A stale file must never let Reverb signal whatever process
 // happens to hold that number now.
 func TestReapOrphanSparesUnrelatedProcess(t *testing.T) {
-	cmd := exec.Command("sleep", "30")
-	if err := cmd.Start(); err != nil {
-		t.Skipf("cannot start helper process: %v", err)
-	}
-	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	cmd, _ := startHelperProcess(t)
 
 	pidPath := filepath.Join(t.TempDir(), "navidrome.pid")
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil {
@@ -272,7 +266,7 @@ func TestReapOrphanSparesUnrelatedProcess(t *testing.T) {
 	reapOrphan(pidPath, "/opt/tools/navidrome")
 
 	time.Sleep(200 * time.Millisecond)
-	if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
-		t.Fatalf("unrelated process was killed: %v", err)
+	if !childproc.Alive(cmd.Process.Pid) {
+		t.Fatal("unrelated process was killed")
 	}
 }

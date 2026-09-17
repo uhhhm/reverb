@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
-	"syscall"
 )
 
 var (
@@ -20,15 +19,18 @@ var (
 // attempts to bind the fixed p2p port and two supervised Navidromes fighting
 // over 4533, so the second copy must not get that far.
 //
-// The lock is an advisory flock rather than the existence of the file: the
-// kernel drops a flock when the holding process dies, so a crash or a force
-// quit cannot leave a lock file behind that keeps the app from ever starting
-// again. The file itself is left in place on release — removing it would let
-// another process lock an unlinked inode and think it holds the lock. It holds
-// the owner's pid, which is only there to name the culprit in the error.
+// The lock is held by the operating system on the open file, not by the
+// existence of the file. That is the contract a port must reproduce: the OS
+// must drop the lock when the holding process dies, so a crash or a force quit
+// cannot leave a lock behind that keeps the app from ever starting again, and
+// the attempt must fail immediately rather than wait for the holder. The file
+// itself is left in place on release — removing it would let another process
+// lock a file nobody can find any more and believe it holds the lock. Its
+// contents are the owner's pid, which is only there to name the culprit in the
+// error.
 //
 // An in-process map is kept alongside so a second call in the same process
-// fails too; flock is per open file description, so the same process would
+// fails too. The OS lock is typically per open file, so the same process would
 // otherwise re-lock its own file happily.
 func AcquireSingleInstanceLock(dataDir string) (func(), error) {
 	if dataDir == "" {
@@ -50,7 +52,7 @@ func AcquireSingleInstanceLock(dataDir string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := lockExclusive(f); err != nil {
 		owner := ""
 		if b, rerr := os.ReadFile(lockPath); rerr == nil && len(b) > 0 {
 			owner = fmt.Sprintf(" held by pid %s", string(b))
@@ -72,7 +74,7 @@ func AcquireSingleInstanceLock(dataDir string) (func(), error) {
 			return
 		}
 		delete(singleHeld, lockPath)
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = unlock(f)
 		_ = f.Close()
 	}
 

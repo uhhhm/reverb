@@ -15,6 +15,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/uhhhm/reverb/internal/childproc"
 )
 
 // TargetLUFS is the reference level tracks are normalized to. -14 LUFS is the
@@ -44,7 +46,7 @@ func Measure(ctx context.Context, ffmpegPath, path string) (float64, error) {
 	if _, err := exec.LookPath(ffmpegPath); err != nil {
 		return 0, ErrUnavailable
 	}
-	cmd := exec.CommandContext(ctx, ffmpegPath,
+	cmd := childproc.CommandContext(ctx, ffmpegPath,
 		"-nostdin", "-hide_banner",
 		"-i", path,
 		"-af", "loudnorm=print_format=json",

@@ -5,7 +5,8 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"os/exec"
+
+	"github.com/uhhhm/reverb/internal/childproc"
 )
 
 // scanLinesCR splits on EITHER '\n' or '\r'. yt-dlp rewrites its progress line
@@ -34,7 +35,7 @@ type Runner interface {
 type ExecRunner struct{}
 
 func (r ExecRunner) Run(ctx context.Context, name string, args []string, onLine func(string)) error {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := childproc.CommandContext(ctx, name, args...)
 	pr, pw := io.Pipe()
 	cmd.Stdout = pw
 	cmd.Stderr = pw

@@ -4,14 +4,33 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
+
+	"github.com/uhhhm/reverb/internal/childproc"
 )
+
+// Installing an update touches three things the operating system has opinions
+// about, so each is a per-OS seam (platform_darwin.go, platform_unix.go). A
+// port must supply all three:
+//
+//   - backupPath says where the outgoing binary is kept until the successor has
+//     started. It must be somewhere a rename can reach without crossing a
+//     filesystem, and somewhere that deleting the file afterwards cannot damage
+//     the installed application — on macOS that means outside the code-signed
+//     .app.
+//   - resealInstalled re-establishes whatever the OS demands before it will run
+//     the replaced binary. Returning an error here is taken to mean the install
+//     is unusable and triggers a rollback, so a port that has nothing to do must
+//     return nil rather than guess.
+//   - relaunchCommand builds the command that starts the successor, and reports
+//     whether it must be waited on. waitForExit is for hosts where the command
+//     merely hands the application to something else and exits: its status is
+//     then the only signal that the launch failed, which has to reach the caller
+//     before it quits. A command that *is* the successor must report false —
+//     waiting on it would hang until the new instance exits.
 
 // backupSuffix marks the outgoing binary. It is kept until the successor has
 // started, so a failed swap can be rolled back and a failed launch is still
@@ -25,9 +44,10 @@ const backupSuffix = ".old"
 func relaunchMarker(dataDir string) string { return filepath.Join(StagingDir(dataDir), "relaunch") }
 
 // ApplyStaged swaps the staged payload over exePath. The running process keeps
-// executing the old inode — on macOS and Linux a running executable can be
-// renamed out from under itself — so this is safe to call before shutdown.
-// On any failure the original binary is restored.
+// executing the outgoing file, which is renamed rather than overwritten, so
+// this is safe to call before shutdown. A port to an OS that will not let a
+// running executable be renamed has to change that ordering, not just this
+// function. On any failure the original binary is restored.
 func ApplyStaged(dataDir, exePath string) error {
 	su, ok := ReadStaged(dataDir)
 	if !ok {
@@ -59,31 +79,11 @@ func ApplyStaged(dataDir, exePath string) error {
 		_ = os.Remove(next)
 		return err
 	}
-	if err := refreshBundleSignature(exePath); err != nil {
+	if err := resealInstalled(exePath); err != nil {
 		if restoreErr := restoreBackup(exePath); restoreErr != nil {
 			return fmt.Errorf("%w; rollback: %v", err, restoreErr)
 		}
 		return err
-	}
-	return nil
-}
-
-// Bundle resources are sealed by codesign. Keep the rollback copy outside the
-// bundle, so deleting it after a successful boot cannot invalidate that seal.
-func backupPath(exePath string) string {
-	if bundle := macAppBundle(exePath); bundle != "" {
-		return filepath.Join(filepath.Dir(bundle), "."+filepath.Base(bundle)+backupSuffix)
-	}
-	return exePath + backupSuffix
-}
-
-// Reverb's distributed bundles are ad-hoc signed (package-mac.sh). Re-seal the
-// bundle after changing its main executable, preserving its bundled tools.
-func refreshBundleSignature(exePath string) error {
-	if bundle := macAppBundle(exePath); bundle != "" {
-		if output, err := exec.Command("/usr/bin/codesign", "--force", "--sign", "-", bundle).CombinedOutput(); err != nil {
-			return fmt.Errorf("sign updated app: %w: %s", err, output)
-		}
 	}
 	return nil
 }
@@ -98,21 +98,13 @@ func Relaunch(dataDir, exePath string, args ...string) error {
 	if err := os.WriteFile(relaunchMarker(dataDir), []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
 		return err
 	}
-	var cmd *exec.Cmd
-	if bundle := macAppBundle(exePath); bundle != "" {
-		// Launching the bundle rather than the executable keeps the Dock icon,
-		// the app name and the activation behaviour macOS attaches to it.
-		cmd = exec.Command("open", append([]string{"-n", bundle, "--args"}, args...)...)
-	} else {
-		cmd = exec.Command(exePath, args...)
-	}
+	cmd, waitForExit := relaunchCommand(exePath, args)
+	// Environment and working directory are both inherited: relative --db and
+	// other paths must keep naming the same files after the restart.
 	cmd.Env = os.Environ()
-	// Inherit the working directory too: relative --db and other paths must
-	// keep naming the same files after restart.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if macAppBundle(exePath) != "" {
-		// open exits after handing the app to Launch Services. Observe its exit
-		// status so an invalid bundle triggers rollback instead of quitting.
+	// The successor has to survive this process quitting moments from now.
+	childproc.Detach(cmd)
+	if waitForExit {
 		if err := cmd.Run(); err != nil {
 			_ = os.Remove(relaunchMarker(dataDir))
 			return err
@@ -137,29 +129,7 @@ func restoreBackup(exePath string) error {
 	if err := os.Rename(backupPath(path), path); err != nil {
 		return err
 	}
-	return refreshBundleSignature(path)
-}
-
-// macAppBundle returns the .app directory exePath lives in, or "" when the
-// binary is not inside a bundle.
-func macAppBundle(exePath string) string {
-	if runtime.GOOS != "darwin" {
-		return ""
-	}
-	// <bundle>.app/Contents/MacOS/<binary>
-	dir := filepath.Dir(exePath)
-	if filepath.Base(dir) != "MacOS" {
-		return ""
-	}
-	contents := filepath.Dir(dir)
-	if filepath.Base(contents) != "Contents" {
-		return ""
-	}
-	bundle := filepath.Dir(contents)
-	if !strings.HasSuffix(bundle, ".app") {
-		return ""
-	}
-	return bundle
+	return resealInstalled(path)
 }
 
 // WaitForPredecessor blocks until the instance that relaunched this one has
@@ -179,7 +149,7 @@ func WaitForPredecessor(dataDir string, timeout time.Duration) {
 	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if !processAlive(pid) {
+		if !childproc.Alive(pid) {
 			// Give the predecessor's listeners and child processes a moment to
 			// be reaped after the process itself is gone.
 			time.Sleep(300 * time.Millisecond)
@@ -187,16 +157,6 @@ func WaitForPredecessor(dataDir string, timeout time.Duration) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-}
-
-// processAlive reports whether pid is a live process. Signal 0 performs the
-// permission and existence checks without delivering anything.
-func processAlive(pid int) bool {
-	p, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return p.Signal(syscall.Signal(0)) == nil
 }
 
 // CleanupAfterUpdate discards the previous binary and the staged payload once

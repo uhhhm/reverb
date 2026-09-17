@@ -4,10 +4,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] macOS and Linux behaviour is unchanged: the desktop, updater, and embedded-library test suites pass and `make check` is green.
-- [ ] The single-instance lock, background process spawn/priority/termination, background control channel, updater process liveness and relaunch, Navidrome stop/reap, bundled-tool resolution, and child-process console suppression are each isolated behind a per-OS seam with a unix implementation.
-- [ ] Shared code no longer contains syscalls or external commands that exist only on POSIX (for example flock, Setsid, `nice`, `ps`, SIGTERM); those live in the versioned implementations.
-- [ ] Each seam documents the semantics a Windows implementation must provide — atomicity, security posture, shutdown guarantees — not just the current unix mechanics.
-- [ ] No test is weakened or skipped to make the split land.
+- [x] macOS and Linux behaviour is unchanged: the desktop, updater, and embedded-library test suites pass and `make check` is green.
+- [x] The single-instance lock, background process spawn/priority/termination, background control channel, updater process liveness and relaunch, Navidrome stop/reap, bundled-tool resolution, and child-process console suppression are each isolated behind a per-OS seam with a unix implementation.
+- [x] Shared code no longer contains syscalls or external commands that exist only on POSIX (for example flock, Setsid, `nice`, `ps`, SIGTERM); those live in the versioned implementations.
+- [x] Each seam documents the semantics a Windows implementation must provide — atomicity, security posture, shutdown guarantees — not just the current unix mechanics.
+- [x] No test is weakened or skipped to make the split land.

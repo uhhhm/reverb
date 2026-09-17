@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"math"
 	"os/exec"
+
+	"github.com/uhhhm/reverb/internal/childproc"
 )
 
 var ErrUnavailable = errors.New("peaks: ffmpeg not available")
@@ -52,7 +54,7 @@ func Compute(ctx context.Context, ffmpegPath, path string, n int) ([]float32, er
 	if _, err := exec.LookPath(ffmpegPath); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
-	cmd := exec.CommandContext(ctx, ffmpegPath, "-v", "error", "-i", path, "-ac", "1", "-ar", "8000", "-f", "s16le", "-")
+	cmd := childproc.CommandContext(ctx, ffmpegPath, "-v", "error", "-i", path, "-ac", "1", "-ar", "8000", "-f", "s16le", "-")
 	data, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("decode waveform: %w", err)

@@ -5,14 +5,15 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"os/exec"
+
+	"github.com/uhhhm/reverb/internal/childproc"
 )
 
 // ExecRunner is the production Runner. Canceling ctx kills the child process.
 type ExecRunner struct{}
 
 func (ExecRunner) Run(ctx context.Context, name string, args []string, onLine func(string)) error {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := childproc.CommandContext(ctx, name, args...)
 	var buf bytes.Buffer
 	pr, pw := io.Pipe()
 	cmd.Stdout = pw

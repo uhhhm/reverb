@@ -18,7 +18,7 @@ func TestMacBundleRemainsValidAfterUpdateAndCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	buildProbe(t, "v1", exe)
-	if err := refreshBundleSignature(exe); err != nil {
+	if err := resealInstalled(exe); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()

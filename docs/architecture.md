@@ -71,6 +71,20 @@ The local `desktop.json` preference controls this handoff; an explicit quit or
 update restart bypasses it. No login service is installed. See
 [desktop background sync](../desktop/README.md#background-sync-macos-and-linux).
 
+Everything about the desktop app that depends on the host's process model lives
+behind a per-OS seam, so a port changes implementations rather than editing
+shared logic. `internal/childproc` is the shared one — console suppression,
+detaching a child that must outlive its parent, low-priority spawning, the
+terminate-then-kill shutdown escalation, and the pid liveness and identity
+checks that stop a stale pid file from signalling an unrelated process. The
+rest are local to the package that owns them: the single-instance lock
+(`desktop/singleinstance_unix.go`), the background control channel
+(`desktop/background_channel_unix.go`), bundled-tool file naming and
+executability (`desktop/bundle_unix.go`), and the updater's backup location,
+post-install resealing and relaunch command (`desktop/updater/platform_*.go`).
+Each seam's doc comment states the guarantee callers rely on, not the unix
+mechanism that currently provides it.
+
 ### Configuration
 
 Flags > env > defaults. Flags: `--port`/`--bind`/`--p2p-port`/`--db`/`--dev`/`--update-repo`. Env: `REVERB_PORT`/`REVERB_BIND`/`REVERB_P2P_PORT`/`REVERB_DB`/`REVERB_DEV`/`REVERB_DOWNLOAD_DIR` / `REVERB_SPOTIFY_CLIENT_ID/SECRET` / `REVERB_LIBRARY_PASSWORD` / `REVERB_SPOTDL_PATH`/`REVERB_NAVIDROME_BIN`/`REVERB_YTDLP_PATH`/`REVERB_DENO_PATH` (+ navidrome listen/port vars) — see `README.md` + `internal/config`. Secrets via env/`.env` only (gitignored; `.env.example` template).

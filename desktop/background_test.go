@@ -172,15 +172,7 @@ func TestBackgroundProcess(t *testing.T) {
 		case <-ticker.C:
 		}
 	}
-	for path, mode := range map[string]os.FileMode{filepath.Dir(backgroundSocket(dir)): 0700, backgroundSocket(dir): 0600} {
-		st, err := os.Stat(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if st.Mode().Perm() != mode {
-			t.Fatalf("permissions %s: %v", path, st.Mode())
-		}
-	}
+	assertControlChannelPrivate(t, dir)
 	if _, err := AcquireSingleInstanceLock(dir); err == nil {
 		t.Fatal("background did not own the database lock")
 	}

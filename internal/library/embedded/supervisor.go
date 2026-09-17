@@ -10,8 +10,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
+
+	"github.com/uhhhm/reverb/internal/childproc"
 )
 
 // Process is a running child (test seam).
@@ -166,8 +167,8 @@ func (s *Supervisor) waitReady(ctx context.Context) {
 	}
 }
 
-// Shutdown cancels the supervise loop (which SIGTERMs the child via ExecRunner's
-// cmd.Cancel) and waits for it to exit, or until ctx is done.
+// Shutdown cancels the supervise loop (which asks the child to stop via
+// ExecRunner's cmd.Cancel) and waits for it to exit, or until ctx is done.
 func (s *Supervisor) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	started := s.started
@@ -189,8 +190,9 @@ func (s *Supervisor) Shutdown(ctx context.Context) error {
 	}
 }
 
-// ExecRunner runs the real navidrome binary. Context cancel sends SIGTERM (via
-// cmd.Cancel), then SIGKILL after WaitDelay — a graceful child shutdown.
+// ExecRunner runs the real navidrome binary. Context cancel asks the child to
+// shut down (via cmd.Cancel), then kills it after WaitDelay. Navidrome writes a
+// SQLite index as it scans, so it is always asked before it is killed.
 //
 // pidPath records the child so the next run can find it. A force-quit of the
 // desktop app kills the parent without unwinding anything, and the child keeps
@@ -201,11 +203,11 @@ func (s *Supervisor) Shutdown(ctx context.Context) error {
 func ExecRunner(binaryPath, pidPath string) Runner {
 	return func(ctx context.Context, env []string) (Process, error) {
 		reapOrphan(pidPath, binaryPath)
-		cmd := exec.CommandContext(ctx, binaryPath)
+		cmd := childproc.CommandContext(ctx, binaryPath)
 		cmd.Env = env
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+		cmd.Cancel = func() error { return childproc.Terminate(cmd.Process.Pid) }
 		cmd.WaitDelay = 10 * time.Second
 		if err := cmd.Start(); err != nil {
 			return nil, err
@@ -245,37 +247,27 @@ func reapOrphan(pidPath, binaryPath string) {
 		_ = os.Remove(pidPath)
 		return
 	}
-	proc, err := os.FindProcess(pid)
-	if err != nil || proc.Signal(syscall.Signal(0)) != nil {
+	if !childproc.Alive(pid) {
 		_ = os.Remove(pidPath) // already gone
 		return
 	}
-	if !processIsNamed(pid, filepath.Base(binaryPath)) {
+	if !childproc.IsNamed(pid, filepath.Base(binaryPath)) {
 		_ = os.Remove(pidPath)
 		return
 	}
 	log.Printf("navidrome: reaping orphaned instance (pid %d) left by a previous run", pid)
-	_ = proc.Signal(syscall.SIGTERM)
+	_ = childproc.Terminate(pid)
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if proc.Signal(syscall.Signal(0)) != nil {
+		if !childproc.Alive(pid) {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if proc.Signal(syscall.Signal(0)) == nil {
-		_ = proc.Signal(syscall.SIGKILL)
+	if childproc.Alive(pid) {
+		_ = childproc.Kill(pid)
 	}
 	_ = os.Remove(pidPath)
-}
-
-// processIsNamed reports whether pid's command name matches want.
-func processIsNamed(pid int, want string) bool {
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
-	if err != nil {
-		return false
-	}
-	return filepath.Base(strings.TrimSpace(string(out))) == want
 }
 
 type execProcess struct{ cmd *exec.Cmd }

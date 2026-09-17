@@ -9,23 +9,19 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
+
+	"github.com/uhhhm/reverb/internal/childproc"
 )
 
-// Background controls use a user-private Unix socket, never the HTTP API or
+// Background controls travel over a user-private channel, never the HTTP API or
 // Wails bindings. A website cannot request a shutdown through the loopback API.
-func backgroundSocket(dataDir string) string {
-	return filepath.Join(dataDir, "background", "control.sock")
-}
-
 func backgroundRequest(ctx context.Context, dataDir, method, path string) error {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", backgroundSocket(dataDir))
+		return dialBackgroundControl(ctx, dataDir)
 	}}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport}
@@ -51,7 +47,7 @@ func stopBackgroundSync(dataDir string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	err := backgroundRequest(ctx, dataDir, http.MethodPost, "/stop")
-	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) {
+	if backgroundNotRunning(err) {
 		return nil
 	}
 	return err
@@ -80,7 +76,7 @@ func backgroundControl(cancel context.CancelFunc, stopped <-chan struct{}) http.
 // runBackground runs the ordinary desktop backend without initialising Wails,
 // GTK/Cocoa or a webview. The existing incremental sync/file workers are reused.
 func runBackground(args []string) error {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, cancel := signal.NotifyContext(context.Background(), childproc.ShutdownSignals()...)
 	defer cancel()
 	a, err := boot(args)
 	if err != nil {
@@ -88,25 +84,11 @@ func runBackground(args []string) error {
 	}
 	a.stopBackground = cancel
 	defer a.OnShutdown(context.Background())
-	dir := filepath.Dir(backgroundSocket(a.dataDir))
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return err
-	}
-	if err := os.Chmod(dir, 0700); err != nil {
-		return err
-	}
-	// Only the database lock owner may replace a socket left by a crash.
-	if err := os.Remove(backgroundSocket(a.dataDir)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	ln, err := net.Listen("unix", backgroundSocket(a.dataDir))
+	ln, err := listenBackgroundControl(a.dataDir)
 	if err != nil {
 		return err
 	}
 	defer ln.Close()
-	if err := os.Chmod(backgroundSocket(a.dataDir), 0600); err != nil {
-		return err
-	}
 	stopped := make(chan struct{})
 	srv := &http.Server{Handler: backgroundControl(cancel, stopped), ReadHeaderTimeout: time.Second, IdleTimeout: time.Second}
 	a.OnStartup(a.ctx)
@@ -138,13 +120,12 @@ func spawnBackground(dataDir string, args []string) error {
 		return err
 	}
 	defer output.Close()
-	// nice runs before Go creates OS threads, so every worker and bundled child
-	// inherits the lower priority (setpriority in Go would only affect one
-	// thread on Linux). nice is provided by both supported desktop platforms.
-	cmd := exec.Command("nice", append([]string{"-n", "10", exe, "--background"}, args...)...)
+	// Background sync is the household's least urgent work, and it must keep
+	// running after the window that started it has gone.
+	cmd := childproc.LowPriorityCommand(exe, append([]string{"--background"}, args...)...)
 	cmd.Env = os.Environ()
 	cmd.Stdout, cmd.Stderr = output, output
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	childproc.Detach(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -159,7 +140,7 @@ func spawnBackground(dataDir string, args []string) error {
 		case err := <-exited:
 			return fmt.Errorf("background process exited before ready: %v (see %s)", err, logPath)
 		case <-ctx.Done():
-			_ = cmd.Process.Signal(syscall.SIGTERM)
+			_ = childproc.Terminate(cmd.Process.Pid)
 			return fmt.Errorf("background startup timed out (see %s)", logPath)
 		case <-ticker.C:
 			if backgroundRequest(ctx, dataDir, http.MethodGet, "/status") == nil {

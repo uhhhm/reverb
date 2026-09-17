@@ -8,10 +8,10 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/uhhhm/reverb/internal/api"
 	"github.com/uhhhm/reverb/internal/app"
+	"github.com/uhhhm/reverb/internal/childproc"
 	"github.com/uhhhm/reverb/internal/config"
 )
 
@@ -92,7 +92,7 @@ func main() {
 
 	stop := make(chan struct{})
 	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sig, childproc.ShutdownSignals()...)
 	go func() { <-sig; close(stop) }()
 
 	httpSrv := newHTTPServer(api.NewServer(rt.Deps).Handler())

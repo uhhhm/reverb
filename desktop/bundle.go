@@ -23,72 +23,84 @@ func ResolveBundledTools() (ffmpeg, navidrome, spotdl, deno, ytdlp string) {
 // (setup-python-venv.sh installs spotdl and yt-dlp there) rather than bin/.
 func inPythonVenv(name string) bool { return name == "spotdl" || name == "yt-dlp" }
 
-func findBundledTool(name string) string {
-	var candidates []string
+// bundledToolDirs lists, in priority order, the directories a bundled tool may
+// live in: beside the running executable first (an installed app), then beside
+// argv[0], then the working tree's desktop/tools, so a developer build finds
+// the tools it just downloaded.
+func bundledToolDirs(name string) []string {
+	var dirs []string
+	venv := inPythonVenv(name)
 
 	if exe, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exe)
-		candidates = append(candidates,
-			filepath.Join(dir, "../Resources/bin", name),
-			filepath.Join(dir, "Resources/bin", name),
-			filepath.Join(dir, "bin", name),
+		dirs = append(dirs,
+			filepath.Join(dir, "../Resources/bin"),
+			filepath.Join(dir, "Resources/bin"),
+			filepath.Join(dir, "bin"),
 		)
-		if inPythonVenv(name) {
-			candidates = append(candidates,
-				filepath.Join(dir, "../Resources/python/bin", name),
-				filepath.Join(dir, "python/bin", name),
+		if venv {
+			dirs = append(dirs,
+				filepath.Join(dir, "../Resources/python", pythonBinSubdir),
+				filepath.Join(dir, "python", pythonBinSubdir),
 			)
 		}
 	}
 
-	candidates = append(candidates,
-		filepath.Join(filepath.Dir(os.Args[0]), "../Resources/bin", name),
-		filepath.Join(filepath.Dir(os.Args[0]), "Resources/bin", name),
+	argv0 := filepath.Dir(os.Args[0])
+	dirs = append(dirs,
+		filepath.Join(argv0, "../Resources/bin"),
+		filepath.Join(argv0, "Resources/bin"),
 	)
-
-	if inPythonVenv(name) {
-		candidates = append(candidates,
-			filepath.Join(filepath.Dir(os.Args[0]), "../Resources/python/bin", name),
-		)
+	if venv {
+		dirs = append(dirs, filepath.Join(argv0, "../Resources/python", pythonBinSubdir))
 	}
 
 	if wd, err := os.Getwd(); err == nil {
-		candidates = append(candidates,
-			filepath.Join(wd, "desktop/tools/bin", name),
-			filepath.Join(wd, "../desktop/tools/bin", name),
-			filepath.Join(wd, "../../desktop/tools/bin", name),
-			filepath.Join(wd, "./desktop/tools/bin", name),
+		dirs = append(dirs,
+			filepath.Join(wd, "desktop/tools/bin"),
+			filepath.Join(wd, "../desktop/tools/bin"),
+			filepath.Join(wd, "../../desktop/tools/bin"),
+			filepath.Join(wd, "./desktop/tools/bin"),
 		)
-		if inPythonVenv(name) {
-			candidates = append(candidates,
-				filepath.Join(wd, "desktop/tools/python/bin", name),
-				filepath.Join(wd, "../desktop/tools/python/bin", name),
-				filepath.Join(wd, "../../desktop/tools/python/bin", name),
+		if venv {
+			dirs = append(dirs,
+				filepath.Join(wd, "desktop/tools/python", pythonBinSubdir),
+				filepath.Join(wd, "../desktop/tools/python", pythonBinSubdir),
+				filepath.Join(wd, "../../desktop/tools/python", pythonBinSubdir),
 			)
 		}
 	}
 
-	candidates = append(candidates,
-		filepath.Join("desktop/tools/bin", name),
-		filepath.Join("./desktop/tools/bin", name),
-	)
-	if inPythonVenv(name) {
-		candidates = append(candidates,
-			filepath.Join("desktop/tools/python/bin", name),
-			filepath.Join("./desktop/tools/python/bin", name),
+	dirs = append(dirs, "desktop/tools/bin", "./desktop/tools/bin")
+	if venv {
+		dirs = append(dirs,
+			filepath.Join("desktop/tools/python", pythonBinSubdir),
+			filepath.Join("./desktop/tools/python", pythonBinSubdir),
 		)
 	}
 
-	for _, c := range candidates {
-		if abs, err := filepath.Abs(c); err == nil {
-			c = abs
-		}
-		c = filepath.Clean(c)
-		if isExecutable(c) {
-			return c
+	return dirs
+}
+
+// findBundledTool returns the absolute path of the first runnable copy of name,
+// or "" when none is found. The file name a tool is installed under is an OS
+// detail (toolFileNames), as is what makes a file runnable (isExecutable).
+func findBundledTool(name string) string {
+	for _, dir := range bundledToolDirs(name) {
+		for _, file := range toolFileNames(name) {
+			c := filepath.Join(dir, file)
+			if abs, err := filepath.Abs(c); err == nil {
+				c = abs
+			}
+			c = filepath.Clean(c)
+			if isExecutable(c) {
+				return c
+			}
 		}
 	}
 
+	// Nothing bundled: fall back to whatever the household has installed.
+	// LookPath applies the OS's own rules, including executable extensions.
 	if p, err := exec.LookPath(name); err == nil {
 		if abs, err := filepath.Abs(p); err == nil {
 			p = abs
@@ -97,20 +109,6 @@ func findBundledTool(name string) string {
 	}
 
 	return ""
-}
-
-func isExecutable(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	if info.IsDir() {
-		return false
-	}
-	if info.Mode()&0111 == 0 {
-		return false
-	}
-	return true
 }
 
 // ApplyBundledToolEnv points the services at the binaries shipped alongside the

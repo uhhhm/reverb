@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+
+	"github.com/uhhhm/reverb/internal/childproc"
 )
 
 var ErrUnavailable = errors.New("duration: ffmpeg not available")
@@ -38,7 +40,7 @@ func Measure(ctx context.Context, ffmpegPath, path string) (int64, error) {
 	if _, err := exec.LookPath(ffmpegPath); err != nil {
 		return 0, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
-	cmd := exec.CommandContext(ctx, ffmpegPath,
+	cmd := childproc.CommandContext(ctx, ffmpegPath,
 		"-v", "error", "-nostdin",
 		"-i", path,
 		"-ac", "1", "-ar", fmt.Sprint(sampleRate), "-f", "s16le", "-",

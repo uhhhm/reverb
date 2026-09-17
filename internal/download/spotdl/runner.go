@@ -5,7 +5,8 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"os/exec"
+
+	"github.com/uhhhm/reverb/internal/childproc"
 )
 
 // scanLinesCR splits on EITHER '\n' or '\r'. spotDL/yt-dlp render progress by
@@ -32,13 +33,13 @@ type Runner interface {
 	Run(ctx context.Context, name string, args []string, onLine func(string)) error
 }
 
-// ExecRunner is the production Runner. It uses os/exec with a piped stdout so
-// progress lines stream as spotDL emits them. The ctx is honored: canceling it
-// kills the child process (exec.CommandContext).
+// ExecRunner is the production Runner. It spawns through childproc with a piped
+// stdout so progress lines stream as spotDL emits them. The ctx is honored:
+// canceling it kills the child process.
 type ExecRunner struct{}
 
 func (r ExecRunner) Run(ctx context.Context, name string, args []string, onLine func(string)) error {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := childproc.CommandContext(ctx, name, args...)
 	pr, pw := io.Pipe()
 	cmd.Stdout = pw
 	cmd.Stderr = pw

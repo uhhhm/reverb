@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/uhhhm/reverb/internal/childproc"
 )
 
 // ReadLocal returns raw lyrics text found beside or inside the audio file.
@@ -24,8 +25,9 @@ func ReadLocal(ctx context.Context, ffprobePath, audioPath string) (raw, source 
 	}
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(cctx, ffprobePath,
-		"-v", "quiet", "-print_format", "json", "-show_format", audioPath).Output()
+	cmd := childproc.CommandContext(cctx, ffprobePath,
+		"-v", "quiet", "-print_format", "json", "-show_format", audioPath)
+	out, err := cmd.Output()
 	if err != nil {
 		return "", "", false
 	}
