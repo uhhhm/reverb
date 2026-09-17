@@ -106,6 +106,10 @@ func runBackground(args []string) error {
 }
 
 func spawnBackground(dataDir string, args []string) error {
+	return spawnBackgroundWithTimeout(dataDir, args, 45*time.Second, 2*time.Second)
+}
+
+func spawnBackgroundWithTimeout(dataDir string, args []string, startupTimeout, terminationGrace time.Duration) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -131,7 +135,7 @@ func spawnBackground(dataDir string, args []string) error {
 	}
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), startupTimeout)
 	defer cancel()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -140,7 +144,7 @@ func spawnBackground(dataDir string, args []string) error {
 		case err := <-exited:
 			return fmt.Errorf("background process exited before ready: %v (see %s)", err, logPath)
 		case <-ctx.Done():
-			_ = childproc.Terminate(cmd.Process.Pid)
+			stopStartingBackground(cmd.Process.Pid, exited, terminationGrace)
 			return fmt.Errorf("background startup timed out (see %s)", logPath)
 		case <-ticker.C:
 			if backgroundRequest(ctx, dataDir, http.MethodGet, "/status") == nil {
@@ -148,6 +152,23 @@ func spawnBackground(dataDir string, args []string) error {
 			}
 		}
 	}
+}
+
+// stopStartingBackground does not return until the failed child has been
+// reaped. A graceful request may be ignored when startup is stuck, so escalate
+// after a short grace period. The window can then report failure without
+// leaving a hidden database owner behind.
+func stopStartingBackground(pid int, exited <-chan error, grace time.Duration) {
+	_ = childproc.Terminate(pid)
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	select {
+	case <-exited:
+		return
+	case <-timer.C:
+	}
+	_ = childproc.Kill(pid)
+	<-exited
 }
 
 var backgroundPreferenceMu sync.Mutex

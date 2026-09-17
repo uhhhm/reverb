@@ -2,14 +2,37 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/uhhhm/reverb/internal/childproc"
 )
+
+const stalledBackgroundHelper = "REVERB_STALLED_BACKGROUND_HELPER"
+
+func TestMain(m *testing.M) {
+	if os.Getenv(stalledBackgroundHelper) == "1" {
+		fmt.Fprintln(os.Stderr, "stalled before publishing the background control channel")
+		if path := os.Getenv("REVERB_STALLED_BACKGROUND_PID"); path != "" {
+			_ = os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())), 0600)
+		}
+		// Exercise the escalation path: a startup that is stuck before it can
+		// unwind must still be gone when spawnBackground reports failure.
+		signal.Ignore(childproc.ShutdownSignals()...)
+		time.Sleep(time.Minute)
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
 
 func TestBackgroundPreferenceAndShutdownHandoff(t *testing.T) {
 	for _, tc := range []struct {
@@ -190,5 +213,35 @@ func TestBackgroundProcess(t *testing.T) {
 	}
 	if err := stopBackgroundSync(dir); err != nil {
 		t.Fatalf("stopping absent process: %v", err)
+	}
+}
+
+func TestSpawnBackgroundTerminatesAChildThatNeverBecomesReady(t *testing.T) {
+	dir := t.TempDir()
+	pidPath := filepath.Join(dir, "stalled.pid")
+	t.Setenv(stalledBackgroundHelper, "1")
+	t.Setenv("REVERB_STALLED_BACKGROUND_PID", pidPath)
+
+	err := spawnBackgroundWithTimeout(dir, nil, time.Second, 100*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "startup timed out") {
+		t.Fatalf("spawnBackgroundWithTimeout error = %v, want startup timeout", err)
+	}
+	pidBytes, readErr := os.ReadFile(pidPath)
+	if readErr != nil {
+		t.Fatalf("read helper pid: %v", readErr)
+	}
+	pid, parseErr := strconv.Atoi(string(pidBytes))
+	if parseErr != nil {
+		t.Fatalf("parse helper pid: %v", parseErr)
+	}
+	if childproc.Alive(pid) {
+		t.Fatalf("startup failure left background pid %d running", pid)
+	}
+	logBytes, readErr := os.ReadFile(filepath.Join(dir, "background.log"))
+	if readErr != nil {
+		t.Fatalf("read background log: %v", readErr)
+	}
+	if !strings.Contains(string(logBytes), "stalled before publishing") {
+		t.Fatalf("background log did not retain startup diagnostics: %q", logBytes)
 	}
 }

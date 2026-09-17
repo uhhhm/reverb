@@ -31,9 +31,16 @@ func startHelper(t *testing.T) *exec.Cmd {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start helper: %v", err)
 	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
 	t.Cleanup(func() {
+		select {
+		case <-exited:
+			return
+		default:
+		}
 		_ = childproc.Kill(cmd.Process.Pid)
-		_ = cmd.Wait()
+		<-exited
 	})
 	return cmd
 }
@@ -59,7 +66,6 @@ func TestAliveTracksTheProcessLifetime(t *testing.T) {
 	if err := childproc.Terminate(cmd.Process.Pid); err != nil {
 		t.Fatalf("Terminate: %v", err)
 	}
-	go func() { _ = cmd.Wait() }()
 	waitGone(t, pid)
 }
 
@@ -71,7 +77,6 @@ func TestKillEndsAnUnresponsiveChild(t *testing.T) {
 	if err := childproc.Kill(cmd.Process.Pid); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
-	go func() { _ = cmd.Wait() }()
 	waitGone(t, pid)
 }
 
@@ -94,7 +99,6 @@ func TestAliveIsFalseForAPidThatIsNotRunning(t *testing.T) {
 	cmd := startHelper(t)
 	pid := cmd.Process.Pid
 	_ = childproc.Kill(cmd.Process.Pid)
-	_ = cmd.Wait()
 	waitGone(t, pid)
 	if childproc.Alive(pid) {
 		t.Fatal("Alive reported a process that has exited")

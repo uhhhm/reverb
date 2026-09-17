@@ -63,11 +63,13 @@ push.
 
 Every per-OS seam has a Windows implementation — the single-instance lock, the
 background control channel, child-process handling, bundled-tool lookup and the
-updater's install step — but only the boot path above is exercised on Windows.
-Two gaps are known rather than suspected: `make desktop-deps` fetches no Windows
-builds of ffmpeg, Navidrome, deno or spotDL, so a Windows build falls back to
-whatever is on `PATH`; and `desktop.yml` publishes no Windows release asset, so
-there is nothing for the updater to find.
+updater's install step. Windows CI exercises the boot and background-control
+round trips, including shutdown acknowledgement after the database lock is
+released and cleanup when background startup stalls. Two gaps are known rather
+than suspected: `make desktop-deps` fetches no Windows builds of ffmpeg,
+Navidrome, deno or spotDL, so a Windows build falls back to whatever is on
+`PATH`; and `desktop.yml` publishes no Windows release asset, so there is
+nothing for the updater to find.
 
 ## Background sync
 
@@ -94,12 +96,15 @@ it also runs the bundled library and download workers. There is no hidden
 webview, UI polling, or additional copy of the backend. Closing/reopening entails
 a brief backend restart and device reconnection.
 
-Background shutdown controls use a Unix socket in a `0700` directory next to
-the database, with socket mode `0600`; they are not exposed on the HTTP API.
-Existing paired-device authentication and HTTP Host/Origin guards still apply.
-The close preference is saved locally in `desktop.json`. Startup diagnostics go
-to `background.log` next to the database; if background startup fails, check that
-file. Files over 5 MiB are rotated on the next background launch.
+Background shutdown controls use a filesystem Unix socket next to the database;
+they are not exposed on the HTTP API and requests carrying a browser `Origin`
+are refused. Unix restricts the socket directory to `0700` and the socket to
+`0600`; Windows inherits the per-user AppData directory's ACL. Existing
+paired-device authentication and HTTP Host/Origin guards still apply. The close
+preference is saved locally in `desktop.json`. Startup diagnostics go to
+`background.log` next to the database; if background startup fails, Reverb
+terminates and reaps that copy before reporting the failure. Files over 5 MiB
+are rotated on the next background launch.
 
 ## Releases and auto-update
 
@@ -126,4 +131,3 @@ runs when a GitHub release is **published**:
 Between publishing and the assets landing, the updater sees the new tag with
 no payload for its platform and re-checks every fifteen minutes instead of
 waiting for the next six-hour cycle. There is no Windows build in the matrix.
-

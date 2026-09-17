@@ -69,7 +69,7 @@ reduced CPU priority, without Wails or a webview. Reopening requests shutdown vi
 a user-private Unix socket and waits for resource release before booting the UI.
 The local `desktop.json` preference controls this handoff; an explicit quit or
 update restart bypasses it. No login service is installed. See
-[desktop background sync](../desktop/README.md#background-sync-macos-and-linux).
+[desktop background sync](../desktop/README.md#background-sync).
 
 Everything about the desktop app that depends on the host's process model lives
 behind a per-OS seam, so a port changes implementations rather than editing
