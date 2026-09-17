@@ -23,10 +23,6 @@ func UpgradeYtDlp(ctx context.Context, pythonBin string) error {
 	if pythonBin == "" {
 		if env := os.Getenv("REVERB_YTDLP_PYTHON"); env != "" {
 			pythonBin = env
-		} else if env := os.Getenv("REVERB_SPOTDL_PATH"); env != "" {
-			// REVERB_SPOTDL_PATH points to spotdl binary; derive python from its venv if possible,
-			// fallback to python3. For now just use python3 to keep contract simple.
-			pythonBin = DefaultPythonBin
 		} else {
 			pythonBin = DefaultPythonBin
 		}

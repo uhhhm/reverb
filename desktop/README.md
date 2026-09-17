@@ -18,7 +18,7 @@ Wails v2 desktop wrapper for Reverb. Sibling to `cmd/reverb`, shares `internal/*
 ```bash
 make desktop        # build dist/reverb-desktop (requires web build)
 make desktop-dev    # wails dev -projectdir ./desktop (hot reload via Vite :5173)
-make desktop-deps   # fetch ffmpeg static + navidrome per TARGETARCH (tools/fetch-*.sh)
+make desktop-deps   # fetch ffmpeg, Navidrome, Deno, Python, spotDL and yt-dlp
 make desktop-windows # cross-compile dist/reverb-desktop.exe from macOS or Linux
 ```
 
@@ -65,11 +65,17 @@ Every per-OS seam has a Windows implementation — the single-instance lock, the
 background control channel, child-process handling, bundled-tool lookup and the
 updater's install step. Windows CI exercises the boot and background-control
 round trips, including shutdown acknowledgement after the database lock is
-released and cleanup when background startup stalls. Two gaps are known rather
-than suspected: `make desktop-deps` fetches no Windows builds of ffmpeg,
-Navidrome, deno or spotDL, so a Windows build falls back to whatever is on
-`PATH`; and `desktop.yml` publishes no Windows release asset, so there is
-nothing for the updater to find.
+released and cleanup when background startup stalls. It also fetches and smoke
+tests the Windows ffmpeg, Navidrome, Deno, Python, spotDL and yt-dlp bundle.
+`desktop.yml` still publishes no Windows release asset, so there is nothing for
+the updater to find until the Windows release-artifact ticket lands.
+
+On Windows, `make desktop-deps` uses a relocatable python-build-standalone
+runtime rather than a machine-wide Python. The `spotdl.exe` and `yt-dlp.exe`
+launchers locate that runtime relative to themselves, so the whole `bin` plus
+`python` tree can move into an installed app unchanged. Desktop startup exports
+that interpreter as `REVERB_YTDLP_PYTHON`; the daily yt-dlp upgrade therefore
+updates the bundled environment and never requires `python3` on `PATH`.
 
 ## Background sync
 

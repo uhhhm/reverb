@@ -4,12 +4,16 @@
 
 **Blocked by:** 02 (Windows desktop builds, opens the window, and boots the backend)
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] The dependency fetch step on Windows retrieves the Windows builds of ffmpeg, Navidrome, and deno and installs spotDL and yt-dlp into a bundled Python runtime.
-- [ ] On Windows the app locates bundled executables under their Windows names and the bundled Python's script location, and services receive the same environment variables as on macOS/Linux.
-- [ ] The PATH prepend that lets spotDL invoke ffmpeg and yt-dlp by name works with the Windows path separator and does not duplicate entries.
+- [x] The dependency fetch step on Windows retrieves the Windows builds of ffmpeg, Navidrome, and deno and installs spotDL and yt-dlp into a bundled Python runtime.
+- [x] On Windows the app locates bundled executables under their Windows names and the bundled Python's script location, and services receive the same environment variables as on macOS/Linux.
+- [x] The PATH prepend that lets spotDL invoke ffmpeg and yt-dlp by name works with the Windows path separator and does not duplicate entries.
 - [ ] A Spotify download, a yt-dlp download, and deno-backed extraction succeed on Windows; downloaded files are post-processed with ffmpeg and appear in the library folder.
-- [ ] No console window appears while bundled tools run.
-- [ ] The automatic yt-dlp upgrade uses the bundled Python and succeeds without a system Python installation.
-- [ ] Tool resolution and the existing tests on macOS/Linux are unchanged.
+- [x] No console window appears while bundled tools run.
+- [x] The automatic yt-dlp upgrade uses the bundled Python and succeeds without a system Python installation.
+- [x] Tool resolution and the existing tests on macOS/Linux are unchanged.
+
+## Comments
+
+Implemented Windows-native dependency fetches, relocatable Python module launchers, Windows-aware bundle resolution and PATH handling, and bundled-Python yt-dlp upgrades. Windows CI fetches and smoke-tests every tool, including a real ffmpeg invocation; existing downloader tests cover the spotDL, yt-dlp, and Deno wiring. A credentialed end-to-end Windows download through all three paths still needs human verification.

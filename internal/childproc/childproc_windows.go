@@ -8,9 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -19,11 +22,9 @@ import (
 // addressable.
 //
 // CREATE_NO_WINDOW is what stops a terminal from flashing when the app starts
-// ffmpeg or Navidrome: the child still gets a console, but an invisible one.
-// That console is also the only route Terminate has, since console control
-// events are the sole orderly-shutdown notification Windows offers. It has no
-// effect on a GUI-subsystem child, which gets no console at all — see
-// Terminate for what that costs.
+// a one-shot tool such as ffmpeg. The child has no console at all, so it cannot
+// receive the console control event Terminate uses; long-lived children that
+// need orderly shutdown are created by hideGracefully instead.
 //
 // CREATE_NEW_PROCESS_GROUP makes the child the leader of a group of its own,
 // so its group id is its pid. Terminate needs that to aim a control event at
@@ -37,6 +38,22 @@ func hide(cmd *exec.Cmd) {
 	attr := sysProcAttr(cmd)
 	attr.HideWindow = true
 	attr.CreationFlags |= windows.CREATE_NO_WINDOW | windows.CREATE_NEW_PROCESS_GROUP
+}
+
+// hideGracefully gives a console-capable child its own hidden console, keeping
+// it out of sight without removing its console control channel. The explicit
+// console matters in production: Reverb is a GUI-subsystem process and has no
+// parent console for Navidrome to inherit. Terminate attaches to that private
+// console and broadcasts Ctrl-Break only to its members. CREATE_NEW_PROCESS_GROUP
+// is deliberately absent because Windows ignores it with CREATE_NEW_CONSOLE.
+//
+// CREATE_NO_WINDOW is deliberately absent: Microsoft documents that it leaves
+// the application with no console handle, at which point AttachConsole cannot
+// reach it and graceful shutdown is impossible.
+func hideGracefully(cmd *exec.Cmd) {
+	attr := sysProcAttr(cmd)
+	attr.HideWindow = true
+	attr.CreationFlags |= windows.CREATE_NEW_CONSOLE
 }
 
 func sysProcAttr(cmd *exec.Cmd) *syscall.SysProcAttr {
@@ -69,9 +86,21 @@ func LowPriorityCommand(exe string, args ...string) *exec.Cmd {
 // Windows console management that golang.org/x/sys/windows does not wrap.
 // Only the handful of calls Terminate needs are bound here.
 var (
-	kernel32          = windows.NewLazySystemDLL("kernel32.dll")
-	procFreeConsole   = kernel32.NewProc("FreeConsole")
-	procAttachConsole = kernel32.NewProc("AttachConsole")
+	kernel32           = windows.NewLazySystemDLL("kernel32.dll")
+	procFreeConsole    = kernel32.NewProc("FreeConsole")
+	procAttachConsole  = kernel32.NewProc("AttachConsole")
+	procSetCtrlHandler = kernel32.NewProc("SetConsoleCtrlHandler")
+)
+
+var (
+	ctrlBreakObserved atomic.Bool
+	ctrlBreakHandler  = syscall.NewCallback(func(event uint32) uintptr {
+		if event == windows.CTRL_BREAK_EVENT {
+			ctrlBreakObserved.Store(true)
+			return 1
+		}
+		return 0
+	})
 )
 
 func freeConsole() error {
@@ -83,6 +112,17 @@ func freeConsole() error {
 
 func attachConsole(pid uint32) error {
 	if r, _, err := procAttachConsole.Call(uintptr(pid)); r == 0 {
+		return err
+	}
+	return nil
+}
+
+func setConsoleCtrlHandler(add bool) error {
+	value := uintptr(0)
+	if add {
+		value = 1
+	}
+	if r, _, err := procSetCtrlHandler.Call(ctrlBreakHandler, value); r == 0 {
 		return err
 	}
 	return nil
@@ -105,14 +145,14 @@ var consoleMu sync.Mutex
 //
 // Reaching the target means borrowing its console, which only a process with
 // no console of its own may do. That is the GUI build, which is what ships.
-// The event is then aimed at the target's own group rather than at the whole
-// console, which is what keeps it off this process: masking would not do
-// instead, since SetConsoleCtrlHandler(nil, true) suppresses CTRL+C and never
-// CTRL+BREAK. The console is given back immediately, so this process ends up
-// where it started.
+// Graceful children own a private console. The event is broadcast to that
+// console (group zero); a temporary last-installed handler absorbs the copy
+// delivered to this process, while the child receives its normal Ctrl-Break.
+// The console is given back after our handler observes the asynchronous event.
 //
-// Two targets cannot be asked at all: one with no console — every
-// GUI-subsystem image, Reverb's own background runtime included — and any
+// Two targets cannot be asked at all: one with no console — every child made
+// by Command/CommandContext and every GUI-subsystem image, including Reverb's
+// own background runtime — and any
 // target at all when the caller holds a console of its own, since Windows will
 // not let it borrow a second one. Only those two end in Kill, because Windows
 // offers no other way to say "please exit" to them and the caller could only
@@ -139,8 +179,19 @@ func Terminate(pid int) error {
 		return fmt.Errorf("attach to console of pid %d: %w", pid, err)
 	}
 	defer func() { _ = freeConsole() }()
-	// Command makes every child a group leader, so the group id is the pid.
-	return windows.GenerateConsoleCtrlEvent(windows.CTRL_BREAK_EVENT, uint32(pid))
+	ctrlBreakObserved.Store(false)
+	if err := setConsoleCtrlHandler(true); err != nil {
+		return fmt.Errorf("install console control handler: %w", err)
+	}
+	defer func() { _ = setConsoleCtrlHandler(false) }()
+	if err := windows.GenerateConsoleCtrlEvent(windows.CTRL_BREAK_EVENT, 0); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(time.Second)
+	for !ctrlBreakObserved.Load() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	return nil
 }
 
 // Kill ends the process outright. TerminateProcess gives the target no chance
@@ -184,19 +235,111 @@ func Alive(pid int) bool {
 // without one still matches: "navidrome" and "navidrome.exe" are the same
 // program here, and nothing else is.
 func IsNamed(pid int, want string) bool {
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	got, err := processImageName(pid)
 	if err != nil {
 		return false
 	}
+	got = filepath.Base(got)
+	return strings.EqualFold(got, want) ||
+		strings.EqualFold(strings.TrimSuffix(got, filepath.Ext(got)), want)
+}
+
+func instanceIdentity(pid int) (string, error) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return "", err
+	}
 	defer windows.CloseHandle(h)
+	return instanceIdentityFromHandle(h)
+}
+
+func instanceIdentityFromHandle(h windows.Handle) (string, error) {
+	var created, exited, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(h, &created, &exited, &kernel, &user); err != nil {
+		return "", err
+	}
+	path, err := processImageNameFromHandle(h)
+	if err != nil {
+		return "", err
+	}
+	ticks := uint64(created.HighDateTime)<<32 | uint64(created.LowDateTime)
+	return strings.ToLower(filepath.Clean(path)) + "|" + strconv.FormatUint(ticks, 10), nil
+}
+
+func stopInstance(pid int, expected string, grace time.Duration) (bool, error) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.PROCESS_TERMINATE, false, uint32(pid))
+	if err != nil {
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer windows.CloseHandle(h)
+	identity, err := instanceIdentityFromHandle(h)
+	if err != nil {
+		return false, err
+	}
+	if expected == "" || identity != expected {
+		return false, nil
+	}
+	// Even if the orderly request cannot be delivered, keep the stable handle
+	// through the grace period and hard-kill that same process instance.
+	_ = Terminate(pid)
+	exited, err := waitForHandleExit(h, grace)
+	if err != nil {
+		return true, err
+	}
+	if exited {
+		return true, nil
+	}
+	if err := windows.TerminateProcess(h, 1); err != nil {
+		return true, err
+	}
+	exited, err = waitForHandleExit(h, grace)
+	if err != nil {
+		return true, err
+	}
+	if !exited {
+		return true, fmt.Errorf("pid %d did not exit after kill", pid)
+	}
+	return true, nil
+}
+
+func waitForHandleExit(h windows.Handle, timeout time.Duration) (bool, error) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		var code uint32
+		if err := windows.GetExitCodeProcess(h, &code); err != nil {
+			return false, err
+		}
+		if code != stillActive {
+			return true, nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	var code uint32
+	if err := windows.GetExitCodeProcess(h, &code); err != nil {
+		return false, err
+	}
+	return code != stillActive, nil
+}
+
+func processImageName(pid int) (string, error) {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return "", err
+	}
+	defer windows.CloseHandle(h)
+	return processImageNameFromHandle(h)
+}
+
+func processImageNameFromHandle(h windows.Handle) (string, error) {
 	buf := make([]uint16, windows.MAX_LONG_PATH)
 	size := uint32(len(buf))
 	if err := windows.QueryFullProcessImageName(h, 0, &buf[0], &size); err != nil {
-		return false
+		return "", err
 	}
-	got := filepath.Base(windows.UTF16ToString(buf[:size]))
-	return strings.EqualFold(got, want) ||
-		strings.EqualFold(strings.TrimSuffix(got, filepath.Ext(got)), want)
+	return windows.UTF16ToString(buf[:size]), nil
 }
 
 // ShutdownSignals: os.Interrupt is how the Go runtime surfaces both console

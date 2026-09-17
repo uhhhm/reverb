@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -230,21 +229,22 @@ func TestSupervisor_LongHealthyRun_ResetsBudget(t *testing.T) {
 // A force-quit leaves navidrome holding its fixed port. The next run reaps it
 // from the pid file before starting its own child.
 func TestReapOrphanKillsRecordedProcess(t *testing.T) {
-	cmd, program := startHelperProcess(t)
+	cmd, program, exited := startHelperProcess(t)
 
 	pidPath := filepath.Join(t.TempDir(), "navidrome.pid")
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writePidFile(pidPath, cmd.Process.Pid)
 
 	// The pid file names the process that is actually running, as it would
 	// after a force-quit of a real navidrome.
-	reapOrphan(pidPath, filepath.Join("/opt/tools", program))
+	if err := reapOrphan(pidPath, filepath.Join("/opt/tools", program)); err != nil {
+		t.Fatal(err)
+	}
+	if childproc.Alive(cmd.Process.Pid) {
+		t.Fatal("reapOrphan returned before the recorded process exited")
+	}
 
-	done := make(chan struct{})
-	go func() { _ = cmd.Wait(); close(done) }()
 	select {
-	case <-done:
+	case <-exited:
 	case <-time.After(10 * time.Second):
 		t.Fatal("orphan still running: it will keep holding the navidrome port")
 	}
@@ -256,14 +256,14 @@ func TestReapOrphanKillsRecordedProcess(t *testing.T) {
 // Pids are reused. A stale file must never let Reverb signal whatever process
 // happens to hold that number now.
 func TestReapOrphanSparesUnrelatedProcess(t *testing.T) {
-	cmd, _ := startHelperProcess(t)
+	cmd, _, _ := startHelperProcess(t)
 
 	pidPath := filepath.Join(t.TempDir(), "navidrome.pid")
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil {
+	writePidFile(pidPath, cmd.Process.Pid)
+
+	if err := reapOrphan(pidPath, "/opt/tools/navidrome"); err != nil {
 		t.Fatal(err)
 	}
-
-	reapOrphan(pidPath, "/opt/tools/navidrome")
 
 	time.Sleep(200 * time.Millisecond)
 	if !childproc.Alive(cmd.Process.Pid) {

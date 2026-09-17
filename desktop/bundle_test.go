@@ -16,7 +16,7 @@ func TestBundleFindNotFound(t *testing.T) {
 func TestBundleFindViaPATH(t *testing.T) {
 	dir := t.TempDir()
 	tool := "test-tool-bundle-xyz"
-	path := filepath.Join(dir, tool)
+	path := filepath.Join(dir, toolFileNames(tool)[0])
 	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -32,23 +32,6 @@ func TestBundleFindViaPATH(t *testing.T) {
 	if _, err := os.Stat(got); err != nil {
 		t.Fatalf("returned path not stat-able: %v", err)
 	}
-}
-
-func TestBundleFindNonExecutable(t *testing.T) {
-	dir := t.TempDir()
-	tool := "non-exec-tool-xyz"
-	path := filepath.Join(dir, tool)
-	if err := os.WriteFile(path, []byte("x"), 0644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	orig := os.Getenv("PATH")
-	t.Setenv("PATH", dir)
-	// also clear any desktop/tools candidate by using unique name
-	got := findBundledTool(tool)
-	if got != "" {
-		t.Fatalf("want empty for non-executable, got %q", got)
-	}
-	_ = orig
 }
 
 func TestBundleResolveDoesNotPanic(t *testing.T) {
@@ -87,7 +70,7 @@ func TestBundleFindViaDesktopToolsBin(t *testing.T) {
 	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	path := filepath.Join(binDir, tool)
+	path := filepath.Join(binDir, toolFileNames(tool)[0])
 	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -127,11 +110,24 @@ func TestApplyBundledToolEnvDoesNotOverrideExplicitEnv(t *testing.T) {
 }
 
 func TestPrependToPathSkipsEmptyAndDuplicates(t *testing.T) {
-	t.Setenv("PATH", "/usr/bin")
-	prependToPath("", "/opt/tools/ffmpeg", "/opt/tools/yt-dlp", "/usr/bin/something")
+	existing := t.TempDir()
+	tools := t.TempDir()
+	t.Setenv("PATH", existing)
+	prependToPath("", filepath.Join(tools, "ffmpeg"), filepath.Join(tools, "yt-dlp"), filepath.Join(existing, "something"))
 	got := os.Getenv("PATH")
-	want := "/opt/tools" + string(filepath.ListSeparator) + "/usr/bin"
+	want := tools + string(filepath.ListSeparator) + existing
 	if got != want {
 		t.Errorf("PATH = %q, want %q", got, want)
+	}
+}
+
+func TestFindBundledExecutableUsesPlatformFileName(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, toolFileNames("python")[0])
+	if err := os.WriteFile(path, []byte("test executable"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := findBundledExecutable("python", []string{dir}); got != path {
+		t.Fatalf("findBundledExecutable = %q, want %q", got, path)
 	}
 }

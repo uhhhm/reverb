@@ -16,6 +16,7 @@ esac
 case "$TARGETOS" in
   linux*) TARGETOS=linux ;;
   darwin*) TARGETOS=darwin ;;
+  windows*|mingw*|msys*) TARGETOS=windows ;;
   *) echo "unsupported OS $TARGETOS" >&2; exit 1 ;;
 esac
 
@@ -33,7 +34,7 @@ if [[ "$TARGETOS" == "linux" ]]; then
   fi
   install -m 0755 "$FFMPEG_BIN" "$BIN_DIR/ffmpeg"
   echo "ffmpeg installed to $BIN_DIR/ffmpeg"
-else
+elif [[ "$TARGETOS" == "darwin" ]]; then
   URL="https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip"
   echo "Fetching ffmpeg for $TARGETOS/$TARGETARCH from $URL"
   TMP="$(mktemp -d)"
@@ -50,4 +51,22 @@ else
   fi
   install -m 0755 "$FFMPEG_BIN" "$BIN_DIR/ffmpeg"
   echo "ffmpeg installed to $BIN_DIR/ffmpeg"
+else
+  if [[ "$TARGETARCH" != "amd64" ]]; then
+    echo "Windows ffmpeg bundle is currently available for amd64 only" >&2
+    exit 1
+  fi
+  URL="https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+  echo "Fetching ffmpeg for $TARGETOS/$TARGETARCH from $URL"
+  TMP="$(mktemp -d)"
+  trap 'rm -rf "$TMP"' EXIT
+  curl -fsSL "$URL" -o "$TMP/ffmpeg.zip"
+  unzip -q "$TMP/ffmpeg.zip" -d "$TMP"
+  FFMPEG_BIN="$(find "$TMP" -type f -iname ffmpeg.exe | head -n 1)"
+  if [[ -z "$FFMPEG_BIN" || ! -f "$FFMPEG_BIN" ]]; then
+    echo "ffmpeg.exe not found in archive" >&2
+    exit 1
+  fi
+  install -m 0755 "$FFMPEG_BIN" "$BIN_DIR/ffmpeg.exe"
+  echo "ffmpeg installed to $BIN_DIR/ffmpeg.exe"
 fi

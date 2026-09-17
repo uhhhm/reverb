@@ -13,6 +13,11 @@ import (
 // here instead of in bin/.
 const pythonBinSubdir = "Scripts"
 
+// python-build-standalone puts python.exe at the runtime root.
+const pythonRuntimeSubdir = ""
+
+func pathKey(path string) string { return strings.ToLower(filepath.Clean(path)) }
+
 // toolFileNames returns the file names a tool may be installed under, most
 // specific first. Windows identifies an executable by its extension, and the
 // bundled tools arrive as .exe while a venv console script may be a .exe shim

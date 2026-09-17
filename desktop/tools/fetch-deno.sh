@@ -16,6 +16,7 @@ esac
 case "$TARGETOS" in
   linux*) OS=unknown-linux-gnu ;;
   darwin*) OS=apple-darwin ;;
+  windows*|mingw*|msys*) OS=pc-windows-msvc ;;
   *) echo "unsupported OS $TARGETOS" >&2; exit 1 ;;
 esac
 
@@ -27,5 +28,9 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 curl -fsSL "$URL" -o "$TMP/deno.zip"
 unzip -q "$TMP/deno.zip" -d "$TMP"
-install -m 0755 "$TMP/deno" "$BIN_DIR/deno"
-echo "deno installed to $BIN_DIR/deno"
+DENO_BIN="deno"
+if [[ "$OS" == "pc-windows-msvc" ]]; then
+  DENO_BIN="deno.exe"
+fi
+install -m 0755 "$TMP/$DENO_BIN" "$BIN_DIR/$DENO_BIN"
+echo "deno installed to $BIN_DIR/$DENO_BIN"

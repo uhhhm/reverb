@@ -10,6 +10,11 @@ import "os"
 // the search about a second layout.
 const pythonBinSubdir = "bin"
 
+// pythonRuntimeSubdir is where the venv's interpreter lives.
+const pythonRuntimeSubdir = "bin"
+
+func pathKey(path string) string { return path }
+
 // toolFileNames returns the file names a tool may be installed under, most
 // specific first. Unix executables carry no extension, so the tool's own name
 // is the only candidate.

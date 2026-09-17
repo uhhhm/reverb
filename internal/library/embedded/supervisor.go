@@ -2,6 +2,8 @@ package embedded
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -202,8 +204,10 @@ func (s *Supervisor) Shutdown(ctx context.Context) error {
 // a hard kill behave like a normal one. An empty pidPath disables both halves.
 func ExecRunner(binaryPath, pidPath string) Runner {
 	return func(ctx context.Context, env []string) (Process, error) {
-		reapOrphan(pidPath, binaryPath)
-		cmd := childproc.CommandContext(ctx, binaryPath)
+		if err := reapOrphan(pidPath, binaryPath); err != nil {
+			return nil, err
+		}
+		cmd := childproc.GracefulCommandContext(ctx, binaryPath)
 		cmd.Env = env
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -217,6 +221,11 @@ func ExecRunner(binaryPath, pidPath string) Runner {
 	}
 }
 
+type pidRecord struct {
+	PID      int    `json:"pid"`
+	Identity string `json:"identity,omitempty"`
+}
+
 func writePidFile(pidPath string, pid int) {
 	if pidPath == "" {
 		return
@@ -225,7 +234,19 @@ func writePidFile(pidPath string, pid int) {
 		log.Printf("navidrome: pid file dir: %v", err)
 		return
 	}
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0o644); err != nil {
+	record := pidRecord{PID: pid}
+	identity, err := childproc.InstanceIdentity(pid)
+	if err != nil {
+		log.Printf("navidrome: read process identity: %v", err)
+	} else {
+		record.Identity = identity
+	}
+	raw, err := json.Marshal(record)
+	if err != nil {
+		log.Printf("navidrome: encode pid file: %v", err)
+		return
+	}
+	if err := os.WriteFile(pidPath, raw, 0o644); err != nil {
 		log.Printf("navidrome: write pid file: %v", err)
 	}
 }
@@ -234,40 +255,57 @@ func writePidFile(pidPath string, pid int) {
 // running. The pid is checked against the binary's own name first: pids are
 // reused, and a stale file must never let Reverb signal a process that merely
 // inherited the number.
-func reapOrphan(pidPath, binaryPath string) {
+func reapOrphan(pidPath, binaryPath string) error {
 	if pidPath == "" {
-		return
+		return nil
 	}
 	raw, err := os.ReadFile(pidPath)
 	if err != nil {
-		return
+		return nil
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-	if err != nil || pid <= 1 {
+	record, ok := parsePidRecord(raw)
+	if !ok || record.PID <= 1 {
 		_ = os.Remove(pidPath)
-		return
+		return nil
 	}
+	pid := record.PID
 	if !childproc.Alive(pid) {
 		_ = os.Remove(pidPath) // already gone
-		return
+		return nil
 	}
 	if !childproc.IsNamed(pid, filepath.Base(binaryPath)) {
 		_ = os.Remove(pidPath)
-		return
+		return nil
+	}
+	identity, err := childproc.InstanceIdentity(pid)
+	if err != nil || (identity != "" && (record.Identity == "" || record.Identity != identity)) {
+		// A Windows pid file without the instance token is from an older build;
+		// safety wins over guessing. A mismatch proves the pid was reused.
+		_ = os.Remove(pidPath)
+		return nil
 	}
 	log.Printf("navidrome: reaping orphaned instance (pid %d) left by a previous run", pid)
-	_ = childproc.Terminate(pid)
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if !childproc.Alive(pid) {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
+	matched, err := childproc.StopInstance(pid, record.Identity, 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("navidrome: stop orphan pid %d: %w", pid, err)
 	}
-	if childproc.Alive(pid) {
-		_ = childproc.Kill(pid)
+	if !matched {
+		// The process changed after the preliminary diagnostics. StopInstance
+		// held the decisive handle while rechecking, so nothing was signalled.
+		_ = os.Remove(pidPath)
+		return nil
 	}
 	_ = os.Remove(pidPath)
+	return nil
+}
+
+func parsePidRecord(raw []byte) (pidRecord, bool) {
+	var record pidRecord
+	if err := json.Unmarshal(raw, &record); err == nil {
+		return record, record.PID > 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	return pidRecord{PID: pid}, err == nil && pid > 0
 }
 
 type execProcess struct{ cmd *exec.Cmd }

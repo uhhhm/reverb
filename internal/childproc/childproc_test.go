@@ -3,6 +3,7 @@ package childproc_test
 import (
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"testing"
 	"time"
@@ -16,6 +17,18 @@ import (
 const helperEnv = "REVERB_CHILDPROC_HELPER"
 
 func TestMain(m *testing.M) {
+	if os.Getenv(helperEnv) == "graceful" {
+		stopped := make(chan os.Signal, 1)
+		signal.Notify(stopped, childproc.ShutdownSignals()...)
+		if ready := os.Getenv("REVERB_CHILDPROC_READY"); ready != "" {
+			_ = os.WriteFile(ready, []byte("ready"), 0o600)
+		}
+		<-stopped
+		if marker := os.Getenv("REVERB_CHILDPROC_STOPPED"); marker != "" {
+			_ = os.WriteFile(marker, []byte("stopped"), 0o600)
+		}
+		os.Exit(0)
+	}
 	if os.Getenv(helperEnv) == "1" {
 		time.Sleep(60 * time.Second)
 		os.Exit(0)

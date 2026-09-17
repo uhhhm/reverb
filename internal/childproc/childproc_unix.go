@@ -3,17 +3,53 @@
 package childproc
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // hide is a no-op: starting a process on a unix system does not create a
 // window of any kind.
 func hide(*exec.Cmd) {}
+
+// Unix signals do not depend on console membership, so a gracefully managed
+// child uses the same process configuration as every other child.
+func hideGracefully(cmd *exec.Cmd) { hide(cmd) }
+
+// Unix orphan handling retains its existing pid-plus-name behavior. The
+// stronger instance token is needed for Windows, where the ticket explicitly
+// guards against signalling a reused pid.
+func instanceIdentity(int) (string, error) { return "", nil }
+
+func stopInstance(pid int, _ string, grace time.Duration) (bool, error) {
+	if !Alive(pid) {
+		return false, nil
+	}
+	_ = Terminate(pid)
+	deadline := time.Now().Add(grace)
+	for Alive(pid) && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !Alive(pid) {
+		return true, nil
+	}
+	if err := Kill(pid); err != nil {
+		return true, fmt.Errorf("kill pid %d: %w", pid, err)
+	}
+	deadline = time.Now().Add(grace)
+	for Alive(pid) && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if Alive(pid) {
+		return true, fmt.Errorf("pid %d did not exit after kill", pid)
+	}
+	return true, nil
+}
 
 // Detach puts the child in its own session, which detaches it from the parent's
 // controlling terminal. It then no longer receives the terminal's SIGHUP when

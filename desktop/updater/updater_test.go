@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -247,6 +249,17 @@ func TestUpgradeYtDlpCommandConstruction(t *testing.T) {
 	}
 	if capturedName != DefaultPythonBin {
 		t.Fatalf("default python = %q want %q", capturedName, DefaultPythonBin)
+	}
+
+	// Desktop startup publishes the relocatable interpreter explicitly; no
+	// system Python should be consulted when the bundle is present.
+	t.Setenv("REVERB_YTDLP_PYTHON", filepath.Join(t.TempDir(), "python.exe"))
+	capturedName = ""
+	if err := UpgradeYtDlp(context.Background(), ""); err != nil {
+		t.Fatalf("UpgradeYtDlp bundled error: %v", err)
+	}
+	if capturedName != os.Getenv("REVERB_YTDLP_PYTHON") {
+		t.Fatalf("bundled python = %q want %q", capturedName, os.Getenv("REVERB_YTDLP_PYTHON"))
 	}
 }
 

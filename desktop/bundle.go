@@ -19,6 +19,13 @@ func ResolveBundledTools() (ffmpeg, navidrome, spotdl, deno, ytdlp string) {
 		findBundledTool("yt-dlp")
 }
 
+// ResolveBundledPython returns only a Python interpreter shipped with Reverb.
+// It deliberately does not fall back to PATH: the yt-dlp hot upgrade must
+// update the bundled environment instead of an unrelated system installation.
+func ResolveBundledPython() string {
+	return findBundledExecutable("python", bundledPythonDirs())
+}
+
 // inPythonVenv reports whether name is installed into the bundled Python venv
 // (setup-python-venv.sh installs spotdl and yt-dlp there) rather than bin/.
 func inPythonVenv(name string) bool { return name == "spotdl" || name == "yt-dlp" }
@@ -86,17 +93,8 @@ func bundledToolDirs(name string) []string {
 // or "" when none is found. The file name a tool is installed under is an OS
 // detail (toolFileNames), as is what makes a file runnable (isExecutable).
 func findBundledTool(name string) string {
-	for _, dir := range bundledToolDirs(name) {
-		for _, file := range toolFileNames(name) {
-			c := filepath.Join(dir, file)
-			if abs, err := filepath.Abs(c); err == nil {
-				c = abs
-			}
-			c = filepath.Clean(c)
-			if isExecutable(c) {
-				return c
-			}
-		}
+	if path := findBundledExecutable(name, bundledToolDirs(name)); path != "" {
+		return path
 	}
 
 	// Nothing bundled: fall back to whatever the household has installed.
@@ -109,6 +107,52 @@ func findBundledTool(name string) string {
 	}
 
 	return ""
+}
+
+func findBundledExecutable(name string, dirs []string) string {
+	for _, dir := range dirs {
+		for _, file := range toolFileNames(name) {
+			c := filepath.Join(dir, file)
+			if abs, err := filepath.Abs(c); err == nil {
+				c = abs
+			}
+			c = filepath.Clean(c)
+			if isExecutable(c) {
+				return c
+			}
+		}
+	}
+	return ""
+}
+
+func bundledPythonDirs() []string {
+	var roots []string
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		roots = append(roots,
+			filepath.Join(dir, "../Resources/python"),
+			filepath.Join(dir, "Resources/python"),
+			filepath.Join(dir, "python"),
+		)
+	}
+	argv0 := filepath.Dir(os.Args[0])
+	roots = append(roots,
+		filepath.Join(argv0, "../Resources/python"),
+		filepath.Join(argv0, "Resources/python"),
+	)
+	if wd, err := os.Getwd(); err == nil {
+		roots = append(roots,
+			filepath.Join(wd, "desktop/tools/python"),
+			filepath.Join(wd, "../desktop/tools/python"),
+			filepath.Join(wd, "../../desktop/tools/python"),
+		)
+	}
+	roots = append(roots, "desktop/tools/python", "./desktop/tools/python")
+	dirs := make([]string, 0, len(roots))
+	for _, root := range roots {
+		dirs = append(dirs, filepath.Join(root, pythonRuntimeSubdir))
+	}
+	return dirs
 }
 
 // ApplyBundledToolEnv points the services at the binaries shipped alongside the
@@ -125,6 +169,7 @@ func ApplyBundledToolEnv() {
 	setEnvIfUnset("REVERB_SPOTDL_PATH", spotdl)
 	setEnvIfUnset("REVERB_YTDLP_PATH", ytdlp)
 	setEnvIfUnset("REVERB_DENO_PATH", deno)
+	setEnvIfUnset("REVERB_YTDLP_PYTHON", ResolveBundledPython())
 	prependToPath(ffmpeg, ytdlp)
 }
 
@@ -141,7 +186,7 @@ func prependToPath(tools ...string) {
 	path := os.Getenv("PATH")
 	existing := make(map[string]bool)
 	for _, d := range filepath.SplitList(path) {
-		existing[d] = true
+		existing[pathKey(d)] = true
 	}
 	var prefix []string
 	for _, t := range tools {
@@ -149,10 +194,11 @@ func prependToPath(tools ...string) {
 			continue
 		}
 		d := filepath.Dir(t)
-		if existing[d] {
+		key := pathKey(d)
+		if existing[key] {
 			continue
 		}
-		existing[d] = true
+		existing[key] = true
 		prefix = append(prefix, d)
 	}
 	if len(prefix) == 0 {
