@@ -77,13 +77,13 @@ export const ownerMe = {
 export async function installApiMocks(
   page: Page,
   authed: { value: boolean },
-  opts: { me?: typeof ownerMe } = {},
+  opts: { me?: typeof ownerMe; mockAudio?: boolean } = {},
 ) {
   downloadState.jobs = [] // reset per test
   // E2E asserts player state, not the browser's codec support. Prevent an empty
   // mock stream from asynchronously rejecting playback and flipping the engine
   // back to paused after the UI has handled a play action.
-  await page.addInitScript(() => {
+  if (opts.mockAudio !== false) await page.addInitScript(() => {
     const paused = new WeakMap<HTMLMediaElement, boolean>()
     const src = new WeakMap<HTMLMediaElement, string>()
     Object.defineProperty(HTMLMediaElement.prototype, 'src', {

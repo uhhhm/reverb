@@ -23,6 +23,30 @@ type fakeExtStream struct {
 	lastTitle   string
 }
 
+func TestNormalizeRangelessRequiresCompleteResource(t *testing.T) {
+	for _, tc := range []struct {
+		name, clientRange, contentRange string
+		wantStatus                      int
+	}{
+		{"whole resource", "", "bytes 0-9/10", http.StatusOK},
+		{"only the beginning", "", "bytes 0-4/10", http.StatusPartialContent},
+		{"unknown total", "", "bytes 0-4/*", http.StatusPartialContent},
+		{"missing total", "", "bytes 0-4", http.StatusPartialContent},
+		{"invalid total", "", "bytes 0-9/0", http.StatusPartialContent},
+		{"nonzero start", "", "bytes 5-9/10", http.StatusPartialContent},
+		{"explicit range", "bytes=0-", "bytes 0-9/10", http.StatusPartialContent},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := &http.Response{StatusCode: http.StatusPartialContent, Header: make(http.Header)}
+			resp.Header.Set("Content-Range", tc.contentRange)
+			status, dropRange := normalizeRangeless(tc.clientRange, resp)
+			if status != tc.wantStatus || dropRange != (tc.wantStatus == http.StatusOK) {
+				t.Fatalf("got status=%d dropRange=%v; want status=%d", status, dropRange, tc.wantStatus)
+			}
+		})
+	}
+}
+
 func (f *fakeExtStream) ResolveHinted(_ context.Context, _, _, artist, title string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

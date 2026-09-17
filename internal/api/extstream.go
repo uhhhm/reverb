@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -143,7 +144,14 @@ func normalizeRangeless(clientRange string, resp *http.Response) (status int, dr
 	if clientRange != "" || resp.StatusCode != http.StatusPartialContent {
 		return resp.StatusCode, false
 	}
-	if !strings.HasPrefix(resp.Header.Get("Content-Range"), "bytes 0-") {
+	span, ok := strings.CutPrefix(resp.Header.Get("Content-Range"), "bytes 0-")
+	if !ok {
+		return resp.StatusCode, false
+	}
+	last, total, ok := strings.Cut(span, "/")
+	end, endErr := strconv.ParseInt(last, 10, 64)
+	size, sizeErr := strconv.ParseInt(total, 10, 64)
+	if !ok || endErr != nil || sizeErr != nil || size <= 0 || end != size-1 {
 		return resp.StatusCode, false
 	}
 	return http.StatusOK, true

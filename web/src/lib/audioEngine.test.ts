@@ -61,6 +61,277 @@ function newEngine(measured: (trackId: string) => Promise<number | null> = async
 
 const list = [track('1'), track('2'), track('3')]
 
+// Model the resource reset and play event as well as the clock. A play event
+// means playback was requested; it does not prove that any audio was decoded.
+class LifecycleAudio extends FakeAudio {
+  override load() {
+    this.currentTime = 0
+    this.duration = 0
+    this.paused = true
+    this.error = null
+  }
+  override async play() {
+    this.paused = false
+    this.fire('play')
+  }
+}
+
+describe('AudioEngine playback lifecycle regressions', () => {
+  let engine: AudioEngine
+  let audios: LifecycleAudio[]
+  beforeEach(() => {
+    vi.useFakeTimers()
+    audios = []
+    engine = new AudioEngine(() => {
+      const a = new LifecycleAudio()
+      audios.push(a)
+      return a
+    }, (t, ms) => `mock://${t.id}?t=${ms}`, async () => null, async () => null)
+  })
+  afterEach(() => {
+    engine.clear()
+    vi.useRealTimers()
+  })
+
+  it.each(['remove', 'replace'] as const)('stops the audio when %s empties the queue', (action) => {
+    engine.playTrackList([track('1')], 0)
+    if (action === 'remove') engine.removeAt(0)
+    else engine.playTrackList([], 0)
+    expect(engine.getState().current).toBeNull()
+    expect(audios[0].paused).toBe(true)
+    expect(engine.getState().loading).toBe(false)
+  })
+
+  it('loads the newly queued track after clearing the previous queue', () => {
+    engine.playTrackList(list, 0)
+    audios[0].currentTime = 0.5
+    audios[0].fire('timeupdate')
+    engine.clear()
+    expect(engine.getState().currentTimeMs).toBe(0)
+    expect(engine.getState().durationMs).toBe(0)
+    engine.enqueue(track('new'))
+    engine.play()
+    expect(audios[0].src).toBe('mock://new?t=0')
+  })
+
+  it('keeps the current queue occurrence when duplicate tracks are reordered', () => {
+    engine.playTrackList([track('1'), track('2'), track('1'), track('3')], 2)
+    engine.moveItem(3, 1)
+    expect(engine.getState().index).toBe(3)
+    expect(engine.getState().upNext).toEqual([])
+  })
+
+  it('does not replay shuffle history when a new track is queued', () => {
+    engine.playTrackList(list, 0)
+    engine.toggleShuffle()
+    engine.next()
+    engine.enqueue(track('4'))
+    expect(engine.getState().upNext).not.toContain(0)
+    expect(engine.getState().upNext).toHaveLength(2)
+  })
+
+  it('stops audible playback at the final crop end and can replay from its start', () => {
+    engine.playTrackList([{ ...track('1'), durationMs: 30000, cropStartMs: 5000, cropEndMs: 10000 }], 0)
+    audios[0].currentTime = 10
+    audios[0].fire('timeupdate')
+    expect(engine.getState().playing).toBe(false)
+    expect(audios[0].paused).toBe(true)
+    engine.play()
+    expect(audios[0].currentTime).toBe(5)
+    expect(engine.getState().currentTimeMs).toBe(0)
+  })
+
+  it('repeat one restarts the whole track after a backend seek', () => {
+    engine.playTrackList([{ ...track('1'), durationMs: 30000, suffix: 'opus', contentType: 'audio/ogg' }], 0)
+    engine.cycleRepeat()
+    engine.cycleRepeat()
+    engine.seekMs(20000)
+    audios[0].fire('ended')
+    expect(audios[0].src).toBe('mock://1?t=0')
+    audios[0].currentTime = 1
+    audios[0].fire('timeupdate')
+    expect(engine.getState().currentTimeMs).toBe(1000)
+  })
+
+  it('does not let a delayed error resume or skip a paused track, even with repeat one', () => {
+    engine.playTrackList(list, 0)
+    engine.cycleRepeat()
+    engine.cycleRepeat()
+    engine.pause()
+    audios[0].error = { code: 3 }
+    audios[0].fire('error')
+    expect(audios[0].paused).toBe(true)
+    expect(engine.getState().playing).toBe(false)
+    expect(engine.getState().index).toBe(0)
+  })
+
+  it('bounds failed retries even when every play request fires a play event', () => {
+    engine.playTrackList(list, 0)
+    for (let i = 0; i < 24 && engine.getState().playing; i++) {
+      audios[0].error = { code: 3 }
+      audios[0].fire('error')
+    }
+    expect(engine.getState().playing).toBe(false)
+  })
+
+  it('cancels a scheduled reload once audio starts flowing again', () => {
+    engine.playTrackList([{ ...track('1'), durationMs: 30000 }], 0)
+    audios[0].error = { code: 2 }
+    audios[0].fire('error')
+    const reload = vi.spyOn(audios[0], 'load')
+    audios[0].error = null
+    audios[0].currentTime = 1
+    audios[0].fire('timeupdate')
+    audios[0].currentTime = 1.25
+    audios[0].fire('timeupdate')
+    vi.advanceTimersByTime(1000)
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it('recovers an initial load that never emits waiting or error', () => {
+    engine.playTrackList(list, 0)
+    const reload = vi.spyOn(audios[0], 'load')
+    vi.advanceTimersByTime(21000)
+    expect(reload).toHaveBeenCalled()
+  })
+
+  it('reports an autoplay refusal as paused instead of playing forever', async () => {
+    const rejected = Promise.reject(new DOMException('blocked', 'NotAllowedError'))
+    void rejected.catch(() => {})
+    vi.spyOn(audios[0], 'play').mockReturnValueOnce(rejected)
+    engine.playTrackList(list, 0)
+    await Promise.resolve()
+    expect(engine.getState().playing).toBe(false)
+    expect(engine.getState().loading).toBe(false)
+  })
+
+  it('ignores a previous play rejection after skipping to a new source', async () => {
+    engine.playTrackList(list, 0)
+    engine.pause()
+    let reject!: (error: Error) => void
+    const pending = new Promise<void>((_, no) => { reject = no })
+    void pending.catch(() => {})
+    vi.spyOn(audios[0], 'play').mockReturnValueOnce(pending)
+    engine.play()
+    engine.next()
+    const reload = vi.spyOn(audios[0], 'load')
+    reject(new DOMException('source replaced', 'AbortError'))
+    await Promise.resolve()
+    expect(reload).not.toHaveBeenCalled()
+    expect(engine.getState().current?.id).toBe('2')
+  })
+
+  it('keeps the recovery position while a reloaded stream reports zero before metadata', () => {
+    engine.playTrackList([{ ...track('1'), durationMs: 60000 }], 0)
+    audios[0].currentTime = 20
+    audios[0].fire('timeupdate')
+    audios[0].error = { code: 2 }
+    audios[0].fire('error')
+    vi.advanceTimersByTime(1000)
+    audios[0].fire('timeupdate')
+    expect(engine.getState().currentTimeMs).toBe(20000)
+    audios[0].fire('canplay')
+    expect(audios[0].currentTime).toBe(20)
+  })
+
+  it('still advances when the browser pauses at EOF before dispatching ended', () => {
+    engine.playTrackList(list, 0)
+    audios[0].fire('canplay')
+    Object.assign(audios[0], { paused: true, ended: true })
+    audios[0].fire('pause')
+    audios[0].fire('ended')
+    expect(engine.getState().index).toBe(1)
+    expect(engine.getState().playing).toBe(true)
+  })
+
+  it('does not defer recovery forever when a stuck source keeps firing waiting', () => {
+    engine.playTrackList(list, 0)
+    const reload = vi.spyOn(audios[0], 'load')
+    for (let i = 0; i < 21; i++) {
+      audios[0].fire('waiting')
+      vi.advanceTimersByTime(1000)
+    }
+    expect(reload).toHaveBeenCalled()
+  })
+
+  it('does not count a fragment clock reset as successful network recovery', () => {
+    engine.playTrackList([{ ...track('1'), durationMs: 60000, suffix: 'opus', contentType: 'audio/ogg' }, track('2')], 0)
+    engine.seekMs(20000)
+    for (let i = 0; i < 8 && engine.getState().index === 0; i++) {
+      audios[0].error = { code: 2 }
+      audios[0].fire('error')
+      vi.advanceTimersByTime(30000)
+      audios[0].fire('timeupdate')
+    }
+    expect(engine.getState().index).toBe(1)
+  })
+
+  it('skips a corrupt local file while offline instead of waiting for internet', () => {
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false)
+    try {
+      engine.playTrackList(list, 0)
+      for (let i = 0; i < 2; i++) {
+        audios[0].error = { code: 3 }
+        audios[0].fire('error')
+      }
+      expect(engine.getState().index).toBe(1)
+    } finally {
+      online.mockRestore()
+    }
+  })
+
+  it('uses a backend seek for the initial crop of an Opus file', () => {
+    engine.playTrackList([{ ...track('1'), durationMs: 60000, cropStartMs: 10000, suffix: 'opus', contentType: 'audio/ogg' }], 0)
+    expect(audios[0].src).toBe('mock://1?t=10000')
+    audios[0].currentTime = 1
+    audios[0].fire('timeupdate')
+    expect(engine.getState().currentTimeMs).toBe(1000)
+  })
+
+  it('accounts for the backend rounding seek offsets down to whole seconds', () => {
+    engine.playTrackList([{ ...track('1'), durationMs: 60000, suffix: 'opus', contentType: 'audio/ogg' }], 0)
+    engine.seekMs(20500)
+    audios[0].fire('canplay')
+    expect(audios[0].currentTime).toBe(0.5)
+    audios[0].fire('timeupdate')
+    expect(engine.getState().currentTimeMs).toBe(20500)
+  })
+
+  it('stops a lone failed track with repeat all without restarting its audio', () => {
+    engine.playTrackList([track('1')], 0)
+    engine.cycleRepeat()
+    audios[0].fire('error')
+    audios[0].fire('error')
+    expect(engine.getState().playing).toBe(false)
+    expect(audios[0].paused).toBe(true)
+  })
+
+  it('never publishes the previous track position as part of a new playlist', () => {
+    engine.playTrackList([{ ...track('old'), durationMs: 60000 }], 0)
+    audios[0].currentTime = 20
+    audios[0].fire('timeupdate')
+    const positions: number[] = []
+    engine.subscribe((s) => {
+      if (s.current?.id === 'new') positions.push(s.currentTimeMs)
+    })
+    engine.playTrackList([{ ...track('new'), durationMs: 40000 }], 0)
+    expect(positions.length).toBeGreaterThan(0)
+    expect(positions.every((ms) => ms === 0)).toBe(true)
+  })
+
+  it('seeking during a network retry reopens the source at the requested position', () => {
+    engine.playTrackList([{ ...track('1'), durationMs: 60000 }], 0)
+    audios[0].error = { code: 2 }
+    audios[0].fire('error')
+    const reload = vi.spyOn(audios[0], 'load')
+    engine.seekMs(10000)
+    expect(reload).toHaveBeenCalledOnce()
+    audios[0].fire('canplay')
+    expect(audios[0].currentTime).toBe(10)
+    expect(engine.getState().playing).toBe(true)
+  })
+})
+
 describe('AudioEngine queue + transport', () => {
   let engine: AudioEngine
   let audios: FakeAudio[]
@@ -279,7 +550,7 @@ describe('AudioEngine stream-error recovery', () => {
     expect(engine.getState().playing).toBe(false)
   })
 
-  it('successful play resets counter: 5-track queue — error, error, play, error → skip not stop', () => {
+  it('successful playback resets the error counter before another track fails', () => {
     const longList = [track('a'), track('b'), track('c'), track('d'), track('e')]
     engine.playTrackList(longList, 0)
 
@@ -290,7 +561,7 @@ describe('AudioEngine stream-error recovery', () => {
 
     // successful play resets counter
     audios[0].paused = false
-    audios[0].fire('play')
+    audios[0].fire('playing')
 
     // one more error → re-attach, then consecutiveErrors=1, should skip not stop
     audios[0].fire('error')
@@ -980,6 +1251,7 @@ describe('AudioEngine network interruptions', () => {
 
     // audio flows again
     a.error = null
+    a.fire('canplay')
     a.currentTime = 10.5
     a.fire('timeupdate')
     expect(engine.getState().index).toBe(0)

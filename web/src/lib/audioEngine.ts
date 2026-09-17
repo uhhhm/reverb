@@ -11,13 +11,15 @@ export interface AudioElement {
   duration: number
   volume: number
   paused: boolean
+  ended?: boolean
   play(): Promise<void>
   pause(): void
   load(): void
+  removeAttribute?(name: string): void
   buffered: { length: number; end(i: number): number; start(i: number): number }
   /**
-   * HTMLMediaElement.readyState / .error. Optional so a test stub need not
-   * model them; see sourceLost, which is the only reader.
+   * HTMLMediaElement.readyState / .error. Optional so a minimal test stub need
+   * not model resource loss or network errors.
    */
   readyState?: number
   error?: unknown
@@ -86,6 +88,10 @@ export class AudioEngine {
   // The source last handed to the preload element, so re-preloading the same
   // next track does not restart its download.
   private preloadedSrc = ''
+  private loadedTrack: Track | null = null
+  // Invalidates pending play promises on pause, seek, and source replacement.
+  private playRequest = 0
+  private finished = false
   private listeners = new Set<(s: PlayerState) => void>()
 
   private queue: Track[] = []
@@ -223,7 +229,7 @@ export class AudioEngine {
     this.active.addEventListener('waiting', this.onWaiting)
     this.active.addEventListener('stalled', this.onWaiting)
     this.active.addEventListener('canplay', this.onLoaded)
-    this.active.addEventListener('playing', this.onLoaded)
+    this.active.addEventListener('playing', this.onPlaying)
     this.active.addEventListener('seeked', this.onLoaded)
     this.active.addEventListener('canplaythrough', this.onLoaded)
     // Note: preload errors are intentionally not handled — a preload error should
@@ -291,6 +297,7 @@ export class AudioEngine {
   }
 
   private onTime = () => {
+    if (!this.loadedTrack || !this.getState().current || this.pendingSeekMs >= 0) return
     const { start, end } = this.cropWindow()
     const rawMs = this.seekBaseMs + Math.round((this.active.currentTime || 0) * 1000)
 
@@ -305,7 +312,7 @@ export class AudioEngine {
 
     // The crop end is the track's end: stop there and move on, exactly as if
     // the file had run out.
-    if (end > 0 && rawMs >= end) {
+    if (this.playing && end > 0 && rawMs >= end) {
       this.onEnded()
       return
     }
@@ -321,12 +328,11 @@ export class AudioEngine {
     // advancing clock is what clears the spinner.
     if (rawMs !== this.lastRawMs) {
       this.lastRawMs = rawMs
-      // Audio is flowing: the source is healthy, so the stall watchdog stands
-      // down and the next interruption starts its backoff from the top.
-      this.clearStall()
-      if (!this.active.paused) {
-        this.retryAttempt = 0
-        this.awaitingNetwork = false
+      // Only forward playback proves health. A freshly opened fragment starts
+      // at seekBaseMs even when it has not produced a single sample yet.
+      const advancing = advancedBy > 0 || (advancedBy === -1 && rawMs > Math.max(start, this.seekBaseMs))
+      if (!this.active.paused && this.playing && advancing) {
+        this.markHealthy()
         this.setLoading(false)
       }
     }
@@ -359,14 +365,14 @@ export class AudioEngine {
   }
 
   private onWaiting = () => {
+    if (!this.playing || !this.loadedTrack) return
     this.setLoading(true)
-    this.armStall()
+    if (this.stallTimer === null && this.retryTimer === null) this.armStall()
   }
 
   /**
-   * (Re)starts the no-progress watchdog. Armed whenever the element says it is
-   * waiting for data and cleared by the clock advancing, so it only ever fires
-   * on a source that has genuinely stopped.
+   * Starts the no-progress watchdog on a play request and refreshes it when
+   * audio advances. Repeated waiting events must not extend the deadline.
    */
   private armStall() {
     this.clearStall()
@@ -403,7 +409,7 @@ export class AudioEngine {
     this.setLoading(true)
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null
-      this.reattach(this.currentTimeMs, this.playing)
+      if (this.playing) this.reattach(this.currentTimeMs, true)
     }, delay)
   }
 
@@ -435,6 +441,7 @@ export class AudioEngine {
   }
 
   private onLoaded = () => {
+    if (!this.loadedTrack) return
     // A newly attached source can come up at the element's own default rather
     // than the level the slider shows; re-assert it.
     this.applyVolume()
@@ -447,6 +454,20 @@ export class AudioEngine {
     this.setLoading(false)
   }
 
+  private markHealthy() {
+    this.consecutiveErrors = 0
+    this.reattachAttempted = false
+    this.retryAttempt = 0
+    this.clearRetry()
+    this.armStall()
+  }
+
+  private onPlaying = () => {
+    if (!this.playing) return
+    this.onLoaded()
+    this.markHealthy()
+  }
+
   private setLoading = (v: boolean) => {
     if (this.loading === v) return
     this.loading = v
@@ -454,12 +475,12 @@ export class AudioEngine {
   }
 
   private onPlayState = () => {
-    this.playing = !this.active.paused
-    if (!this.active.paused) {
-      // Successful play: reset error counters so isolated dead tracks don't accumulate
-      this.consecutiveErrors = 0
-      this.reattachAttempted = false
-      this.retryAttempt = 0
+    // A play event only reflects a request, not successful audio. Likewise an
+    // error can pause the element without cancelling the listener's intent.
+    if (!this.playing && !this.active.paused) {
+      this.active.pause()
+    } else if (this.active.paused && !this.active.ended && !this.loading && !this.active.error && this.retryTimer === null) {
+      this.playing = false
     }
     this.emit()
   }
@@ -470,15 +491,21 @@ export class AudioEngine {
     // sets it again.
     this.loading = false
     const current = this.getState().current
-    if (!current) {
-      this.abandonTrack()
+    if (!current || !this.playing) {
+      this.clearRetry()
+      this.clearStall()
+      this.emit()
       return
     }
 
     // A network failure says nothing about the track, so it is waited out
     // rather than skipped past — skipping would just fail on the next track and
     // walk the queue while the connection is down.
-    if ((this.offline() || this.networkError()) && this.recover()) return
+    const errorCode = (this.active.error as { code?: number } | null)?.code
+    // Unsupported-source also covers an HTTP request failing before metadata;
+    // while offline it is not proof of a bad file. A decode error is.
+    const brokenMedia = errorCode === 3
+    if (!brokenMedia && (this.offline() || this.networkError()) && this.recover()) return
 
     // Otherwise: re-attach the source once before giving up on the track. The
     // usual cause is not a dead track but a stale source — a proxied external
@@ -487,7 +514,7 @@ export class AudioEngine {
     // the position over, so a resume is still a resume.
     if (!this.reattachAttempted) {
       this.reattachAttempted = true
-      this.reattach(this.currentTimeMs, this.playing || this.repeat === 'one')
+      this.reattach(this.currentTimeMs, true)
       return
     }
 
@@ -511,38 +538,30 @@ export class AudioEngine {
     this.clearStall()
     this.loading = false
 
-    if (this.repeat === 'one') {
-      // Never skip off the pinned track: stop instead.
-      this.playing = false
-      this.emit()
+    const next = this.peekNextIndex()
+    if (this.repeat === 'one' || next < 0 || next === this.index) {
+      // Nothing else to try. Keep the position for an explicit retry, and
+      // stop the element too (a watchdog can arrive while it is still active).
+      this.pause()
       return
     }
 
     this.consecutiveErrors++
     if (this.consecutiveErrors >= 3) {
       // Backend-down storm: stop to prevent infinite skip loop
-      this.playing = false
       this.consecutiveErrors = 0
-      this.emit()
+      this.pause()
       return
     }
 
-    // Skip the dead track and autoplay the next one. With nothing to skip to,
-    // stop — leaving `playing` true would show a playing track that is silent.
-    const before = this.index
+    // Skip the dead track and autoplay the next one.
     this.advance(1, true)
-    if (this.index === before && this.playing) {
-      this.playing = false
-      this.emit()
-    }
   }
 
   private onEnded = () => {
+    if (!this.playing || !this.loadedTrack) return
     if (this.repeat === 'one') {
-      this.active.currentTime = this.cropWindow().start / 1000
-      void this.active.play()
-      this.playing = true
-      this.emit()
+      this.loadCurrent(true)
       return
     }
     this.advance(1, true)
@@ -678,15 +697,21 @@ export class AudioEngine {
     this.listeners.forEach((cb) => cb(s))
   }
 
-  setQueue(tracks: Track[], startIndex = 0) {
+  private replaceQueue(tracks: Track[], startIndex: number) {
     this.queue = tracks.slice()
     this.index = tracks.length ? Math.min(Math.max(startIndex, 0), tracks.length - 1) : -1
     this.rebuildShuffle()
+  }
+
+  setQueue(tracks: Track[], startIndex = 0) {
+    this.replaceQueue(tracks, startIndex)
+    if (!tracks.length) this.unload()
     this.emit()
   }
 
   playTrackList(tracks: Track[], startIndex: number) {
-    this.setQueue(tracks, startIndex)
+    // Publish the new track together with its own position and duration.
+    this.replaceQueue(tracks, startIndex)
     this.loadCurrent(true)
   }
 
@@ -702,7 +727,11 @@ export class AudioEngine {
     this.queue = q
     if (this.index === -1) this.index = 0
     else if (i <= this.index) this.index++
-    this.rebuildShuffle()
+    if (this.shuffle) {
+      this.shuffleOrder = this.shuffleOrder.map((idx) => idx >= i ? idx + 1 : idx)
+      this.shuffleOrder.push(i)
+      this.shufflePos = this.shuffleOrder.indexOf(this.index)
+    }
     // The track after the current one may have just changed; start fetching it
     // now rather than when the current one ends.
     if (this.active.src) this.preloadNext()
@@ -711,68 +740,103 @@ export class AudioEngine {
 
   /** Stops playback and empties the queue. */
   clear() {
+    this.setQueue([])
+  }
+
+  private release(audio: AudioElement) {
+    audio.pause()
+    if (audio.removeAttribute) audio.removeAttribute('src')
+    else audio.src = ''
+    audio.load()
+  }
+
+  private unload() {
+    this.playRequest++
     this.clearRetry()
     this.clearStall()
-    this.active.pause()
+    this.loadedTrack = null
     this.playing = false
     this.loading = false
+    this.finished = false
+    this.pendingSeekMs = -1
+    this.seekBaseMs = 0
+    this.currentTimeMs = 0
+    this.durationMs = 0
+    this.bufferedMs = 0
     this.preloadedSrc = ''
-    this.setQueue([])
+    this.release(this.active)
+    this.release(this.preload)
   }
 
   removeAt(i: number) {
     if (i < 0 || i >= this.queue.length) return
     const wasCurrent = i === this.index
+    const nextShuffled = this.shuffleOrder[this.shufflePos + 1] ?? this.shuffleOrder[this.shufflePos - 1]
     this.queue = this.queue.filter((_, idx) => idx !== i)
+    if (wasCurrent && this.shuffle && nextShuffled !== undefined) this.index = nextShuffled
     if (i < this.index) this.index--
     if (this.index >= this.queue.length) this.index = this.queue.length - 1
-    this.rebuildShuffle()
+    if (this.shuffle) {
+      this.shuffleOrder = this.shuffleOrder.filter((idx) => idx !== i).map((idx) => idx > i ? idx - 1 : idx)
+      this.shufflePos = this.shuffleOrder.indexOf(this.index)
+    }
     if (wasCurrent) this.loadCurrent(this.playing)
+    else this.preloadNext()
     this.emit()
   }
 
   moveItem(from: number, to: number) {
     if (from < 0 || from >= this.queue.length || to < 0 || to >= this.queue.length) return
-    const currentId = this.index >= 0 ? this.queue[this.index]?.id : null
     const q = this.queue.slice()
     const [item] = q.splice(from, 1)
     q.splice(to, 0, item)
     this.queue = q
-    if (currentId) {
-      this.index = q.findIndex((t) => t.id === currentId)
+    const movedIndex = (i: number) => {
+      if (i === from) return to
+      if (from < i && i <= to) return i - 1
+      if (to <= i && i < from) return i + 1
+      return i
     }
-    this.rebuildShuffle()
+    this.index = movedIndex(this.index)
+    this.shuffleOrder = this.shuffleOrder.map(movedIndex)
+    this.preloadNext()
     this.emit()
   }
 
   private loadCurrent(autoplay: boolean) {
     const t = this.getState().current
     if (!t) {
-      this.playing = false
+      this.unload()
       this.emit()
       return
     }
     this.clearRetry()
     this.clearStall()
+    this.playRequest++
+    this.loadedTrack = t
+    this.finished = false
+    this.playing = autoplay
+    this.loading = true
     this.retryAttempt = 0
-    this.active.src = this.resolveSrc(t, 0)
+    const cropStart = Math.max(0, t.cropStartMs ?? 0)
+    const backendSeek = cropStart > 0 && needsBackendSeek(t)
+    this.seekBaseMs = backendSeek ? Math.floor(cropStart / 1000) * 1000 : 0
+    this.active.src = this.resolveSrc(t, backendSeek ? cropStart : 0)
     this.active.load()
     this.applyVolume()
-    this.loading = true
     this.lastRawMs = -1
     this.currentTimeMs = 0
+    this.bufferedMs = 0
     // A crop starts playback inside the file. The assignment may be ignored
     // until metadata arrives, which onTime's forward-clamp then fixes.
-    const cropStart = Math.max(0, t.cropStartMs ?? 0)
-    this.active.currentTime = cropStart / 1000
+    this.active.currentTime = (cropStart - this.seekBaseMs) / 1000
     // Only the new track's own numbers: the element still carries the previous
     // source's duration until it has loaded metadata for this one.
     const knownEnd = t.cropEndMs && t.cropEndMs > cropStart ? t.cropEndMs : (t.durationMs || 0)
     this.claimedEndMs = Math.max(0, knownEnd)
     this.playedToMs = 0
-    this.seekedSinceLoad = false
-    this.seekBaseMs = 0
-    this.pendingSeekMs = -1
+    this.seekedSinceLoad = cropStart > 0
+    this.pendingSeekMs = backendSeek && cropStart > this.seekBaseMs ? cropStart - this.seekBaseMs : -1
     this.reattachAttempted = false
     this.measuredEndMs = 0
     this.durationMs = Math.max(0, knownEnd - cropStart)
@@ -782,8 +846,7 @@ export class AudioEngine {
     this.applyVolume()
     if (this.normalization) void this.applyGainFor(t)
     if (autoplay) {
-      void this.active.play()
-      this.playing = true
+      this.startPlayback()
     }
     this.preloadNext()
     this.emit()
@@ -791,7 +854,11 @@ export class AudioEngine {
 
   private preloadNext() {
     const ni = this.peekNextIndex()
-    if (ni < 0 || ni >= this.queue.length) return
+    if (ni < 0 || ni >= this.queue.length) {
+      if (this.preloadedSrc) this.release(this.preload)
+      this.preloadedSrc = ''
+      return
+    }
     const src = this.resolveSrc(this.queue[ni], 0)
     if (src === this.preloadedSrc) return
     this.preloadedSrc = src
@@ -804,26 +871,34 @@ export class AudioEngine {
     if (this.index < 0 && this.queue.length) this.index = 0
     if (this.getState().current) {
       const retrying = this.retryTimer !== null || this.awaitingNetwork
-      if (!this.active.src) this.loadCurrent(true)
+      if (this.loadedTrack !== this.getState().current || this.finished || !this.active.src) this.loadCurrent(true)
       else if (retrying || this.sourceLost()) {
         // Pressing play is a request to try now, whatever the backoff says.
         this.clearRetry()
         this.reattach(this.currentTimeMs, true)
       }
       else {
-        this.playing = true
-        const started = this.active.play() as unknown as Promise<void> | undefined
-        if (started && typeof started.catch === 'function') {
-          started.catch((err: unknown) => {
-            // A browser refusing to autoplay is not a broken source; anything
-            // else means this element will not produce audio again.
-            if ((err as { name?: string })?.name === 'NotAllowedError') return
-            if (this.playing) this.reattach(this.currentTimeMs, true)
-          })
-        }
+        this.startPlayback()
       }
     }
     this.emit()
+  }
+
+  private startPlayback() {
+    this.playing = true
+    const request = ++this.playRequest
+    this.armStall()
+    const started = this.active.play()
+    void started?.catch((err: unknown) => {
+      if (request !== this.playRequest || !this.playing) return
+      const name = (err as { name?: string })?.name
+      if (name === 'NotAllowedError' || name === 'AbortError') {
+        this.loading = false
+        this.pause()
+      } else {
+        this.onError()
+      }
+    })
   }
 
   /**
@@ -851,28 +926,30 @@ export class AudioEngine {
     const t = this.getState().current
     if (!t) return
     this.clearStall()
+    this.playRequest++
+    this.playing = autoplay
+    this.loading = true
     const at = Math.max(0, ms)
     const target = this.cropWindow().start + at
     const backendSeek = target > 0 && needsBackendSeek(t)
     this.active.src = this.resolveSrc(t, backendSeek ? target : 0)
     this.active.load()
     this.applyVolume()
-    this.seekBaseMs = backendSeek ? target : 0
+    // Subsonic's timeOffset is in whole seconds. Seek the remaining fraction
+    // inside the returned MP3 so the clock and crop stay aligned to the file.
+    this.seekBaseMs = backendSeek ? Math.floor(target / 1000) * 1000 : 0
     // A browser-seekable source is put back by position once it has metadata;
     // assigning now would be dropped.
-    this.pendingSeekMs = backendSeek || target === 0 ? -1 : target
+    this.pendingSeekMs = target > this.seekBaseMs ? target - this.seekBaseMs : -1
     this.currentTimeMs = at
+    this.bufferedMs = 0
     this.lastRawMs = -1
     this.playedToMs = 0
     // Resuming partway in is a seek: what the element reports about its length
     // from here is read from the seek target, not from the file.
-    this.seekedSinceLoad = at > 0
-    this.loading = true
+    this.seekedSinceLoad = target > 0
     if (autoplay) {
-      void this.active.play()
-      this.playing = true
-      // A source that comes up silent and never errors is caught by this.
-      this.armStall()
+      this.startPlayback()
     }
     this.emit()
   }
@@ -882,8 +959,9 @@ export class AudioEngine {
     // it under them; play() arranges a fresh one.
     this.clearRetry()
     this.clearStall()
-    this.active.pause()
+    this.playRequest++
     this.playing = false
+    this.active.pause()
     this.emit()
   }
 
@@ -934,7 +1012,7 @@ export class AudioEngine {
       if (np >= this.shuffleOrder.length) {
         if (this.repeat === 'all') np = 0
         else {
-          if (fromEnded) { this.playing = false; this.emit() }
+          if (fromEnded) this.finishPlayback()
           return
         }
       }
@@ -948,13 +1026,20 @@ export class AudioEngine {
     if (ni >= this.queue.length) {
       if (this.repeat === 'all') ni = 0
       else {
-        if (fromEnded) { this.playing = false; this.emit() }
+        if (fromEnded) this.finishPlayback()
         return
       }
     }
     if (ni < 0) ni = 0
     this.index = ni
     this.loadCurrent(this.playing || fromEnded)
+  }
+
+  private finishPlayback() {
+    this.finished = true
+    this.loading = false
+    this.currentTimeMs = this.durationMs
+    this.pause()
   }
 
   playAt(index: number) {
@@ -988,20 +1073,22 @@ export class AudioEngine {
 
   /** Seeks within the cropped window; ms is relative to the crop start. */
   seekMs(ms: number) {
+    if (!Number.isFinite(ms) || !this.getState().current) return
+    if (this.loadedTrack !== this.getState().current) this.loadCurrent(false)
+    this.finished = false
+    this.pendingSeekMs = -1
+    const retrying = this.retryTimer !== null || this.awaitingNetwork
+    this.clearRetry()
     const clamped = Math.max(0, this.durationMs > 0 ? Math.min(ms, this.durationMs) : ms)
     const target = this.cropWindow().start + clamped
     const t = this.getState().current
-    if (t && needsBackendSeek(t)) {
+    if (t && (needsBackendSeek(t) || retrying || this.sourceLost())) {
       // The browser cannot find this position in the file, so the stream is
       // re-opened at it instead. The element then plays from zero and its clock
       // is read through seekBaseMs. Seeking back to the start re-opens the whole
       // file the same way — the loaded source is a fragment, so its own zero is
       // wherever the last seek landed, not the track's beginning.
-      this.seekBaseMs = target
-      this.active.src = this.resolveSrc(t, target)
-      this.active.load()
-      this.applyVolume()
-      if (this.playing) void this.active.play()
+      this.reattach(clamped, this.playing)
     } else {
       this.seekBaseMs = 0
       this.active.currentTime = target / 1000
@@ -1023,11 +1110,13 @@ export class AudioEngine {
   toggleShuffle() {
     this.shuffle = !this.shuffle
     this.rebuildShuffle()
+    if (this.loadedTrack) this.preloadNext()
     this.emit()
   }
 
   cycleRepeat() {
     this.repeat = this.repeat === 'off' ? 'all' : this.repeat === 'all' ? 'one' : 'off'
+    if (this.loadedTrack) this.preloadNext()
     this.emit()
   }
 }
