@@ -185,10 +185,10 @@ func Terminate(pid int) error {
 		_ = freeConsole()
 		return fmt.Errorf("install console control handler: %w", err)
 	}
-	// Order matters, and it is the reverse of the order these were acquired in.
-	// The event is asynchronous: a copy that lands after the handler is gone
-	// but while this process is still a console member would fall through to
-	// the Go runtime and interrupt Reverb itself.
+	// Order matters: the console is given back before the handler is
+	// uninstalled. The event is asynchronous: a copy that lands after the
+	// handler is gone but while this process is still a console member would
+	// fall through to the Go runtime and interrupt Reverb itself.
 	defer func() {
 		_ = freeConsole()
 		_ = setConsoleCtrlHandler(false)

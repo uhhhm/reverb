@@ -27,7 +27,8 @@
 //     the household is actually doing; it is expected to lose.
 //   - [Terminate] must request an orderly shutdown, giving the child a chance to
 //     flush and close. Navidrome corrupts its index if it is cut off mid-write,
-//     so this is the only sanctioned first move. It must not block.
+//     so this is the only sanctioned first move. It must not wait for the
+//     target to exit.
 //   - [Kill] ends the process immediately, with no chance to clean up. It is the
 //     escalation after [Terminate] has been given a grace period.
 //   - [Alive] must report whether the pid names a live process, without

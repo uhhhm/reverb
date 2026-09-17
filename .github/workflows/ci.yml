@@ -69,9 +69,10 @@ jobs:
           path: |
             desktop/tools/bin
             desktop/tools/python
-          # Keyed on the fetch scripts themselves: every pinned version lives
-          # in them, so a bump invalidates the cache without a second edit here.
-          key: windows-desktop-tools-v1-${{ hashFiles('desktop/tools/fetch-ffmpeg.sh', 'desktop/tools/fetch-navidrome.sh', 'desktop/tools/fetch-deno.sh', 'desktop/tools/setup-python-venv.sh') }}
+          # Keyed on the fetch scripts and the launcher source they compile:
+          # every pinned version lives in them, so a bump invalidates the cache
+          # without a second edit here.
+          key: windows-desktop-tools-v1-${{ hashFiles('desktop/tools/fetch-ffmpeg.sh', 'desktop/tools/fetch-navidrome.sh', 'desktop/tools/fetch-deno.sh', 'desktop/tools/setup-python-venv.sh', 'desktop/tools/python-launcher/**') }}
       - name: Fetch Windows desktop tools
         if: steps.windows-tools-cache.outputs.cache-hit != 'true'
         shell: bash
