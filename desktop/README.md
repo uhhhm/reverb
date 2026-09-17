@@ -22,24 +22,27 @@ make desktop-deps   # fetch ffmpeg, Navidrome, Deno, Python, spotDL and yt-dlp
 make desktop-windows # cross-compile dist/reverb-desktop.exe from macOS or Linux
 ```
 
-On Windows, build with the same command CI runs, from the repository root
-(PowerShell), after building the SPA into `internal/api/dist`:
+On Windows, build the SPA into `internal/api/dist` (PowerShell, from the
+repository root) and then run the same script CI and the release workflow run:
 
 ```powershell
 npm ci --prefix web
 npm run build --prefix web
 if (Test-Path internal/api/dist) { Remove-Item -Recurse -Force internal/api/dist }
 Copy-Item -Recurse web/dist internal/api/dist
-go build -tags desktop,production -ldflags "-H windowsgui -X main.version=dev" -o dist/reverb-desktop.exe ./desktop
+bash desktop/build/windows/build.sh dev
 ```
 
-`-H windowsgui` puts the binary in the GUI subsystem; without it Windows opens a
-console window behind the app on every launch. `webkit2_41` is a Linux tag and
-must not be passed.
+`build.sh` is the one place the Windows build flags live. `-H windowsgui` puts
+the binary in the GUI subsystem; without it Windows opens a console window
+behind the app on every launch. `webkit2_41` is a Linux tag and must not be
+passed. `go run ./desktop/tools/verify-windows-artifact -exe
+dist/reverb-desktop.exe` checks both from the built PE, and with `-zip` checks a
+release archive holds exactly `reverb-desktop.exe` and decompresses clean.
 
 Config is in `desktop/wails.json` — frontend `../web`, build `npm run build`, dev server `http://localhost:5173`, fallback `index.html` for BrowserRouter.
 
-Build assets: `desktop/build/appicon.png` (from `web/public/logo.png`), `build/darwin/Info.plist`, `build/linux/app.desktop`.
+Build assets: `desktop/build/appicon.png` (from `web/public/logo.png`), `build/darwin/Info.plist`, `build/linux/app.desktop`, `build/windows/icon.ico`. The icon reaches the Windows exe through the committed `desktop/rsrc_windows_amd64.syso`, which the Go linker picks up on any Windows build; regenerate it from the PNG with `desktop/build/windows/make-icon-resource.sh`. CI fails the build if the icon stops being linked in.
 Bundled tools are fetched into `desktop/tools/` (gitignored) per arch.
 
 Data dirs (desktop mode): DB via `internal/desktop.ResolveDesktopDB()` — XDG on
@@ -67,8 +70,17 @@ updater's install step. Windows CI exercises the boot and background-control
 round trips, including shutdown acknowledgement after the database lock is
 released and cleanup when background startup stalls. It also fetches and smoke
 tests the Windows ffmpeg, Navidrome, Deno, Python, spotDL and yt-dlp bundle.
-`desktop.yml` still publishes no Windows release asset, so there is nothing for
-the updater to find until the Windows release-artifact ticket lands.
+`desktop.yml` publishes `reverb-desktop-<version>-windows-amd64.zip`, which is
+the asset the updater picks up.
+
+ARM64 Windows is out of scope: there is no arm64 artifact and no arm64 bundled
+tool set, and an amd64 build runs under emulation without the download stack
+being exercised there.
+
+Installing is unzipping: put `reverb-desktop.exe` wherever it should live and
+run it. There is no installer and nothing is written outside `%AppData%\reverb`
+and `%USERPROFILE%\Music\Reverb`. Windows SmartScreen warns on first launch
+because the binary is unsigned — **More info** → **Run anyway**.
 
 On Windows, `make desktop-deps` uses a relocatable python-build-standalone
 runtime rather than a machine-wide Python. The `spotdl.exe` and `yt-dlp.exe`
@@ -130,10 +142,20 @@ runs when a GitHub release is **published**:
    has not finished yet the run fails; re-run it with **Run workflow** and the
    tag once CI is green.
 3. It builds `reverb-desktop-<version>-<os>-<arch>.zip` for macOS and Linux
-   (amd64 and arm64) and attaches all four to the release. Each zip holds the
-   bare `reverb-desktop` executable, which is the only file the updater swaps;
-   the bundled tools beside the app are left as they are.
+   (amd64 and arm64) plus Windows amd64, and attaches all five to the release.
+   Each zip holds the bare `reverb-desktop` executable — `reverb-desktop.exe`
+   on Windows — which is the only file the updater swaps; the bundled tools
+   beside the app are left as they are.
 
 Between publishing and the assets landing, the updater sees the new tag with
 no payload for its platform and re-checks every fifteen minutes instead of
-waiting for the next six-hour cycle. There is no Windows build in the matrix.
+waiting for the next six-hour cycle.
+
+On Windows the swap needs no helper process: an image that is mapped cannot be
+deleted or written, but it can be renamed within its volume, so the running
+`reverb-desktop.exe` is moved aside and the new build takes its name. When the
+old name cannot be reused — a predecessor still exiting, or an earlier
+update whose cleanup never ran — the outgoing binary goes to a uniquely named
+sibling instead, and both forms are collected on the next boot. A rename the
+filesystem refuses outright (antivirus, a shell holding the folder) rolls back
+to the working binary.

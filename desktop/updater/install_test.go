@@ -19,6 +19,10 @@ import (
 	"time"
 )
 
+// exeName is what the running binary is called on this platform; Windows will
+// not execute a file without the extension.
+func exeName() string { return payloadName(runtime.GOOS) }
+
 // fakeBinary returns bytes that pass verifyExecutable on this platform: the
 // right magic number and comfortably over the minimum size.
 func fakeBinary(marker string) []byte {
@@ -58,7 +62,7 @@ func zipOf(t *testing.T, name string, payload []byte) []byte {
 func releaseServer(t *testing.T, tag string, payload []byte) *httptest.Server {
 	t.Helper()
 	assetName := fmt.Sprintf("reverb-desktop-%s-%s-%s.zip", tag, runtime.GOOS, runtime.GOARCH)
-	archive := zipOf(t, "reverb-desktop", payload)
+	archive := zipOf(t, exeName(), payload)
 	mux := http.NewServeMux()
 	srv := httptest.NewServer(mux)
 	mux.HandleFunc("/asset.zip", func(w http.ResponseWriter, r *http.Request) {
@@ -94,7 +98,7 @@ func TestCheckNowStagesWithoutInstalling(t *testing.T) {
 	payload := fakeBinary("v2")
 	useServer(t, releaseServer(t, "v2.0.0", payload))
 
-	exe := filepath.Join(t.TempDir(), "reverb-desktop")
+	exe := filepath.Join(t.TempDir(), exeName())
 	if err := os.WriteFile(exe, fakeBinary("v1"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -118,13 +122,17 @@ func TestCheckNowStagesWithoutInstalling(t *testing.T) {
 	}
 
 	// Applying swaps the payload in and keeps the outgoing binary as a backup.
-	if err := ApplyStaged(dataDir, exe); err != nil {
+	backup, err := ApplyStaged(dataDir, exe)
+	if err != nil {
 		t.Fatalf("ApplyStaged: %v", err)
 	}
 	if got, _ := os.ReadFile(exe); !bytes.Equal(got, payload) {
 		t.Fatalf("binary was not replaced with the staged payload")
 	}
-	if got, err := os.ReadFile(exe + backupSuffix); err != nil || !bytes.Equal(got, fakeBinary("v1")) {
+	if backup != exe+backupSuffix {
+		t.Fatalf("backup = %q want %q", backup, exe+backupSuffix)
+	}
+	if got, err := os.ReadFile(backup); err != nil || !bytes.Equal(got, fakeBinary("v1")) {
 		t.Fatalf("outgoing binary was not kept as %s: %v", backupSuffix, err)
 	}
 	if fi, err := os.Stat(exe); err != nil || fi.Mode().Perm()&0o111 == 0 {
@@ -177,11 +185,11 @@ func TestReadStagedRejectsCorruptedPayload(t *testing.T) {
 		t.Fatal("ReadStaged accepted a payload whose digest no longer matches")
 	}
 
-	exe := filepath.Join(t.TempDir(), "reverb-desktop")
+	exe := filepath.Join(t.TempDir(), exeName())
 	if err := os.WriteFile(exe, fakeBinary("v1"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := ApplyStaged(dataDir, exe); err == nil {
+	if _, err := ApplyStaged(dataDir, exe); err == nil {
 		t.Fatal("ApplyStaged installed a corrupted payload")
 	}
 	if got, _ := os.ReadFile(exe); !bytes.Equal(got, fakeBinary("v1")) {
@@ -263,7 +271,7 @@ func TestCleanupAfterUpdate(t *testing.T) {
 	if st := svc.CheckNow(context.Background()); st.Staged == "" {
 		t.Fatalf("setup: nothing staged (%q)", st.Error)
 	}
-	exe := filepath.Join(t.TempDir(), "reverb-desktop")
+	exe := filepath.Join(t.TempDir(), exeName())
 	if err := os.WriteFile(exe, fakeBinary("v2"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -324,6 +332,9 @@ func TestWaitForPredecessor(t *testing.T) {
 func exitedPID(t *testing.T) int {
 	t.Helper()
 	cmd := exec.Command("true")
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/c", "exit")
+	}
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("spawning a throwaway process: %v", err)
 	}
@@ -343,7 +354,7 @@ func TestUnzipRejectsTraversal(t *testing.T) {
 	if err := os.WriteFile(path, zipOf(t, "../../escape", []byte("x")), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := unzipSingle(path, dir); err == nil {
+	if _, err := unzipNamed(path, dir, exeName()); err == nil {
 		t.Fatal("unzipSingle accepted an entry escaping the destination")
 	}
 }

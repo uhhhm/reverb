@@ -105,17 +105,12 @@ jobs:
           npm run build --prefix web
           if (Test-Path internal/api/dist) { Remove-Item -Recurse -Force internal/api/dist }
           Copy-Item -Recurse web/dist internal/api/dist
-      # The build command contributors run on Windows; see docs/deployment.md.
+      # The same script make desktop-windows and the release workflow run.
       - name: Build the desktop binary
-        run: go build -tags desktop,production -ldflags "-H windowsgui -X main.version=${{ github.sha }}" -o dist/reverb-desktop.exe ./desktop
-      # Subsystem 2 is GUI: a console-subsystem binary would open a terminal
-      # behind the window on every launch.
-      - name: Check the binary is a GUI application
-        run: |
-          $bytes = [IO.File]::ReadAllBytes("dist/reverb-desktop.exe")
-          $pe = [BitConverter]::ToInt32($bytes, 0x3c)
-          $subsystem = [BitConverter]::ToUInt16($bytes, $pe + 92)
-          if ($subsystem -ne 2) { throw "PE subsystem $subsystem, want 2 (GUI)" }
+        shell: bash
+        run: bash desktop/build/windows/build.sh "${{ github.sha }}"
+      - name: Check the binary is a GUI application carrying the Reverb icon
+        run: go run ./desktop/tools/verify-windows-artifact -exe dist/reverb-desktop.exe
       - name: Desktop, paths, embedded-library and child-process tests
         run: go test ./desktop/... ./internal/desktop/... ./internal/library/embedded/... ./internal/childproc/...
   contracts:

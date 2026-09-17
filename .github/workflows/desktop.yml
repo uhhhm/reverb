@@ -112,8 +112,59 @@ jobs:
           path: dist/*.zip
           if-no-files-found: error
 
+  # Windows is a separate job rather than a matrix row: the build, the GUI and
+  # icon checks, and the zip all have to run in PowerShell, and threading that
+  # through the bash matrix step would obscure both.
+  build-windows:
+    needs: verify
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.5'
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build and embed the SPA
+        run: |
+          npm ci --prefix web
+          npm run build --prefix web
+          if (Test-Path internal/api/dist) { Remove-Item -Recurse -Force internal/api/dist }
+          Copy-Item -Recurse web/dist internal/api/dist
+      - run: go test ./desktop/... ./internal/desktop/...
+      # The same script make desktop-windows and the CI `windows` job run, so
+      # the tags, the GUI-subsystem link and the version stamp cannot drift.
+      - name: Build the desktop binary
+        shell: bash
+        env:
+          TAG: ${{ needs.verify.outputs.tag }}
+        run: bash desktop/build/windows/build.sh "$TAG"
+      - name: Check the binary is a GUI application carrying the Reverb icon
+        run: go run ./desktop/tools/verify-windows-artifact -exe dist/reverb-desktop.exe
+      # This is the updater's exact payload format: the bare executable, under
+      # the name the updater unpacks by.
+      - name: Package and verify the updater payload
+        shell: bash
+        env:
+          TAG: ${{ needs.verify.outputs.tag }}
+        run: |
+          artifact="reverb-desktop-${TAG#v}-windows-amd64.zip"
+          powershell -Command "Compress-Archive -Path dist/reverb-desktop.exe -DestinationPath dist/$artifact"
+          go run ./desktop/tools/verify-windows-artifact -zip "dist/$artifact"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows-amd64
+          path: dist/*.zip
+          if-no-files-found: error
+
   publish:
-    needs: [verify, build]
+    needs: [verify, build, build-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -123,11 +174,11 @@ jobs:
           pattern: desktop-*
           path: dist
           merge-multiple: true
-      - name: Attach all four verified builds to the existing release
+      - name: Attach all five verified builds to the existing release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.verify.outputs.tag }}
         run: |
-          test "$(find dist -name '*.zip' | wc -l)" -eq 4
+          test "$(find dist -name '*.zip' | wc -l)" -eq 5
           gh release upload "$TAG" dist/*.zip --clobber

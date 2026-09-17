@@ -99,7 +99,11 @@ func FileSHA256(path string) (string, error) {
 // verifyExecutable rejects a payload that is not a plausible executable for
 // this platform, so a truncated or HTML error-page download cannot be renamed
 // over the running binary.
-func verifyExecutable(path string) error {
+func verifyExecutable(path string) error { return verifyExecutableFor(runtime.GOOS, path) }
+
+// verifyExecutableFor is verifyExecutable against a named platform, so every
+// host's magic number is testable from any one of them.
+func verifyExecutableFor(goos, path string) error {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return err
@@ -116,7 +120,7 @@ func verifyExecutable(path string) error {
 	if _, err := io.ReadFull(f, magic[:]); err != nil {
 		return err
 	}
-	switch runtime.GOOS {
+	switch goos {
 	case "linux":
 		if string(magic[:]) != "\x7fELF" {
 			return fmt.Errorf("update payload is not an ELF binary")
@@ -128,6 +132,11 @@ func verifyExecutable(path string) error {
 		case 0xfeedfacf, 0xcffaedfe, 0xcafebabe, 0xbebafeca:
 		default:
 			return fmt.Errorf("update payload is not a Mach-O binary")
+		}
+	case "windows":
+		// The DOS stub every PE image still begins with.
+		if string(magic[:2]) != "MZ" {
+			return fmt.Errorf("update payload is not a Windows executable")
 		}
 	}
 	return nil

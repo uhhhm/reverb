@@ -245,8 +245,10 @@ Transport security is HTTPS to GitHub plus that digest; release artifacts are no
 
 Server/Docker builds wire no updater — the update endpoints report 503 there, and the image tag is the update mechanism. `yt-dlp` is hot-upgraded separately every 24 h via `pip install --upgrade yt-dlp` without an app restart.
 
-CI builds `reverb-desktop-$VERSION-$GOOS-$GOARCH.{zip,deb,AppImage}` via `.github/workflows/desktop.yml` (matrix `macos-14` + `ubuntu-22.04` × `amd64`/`arm64`, `wails build -platform $GOOS/$GOARCH -ldflags "-X main.version=$TAG"`). Windows is not in that matrix; `ci.yml`'s `windows` job compiles `reverb-desktop.exe` on every push and runs the desktop, desktop-paths, embedded-library and child-process tests there.
+`.github/workflows/desktop.yml` builds `reverb-desktop-$VERSION-$GOOS-$GOARCH.zip` for macOS and Linux on amd64 and arm64, and `reverb-desktop-$VERSION-windows-amd64.zip` on a Windows runner; the publish job attaches all five and fails if it does not see exactly that many. `ci.yml`'s `windows` job compiles `reverb-desktop.exe` on every push and runs the desktop, desktop-paths, embedded-library and child-process tests there. ARM64 Windows is out of scope.
+
+On Windows the updater renames the running `reverb-desktop.exe` aside and moves the new build into its place — Windows locks a mapped image against deletion and writes, but not against a rename within the volume — so no helper process is involved. See `desktop/README.md` for the fallback when the old name cannot be reused.
 
 ### Building on Windows
 
-`desktop/README.md` carries the build commands, which are the ones the `windows` CI job runs. The binary must be linked `-H windowsgui` — the GUI subsystem is what keeps a console window from opening behind the app — and CI asserts the built PE carries it. From macOS or Linux, `make desktop-windows` cross-compiles the same binary.
+`desktop/build/windows/build.sh` holds the Windows build flags; the `windows` CI job, the release workflow and `make desktop-windows` all run it, so a local cross-compile from macOS or Linux produces what is published. The binary must be linked `-H windowsgui` — the GUI subsystem is what keeps a console window from opening behind the app — and `desktop/tools/verify-windows-artifact` asserts that and the icon resource from `desktop/rsrc_windows_amd64.syso` against the built PE, and the release zip's single entry and CRCs before upload. See `desktop/README.md` for the commands.

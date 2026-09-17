@@ -315,12 +315,13 @@ func (s *Service) InstallAndRestart() error {
 	if s.Status().Staged == "" {
 		return errNothingStaged
 	}
-	if err := ApplyStaged(s.opts.DataDir, s.opts.ExePath); err != nil {
+	backup, err := ApplyStaged(s.opts.DataDir, s.opts.ExePath)
+	if err != nil {
 		s.update(func(st *State) { st.Error = err.Error() })
 		return err
 	}
 	if err := Relaunch(s.opts.DataDir, s.opts.ExePath, s.opts.Args...); err != nil {
-		if restoreErr := restoreBackup(s.opts.ExePath); restoreErr != nil {
+		if restoreErr := restoreBackup(s.opts.ExePath, backup); restoreErr != nil {
 			err = fmt.Errorf("%w; restore previous binary: %v", err, restoreErr)
 		}
 		s.update(func(st *State) { st.Error = err.Error() })

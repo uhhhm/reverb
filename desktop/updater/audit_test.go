@@ -10,7 +10,7 @@ import (
 
 func TestFailedRelaunchRestoresWorkingExecutable(t *testing.T) {
 	dir := t.TempDir()
-	exe := filepath.Join(t.TempDir(), "reverb-desktop")
+	exe := filepath.Join(t.TempDir(), exeName())
 	old := fakeBinary("original")
 	if err := os.WriteFile(exe, old, 0o755); err != nil {
 		t.Fatal(err)

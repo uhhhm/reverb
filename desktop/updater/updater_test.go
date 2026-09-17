@@ -85,6 +85,7 @@ func TestPickAssetSelection(t *testing.T) {
 			{Name: "reverb-desktop-v1.2.3-darwin-arm64.zip", URL: "https://example.com/darwin-zip"},
 			{Name: "reverb-desktop-v1.2.3-darwin-amd64.zip", URL: "https://example.com/darwin-amd64"},
 			{Name: "reverb-desktop-v1.2.3-linux-amd64.zip", URL: "https://example.com/linux-zip"},
+			{Name: "reverb-desktop-v1.2.3-windows-amd64.zip", URL: "https://example.com/windows-zip"},
 			{Name: "other.txt", URL: "https://example.com/other"},
 		},
 	}
@@ -97,7 +98,7 @@ func TestPickAssetSelection(t *testing.T) {
 		{"linux", "amd64", "reverb-desktop-v1.2.3-linux-amd64.zip", false},
 		{"darwin", "arm64", "reverb-desktop-v1.2.3-darwin-arm64.zip", false},
 		{"darwin", "amd64", "reverb-desktop-v1.2.3-darwin-amd64.zip", false},
-		{"windows", "amd64", "", true},
+		{"windows", "amd64", "reverb-desktop-v1.2.3-windows-amd64.zip", false},
 		{"linux", "arm64", "", true},
 	}
 	for _, tc := range tests {

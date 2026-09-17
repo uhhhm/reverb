@@ -83,12 +83,10 @@ WAILS_TAGS ?= desktop,production,webkit2_41
 desktop: web
 	go build -tags $(WAILS_TAGS) -ldflags "-X main.version=$(VERSION)" -o dist/reverb-desktop ./desktop
 
-# Windows. webkit2_41 is a Linux tag and must not be passed; -H windowsgui puts
-# the binary in the GUI subsystem, which is what stops a console window from
-# opening behind the app. These are the same flags the Windows CI job runs, so
-# this target cross-compiles exactly what CI builds.
+# Windows. The flags live in the build script, which CI and the release
+# workflow run too, so this target cross-compiles exactly what is published.
 desktop-windows: web
-	GOOS=windows GOARCH=amd64 go build -tags desktop,production -ldflags "-H windowsgui -X main.version=$(VERSION)" -o dist/reverb-desktop.exe ./desktop
+	bash desktop/build/windows/build.sh "$(VERSION)"
 
 desktop-dev:
 	wails dev -projectdir ./desktop

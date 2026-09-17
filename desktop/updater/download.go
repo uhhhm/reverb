@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -95,7 +96,7 @@ func DownloadAsset(ctx context.Context, a Asset, destDir string, onProgress func
 		}
 		return raw, nil
 	}
-	bin, err := unzipSingle(raw, destDir)
+	bin, err := unzipNamed(raw, destDir, payloadName(runtime.GOOS))
 	// The archive has served its purpose either way; the payload is what we keep.
 	_ = os.Remove(raw)
 	if err != nil {
@@ -104,9 +105,20 @@ func DownloadAsset(ctx context.Context, a Asset, destDir string, onProgress func
 	return bin, nil
 }
 
-// unzipSingle extracts the named executable. Never infer it from size: a
-// bundled ffmpeg or debug symbol file can be larger than the application.
-func unzipSingle(zipPath, destDir string) (string, error) {
+// payloadName is the executable entry the desktop workflow puts in a release
+// zip for goos. Windows will not run a file without the extension, so the
+// archive built there carries it and the updater has to ask for it by name.
+func payloadName(goos string) string {
+	if goos == "windows" {
+		return "reverb-desktop.exe"
+	}
+	return "reverb-desktop"
+}
+
+// unzipNamed extracts the entry called want. Never infer the executable from
+// size: a bundled ffmpeg or debug symbol file can be larger than the
+// application.
+func unzipNamed(zipPath, destDir, want string) (string, error) {
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return "", err
@@ -125,7 +137,7 @@ func unzipSingle(zipPath, destDir string) (string, error) {
 		if !f.Mode().IsRegular() {
 			continue
 		}
-		if f.Name != "reverb-desktop" {
+		if f.Name != want {
 			continue
 		}
 		if best != nil {
@@ -134,7 +146,7 @@ func unzipSingle(zipPath, destDir string) (string, error) {
 		best = f
 	}
 	if best == nil {
-		return "", fmt.Errorf("archive %s has no reverb-desktop executable", filepath.Base(zipPath))
+		return "", fmt.Errorf("archive %s has no %s executable", filepath.Base(zipPath), want)
 	}
 	rc, err := best.Open()
 	if err != nil {

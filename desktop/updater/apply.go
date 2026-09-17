@@ -43,49 +43,82 @@ const backupSuffix = ".old"
 // otherwise collide with the instance still shutting down.
 func relaunchMarker(dataDir string) string { return filepath.Join(StagingDir(dataDir), "relaunch") }
 
-// ApplyStaged swaps the staged payload over exePath. The running process keeps
-// executing the outgoing file, which is renamed rather than overwritten, so
-// this is safe to call before shutdown. A port to an OS that will not let a
-// running executable be renamed has to change that ordering, not just this
-// function. On any failure the original binary is restored.
-func ApplyStaged(dataDir, exePath string) error {
+// ApplyStaged swaps the staged payload over exePath and returns the path the
+// outgoing binary was kept at, for rollback. The running process keeps
+// executing that file, which is renamed rather than overwritten, so this is
+// safe to call before shutdown. A port to an OS that will not let a running
+// executable be renamed has to change that ordering, not just this function.
+// On any failure the original binary is restored.
+func ApplyStaged(dataDir, exePath string) (string, error) {
 	su, ok := ReadStaged(dataDir)
 	if !ok {
-		return fmt.Errorf("no verified update is staged")
+		return "", fmt.Errorf("no verified update is staged")
 	}
 	if err := verifyExecutable(su.File); err != nil {
-		return err
+		return "", err
 	}
 	exePath, err := filepath.EvalSymlinks(exePath)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Stage the replacement beside the target first: a cross-device rename
 	// fails, and the copy must land on the same filesystem as the binary.
 	next := exePath + ".new"
 	if err := copyFile(su.File, next, 0o755); err != nil {
-		return err
+		return "", err
 	}
-	backup := backupPath(exePath)
-	_ = os.Remove(backup)
+	backup := freeBackupPath(exePath)
 	if err := os.Rename(exePath, backup); err != nil {
 		_ = os.Remove(next)
-		return err
+		return "", err
 	}
 	if err := os.Rename(next, exePath); err != nil {
 		// Put the working binary back before giving up.
 		_ = os.Rename(backup, exePath)
 		_ = os.Remove(next)
-		return err
+		return "", err
 	}
 	if err := resealInstalled(exePath); err != nil {
-		if restoreErr := restoreBackup(exePath); restoreErr != nil {
-			return fmt.Errorf("%w; rollback: %v", err, restoreErr)
+		if restoreErr := restoreBackup(exePath, backup); restoreErr != nil {
+			return "", fmt.Errorf("%w; rollback: %v", err, restoreErr)
 		}
-		return err
+		return "", err
 	}
-	return nil
+	return backup, nil
+}
+
+// freeBackupPath is where the outgoing binary can be moved to. The preferred
+// name is reused after deleting whatever is there, but Windows refuses to
+// delete an image a process still has mapped — a predecessor that has not
+// finished exiting, or an earlier update whose cleanup never ran — and the
+// swap must not fail because of it, so a unique sibling is used instead.
+func freeBackupPath(exePath string) string {
+	preferred := backupPath(exePath)
+	if err := os.Remove(preferred); err == nil || os.IsNotExist(err) {
+		return preferred
+	}
+	return preferred + "." + strconv.FormatInt(time.Now().UnixNano(), 36)
+}
+
+// existingBackups finds every outgoing binary freeBackupPath may have left
+// beside exePath. It reads the directory rather than globbing: an installation
+// path is arbitrary user input and may contain pattern metacharacters.
+func existingBackups(exePath string) []string {
+	preferred := backupPath(exePath)
+	dir, prefix := filepath.Split(preferred)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var found []string
+	for _, e := range entries {
+		name := e.Name()
+		if name == prefix || strings.HasPrefix(name, prefix+".") {
+			found = append(found, filepath.Join(dir, name))
+		}
+	}
+	return found
 }
 
 // Relaunch starts the updated binary and returns once it has been spawned. The
@@ -121,12 +154,13 @@ func Relaunch(dataDir, exePath string, args ...string) error {
 	return nil
 }
 
-func restoreBackup(exePath string) error {
+// restoreBackup puts the binary ApplyStaged moved to backup back in place.
+func restoreBackup(exePath, backup string) error {
 	path, err := filepath.EvalSymlinks(exePath)
 	if err != nil {
 		return err
 	}
-	if err := os.Rename(backupPath(path), path); err != nil {
+	if err := os.Rename(backup, path); err != nil {
 		return err
 	}
 	return resealInstalled(path)
@@ -165,7 +199,9 @@ func WaitForPredecessor(dataDir string, timeout time.Duration) {
 // update staged for a *newer* release than this one survives.
 func CleanupAfterUpdate(dataDir, exePath, currentVersion string) {
 	if resolved, err := filepath.EvalSymlinks(exePath); err == nil {
-		_ = os.Remove(backupPath(resolved))
+		for _, b := range existingBackups(resolved) {
+			_ = os.Remove(b)
+		}
 		_ = os.Remove(resolved + ".new")
 	}
 	su, ok := ReadStaged(dataDir)

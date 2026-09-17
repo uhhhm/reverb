@@ -220,9 +220,10 @@ make check-full  # also race and browser tests
 make build        # -> ./reverb (requires the Go version in go.mod, Node 22+)
 make desktop      # -> ./dist/reverb-desktop (Wails desktop app)
 make desktop-dev  # wails dev -projectdir ./desktop (hot reload via Vite :5173)
+make desktop-windows # -> ./dist/reverb-desktop.exe (cross-compiled from macOS or Linux)
 ```
 
-Desktop (Wails) runs the same Go monolith on `127.0.0.1:0`, DB at `~/Library/Application Support/Reverb/reverb.db` (macOS) / `~/.config/reverb/reverb.db` (Linux, XDG) and downloads in `~/Music/Reverb`. Bundled `ffmpeg`/`spotDL`/`Navidrome`/`deno` are fetched into `desktop/tools/` via `make desktop-deps`. See [docs/deployment.md#desktop-wails](docs/deployment.md#desktop-wails) and `desktop/README.md`.
+Desktop (Wails) runs the same Go monolith on `127.0.0.1:0` on macOS, Linux and Windows (amd64; ARM64 Windows is out of scope). The DB lives at `~/Library/Application Support/Reverb/reverb.db` (macOS) / `~/.config/reverb/reverb.db` (Linux, XDG) / `%AppData%\reverb\reverb.db` (Windows), with downloads in `~/Music/Reverb` (`%USERPROFILE%\Music\Reverb`). Bundled `ffmpeg`/`spotDL`/`Navidrome`/`deno` are fetched into `desktop/tools/` via `make desktop-deps`. Releases carry a zip per platform and the app self-updates from them. Windows needs Windows 10 1803+ and the WebView2 runtime; install by unzipping `reverb-desktop.exe`. See [docs/deployment.md#desktop-wails](docs/deployment.md#desktop-wails) and `desktop/README.md`.
 
 See `AGENTS.md` for task navigation, verification commands, and architecture references. `gofmt -w` and Conventional Commits are required.
 

@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -52,8 +53,8 @@ func TestInstallReplacesAndRelaunchesTheRealBinary(t *testing.T) {
 	}
 	dataDir := t.TempDir()
 	binDir := t.TempDir()
-	exe := filepath.Join(binDir, "reverb-desktop")
-	payload := filepath.Join(StagingDir(dataDir), "reverb-desktop")
+	exe := filepath.Join(binDir, payloadName(runtime.GOOS))
+	payload := filepath.Join(StagingDir(dataDir), payloadName(runtime.GOOS))
 
 	buildProbe(t, "v1", exe)
 	if err := os.MkdirAll(StagingDir(dataDir), 0o755); err != nil {
@@ -69,7 +70,7 @@ func TestInstallReplacesAndRelaunchesTheRealBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := ApplyStaged(dataDir, exe); err != nil {
+	if _, err := ApplyStaged(dataDir, exe); err != nil {
 		t.Fatalf("ApplyStaged: %v", err)
 	}
 
