@@ -23,7 +23,7 @@ func TestLowPriorityCommandStartsHiddenAndBelowNormal(t *testing.T) {
 	}
 }
 
-func TestGracefulCommandStartsHiddenWithAControllableProcessGroup(t *testing.T) {
+func TestGracefulCommandStartsHiddenWithAControllableConsole(t *testing.T) {
 	cmd := GracefulCommandContext(context.Background(), "navidrome.exe")
 	if cmd.SysProcAttr == nil {
 		t.Fatal("GracefulCommandContext left Windows process attributes unset")

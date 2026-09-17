@@ -69,7 +69,9 @@ jobs:
           path: |
             desktop/tools/bin
             desktop/tools/python
-          key: windows-desktop-tools-v1-navidrome-0.62.0-python-3.12.13-spotdl-4.5.0
+          # Keyed on the fetch scripts themselves: every pinned version lives
+          # in them, so a bump invalidates the cache without a second edit here.
+          key: windows-desktop-tools-v1-${{ hashFiles('desktop/tools/fetch-ffmpeg.sh', 'desktop/tools/fetch-navidrome.sh', 'desktop/tools/fetch-deno.sh', 'desktop/tools/setup-python-venv.sh') }}
       - name: Fetch Windows desktop tools
         if: steps.windows-tools-cache.outputs.cache-hit != 'true'
         shell: bash

@@ -281,6 +281,16 @@ func reapOrphan(pidPath, binaryPath string) error {
 	if err != nil || (identity != "" && (record.Identity == "" || record.Identity != identity)) {
 		// A Windows pid file without the instance token is from an older build;
 		// safety wins over guessing. A mismatch proves the pid was reused.
+		//
+		// A mismatch is the ordinary case and says nothing is wrong. The other
+		// two leave a live, same-named navidrome unreaped and holding the port,
+		// which the supervisor can only report later as repeated bind failures,
+		// so say so here where the reason is still known.
+		if err != nil {
+			log.Printf("navidrome: cannot verify the identity of pid %d, leaving it alone: %v", pid, err)
+		} else if record.Identity == "" {
+			log.Printf("navidrome: pid file for %d records no process identity, leaving it alone", pid)
+		}
 		_ = os.Remove(pidPath)
 		return nil
 	}

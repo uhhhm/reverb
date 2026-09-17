@@ -26,11 +26,11 @@ import (
 // receive the console control event Terminate uses; long-lived children that
 // need orderly shutdown are created by hideGracefully instead.
 //
-// CREATE_NEW_PROCESS_GROUP makes the child the leader of a group of its own,
-// so its group id is its pid. Terminate needs that to aim a control event at
-// one child instead of at every process sharing the console, this one
-// included. It also insulates the child from events aimed at Reverb's group,
-// which is what Reverb wants: it stops its children deliberately.
+// CREATE_NEW_PROCESS_GROUP insulates the child from console control events
+// aimed at Reverb's own group, which is what Reverb wants: it stops its
+// children deliberately. It buys nothing for shutdown here — a child with no
+// console handle is unreachable by a control event however it is aimed — so a
+// child that must be asked to stop is created by hideGracefully instead.
 //
 // stdio is untouched. The child's handles are still whatever the caller set,
 // so pipes attached for progress parsing keep working.
@@ -137,29 +137,31 @@ const stillActive = 259
 // interleave and signal each other's target.
 var consoleMu sync.Mutex
 
-// Terminate delivers CTRL_BREAK to the target's process group, which a Go
-// program — Reverb's background runtime, and Navidrome — surfaces as an
-// interrupt and can unwind on. It is the closest Windows equivalent of SIGTERM
-// for a process with no window, and it does not block: the event is posted,
-// not waited on.
+// Terminate delivers CTRL_BREAK to the target, which a Go program — Reverb's
+// background runtime, and Navidrome — surfaces as an interrupt and can unwind
+// on. It is the closest Windows equivalent of SIGTERM for a process with no
+// window. It does not wait for the target to exit, but neither does it return
+// at once: it holds the console it borrowed for as long as the delivery below
+// takes, so the caller's grace period effectively begins after it returns.
 //
 // Reaching the target means borrowing its console, which only a process with
 // no console of its own may do. That is the GUI build, which is what ships.
 // Graceful children own a private console. The event is broadcast to that
 // console (group zero); a temporary last-installed handler absorbs the copy
 // delivered to this process, while the child receives its normal Ctrl-Break.
-// The console is given back after our handler observes the asynchronous event.
+// The console is given back once that handler has seen the event, or after a
+// short wait when it has not — and always before the handler is uninstalled,
+// since leaving the console is what actually stops a late copy arriving.
 //
 // Two targets cannot be asked at all: one with no console — every child made
 // by Command/CommandContext and every GUI-subsystem image, including Reverb's
-// own background runtime — and any
-// target at all when the caller holds a console of its own, since Windows will
-// not let it borrow a second one. Only those two end in Kill, because Windows
-// offers no other way to say "please exit" to them and the caller could only
-// answer the failure by killing anyway. Declining to free the caller's own
-// console to get around the second case is deliberate: it could never be
-// restored, and detaching a terminal the household is looking at is a worse
-// outcome than a hard stop.
+// own background runtime — and any target at all when the caller holds a
+// console of its own, since Windows will not let it borrow a second one. Only
+// those two end in Kill, because Windows offers no other way to say "please
+// exit" to them and the caller could only answer the failure by killing
+// anyway. Declining to free the caller's own console to get around the second
+// case is deliberate: it could never be restored, and detaching a terminal the
+// household is looking at is a worse outcome than a hard stop.
 //
 // Any other failure is reported rather than escalated. Navidrome corrupts its
 // index when it is cut off mid-write, so an unexplained error must leave the
@@ -178,12 +180,19 @@ func Terminate(pid int) error {
 		}
 		return fmt.Errorf("attach to console of pid %d: %w", pid, err)
 	}
-	defer func() { _ = freeConsole() }()
 	ctrlBreakObserved.Store(false)
 	if err := setConsoleCtrlHandler(true); err != nil {
+		_ = freeConsole()
 		return fmt.Errorf("install console control handler: %w", err)
 	}
-	defer func() { _ = setConsoleCtrlHandler(false) }()
+	// Order matters, and it is the reverse of the order these were acquired in.
+	// The event is asynchronous: a copy that lands after the handler is gone
+	// but while this process is still a console member would fall through to
+	// the Go runtime and interrupt Reverb itself.
+	defer func() {
+		_ = freeConsole()
+		_ = setConsoleCtrlHandler(false)
+	}()
 	if err := windows.GenerateConsoleCtrlEvent(windows.CTRL_BREAK_EVENT, 0); err != nil {
 		return err
 	}
