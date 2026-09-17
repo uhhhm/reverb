@@ -200,6 +200,20 @@ func (s *Service) BumpEpoch(ctx context.Context, identity string) error {
 	return BumpEpoch(ctx, s.q, identity)
 }
 
+// BumpCurrentEpoch stales every binding for the library that is active now.
+//
+// A caller that has changed what the backend holds — renaming the files on disk
+// out from under it, say — knows the bindings are wrong but has no business
+// knowing how the active library is identified. Reading the identity here keeps
+// that one lookup in the package that owns it.
+func (s *Service) BumpCurrentEpoch(ctx context.Context) error {
+	identity, err := s.identity(ctx)
+	if err != nil {
+		return err
+	}
+	return s.BumpEpoch(ctx, identity)
+}
+
 // RefreshLinked forces a re-resolve for each given catalog ID at the current
 // epoch by marking any existing binding as stale (epoch-1) and then resolving.
 // This is used by the scan completion path to refresh a batch of linked IDs.

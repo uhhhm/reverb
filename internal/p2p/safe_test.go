@@ -64,7 +64,7 @@ func TestSafeGoContainsPanic(t *testing.T) {
 // A panicking anti-entropy loop must come back. Containing the panic but
 // leaving the loop dead would stop syncing for the life of the process while
 // the app went on looking healthy.
-func TestSafeGoLoopRestartsAfterPanic(t *testing.T) {
+func TestSafeLoopRestartsAfterPanic(t *testing.T) {
 	old := safeLoopRestartDelayForTest
 	safeLoopRestartDelayForTest = 5 * time.Millisecond
 	defer func() { safeLoopRestartDelayForTest = old }()
@@ -73,7 +73,7 @@ func TestSafeGoLoopRestartsAfterPanic(t *testing.T) {
 	defer cancel()
 	runs := make(chan int, 4)
 	var n int32
-	SafeGoLoop(ctx, "test", func() {
+	go SafeLoop(ctx, "test", func() {
 		i := atomic.AddInt32(&n, 1)
 		runs <- int(i)
 		if i < 3 {
@@ -95,7 +95,7 @@ func TestSafeGoLoopRestartsAfterPanic(t *testing.T) {
 
 // A loop that returns on its own -- context cancelled, work done -- is finished,
 // not broken, and must not be restarted.
-func TestSafeGoLoopDoesNotRestartCleanReturn(t *testing.T) {
+func TestSafeLoopDoesNotRestartCleanReturn(t *testing.T) {
 	old := safeLoopRestartDelayForTest
 	safeLoopRestartDelayForTest = time.Millisecond
 	defer func() { safeLoopRestartDelayForTest = old }()
@@ -103,7 +103,7 @@ func TestSafeGoLoopDoesNotRestartCleanReturn(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var n int32
-	SafeGoLoop(ctx, "test", func() { atomic.AddInt32(&n, 1) })
+	go SafeLoop(ctx, "test", func() { atomic.AddInt32(&n, 1) })
 	time.Sleep(50 * time.Millisecond)
 	if got := atomic.LoadInt32(&n); got != 1 {
 		t.Fatalf("ran %d times, want 1", got)

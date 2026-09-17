@@ -126,7 +126,13 @@ func TestFileHandlerRefusesSymlinkEscape(t *testing.T) {
 	}
 	musicDir := t.TempDir()
 	if err := os.Symlink(outside, filepath.Join(musicDir, "escape")); err != nil {
-		t.Skipf("symlinks unavailable: %v", err)
+		// Creating a symlink on Windows needs SeCreateSymbolicLinkPrivilege,
+		// which an unelevated token without Developer Mode does not hold. There
+		// is no way to set up the escape this test exists to refuse, so it skips
+		// rather than passing vacuously — the containment it guards is still
+		// exercised on every other platform, and on a Windows runner whose token
+		// does hold the privilege.
+		t.Skipf("cannot create the symlink this test needs, so the escape cannot be set up: %v", err)
 	}
 
 	q := newTrustStore(t)

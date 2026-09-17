@@ -1092,3 +1092,74 @@ func TestStartDoesNotRetryOnRealFailure(t *testing.T) {
 		t.Fatalf("want exactly 1 invocation, got %d", len(r.allArgs))
 	}
 }
+
+// writingRunner stands in for spotDL writing its output file. The name it
+// chooses comes from Spotify's metadata, not from our template, which is why
+// the adapter has to correct it after the fact.
+type writingRunner struct {
+	dir  string
+	name string
+}
+
+func (w *writingRunner) Run(ctx context.Context, name string, args []string, onLine func(string)) error {
+	if err := os.MkdirAll(w.dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(w.dir, w.name), []byte("audio"), 0o644)
+}
+
+// spotDL strips the illegal characters itself but leaves trailing dots and the
+// DOS device names behind, and those are exactly as unwritable on a Windows
+// peer. The file replicates everywhere except the one device that cannot store
+// the name, so the owner sees a track that silently never arrives.
+func TestStartRenamesAnUnportableDownload(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"trailing dot", "Nine Inch Nails - Closer..mp3", "Nine Inch Nails - Closer..mp3"},
+		{"trailing dot at the end", "Weezer - Etc.", "Weezer - Etc"},
+		{"reserved device name", "NUL.mp3", "NUL_.mp3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			a := New().WithRunner(&writingRunner{dir: dir, name: tc.got})
+			if err := a.Init(map[string]any{"output_dir": dir, "binary_path": "spotdl"}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := a.Start(context.Background(), core.DownloadRequest{Artist: "A", Title: "T"}, func(int) {}); err != nil {
+				t.Fatalf("Start: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, tc.want)); err != nil {
+				entries, _ := os.ReadDir(dir)
+				var names []string
+				for _, e := range entries {
+					names = append(names, e.Name())
+				}
+				t.Fatalf("expected %q; directory holds %v", tc.want, names)
+			}
+		})
+	}
+}
+
+// A library that was already on disk is not this download's business. Making an
+// established library portable is a migration the owner runs, not a side effect
+// of downloading one track.
+func TestStartLeavesTheExistingLibraryAlone(t *testing.T) {
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, "Legacy - Track.")
+	if err := os.WriteFile(legacy, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := New().WithRunner(&writingRunner{dir: dir, name: "New - Track.mp3"})
+	if err := a.Init(map[string]any{"output_dir": dir, "binary_path": "spotdl"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Start(context.Background(), core.DownloadRequest{Artist: "A", Title: "T"}, func(int) {}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if _, err := os.Stat(legacy); err != nil {
+		t.Fatalf("the pre-existing file was renamed: %v", err)
+	}
+}

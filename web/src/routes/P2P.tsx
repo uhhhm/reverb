@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getP2PStatus, getP2PPeers, redeemViaPeer, getFileManifests, fetchFileFromPeer } from '../lib/p2pApi'
+import { getP2PStatus, getP2PPeers, redeemViaPeer, getFileManifests, fetchFileFromPeer, getFileFetchFailures, migratePortableNames, getPortableNamesPending, type FileFetchFailure } from '../lib/p2pApi'
 import { generatePairingCode, listDevices, deleteDevice, type DeviceInfo } from '../lib/pairingApi'
 import { ManualSyncControl } from '../components/ManualSyncControl'
 import { Button } from '../components/ui/Button'
@@ -18,6 +18,10 @@ export default function P2P() {
   const statusQ = useQuery({ queryKey: ['p2p/status'], queryFn: getP2PStatus })
   const peersQ = useQuery({ queryKey: ['p2p/peers'], queryFn: getP2PPeers, refetchInterval: 5000 })
   const manifestsQ = useQuery({ queryKey: ['p2p/manifests'], queryFn: getFileManifests })
+  const failuresQ = useQuery({ queryKey: ['p2p/file-failures'], queryFn: getFileFetchFailures, refetchInterval: 30000 })
+  // Asked of this device about its own library: the device holding an unstorable
+  // name is not the one that fails to copy it.
+  const pendingQ = useQuery({ queryKey: ['p2p/portable-names'], queryFn: getPortableNamesPending })
 
   const genCode = useMutation({
     mutationFn: () => generatePairingCode(),
@@ -30,6 +34,19 @@ export default function P2P() {
       setRemovingDevice(null)
       void qc.invalidateQueries({ queryKey: ['pairing/devices'] })
       void qc.invalidateQueries({ queryKey: ['p2p/peers'] })
+    },
+  })
+
+  // Renaming the owner's own music files is the most destructive thing Reverb
+  // does to data it did not create, so it is a button they press rather than
+  // something that happens at startup — and it sits next to the list of tracks
+  // that are stuck, which is where they find out they need it.
+  const migrate = useMutation({
+    mutationFn: migratePortableNames,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['p2p/file-failures'] })
+      void qc.invalidateQueries({ queryKey: ['p2p/manifests'] })
+      void qc.invalidateQueries({ queryKey: ['p2p/portable-names'] })
     },
   })
 
@@ -236,6 +253,78 @@ export default function P2P() {
           ))}
         </div>
       </section>
+
+      {(pendingQ.data?.pending ?? 0) > 0 && (
+        <section className="rounded-lg border border-border-subtle bg-raised p-4 space-y-3">
+          <h2 className="font-semibold">File names other devices cannot store</h2>
+          <p className="text-sm text-text-secondary">
+            {pendingQ.data?.pending} of this device&apos;s files were named before Reverb started choosing names
+            every platform can store, so a Windows device in your household cannot save them. Renaming them
+            here lets them sync. Files keep their contents and their place in your library, and nothing is
+            overwritten — a name that is already taken gets a free one.
+          </p>
+          <Button onClick={() => migrate.mutate()} disabled={migrate.isPending}>
+            {migrate.isPending ? 'Renaming…' : 'Rename them for every device'}
+          </Button>
+          {migrate.error && <p className="text-sm text-red-500">{String(migrate.error)}</p>}
+          {migrate.data && (
+            <p className="text-sm text-green-600">
+              Renamed {migrate.data.renamed.length} of {migrate.data.examined} entries
+              {migrate.data.failed.length > 0 && `; ${migrate.data.failed.length} could not be moved`}.
+            </p>
+          )}
+        </section>
+      )}
+
+      {(failuresQ.data?.length ?? 0) > 0 && (
+        <section className="rounded-lg border border-border-subtle bg-raised p-4 space-y-3">
+          <h2 className="font-semibold">Files that are not syncing</h2>
+          <p className="text-xs text-text-secondary">
+            These tracks could not be copied from a paired device. Reverb keeps trying them on a widening
+            schedule rather than giving up, so one that becomes available again arrives on its own.
+          </p>
+          <div className="max-h-64 space-y-1 overflow-auto">
+            {failuresQ.data?.map((f) => (
+              <div key={`${f.peerId}:${f.contentHash}`} className="rounded bg-input px-2 py-1 text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate" title={f.relPath}>{f.relPath}</span>
+                  <span className="shrink-0 text-text-secondary">{describeRetry(f)}</span>
+                </div>
+                <p className="text-text-secondary" title={f.detail}>{describeFailure(f)}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
+}
+
+/**
+ * The stored reason is a stable token; the sentence the owner reads lives here,
+ * so the wording can change without a migration.
+ */
+function describeFailure(f: FileFetchFailure): string {
+  switch (f.reason) {
+    case 'unstorable-path':
+      return 'This device cannot store that file name. Renaming it on the device that holds it will let it sync.'
+    case 'content-mismatch':
+      return 'The file that device sent did not match the content it advertised.'
+    default:
+      // A failure is recorded per device, so this one says nothing about
+      // whether another device could supply the same file.
+      return 'That device would not send this file.'
+  }
+}
+
+function describeRetry(f: FileFetchFailure): string {
+  // An unwritable name is not waiting on a timer. It is rejected before the
+  // round even asks, and stays rejected until the name changes, so saying
+  // "retrying in 4h" would promise something that will not happen.
+  if (f.reason === 'unstorable-path') return 'needs renaming'
+  const wait = f.nextAttemptAt - Date.now()
+  if (wait <= 0) return 'retrying'
+  const hours = Math.round(wait / 3_600_000)
+  if (hours >= 1) return `retrying in ${hours}h`
+  return `retrying in ${Math.max(1, Math.round(wait / 60_000))}m`
 }

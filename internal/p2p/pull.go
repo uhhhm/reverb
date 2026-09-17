@@ -10,6 +10,7 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/uhhhm/reverb/internal/portablename"
 	"github.com/uhhhm/reverb/internal/store/db"
 )
 
@@ -34,6 +35,11 @@ type Puller struct {
 	// them. Both nil/empty leaves cover pulling off.
 	covers   CoverRefLister
 	coverDir string
+
+	// failures is how a file that can never be fetched stops crowding out the
+	// ones that can. Optional: a store without the capability degrades to the
+	// old behaviour of retrying everything every round.
+	failures *fetchFailures
 }
 
 // CoverRefLister reads the covers this device knows about, whether or not it
@@ -49,7 +55,7 @@ func (p *Puller) WithCovers(c CoverRefLister, coverDir string) *Puller {
 }
 
 func NewPuller(h host.Host, store FileStore, files *FileSyncer, guard *Guard, localDeviceID, musicDir string) *Puller {
-	return &Puller{
+	p := &Puller{
 		host:     h,
 		store:    store,
 		files:    files,
@@ -60,7 +66,12 @@ func NewPuller(h host.Host, store FileStore, files *FileSyncer, guard *Guard, lo
 		// Bounds one round's work so a large peer library is pulled over
 		// several rounds instead of saturating the link in one go.
 		maxPerRound: 50,
+		failures:    &fetchFailures{},
 	}
+	if q, ok := store.(FetchFailureStore); ok {
+		p.failures.q = q
+	}
+	return p
 }
 
 // Run pulls on an interval until ctx is canceled.
@@ -136,6 +147,8 @@ func (p *Puller) pullPeer(ctx context.Context, pid peer.ID) error {
 		p.guard.Touch(ctx, pid)
 	}()
 	if len(resp.Files) == 0 || p.musicDir == "" {
+		// A peer offering nothing cannot be the reason anything is stuck.
+		p.failures.prune(ctx, pid.String(), nil)
 		return nil
 	}
 	local, err := p.localManifests(ctx)
@@ -147,11 +160,43 @@ func (p *Puller) pullPeer(ctx context.Context, pid peer.ID) error {
 	if err != nil {
 		return err
 	}
-	kept := want[:0]
+	// Everything still missing from this peer, before any backoff is applied.
+	// A failure row for anything else is out of date — the content arrived from
+	// another device, the owner deleted it, or the peer stopped offering it —
+	// and is dropped, so the owner's list of stuck tracks stays one they can
+	// act on rather than one they learn to distrust.
+	stillWanted := make(map[string]bool, len(want))
 	for _, file := range want {
 		if !deleted[file.ContentHash] {
-			kept = append(kept, file)
+			stillWanted[file.ContentHash] = true
 		}
+	}
+	p.failures.prune(ctx, pid.String(), stillWanted)
+
+	// Selection, not attempt, is where a file that cannot be fetched is
+	// dropped. The round is capped, so an entry that fails every time does not
+	// merely waste its own attempt — it holds a slot a fetchable file needed,
+	// and enough of them stall replication completely while the log fills with
+	// the same errors.
+	kept := want[:0]
+	for _, file := range want {
+		if deleted[file.ContentHash] {
+			continue
+		}
+		// A name this filesystem cannot write is knowable before any network
+		// work, so it is recognised here rather than discovered as a failed
+		// write ten minutes into a transfer. A Windows device pulling from a
+		// Linux or macOS peer meets these whenever the peer's library predates
+		// portable naming.
+		c := candidate{peerID: pid.String(), contentHash: file.ContentHash, relPath: file.RelPath}
+		if !portablename.LocallyStorable(file.RelPath) {
+			p.failures.noteUnattempted(ctx, c, ReasonUnstorablePath, unstorableDetail(file.RelPath))
+			continue
+		}
+		if !p.failures.ready(ctx, c) {
+			continue
+		}
+		kept = append(kept, file)
 	}
 	want = kept
 	if len(want) == 0 {
@@ -165,13 +210,18 @@ func (p *Puller) pullPeer(ctx context.Context, pid peer.ID) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		c := candidate{peerID: pid.String(), contentHash: f.ContentHash, relPath: f.RelPath}
 		fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		err := p.files.FetchFileViaPeer(fetchCtx, p.host, pid.String(), f.RelPath, f.ContentHash)
 		cancel()
 		if err != nil {
 			log.Printf("p2p pull: fetch %q from %s: %v", f.RelPath, pid, err)
+			p.failures.recordAttempt(ctx, c, err)
 			continue
 		}
+		// Backing off is not giving up: a file that starts succeeding forgets
+		// its history, so a later failure begins its backoff from scratch.
+		p.failures.clear(ctx, c)
 		fetched++
 	}
 	if fetched > 0 {

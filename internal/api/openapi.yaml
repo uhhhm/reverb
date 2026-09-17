@@ -1528,6 +1528,77 @@ paths:
                     device_id: { type: string }
                   required: [canonical_id, content_hash, size, rel_path, mtime, device_id]
         "500": { description: could not list manifests }
+  /p2p/file-failures:
+    get:
+      summary: Files that are not syncing, and why (manage-library capability required)
+      description: >
+        A file that repeatedly fails to copy from a peer backs off instead of
+        being retried at full rate every round, so it stops consuming the
+        per-round budget the files that can be copied need. This is how the owner
+        learns a track will never arrive rather than inferring it from a log: a
+        file silently absent forever is indistinguishable from one still in
+        flight.
+      responses:
+        "200":
+          description: files this device could not copy from a peer
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/FileFetchFailure' }
+        "500": { description: could not list fetch failures }
+  /p2p/portable-names:
+    get:
+      summary: How many of this device's files need renaming (manage-library capability required)
+      description: >
+        The device holding unportable names is not the device that notices them:
+        a Linux or macOS device stores "Where Is My Mind?.flac" perfectly well
+        and sees no failure, while the Windows device that cannot copy it has
+        nothing to rename. The offer to migrate therefore has to be driven by
+        what each device holds, which is what this reports.
+      responses:
+        "200":
+          description: count of this device's files carrying a name another device could not store
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pending: { type: integer }
+                required: [pending]
+        "500": { description: could not read the file manifest }
+    post:
+      summary: Rename existing files onto portable names (manage-library capability required)
+      description: >
+        A library downloaded before portable naming landed holds names another
+        platform cannot store, and those tracks stay permanently stuck. This
+        renames them in place onto the same form new downloads receive, carries
+        the file manifest across so peers already holding the content do not
+        copy it again, and re-indexes the library.
+
+
+        Safe to interrupt: each file moves with one atomic rename and nothing is
+        journalled beforehand, so a run cut short leaves every file at either its
+        old name or its new one, and asking again finishes the job. A rename that
+        would collide with an existing file is given a free name instead; nothing
+        is ever overwritten.
+      responses:
+        "200":
+          description: migration finished
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PortableNameMigration' }
+        "500":
+          description: the library could not be reconciled with the renames that were made
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  result: { $ref: '#/components/schemas/PortableNameMigration' }
+                required: [error]
+        "503": { description: there is no local music directory to migrate }
   /p2p/fetch:
     post:
       summary: Fetch a file from a paired peer (manage-library capability required)
@@ -1575,6 +1646,51 @@ paths:
               schema: { type: array, items: { $ref: "#/components/schemas/RecommendationStats" } }
 components:
   schemas:
+    FileFetchFailure:
+      type: object
+      properties:
+        peerId: { type: string, description: The paired device this file could not be copied from. A file can fail from one device and succeed from another, so a failure is reported per device. }
+        contentHash: { type: string, description: SHA-256 of the content that could not be copied }
+        relPath: { type: string, description: Path last attempted, as the peer advertises it }
+        reason:
+          type: string
+          description: >
+            unstorable-path — this device's filesystem cannot write that name;
+            content-mismatch — the bytes served did not hash to what was advertised;
+            unavailable — the peer did not serve the file.
+          enum: [unstorable-path, content-mismatch, unavailable]
+        detail: { type: string, description: The underlying error, for diagnosis }
+        attempts: { type: integer, format: int64, description: Fetches actually attempted; 0 when the path was rejected without one }
+        firstFailedAt: { type: integer, format: int64, description: Unix milliseconds }
+        lastFailedAt: { type: integer, format: int64, description: Unix milliseconds }
+        nextAttemptAt: { type: integer, format: int64, description: Unix milliseconds; the file is tried again from this time }
+      required: [peerId, contentHash, relPath, reason, detail, attempts, firstFailedAt, lastFailedAt, nextAttemptAt]
+    PortableNameMigration:
+      type: object
+      properties:
+        renamed:
+          type: array
+          description: Every file and directory moved, as slash-relative paths.
+          items:
+            type: object
+            properties:
+              from: { type: string }
+              to: { type: string }
+            required: [from, to]
+        failed:
+          type: array
+          description: >
+            Entries that could not be moved — a file held open by another
+            process, say. One unmovable file does not abandon the rest of the
+            library, so these are reported rather than raised.
+          items:
+            type: object
+            properties:
+              path: { type: string }
+              reason: { type: string }
+            required: [path, reason]
+        examined: { type: integer, description: Entries considered, migrated or not }
+      required: [renamed, failed, examined]
     SyncRound:
       type: object
       description: Metadata exchange status. Local projection and file transfers run independently in the background.

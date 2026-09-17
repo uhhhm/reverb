@@ -14,6 +14,13 @@ jobs:
         with: { go-version: '1.26.5', cache: true }
       - run: make gen-check
       - run: make vet
+      # Windows-only files — the _windows_test.go guards for the paths and
+      # device names that only Windows refuses — are invisible to every check
+      # above, so a rename can break them and still look green here. Vetting
+      # cross-compiled catches that in seconds on a Linux runner, instead of
+      # after the Windows job has finished building the whole desktop app.
+      - name: Vet for Windows
+        run: make vet-windows
       - run: make test-race
   lint:
     runs-on: ubuntu-latest
@@ -111,8 +118,17 @@ jobs:
         run: bash desktop/build/windows/build.sh "${{ github.sha }}"
       - name: Check the binary is a GUI application carrying the Reverb icon
         run: go run ./desktop/tools/verify-windows-artifact -exe dist/reverb-desktop.exe
+      # Replication is the half of Reverb a cross-platform household hits first,
+      # and Windows is the platform whose filesystem rules differ. Building the
+      # desktop shell here proved only that the code compiles; these suites —
+      # sync, p2p, the portable-name rules, the migration that renames an
+      # established library, and the two-device end-to-end test that boots two
+      # complete runtimes and pairs them over loopback — are what make a Windows
+      # sync regression fail CI instead of reaching a release.
       - name: Desktop, paths, embedded-library and child-process tests
         run: go test ./desktop/... ./internal/desktop/... ./internal/library/embedded/... ./internal/childproc/...
+      - name: Sync, P2P and two-device end-to-end tests
+        run: go test ./internal/sync/... ./internal/p2p/... ./internal/app/... ./internal/portablename/... ./internal/portablemigrate/...
   contracts:
     runs-on: ubuntu-latest
     steps:

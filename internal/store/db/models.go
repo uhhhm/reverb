@@ -140,6 +140,18 @@ type ExtstreamResolve struct {
 	UpdatedAt    int64  `json:"updated_at"`
 }
 
+type FileFetchFailure struct {
+	PeerID        string `json:"peer_id"`
+	ContentHash   string `json:"content_hash"`
+	RelPath       string `json:"rel_path"`
+	Reason        string `json:"reason"`
+	Detail        string `json:"detail"`
+	Attempts      int64  `json:"attempts"`
+	FirstFailedAt int64  `json:"first_failed_at"`
+	LastFailedAt  int64  `json:"last_failed_at"`
+	NextAttemptAt int64  `json:"next_attempt_at"`
+}
+
 type FileManifest struct {
 	CanonicalID string `json:"canonical_id"`
 	ContentHash string `json:"content_hash"`

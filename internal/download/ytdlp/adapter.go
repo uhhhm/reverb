@@ -21,6 +21,7 @@ import (
 
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/download"
+	"github.com/uhhhm/reverb/internal/portablename"
 	"github.com/uhhhm/reverb/internal/registry"
 )
 
@@ -211,6 +212,11 @@ func buildQuery(req core.DownloadRequest) string {
 
 // sanitizeSegment makes a known artist/title safe to embed in an -o template:
 // "%" would be read as an output-template placeholder and "/" as a path separator.
+//
+// It deliberately stops there. The value also feeds --parse-metadata, where it
+// becomes the tag written into the file rather than part of a path, and a tag
+// should keep the colons and quotes the filesystem cannot. outputTemplate
+// applies the portable-name rules on top for the path.
 func sanitizeSegment(s string) string {
 	r := strings.NewReplacer("%", "", "/", "-", "\\", "-")
 	return strings.TrimSpace(r.Replace(s))
@@ -238,13 +244,76 @@ func metadataLiteral(s string) string {
 // outputTemplate builds the -o value. When artist and title are known they are
 // used literally, so the file lands with a sane name instead of a YouTube title
 // like "Artist - Song (Official Video) [HD]".
+//
+// The literals go through portablename because this name is minted once, here,
+// and then replicates to peers on every platform. A title carrying ":" or "?"
+// is perfectly storable on the Linux box running the download and impossible to
+// write on the Windows device that later pulls it, so sanitising only for the
+// running platform would mint a file that silently never arrives.
+//
+// The %(title)s fallback cannot be covered here — yt-dlp substitutes it from the
+// source's own metadata — so Start sweeps the output directory afterwards.
 func (a *Adapter) outputTemplate(req core.DownloadRequest) string {
 	dir := strings.TrimRight(a.outputDir, "/")
-	artist, title := sanitizeSegment(req.Artist), sanitizeSegment(req.Title)
-	if artist != "" && title != "" {
-		return dir + "/" + artist + " - " + title + ".%(ext)s"
+	// The emptiness test is on the template-safe value, not the raw request: an
+	// artist of "%" has no characters yt-dlp can be given literally, and falling
+	// back to %(title)s is better than a file called "_ - Title". portablename
+	// never returns an empty component, so it cannot be the one asked.
+	if !a.mintsItsOwnName(req) {
+		return dir + "/%(title)s.%(ext)s"
 	}
-	return dir + "/%(title)s.%(ext)s"
+	artist, title := sanitizeSegment(req.Artist), sanitizeSegment(req.Title)
+	stem := portablename.Segment(artist) + " - " + portablename.Segment(title)
+	return dir + "/" + a.freeStem(stem, req.ForceOverwrite) + ".%(ext)s"
+}
+
+// mintsItsOwnName reports whether the request carries enough for the template
+// to name the file itself, rather than leaving it to yt-dlp's %(title)s.
+//
+// The test is on the template-safe values, not the raw request: an artist of
+// "%" has no characters yt-dlp can be given literally, and the source's own
+// title is better than a file called "_ - Title".
+func (a *Adapter) mintsItsOwnName(req core.DownloadRequest) bool {
+	return sanitizeSegment(req.Artist) != "" && sanitizeSegment(req.Title) != ""
+}
+
+// freeStem keeps two different tracks from being minted onto one name.
+//
+// Sanitising maps several illegal characters onto one legal stand-in — ":" and
+// "|" both become "-" — so "Who: Live" and "Who- Live" now reach the same
+// template, where before they were distinct literals. yt-dlp skips a target
+// that already exists, so the second track would not fail loudly: it would
+// simply never arrive, and the owner would find the first track's file under
+// the second one's name.
+//
+// The extension is yt-dlp's to choose, so the check is on the stem: any file
+// already called "<stem>.something" counts as occupied. A forced overwrite is
+// the one case that must land on the existing name — that is a quality upgrade
+// replacing the same track.
+func (a *Adapter) freeStem(stem string, force bool) string {
+	if force {
+		return stem
+	}
+	entries, err := os.ReadDir(a.outputDir)
+	if err != nil {
+		// Nothing to collide with that we can see. Minting the plain name is
+		// what this did before, and yt-dlp still refuses to clobber.
+		return stem
+	}
+	taken := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		taken[strings.TrimSuffix(name, filepath.Ext(name))] = true
+	}
+	for i := 1; i < 1000; i++ {
+		if candidate := portablename.Nth(stem, i); !taken[candidate] {
+			return candidate
+		}
+	}
+	return stem
 }
 
 // classifyFailure turns captured yt-dlp output into a FailureClass plus a
@@ -286,6 +355,17 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 			Class: download.ClassNoMatch,
 			Err:   fmt.Errorf("ytdlp: request has no URL and no artist/title to search for"),
 		}
+	}
+	// outputTemplate sanitises the artist/title literals, but the %(title)s
+	// fallback is substituted by yt-dlp from the source's own metadata and can
+	// still land a name a Windows peer cannot write.
+	// Only the %(title)s fallback needs sweeping. When artist and title are
+	// known, outputTemplate already minted a portable name, and sweeping anyway
+	// would put this job's hands on files belonging to the other downloads
+	// sharing this directory for no gain.
+	sweep := func() {}
+	if !a.mintsItsOwnName(req) {
+		sweep = download.BeginPortableSweep(a.outputDir, "ytdlp")
 	}
 
 	args := []string{
@@ -376,6 +456,7 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 	if !sawProgress {
 		onProgress(-1) // indeterminate: yt-dlp gave no parseable progress
 	}
+	sweep()
 	log.Printf("ytdlp: %q finished (output_dir=%s)", query, a.outputDir)
 	return a.outputDir, nil
 }

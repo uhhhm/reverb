@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -29,8 +30,23 @@ type FileStore interface {
 
 const maxFileHashSize = 2 * 1024 * 1024 * 1024 // 2 GiB — skip larger files to bound hashing
 
+// ErrContentMismatch reports that a peer served bytes that did not hash to what
+// its manifest advertised. It is a sentinel because the puller has to tell this
+// apart from an ordinary transfer failure — retrying the same peer will not
+// help until its own scan catches up — and matching on the message text would
+// break silently the next time the wording changes.
+var ErrContentMismatch = errors.New("hash mismatch")
+
 func validateRelPath(relPath string) (string, error) {
 	cleanRel := filepath.Clean(filepath.FromSlash(relPath))
+	// A drive-relative path — "C:evil", "C:..\\secrets" — is not absolute by
+	// filepath.IsAbs on Windows, but it does not resolve under the music
+	// directory either: Windows reads it against that drive's current
+	// directory. On Unix a volume name is always empty, so this costs nothing
+	// and closes an escape that only exists on the platform that has drives.
+	if filepath.VolumeName(cleanRel) != "" {
+		return "", fmt.Errorf("invalid relPath: %q", relPath)
+	}
 	if cleanRel == "." || cleanRel == "" || filepath.IsAbs(cleanRel) || cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("invalid relPath: %q", relPath)
 	}
@@ -268,8 +284,16 @@ func (f *FileSyncer) Run(ctx context.Context) {
 		// Ensure musicDir exists before watching.
 		_ = os.MkdirAll(f.musicDir, 0o755)
 		_ = watcher.Add(f.musicDir)
+		// The watcher goroutine is waited for, not just cancelled: it opens
+		// files to hash them, and on Windows a directory holding an open file
+		// cannot be removed. Returning from Run while it is mid-scan would
+		// leave the music directory pinned after shutdown.
+		var watching sync.WaitGroup
+		watching.Add(1)
+		defer watching.Wait()
 		// Also watch subdirs as they appear; we add them on create.
 		SafeGo("file watcher", func() {
+			defer watching.Done()
 			debounce := time.NewTimer(0)
 			if !debounce.Stop() {
 				<-debounce.C
@@ -427,7 +451,7 @@ func (f *FileSyncer) FetchFileViaPeer(ctx context.Context, h host.Host, peerIDSt
 		return err
 	}
 	if got := hex.EncodeToString(digest.Sum(nil)); got != expHash {
-		return fmt.Errorf("hash mismatch for %q: expected %s got %s", relPath, expHash, got)
+		return fmt.Errorf("%w for %q: expected %s got %s", ErrContentMismatch, relPath, expHash, got)
 	}
 	// Linking is atomic and refuses an occupied destination, including when
 	// two peers fetched the same path concurrently. Root confines symlinks.

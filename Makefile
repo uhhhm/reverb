@@ -1,4 +1,4 @@
-.PHONY: gen gen-check test test-go test-web test-race fmt-check vet check check-web check-full recommend-quality setup-web setup-contracts contracts contracts-check contracts-test build web dev clean desktop desktop-windows desktop-dev desktop-deps package-mac
+.PHONY: gen gen-check test test-go test-web test-race fmt-check vet vet-windows check check-web check-full recommend-quality setup-web setup-contracts contracts contracts-check contracts-test build web dev clean desktop desktop-windows desktop-dev desktop-deps package-mac
 
 VERSION ?= dev
 GO_PACKAGES := ./cmd/... ./internal/... ./desktop/...
@@ -29,10 +29,17 @@ fmt-check:
 vet:
 	go vet $(GO_PACKAGES)
 
+# Windows-only files -- the _windows_test.go guards for the paths and device
+# names only Windows refuses -- are invisible to every other check here, so a
+# rename can break them while everything local stays green. Cross-compiled vet
+# catches that in seconds, without a Windows machine.
+vet-windows:
+	GOOS=windows go vet $(GO_PACKAGES)
+
 check-web:
 	cd web && npm run typecheck && npm run lint && npm run test
 
-check: fmt-check vet test-go check-web gen-check contracts-check contracts-test
+check: fmt-check vet vet-windows test-go check-web gen-check contracts-check contracts-test
 
 check-full: check test-race
 	cd web && npm run e2e

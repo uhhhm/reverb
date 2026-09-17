@@ -3,6 +3,8 @@ package ytdlp
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -404,5 +406,91 @@ func TestStartEscapesColonsInParseMetadata(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("want escaped title arg %q, got args: %v", want, r.gotArgs)
+	}
+}
+
+// The name is minted once, here, and then replicates to peers on every
+// platform. A title carrying a Windows-illegal character is perfectly storable
+// on the Linux box running the download and impossible to write on the Windows
+// device that later pulls it, so the template has to be portable whatever
+// platform mints it.
+func TestOutputTemplateIsPortableOnEveryPlatform(t *testing.T) {
+	a := newAdapter(t, &fakeRunner{}, nil)
+	for _, tc := range []struct {
+		name   string
+		artist string
+		title  string
+		want   string
+	}{
+		{"illegal characters", "AC/DC", `Who Made Who: "Live"?`, "/music/AC-DC - Who Made Who- 'Live'_.%(ext)s"},
+		{"trailing dot", "Weezer", "Etc.", "/music/Weezer - Etc.%(ext)s"},
+		{"reserved device name", "Nine Inch Nails", "NUL", "/music/Nine Inch Nails - NUL_.%(ext)s"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := a.outputTemplate(core.DownloadRequest{Artist: tc.artist, Title: tc.title})
+			if got != tc.want {
+				t.Fatalf("outputTemplate = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The artist and title also feed --parse-metadata, where they become the tags
+// written into the file rather than part of a path. Sanitising a path is no
+// reason to strip a colon out of the track's own title.
+func TestMetadataLiteralKeepsPunctuationThePathCannot(t *testing.T) {
+	got := metadataLiteral("Lullaby of the New Moon (I) : Somnias a Luna")
+	if !strings.Contains(got, `\:`) {
+		t.Fatalf("metadataLiteral dropped the colon instead of escaping it: %q", got)
+	}
+}
+
+// An artist with no characters yt-dlp can be given literally leaves nothing to
+// build a name from. Falling back to the source's own title is better than a
+// file called "_ - Title".
+func TestOutputTemplateFallsBackWhenNothingSurvivesTheTemplate(t *testing.T) {
+	a := newAdapter(t, &fakeRunner{}, nil)
+	got := a.outputTemplate(core.DownloadRequest{Artist: "%", Title: "Real Title"})
+	if got != "/music/%(title)s.%(ext)s" {
+		t.Fatalf("outputTemplate = %q, want the %%(title)s fallback", got)
+	}
+}
+
+// Sanitising maps several illegal characters onto one stand-in — ":" and "|"
+// both become "-" — so two titles that were distinct literals can now reach the
+// same template. yt-dlp skips a target that already exists, so the second track
+// would not fail loudly: it would never arrive, and the owner would find the
+// first track's file under the second one's name.
+func TestOutputTemplateDoesNotMintOverAnExistingTrack(t *testing.T) {
+	dir := t.TempDir()
+	a := newAdapter(t, &fakeRunner{}, nil)
+	if err := a.Init(map[string]any{"output_dir": dir, "binary_path": "yt-dlp"}); err != nil {
+		t.Fatal(err)
+	}
+	// The first track has already landed, extension and all.
+	if err := os.WriteFile(filepath.Join(dir, "Band - Who- Live.opus"), []byte("first"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := a.outputTemplate(core.DownloadRequest{Artist: "Band", Title: "Who: Live"})
+	want := dir + "/Band - Who- Live (2).%(ext)s"
+	if got != want {
+		t.Fatalf("outputTemplate = %q, want %q", got, want)
+	}
+}
+
+// A quality upgrade is the same track again and must land on the same name.
+func TestOutputTemplateKeepsTheNameForAForcedOverwrite(t *testing.T) {
+	dir := t.TempDir()
+	a := newAdapter(t, &fakeRunner{}, nil)
+	if err := a.Init(map[string]any{"output_dir": dir, "binary_path": "yt-dlp"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "Band - Song.opus"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := a.outputTemplate(core.DownloadRequest{Artist: "Band", Title: "Song", ForceOverwrite: true})
+	want := dir + "/Band - Song.%(ext)s"
+	if got != want {
+		t.Fatalf("outputTemplate = %q, want %q", got, want)
 	}
 }

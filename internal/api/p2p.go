@@ -245,3 +245,99 @@ func (s *Server) localSyncDeviceID(ctx context.Context) string {
 	}
 	return ""
 }
+
+// fileFetchFailure is what the owner is shown about a file that is not
+// replicating. The stored reason is a stable token rather than a sentence, so
+// the UI phrases it and this payload stays the same when the wording changes.
+type fileFetchFailure struct {
+	PeerID      string `json:"peerId"`
+	ContentHash string `json:"contentHash"`
+	RelPath     string `json:"relPath"`
+	Reason      string `json:"reason"`
+	Detail      string `json:"detail"`
+	Attempts    int64  `json:"attempts"`
+	FirstFailed int64  `json:"firstFailedAt"`
+	LastFailed  int64  `json:"lastFailedAt"`
+	NextAttempt int64  `json:"nextAttemptAt"`
+}
+
+// handleP2PFileFailures answers with the files this device cannot pull. It
+// exists because a file silently absent forever is worse than one reported as
+// failed: without this the owner cannot tell a track that will never arrive
+// from one still in flight, and the only evidence is a repeating line in a log
+// they never see.
+func (s *Server) handleP2PFileFailures(w http.ResponseWriter, r *http.Request) {
+	lister, ok := s.deps.FileStore.(FileFetchFailureLister)
+	if !ok {
+		writeJSON(w, http.StatusOK, []fileFetchFailure{})
+		return
+	}
+	rows, err := lister.ListFileFetchFailures(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	out := make([]fileFetchFailure, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, fileFetchFailure{
+			PeerID:      row.PeerID,
+			ContentHash: row.ContentHash,
+			RelPath:     row.RelPath,
+			Reason:      row.Reason,
+			Detail:      row.Detail,
+			Attempts:    row.Attempts,
+			FirstFailed: row.FirstFailedAt,
+			LastFailed:  row.LastFailedAt,
+			NextAttempt: row.NextAttemptAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleP2PPortableNamesPending reports whether this device has anything to
+// migrate.
+//
+// The device holding unportable names is not the device that notices them: a
+// Linux box stores "Where Is My Mind?.flac" perfectly well and sees no failure
+// at all, while the Windows peer that cannot pull it has nothing to rename. So
+// the UI cannot offer the migration off the back of pull failures — it has to
+// ask each device about its own library, which is what this answers.
+func (s *Server) handleP2PPortableNamesPending(w http.ResponseWriter, r *http.Request) {
+	if s.deps.PortableMigration == nil {
+		writeJSON(w, http.StatusOK, map[string]int{"pending": 0})
+		return
+	}
+	n, err := s.deps.PortableMigration.Pending(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"pending": n})
+}
+
+// handleP2PPortableNames renames the library's existing files onto names every
+// device in the household can store.
+//
+// It is a deliberate action rather than something that happens at startup. This
+// touches files in the owner's own music folder, which is the most destructive
+// thing Reverb does to data it did not create, and the owner reaches it from
+// the same screen that shows them which tracks are stuck.
+//
+// The run is safe to interrupt: each file moves with one atomic rename, so a
+// migration cut short leaves every file at either its old name or its new one,
+// and asking again finishes the job.
+func (s *Server) handleP2PPortableNames(w http.ResponseWriter, r *http.Request) {
+	if s.deps.PortableMigration == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "there is no local music directory to migrate"})
+		return
+	}
+	res, err := s.deps.PortableMigration.Run(r.Context())
+	if err != nil {
+		// The renames that succeeded are reported alongside the error: they
+		// have already happened on disk, and hiding them would leave the owner
+		// thinking nothing moved.
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error(), "result": res})
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}

@@ -1,4 +1,5 @@
 import { api } from './api'
+import type { components } from './generated/api'
 
 export interface P2PStatus {
   peerId: string
@@ -55,4 +56,39 @@ export function getFileManifests(): Promise<FileManifest[]> {
 
 export function fetchFileFromPeer(peerId: string, relPath: string, contentHash: string): Promise<{ ok: boolean }> {
   return api.post<{ ok: boolean }>('/p2p/fetch', { peerId, relPath, contentHash })
+}
+
+/**
+ * A file this device could not copy from a peer, and why. `reason` is a stable
+ * token so the wording lives in the UI rather than the database; the shape is
+ * taken from the generated contract so the three spellings of that token — Go,
+ * OpenAPI, TypeScript — cannot drift apart.
+ */
+export type FileFetchFailure = components['schemas']['FileFetchFailure']
+
+export function getFileFetchFailures(): Promise<FileFetchFailure[]> {
+  return api.get<FileFetchFailure[]>('/p2p/file-failures')
+}
+
+export type PortableNameMigration = components['schemas']['PortableNameMigration']
+
+/**
+ * Renames the library's existing files onto names every device in the household
+ * can store. Safe to interrupt and safe to repeat: a run cut short leaves every
+ * file at either its old name or its new one, and asking again finishes the job.
+ */
+export function migratePortableNames(): Promise<PortableNameMigration> {
+  return api.post<PortableNameMigration>('/p2p/portable-names', {})
+}
+
+/**
+ * How many of this device's files carry a name another device in the household
+ * could not store.
+ *
+ * The device holding those names is not the device that notices them — a Linux
+ * box stores them perfectly well — so the offer to migrate has to be driven by
+ * each device's own library rather than by what a peer failed to copy.
+ */
+export function getPortableNamesPending(): Promise<{ pending: number }> {
+  return api.get<{ pending: number }>('/p2p/portable-names')
 }

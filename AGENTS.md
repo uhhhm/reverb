@@ -30,7 +30,7 @@ Reverb is a Go modular monolith with an embedded React/TypeScript SPA. **Desktop
 - `make test` includes backend, desktop Go packages, and frontend unit tests. Use explicit Go package roots (`./cmd/... ./internal/... ./desktop/...`): repository-wide `./...` can traverse vendored Go in `web/node_modules`.
 - For HTTP or WebSocket shape changes, read [docs/contracts.md](docs/contracts.md), edit OpenAPI, and run `make contracts`. Generated transport files are checked by `make contracts-check`.
 - `make gen` regenerates sqlc output; `make gen-check` checks drift. Edit SQL in `internal/store/queries`, migrations in `internal/store/migrations`, and handwritten extensions in separate files such as `internal/store/db/underlying.go`. Generated Go files are not hand-edited.
-- `make fmt-check`, `make vet`, and `make check-web` expose the individual fast checks. Untagged desktop tests exercise boot and transport; they do not compile the native Wails window.
+- `make fmt-check`, `make vet`, `make vet-windows` and `make check-web` expose the individual fast checks. `make vet-windows` cross-compiles: the `_windows_test.go` guards are invisible to every other check, so a rename can break them while everything else stays green. Untagged desktop tests exercise boot and transport; they do not compile the native Wails window.
 
 ## Rules
 

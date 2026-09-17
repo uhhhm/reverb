@@ -5234,6 +5234,144 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/p2p/file-failures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Files that are not syncing, and why (manage-library capability required)
+         * @description A file that repeatedly fails to copy from a peer backs off instead of being retried at full rate every round, so it stops consuming the per-round budget the files that can be copied need. This is how the owner learns a track will never arrive rather than inferring it from a log: a file silently absent forever is indistinguishable from one still in flight.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description files this device could not copy from a peer */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["FileFetchFailure"][];
+                    };
+                };
+                /** @description could not list fetch failures */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/p2p/portable-names": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * How many of this device's files need renaming (manage-library capability required)
+         * @description The device holding unportable names is not the device that notices them: a Linux or macOS device stores "Where Is My Mind?.flac" perfectly well and sees no failure, while the Windows device that cannot copy it has nothing to rename. The offer to migrate therefore has to be driven by what each device holds, which is what this reports.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description count of this device's files carrying a name another device could not store */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            pending: number;
+                        };
+                    };
+                };
+                /** @description could not read the file manifest */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Rename existing files onto portable names (manage-library capability required)
+         * @description A library downloaded before portable naming landed holds names another platform cannot store, and those tracks stay permanently stuck. This renames them in place onto the same form new downloads receive, carries the file manifest across so peers already holding the content do not copy it again, and re-indexes the library.
+         *
+         *     Safe to interrupt: each file moves with one atomic rename and nothing is journalled beforehand, so a run cut short leaves every file at either its old name or its new one, and asking again finishes the job. A rename that would collide with an existing file is given a free name instead; nothing is ever overwritten.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description migration finished */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PortableNameMigration"];
+                    };
+                };
+                /** @description the library could not be reconciled with the renames that were made */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            result?: components["schemas"]["PortableNameMigration"];
+                        };
+                    };
+                };
+                /** @description there is no local music directory to migrate */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/p2p/fetch": {
         parameters: {
             query?: never;
@@ -5349,6 +5487,55 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        FileFetchFailure: {
+            /** @description The paired device this file could not be copied from. A file can fail from one device and succeed from another */
+            peerId: string;
+            /** @description SHA-256 of the content that could not be copied */
+            contentHash: string;
+            /** @description Path last attempted */
+            relPath: string;
+            /**
+             * @description unstorable-path — this device's filesystem cannot write that name; content-mismatch — the bytes served did not hash to what was advertised; unavailable — the peer did not serve the file.
+             * @enum {string}
+             */
+            reason: "unstorable-path" | "content-mismatch" | "unavailable";
+            /** @description The underlying error */
+            detail: string;
+            /**
+             * Format: int64
+             * @description Fetches actually attempted; 0 when the path was rejected without one
+             */
+            attempts: number;
+            /**
+             * Format: int64
+             * @description Unix milliseconds
+             */
+            firstFailedAt: number;
+            /**
+             * Format: int64
+             * @description Unix milliseconds
+             */
+            lastFailedAt: number;
+            /**
+             * Format: int64
+             * @description Unix milliseconds; the file is tried again from this time
+             */
+            nextAttemptAt: number;
+        };
+        PortableNameMigration: {
+            /** @description Every file and directory moved, as slash-relative paths. */
+            renamed: {
+                from: string;
+                to: string;
+            }[];
+            /** @description Entries that could not be moved — a file held open by another process, say. One unmovable file does not abandon the rest of the library, so these are reported rather than raised. */
+            failed: {
+                path: string;
+                reason: string;
+            }[];
+            /** @description Entries considered */
+            examined: number;
+        };
         /** @description Metadata exchange status. Local projection and file transfers run independently in the background. */
         SyncRound: {
             /** Format: int64 */

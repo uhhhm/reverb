@@ -435,10 +435,19 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 		copy(full, args)
 		return append(full, q)
 	}
+	// spotDL substitutes {artists} and {title} itself, from Spotify's metadata,
+	// so the template cannot carry sanitised literals the way yt-dlp's can.
+	// spotDL strips the illegal characters but leaves trailing dots and spaces
+	// and the DOS device names behind, and those are exactly as unwritable on a
+	// Windows peer.
+	sweep := download.BeginPortableSweep(a.outputDir, "spotdl")
 	dir, noResults, err := a.runOnce(ctx, withQuery(query), query, onProgress)
 	if noResults && fallbackQuery != "" {
 		log.Printf("spotdl: %q matched nothing, retrying as %q", query, fallbackQuery)
 		dir, _, err = a.runOnce(ctx, withQuery(fallbackQuery), fallbackQuery, onProgress)
+	}
+	if err == nil {
+		sweep()
 	}
 	return dir, err
 }

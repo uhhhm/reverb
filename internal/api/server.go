@@ -21,6 +21,7 @@ import (
 	"github.com/uhhhm/reverb/internal/override"
 	"github.com/uhhhm/reverb/internal/p2p"
 	"github.com/uhhhm/reverb/internal/play"
+	"github.com/uhhhm/reverb/internal/portablemigrate"
 	"github.com/uhhhm/reverb/internal/recommendationevent"
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/resolver"
@@ -263,6 +264,10 @@ type Deps struct {
 	DeviceKeys p2p.DeviceKeyStore
 	FileStore  FileManifestStore
 	MusicDir   string
+	// PortableMigration renames existing files onto names every device in the
+	// household can store. Nil when there is no local music directory to
+	// migrate — a device running against an external library backend.
+	PortableMigration PortableNameMigrator
 }
 
 // TrackSyncEmitter publishes a per-track field to the sync log under a catalog
@@ -310,6 +315,24 @@ type FileManifestStore interface {
 	GetFileManifest(ctx context.Context, canonicalID string) (db.FileManifest, error)
 	UpsertFileManifest(ctx context.Context, arg db.UpsertFileManifestParams) error
 	DeleteFileManifest(ctx context.Context, canonicalID string) error
+}
+
+// FileFetchFailureLister reads the files that are not replicating and why.
+// *db.Queries satisfies it. It is separate from FileManifestStore and probed
+// by type assertion so a Deps assembled without it still serves every other
+// p2p route.
+type FileFetchFailureLister interface {
+	ListFileFetchFailures(ctx context.Context) ([]db.FileFetchFailure, error)
+}
+
+// PortableNameMigrator renames an established library onto names every device
+// in the household can store. *portablemigrate.Service satisfies it.
+type PortableNameMigrator interface {
+	Run(ctx context.Context) (portablemigrate.Result, error)
+	// Pending reports how many of this device's files carry a name another
+	// device in the household could not store, so the UI can offer the
+	// migration on the device that can actually perform it.
+	Pending(ctx context.Context) (int, error)
 }
 
 type Server struct {
@@ -509,6 +532,9 @@ func (s *Server) routes() {
 				pr2.Get("/p2p/peers", s.handleP2PPeers)
 				pr2.Post("/p2p/pair/redeem", s.handleP2PRedeem)
 				pr2.Get("/p2p/manifests", s.handleP2PManifests)
+				pr2.Get("/p2p/file-failures", s.handleP2PFileFailures)
+				pr2.Get("/p2p/portable-names", s.handleP2PPortableNamesPending)
+				pr2.Post("/p2p/portable-names", s.handleP2PPortableNames)
 				pr2.Post("/p2p/fetch", s.handleP2PFetch)
 			})
 

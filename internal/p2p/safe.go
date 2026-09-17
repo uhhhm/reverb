@@ -60,34 +60,37 @@ func SafeRun(name string, fn func()) {
 // iteration cannot spin the CPU. A variable only so tests need not wait it out.
 var safeLoopRestartDelayForTest = 5 * time.Second
 
-// SafeGoLoop runs a long-lived loop in a goroutine and restarts it after a
-// panic, until ctx is done. SafeGo alone would contain the panic but leave the
-// loop dead for the life of the process: anti-entropy would stop silently, and
-// the app would go on looking healthy while no longer syncing.
-func SafeGoLoop(ctx context.Context, name string, fn func()) {
-	go func() {
-		for ctx.Err() == nil {
-			panicked := func() (panicked bool) {
-				defer func() {
-					if r := recover(); r != nil {
-						panicked = true
-						log.Printf("p2p %s loop panic, restarting: %v\n%s", name, r, debug.Stack())
-					}
-				}()
-				fn()
-				return false
+// SafeLoop runs a long-lived loop and restarts it after a panic, until ctx is
+// done. SafeGo alone would contain the panic but leave the loop dead for the
+// life of the process: anti-entropy would stop silently, and the app would go
+// on looking healthy while no longer syncing.
+//
+// It runs on the calling goroutine so the caller decides how the goroutine is
+// owned. Shutdown has to wait for these loops — one still running holds open
+// handles on the music directory — which a fire-and-forget spawn here would
+// have made impossible to observe.
+func SafeLoop(ctx context.Context, name string, fn func()) {
+	for ctx.Err() == nil {
+		panicked := func() (panicked bool) {
+			defer func() {
+				if r := recover(); r != nil {
+					panicked = true
+					log.Printf("p2p %s loop panic, restarting: %v\n%s", name, r, debug.Stack())
+				}
 			}()
-			// A clean return means the loop finished on its own terms --
-			// ctx cancelled, or nothing left to do. Only a panic is worth
-			// restarting for.
-			if !panicked || ctx.Err() != nil {
-				return
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(safeLoopRestartDelayForTest):
-			}
+			fn()
+			return false
+		}()
+		// A clean return means the loop finished on its own terms --
+		// ctx cancelled, or nothing left to do. Only a panic is worth
+		// restarting for.
+		if !panicked || ctx.Err() != nil {
+			return
 		}
-	}()
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(safeLoopRestartDelayForTest):
+		}
+	}
 }

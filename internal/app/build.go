@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,6 +42,7 @@ import (
 	"github.com/uhhhm/reverb/internal/play"
 	"github.com/uhhhm/reverb/internal/playlistcrdt"
 	"github.com/uhhhm/reverb/internal/playlistsync"
+	"github.com/uhhhm/reverb/internal/portablemigrate"
 	"github.com/uhhhm/reverb/internal/recommend"
 	"github.com/uhhhm/reverb/internal/recommend/listenbrainz"
 	"github.com/uhhhm/reverb/internal/recommendationevent"
@@ -110,6 +112,26 @@ type Runtime struct {
 	Playlists *playlistcrdt.Service
 	projector *materialize.Service
 	files     *p2p.FileSyncer
+
+	// bg holds the background loops StartBackground launched, so Close can wait
+	// for them to stop rather than returning while they still hold handles.
+	bg sync.WaitGroup
+}
+
+// goLoop starts one supervised background loop and enrols it in r.bg.
+//
+// Enrolment is the point: a loop that is still running holds open handles — the
+// file syncer's fsnotify watch on the music directory, a peer fetch's temp
+// file. On Unix that is invisible, because a directory can be removed while a
+// handle on it is open; on Windows the removal fails outright, so a Close that
+// returned before its loops had stopped would leave the music directory
+// undeletable and, in a test, fail the whole case at cleanup.
+func (r *Runtime) goLoop(ctx context.Context, name string, fn func()) {
+	r.bg.Add(1)
+	go func() {
+		defer r.bg.Done()
+		p2p.SafeLoop(ctx, name, fn)
+	}()
 }
 
 // Build opens the store, runs migrations, constructs every service, and returns
@@ -450,11 +472,44 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		musicDir = ""
 	}
 	localID, _ := reverbsync.LocalDeviceID(ctx, st.Q())
-	files := p2p.NewFileSyncer(st.Q(), localID, musicDir).WithOnChanged(func() {
+	// scheduleDownloadScan asks the live download manager to re-scan the music
+	// directory. The capability is probed rather than declared because the
+	// aggregator behind Downloads is hot-reloadable and not every adapter set
+	// offers it.
+	scheduleDownloadScan := func() {
 		if downloader, ok := reloader.Current().Downloads.(interface{ ScheduleScan() }); ok {
 			downloader.ScheduleScan()
 		}
-	})
+	}
+	files := p2p.NewFileSyncer(st.Q(), localID, musicDir).WithOnChanged(scheduleDownloadScan)
+	// Renaming the library's existing files is what lets a Windows device pair
+	// with a library built on Linux or macOS. It is exposed as a deliberate
+	// action rather than run at startup, because it touches the owner's own
+	// music folder.
+	//
+	// Reconciliation is three steps, and all three are needed: the embedded
+	// library has to re-index the moved files or it serves paths that no longer
+	// exist; the catalog's backend bindings have to be invalidated so the
+	// resolver re-resolves each track to its new backend id; and the file
+	// manifest is carried across by the migration itself, which is why it is
+	// not repeated here. Listening history, playlists and ratings are keyed on
+	// catalog ids, which a rename does not touch, so they follow for free.
+	var portableMigration *portablemigrate.Service
+	if musicDir != "" {
+		portableMigration = portablemigrate.New(musicDir, func(c context.Context) error {
+			scheduleDownloadScan()
+			if lib := reloader.Current().Library; lib != nil {
+				if err := lib.StartScan(c); err != nil {
+					return err
+				}
+			}
+			return resolverSvc.BumpCurrentEpoch(c)
+		}).WithManifest(st.Q(), localID)
+	}
+	if portableMigration != nil {
+		deps.PortableMigration = portableMigration
+	}
+
 	newMaterializer := func() *materialize.Service {
 		return materialize.New(deps.Overrides, deps.Crop).
 			WithFiles(files).
@@ -604,14 +659,14 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 				}
 				fs := r.files
 				if musicDir != "" {
-					p2p.SafeGoLoop(ctx, "file sync", func() { fs.Run(ctx) })
+					r.goLoop(ctx, "file sync", func() { fs.Run(ctx) })
 				}
 				// Advertise what we hold and pull what paired peers hold.
 				if h.LibHost() != nil {
 					p2p.RegisterManifestHandler(h.LibHost(), r.Store.Q(), localID, guard)
 					puller := p2p.NewPuller(h.LibHost(), r.Store.Q(), fs, guard, localID, musicDir).
 						WithCovers(r.Store.Q(), coverDir)
-					p2p.SafeGoLoop(ctx, "file pull", func() { puller.Run(ctx) })
+					r.goLoop(ctx, "file pull", func() { puller.Run(ctx) })
 				}
 				// P2P anti-entropy for sync changes over libp2p.
 				if r.Deps.SyncStore != nil && h.LibHost() != nil {
@@ -619,7 +674,7 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 					syncer := p2p.NewSyncer(h.LibHost(), r.Deps.SyncStore, guard, r.Store.Q(), localID)
 					syncer.SetBus(r.Bus)
 					r.P2PSyncer = syncer
-					p2p.SafeGoLoop(ctx, "syncer", func() { _ = syncer.Run(ctx) })
+					r.goLoop(ctx, "syncer", func() { _ = syncer.Run(ctx) })
 				}
 			}
 		}
@@ -630,7 +685,7 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 		}
 	}
 	if r.Deps.SyncStore != nil {
-		p2p.SafeGoLoop(ctx, "projection recovery", func() { r.Deps.SyncStore.RunProjectionRecovery(ctx) })
+		r.goLoop(ctx, "projection recovery", func() { r.Deps.SyncStore.RunProjectionRecovery(ctx) })
 	}
 	if r.Bundle.Supervisor != nil {
 		r.Bundle.Supervisor.Start()
@@ -675,14 +730,43 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 // Close stops the download manager and closes the store. The HTTP server and the
 // library supervisor are shut down by the entry point, which owns their
 // lifecycles.
+// Close releases everything StartBackground acquired. The caller cancels the
+// context it passed to StartBackground first; Close then waits for the loops
+// that context stops, because a loop still running holds handles on the music
+// directory and the database that the next thing to touch them — a Windows
+// RemoveAll, a reopen of the store — will be refused.
+//
+// The wait is bounded. A loop wedged in a slow network read must not turn
+// quitting the app into a hang; after the grace period Close carries on and
+// closes the store anyway, which is the same outcome the old unconditional
+// close gave.
 func (r *Runtime) Close() {
 	if r.P2P != nil {
 		_ = r.P2P.Close()
 	}
+	r.waitForBackground(backgroundStopGrace)
 	if r.Reloader != nil {
 		r.Reloader.Close()
 	}
 	if r.Store != nil {
 		_ = r.Store.Close()
+	}
+}
+
+// backgroundStopGrace bounds how long Close waits for the background loops. The
+// loops themselves return promptly on cancellation; the grace covers a fetch or
+// a scan that is mid-syscall when the cancel lands.
+const backgroundStopGrace = 10 * time.Second
+
+func (r *Runtime) waitForBackground(grace time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		r.bg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(grace):
+		logf("WARNING: background loops did not stop within %s; closing anyway", grace)
 	}
 }
