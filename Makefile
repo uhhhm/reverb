@@ -1,4 +1,4 @@
-.PHONY: gen gen-check test test-go test-web test-race fmt-check vet check check-web check-full recommend-quality setup-web setup-contracts contracts contracts-check contracts-test build web dev clean desktop desktop-dev desktop-deps package-mac
+.PHONY: gen gen-check test test-go test-web test-race fmt-check vet check check-web check-full recommend-quality setup-web setup-contracts contracts contracts-check contracts-test build web dev clean desktop desktop-windows desktop-dev desktop-deps package-mac
 
 VERSION ?= dev
 GO_PACKAGES := ./cmd/... ./internal/... ./desktop/...
@@ -82,6 +82,13 @@ WAILS_TAGS ?= desktop,production,webkit2_41
 
 desktop: web
 	go build -tags $(WAILS_TAGS) -ldflags "-X main.version=$(VERSION)" -o dist/reverb-desktop ./desktop
+
+# Windows. webkit2_41 is a Linux tag and must not be passed; -H windowsgui puts
+# the binary in the GUI subsystem, which is what stops a console window from
+# opening behind the app. These are the same flags the Windows CI job runs, so
+# this target cross-compiles exactly what CI builds.
+desktop-windows: web
+	GOOS=windows GOARCH=amd64 go build -tags desktop,production -ldflags "-H windowsgui -X main.version=$(VERSION)" -o dist/reverb-desktop.exe ./desktop
 
 desktop-dev:
 	wails dev -projectdir ./desktop

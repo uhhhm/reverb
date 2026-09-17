@@ -13,8 +13,8 @@ import (
 )
 
 // Installing an update touches three things the operating system has opinions
-// about, so each is a per-OS seam (platform_darwin.go, platform_unix.go). A
-// port must supply all three:
+// about, so each is a per-OS seam (platform_darwin.go, platform_unix.go,
+// platform_windows.go). A port must supply all three:
 //
 //   - backupPath says where the outgoing binary is kept until the successor has
 //     started. It must be somewhere a rename can reach without crossing a

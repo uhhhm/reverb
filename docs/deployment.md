@@ -226,8 +226,8 @@ Bundled tools (ffmpeg static, Navidrome 0.62.0, spotDL 4.5.0, yt-dlp, deno) are 
 
 ### Data locations
 
-- **DB:** `~/Library/Application Support/Reverb/reverb.db` (macOS) / `~/.config/reverb/reverb.db` (Linux, XDG via `os.UserConfigDir`). `REVERB_DB` overrides. On first launch `MaybeMigrateLegacyDB` copies `./data/reverb.db` if the desktop DB is missing.
-- **Downloads:** `~/Music/Reverb` (`REVERB_DOWNLOAD_DIR` overrides, created if missing) — also the built-in Navidrome scan dir.
+- **DB:** `~/Library/Application Support/reverb/reverb.db` (macOS) / `~/.config/reverb/reverb.db` (Linux, XDG via `os.UserConfigDir`) / `%AppData%\reverb\reverb.db` (Windows, roaming). `REVERB_DB` overrides. On first launch `MaybeMigrateLegacyDB` copies `./data/reverb.db` if the desktop DB is missing.
+- **Downloads:** `Music/Reverb` under the user's home directory (`%USERPROFILE%\Music\Reverb` on Windows) (`REVERB_DOWNLOAD_DIR` overrides, created if missing) — also the built-in Navidrome scan dir.
 
 ### macOS Gatekeeper (unsigned v1)
 
@@ -245,4 +245,8 @@ Transport security is HTTPS to GitHub plus that digest; release artifacts are no
 
 Server/Docker builds wire no updater — the update endpoints report 503 there, and the image tag is the update mechanism. `yt-dlp` is hot-upgraded separately every 24 h via `pip install --upgrade yt-dlp` without an app restart.
 
-CI builds `reverb-desktop-$VERSION-$GOOS-$GOARCH.{zip,deb,AppImage}` via `.github/workflows/desktop.yml` (matrix `macos-14` + `ubuntu-22.04` × `amd64`/`arm64`, `wails build -platform $GOOS/$GOARCH -ldflags "-X main.version=$TAG"`).
+CI builds `reverb-desktop-$VERSION-$GOOS-$GOARCH.{zip,deb,AppImage}` via `.github/workflows/desktop.yml` (matrix `macos-14` + `ubuntu-22.04` × `amd64`/`arm64`, `wails build -platform $GOOS/$GOARCH -ldflags "-X main.version=$TAG"`). Windows is not in that matrix; `ci.yml`'s `windows` job compiles `reverb-desktop.exe` on every push and runs the desktop, desktop-paths, embedded-library and child-process tests there.
+
+### Building on Windows
+
+`desktop/README.md` carries the build commands, which are the ones the `windows` CI job runs. The binary must be linked `-H windowsgui` — the GUI subsystem is what keeps a console window from opening behind the app — and CI asserts the built PE carries it. From macOS or Linux, `make desktop-windows` cross-compiles the same binary.

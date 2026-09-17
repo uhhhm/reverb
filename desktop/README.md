@@ -9,6 +9,9 @@ Wails v2 desktop wrapper for Reverb. Sibling to `cmd/reverb`, shares `internal/*
 - Wails v2 (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`)
 - Linux deps: `libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev pkg-config`
 - macOS: Xcode
+- Windows: Windows 10 1803 or newer and the WebView2 runtime (preinstalled on
+  Windows 11 and current Windows 10). No C toolchain is needed — the Windows
+  build is pure Go.
 
 ## Commands
 
@@ -16,16 +19,57 @@ Wails v2 desktop wrapper for Reverb. Sibling to `cmd/reverb`, shares `internal/*
 make desktop        # build dist/reverb-desktop (requires web build)
 make desktop-dev    # wails dev -projectdir ./desktop (hot reload via Vite :5173)
 make desktop-deps   # fetch ffmpeg static + navidrome per TARGETARCH (tools/fetch-*.sh)
+make desktop-windows # cross-compile dist/reverb-desktop.exe from macOS or Linux
 ```
+
+On Windows, build with the same command CI runs, from the repository root
+(PowerShell), after building the SPA into `internal/api/dist`:
+
+```powershell
+npm ci --prefix web
+npm run build --prefix web
+if (Test-Path internal/api/dist) { Remove-Item -Recurse -Force internal/api/dist }
+Copy-Item -Recurse web/dist internal/api/dist
+go build -tags desktop,production -ldflags "-H windowsgui -X main.version=dev" -o dist/reverb-desktop.exe ./desktop
+```
+
+`-H windowsgui` puts the binary in the GUI subsystem; without it Windows opens a
+console window behind the app on every launch. `webkit2_41` is a Linux tag and
+must not be passed.
 
 Config is in `desktop/wails.json` — frontend `../web`, build `npm run build`, dev server `http://localhost:5173`, fallback `index.html` for BrowserRouter.
 
 Build assets: `desktop/build/appicon.png` (from `web/public/logo.png`), `build/darwin/Info.plist`, `build/linux/app.desktop`.
 Bundled tools are fetched into `desktop/tools/` (gitignored) per arch.
 
-Data dirs (desktop mode): DB via `internal/desktop.ResolveDesktopDB()` (XDG), downloads `~/Music/Reverb`.
+Data dirs (desktop mode): DB via `internal/desktop.ResolveDesktopDB()` — XDG on
+Linux, Application Support on macOS, `%AppData%\reverb` on Windows — and
+downloads in `Music/Reverb` under the user's home directory. `REVERB_DB` and
+`REVERB_DOWNLOAD_DIR` override both on every platform.
 
-## Background sync (macOS and Linux)
+One instance owns a data directory at a time. The second launch fails with
+"another instance is running" rather than becoming a second writer on the same
+database; the lock is held by the operating system on an open file, so a crash
+or a force quit releases it.
+
+## Windows
+
+`reverb-desktop.exe` opens the window, serves the SPA and answers the API on a
+random `127.0.0.1` port, stores its database under `%AppData%\reverb` and its
+downloads under `%USERPROFILE%\Music\Reverb`, and refuses a second instance
+while the first holds the lock. The `windows` CI job builds the binary and runs
+the desktop, desktop-paths, embedded-library and child-process tests on every
+push.
+
+Every per-OS seam has a Windows implementation — the single-instance lock, the
+background control channel, child-process handling, bundled-tool lookup and the
+updater's install step — but only the boot path above is exercised on Windows.
+Two gaps are known rather than suspected: `make desktop-deps` fetches no Windows
+builds of ffmpeg, Navidrome, deno or spotDL, so a Windows build falls back to
+whatever is on `PATH`; and `desktop.yml` publishes no Windows release asset, so
+there is nothing for the updater to find.
+
+## Background sync
 
 Closing the window keeps sync running by default. After shutting down the window's
 backend, Reverb launches the same executable with `--background`, without starting

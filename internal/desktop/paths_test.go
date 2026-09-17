@@ -20,11 +20,11 @@ func requireXDG(t *testing.T) {
 func TestResolveDesktopDB_XDGConfigDir(t *testing.T) {
 	requireXDG(t)
 	tmp := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmp)
+	setConfigHome(t, tmp)
 	t.Setenv("REVERB_DB", "")
 	// Ensure HOME is set so UserConfigDir does not error via fallback.
 	// XDG_CONFIG_HOME takes precedence, HOME value irrelevant.
-	t.Setenv("HOME", tmp)
+	setHome(t, tmp)
 
 	got := ResolveDesktopDB()
 	want := filepath.Join(tmp, "reverb", "reverb.db")
@@ -36,8 +36,8 @@ func TestResolveDesktopDB_XDGConfigDir(t *testing.T) {
 func TestResolveDesktopDB_XDGHomeFallback(t *testing.T) {
 	requireXDG(t)
 	home := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", "")
-	t.Setenv("HOME", home)
+	setConfigHome(t, "")
+	setHome(t, home)
 	t.Setenv("REVERB_DB", "")
 
 	got := ResolveDesktopDB()
@@ -49,8 +49,8 @@ func TestResolveDesktopDB_XDGHomeFallback(t *testing.T) {
 
 func TestResolveDesktopDB_EnvOverride(t *testing.T) {
 	t.Setenv("REVERB_DB", "/custom/override.db")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("HOME", t.TempDir())
+	setConfigHome(t, t.TempDir())
+	setHome(t, t.TempDir())
 
 	got := ResolveDesktopDB()
 	if got != "/custom/override.db" {
@@ -60,8 +60,8 @@ func TestResolveDesktopDB_EnvOverride(t *testing.T) {
 
 func TestResolveDesktopDB_FallbackOnError(t *testing.T) {
 	t.Setenv("REVERB_DB", "")
-	t.Setenv("XDG_CONFIG_HOME", "")
-	t.Setenv("HOME", "")
+	setConfigHome(t, "")
+	setHome(t, "")
 
 	got := ResolveDesktopDB()
 	if got != "./data/reverb.db" {
@@ -71,8 +71,8 @@ func TestResolveDesktopDB_FallbackOnError(t *testing.T) {
 
 func TestResolveDesktopDataDir(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", tmp)
-	t.Setenv("HOME", tmp)
+	setConfigHome(t, tmp)
+	setHome(t, tmp)
 	t.Setenv("REVERB_DB", "")
 
 	db := ResolveDesktopDB()
@@ -102,7 +102,7 @@ func TestResolveDesktopDataDir_EnvOverride(t *testing.T) {
 
 func TestResolveDesktopDownloadDir_Creation(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 
 	got := ResolveDesktopDownloadDir()
 	want := filepath.Join(home, "Music", "Reverb")
@@ -117,7 +117,7 @@ func TestResolveDesktopDownloadDir_Creation(t *testing.T) {
 func TestResolveDesktopDownloadDir_Fallback(t *testing.T) {
 	work := t.TempDir()
 	chdir(t, work)
-	t.Setenv("HOME", "")
+	setHome(t, "")
 
 	got := ResolveDesktopDownloadDir()
 	if got != "./music" {
@@ -132,8 +132,8 @@ func TestMaybeMigrateLegacyDB_CopiesWhenMissing(t *testing.T) {
 	work := t.TempDir()
 	chdir(t, work)
 	configDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configDir)
-	t.Setenv("HOME", t.TempDir())
+	setConfigHome(t, configDir)
+	setHome(t, t.TempDir())
 	t.Setenv("REVERB_DB", "")
 
 	dest := ResolveDesktopDB()
@@ -167,8 +167,8 @@ func TestMaybeMigrateLegacyDB_NoOverwriteWhenExists(t *testing.T) {
 	work := t.TempDir()
 	chdir(t, work)
 	configDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configDir)
-	t.Setenv("HOME", t.TempDir())
+	setConfigHome(t, configDir)
+	setHome(t, t.TempDir())
 	t.Setenv("REVERB_DB", "")
 
 	dest := ResolveDesktopDB()
@@ -211,8 +211,8 @@ func TestMaybeMigrateLegacyDB_NoLegacyNoOp(t *testing.T) {
 	work := t.TempDir()
 	chdir(t, work)
 	configDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configDir)
-	t.Setenv("HOME", t.TempDir())
+	setConfigHome(t, configDir)
+	setHome(t, t.TempDir())
 	t.Setenv("REVERB_DB", "")
 
 	dest := ResolveDesktopDB()
@@ -234,8 +234,8 @@ func TestMaybeMigrateLegacyDB_SamePathNoCopy(t *testing.T) {
 	chdir(t, work)
 	// Force fallback so dest == legacy == ./data/reverb.db
 	t.Setenv("REVERB_DB", "")
-	t.Setenv("XDG_CONFIG_HOME", "")
-	t.Setenv("HOME", "")
+	setConfigHome(t, "")
+	setHome(t, "")
 
 	dest := ResolveDesktopDB()
 	if dest != "./data/reverb.db" {
@@ -264,8 +264,8 @@ func TestMaybeMigrateLegacyDB_EnvOverrideDest(t *testing.T) {
 	customDest := filepath.Join(t.TempDir(), "custom.db")
 	t.Setenv("REVERB_DB", customDest)
 	// XDG should be ignored when REVERB_DB set
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("HOME", t.TempDir())
+	setConfigHome(t, t.TempDir())
+	setHome(t, t.TempDir())
 
 	legacy := filepath.Join(work, "data", "reverb.db")
 	if err := os.MkdirAll(filepath.Dir(legacy), 0755); err != nil {

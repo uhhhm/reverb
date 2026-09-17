@@ -8,8 +8,9 @@ import (
 
 // ResolveDesktopDB returns SQLite path for desktop mode.
 //
-//	macOS: ~/Library/Application Support/Reverb/reverb.db
-//	linux: ~/.config/reverb/reverb.db  (XDG via os.UserConfigDir)
+//	macOS:   ~/Library/Application Support/reverb/reverb.db
+//	linux:   ~/.config/reverb/reverb.db  (XDG via os.UserConfigDir)
+//	windows: %AppData%\reverb\reverb.db (roaming, via os.UserConfigDir)
 //
 // Falls back to "./data/reverb.db" if UserConfigDir errors.
 //
@@ -28,7 +29,9 @@ func ResolveDesktopDB() string {
 	return filepath.Join(dir, "reverb", "reverb.db")
 }
 
-// ResolveDesktopDownloadDir returns ~/Music/Reverb, creating it if missing (mkdir 0755).
+// ResolveDesktopDownloadDir returns the Music/Reverb folder inside the user's
+// home directory, creating it if missing (mkdir 0755). That is ~/Music/Reverb
+// on macOS and Linux and %USERPROFILE%\Music\Reverb on Windows.
 // If the home directory cannot be determined, it falls back to "./music" and
 // attempts to create that directory.
 func ResolveDesktopDownloadDir() string {
