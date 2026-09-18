@@ -10,9 +10,39 @@ The fix belongs in the product, not the test, if `RedeemViaDiscoveredPeers` givi
 
 **Blocked by:** None
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The two-device end-to-end test passes repeatedly under `make test-race` on a loaded machine.
-- [ ] Whichever layer is at fault is the one changed: a real race in `RedeemViaDiscoveredPeers` is fixed there, and only a genuinely test-only setup gap is fixed in the test.
-- [ ] Pairing by code alone on a LAN still works, and pairing with an explicit address is unaffected.
-- [ ] The fix does not mask a failure by retrying until the deadline: a peer set that stays empty still reports an error the owner can act on.
+- [x] The two-device end-to-end test passes repeatedly under `make test-race` on a loaded machine.
+- [x] Whichever layer is at fault is the one changed: a real race in `RedeemViaDiscoveredPeers` is fixed there, and only a genuinely test-only setup gap is fixed in the test.
+- [x] Pairing by code alone on a LAN still works, and pairing with an explicit address is unaffected.
+- [x] The fix does not mask a failure by retrying until the deadline: a peer set that stays empty still reports an error the owner can act on.
+
+## Comments
+
+Fixed in the product, not the test. `RedeemViaDiscoveredPeers` took an empty
+candidate set as proof that no Reverb device was on the network, but libp2p
+reports a connection before identify has said what the other end speaks, so a
+redeem entered moments after discovery — or on a device slow enough that
+identify has not finished — saw a connected household peer as no peer at all.
+`awaitPairablePeers` now waits for that, and `internal/app/sync_e2e_test.go` is
+untouched: `pairByDiscovery` still redeems immediately after `Connect`, which is
+exactly the pre-identify state, so the test exercises the race rather than
+stepping around it.
+
+The wait ends on whichever event makes the answer final, not on a timer:
+identify completing, identify failing, or a peer's connectedness changing. A
+failure needs its own record, because libp2p writes nothing to the peerstore
+when identify fails, so by peerstore state alone a peer that will never be
+identified is indistinguishable from one still being identified. Nothing is
+masked: with no peer connected the redeem still fails at once with the same
+actionable error, and a caller that gives up now gets `ctx.Err()` rather than a
+network diagnosis it did not earn.
+
+One limit is documented rather than papered over: an identify failure that
+landed before the subscription is not replayed and cannot be recovered through
+the public `host.Host` API, so that peer is waited on until the grace expires —
+a bounded delay before the same error, which is what the grace is for.
+
+Verified by mutation: removing the failure tracking, or ignoring the events
+entirely, each fail the new tests. Before the fix the tests failed; `make check`,
+`make vet-windows` and three consecutive `make test-race` runs are green.

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -398,13 +399,22 @@ const pairProtocol = "/reverb/pair/2.0.0"
 // that device's pairing attempts for this peer, which a household-sized
 // network never exhausts.
 //
-// Nothing is tried over a VPN, where discovery does not work and the
-// candidate list is empty: the caller then needs the other device's address.
+// A connection exists before identify has reported what the other end speaks,
+// so an empty candidate list is only believed once every connected peer has
+// been identified, or a short grace has passed.
+//
+// Nothing is tried over a VPN, where discovery does not work and no peer is
+// connected to wait for: the caller then needs the other device's address.
 func RedeemViaDiscoveredPeers(ctx context.Context, h host.Host, guard *Guard, keys DeviceKeyStore, code, deviceName, localDeviceID string) (string, string, error) {
 	if h == nil {
 		return "", "", fmt.Errorf("host is nil")
 	}
-	candidates := pairablePeers(h)
+	candidates := awaitPairablePeers(ctx, h)
+	if ctx.Err() != nil {
+		// The caller gave up while we waited. Saying no device was found would
+		// diagnose the network for what was actually an abandoned request.
+		return "", "", ctx.Err()
+	}
 	if len(candidates) == 0 {
 		return "", "", fmt.Errorf("no other Reverb device was found on this network; if it is on a VPN, enter its address as well as the code")
 	}
@@ -422,16 +432,118 @@ func RedeemViaDiscoveredPeers(ctx context.Context, h host.Host, guard *Guard, ke
 	return "", "", fmt.Errorf("no device on this network accepted the code (%s); check the code on the other device, or enter its address if it is on a VPN", strings.Join(refusals, "; "))
 }
 
+// identifyGrace bounds how long a redeem waits for connected peers to finish
+// identifying. It is an upper bound rather than a delay: the wait ends the
+// moment a candidate appears, or as soon as every connected peer has been
+// identified and none speaks the pairing protocol.
+const identifyGrace = 3 * time.Second
+
+// awaitPairablePeers waits for a connected-but-unidentified peer to finish
+// libp2p's identify exchange, returning the pairable set as soon as one
+// appears. It returns immediately — reporting no candidates — when there is
+// nothing to wait for, so a genuinely empty network still fails fast with an
+// error the owner can act on rather than stalling for the full grace.
+func awaitPairablePeers(ctx context.Context, h host.Host) []peer.ID {
+	// Every event that can change the answer, not just the happy one. Identify
+	// failing settles a peer that would otherwise look like it is still being
+	// identified, and a connectedness change both retires that verdict and
+	// wakes the loop to re-read the connected set; without them a peer that
+	// never identifies would stall for the whole grace. Subscribing before the
+	// first check closes the gap in which an event could land after the check
+	// and before the wait.
+	sub, err := h.EventBus().Subscribe([]any{
+		new(event.EvtPeerIdentificationCompleted),
+		new(event.EvtPeerIdentificationFailed),
+		new(event.EvtPeerConnectednessChanged),
+	})
+	if err != nil {
+		return pairablePeers(h)
+	}
+	defer sub.Close()
+
+	// libp2p writes nothing to the peerstore when identify fails, so by
+	// peerstore state alone a peer that will never be identified looks exactly
+	// like one still being identified. Remembering the failures we observe
+	// lets the wait end as soon as the answer is final. A failure that landed
+	// before we subscribed is not replayed and cannot be recovered from the
+	// public host API, so that peer is waited on until the grace — which is
+	// what the grace is for.
+	failed := make(map[peer.ID]bool)
+
+	waitCtx, cancel := context.WithTimeout(ctx, identifyGrace)
+	defer cancel()
+	for {
+		if candidates := pairablePeers(h); len(candidates) > 0 {
+			return candidates
+		}
+		if !hasUnidentifiedPeer(h, failed) {
+			return nil
+		}
+		select {
+		case ev := <-sub.Out():
+			switch e := ev.(type) {
+			case event.EvtPeerIdentificationFailed:
+				failed[e.Peer] = true
+			case event.EvtPeerIdentificationCompleted:
+				// A retry succeeded; the peerstore is authoritative again.
+				delete(failed, e.Peer)
+			case event.EvtPeerConnectednessChanged:
+				// Any change of connectedness retires the old verdict: the
+				// connection it was about is either gone or replaced by one
+				// that identifies afresh, so the peer is worth waiting for
+				// again.
+				delete(failed, e.Peer)
+			}
+		case <-waitCtx.Done():
+			if ctx.Err() != nil {
+				// The caller gave up rather than the grace expiring. Handing
+				// back candidates would only dial them with a dead context.
+				return nil
+			}
+			return pairablePeers(h)
+		}
+	}
+}
+
+// hasUnidentifiedPeer reports whether any connected peer may still have
+// something to tell us about what it speaks. The peerstore holds no protocols
+// at all for such a peer, which is what separates "we do not know yet" from an
+// identified peer that simply is not a Reverb device. Peers in failed are
+// settled too: their identify has already reported, and reported nothing.
+func hasUnidentifiedPeer(h host.Host, failed map[peer.ID]bool) bool {
+	for _, pid := range connectedPeers(h) {
+		if failed[pid] {
+			continue
+		}
+		protos, err := h.Peerstore().GetProtocols(pid)
+		if err == nil && len(protos) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// connectedPeers lists the peers this host holds a connection to, never
+// including itself.
+func connectedPeers(h host.Host) []peer.ID {
+	peers := h.Network().Peers()
+	out := make([]peer.ID, 0, len(peers))
+	for _, pid := range peers {
+		if pid == h.ID() {
+			continue
+		}
+		out = append(out, pid)
+	}
+	return out
+}
+
 // pairablePeers lists the connected peers that advertise the pairing protocol,
 // in a stable order. Connections come from mDNS and the DHT alike, and the
 // DHT's public nodes must not be asked to pair, so the protocol filter is what
 // narrows the set to Reverb devices.
 func pairablePeers(h host.Host) []peer.ID {
 	var out []peer.ID
-	for _, pid := range h.Network().Peers() {
-		if pid == h.ID() {
-			continue
-		}
+	for _, pid := range connectedPeers(h) {
 		supported, err := h.Peerstore().SupportsProtocols(pid, pairProtocol)
 		if err != nil || len(supported) == 0 {
 			continue

@@ -6,10 +6,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -394,19 +396,39 @@ func TestPairingRefusesPreProofResponder(t *testing.T) {
 	assertNoTrustedPeers(t, clientGuard)
 }
 
-// waitForPairProtocol waits until the peerstore knows pid advertises the
-// pairing protocol, so a discovery test is not racing identify.
-func waitForPairProtocol(t *testing.T, client host.Host, pid peer.ID) {
+// waitForPeerstore polls client's record for pid until ready reports the state
+// the caller needs, so a test is not racing identify. want names the state, for
+// the failure message.
+func waitForPeerstore(t *testing.T, client host.Host, pid peer.ID, want string, ready func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		supported, err := client.Peerstore().SupportsProtocols(pid, pairProtocol)
-		if err == nil && len(supported) > 0 {
+		if ready() {
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("peer %s never advertised %s", pid, pairProtocol)
+	t.Fatalf("peer %s: %s", pid, want)
+}
+
+// waitForPairProtocol waits until the peerstore knows pid advertises the
+// pairing protocol.
+func waitForPairProtocol(t *testing.T, client host.Host, pid peer.ID) {
+	t.Helper()
+	waitForPeerstore(t, client, pid, "never advertised "+pairProtocol, func() bool {
+		supported, err := client.Peerstore().SupportsProtocols(pid, pairProtocol)
+		return err == nil && len(supported) > 0
+	})
+}
+
+// waitForIdentify blocks until identify has told client what pid speaks, which
+// is the point after which the peerstore entry stops changing on its own.
+func waitForIdentify(t *testing.T, client host.Host, pid peer.ID) {
+	t.Helper()
+	waitForPeerstore(t, client, pid, "identify never completed", func() bool {
+		protos, err := client.Peerstore().GetProtocols(pid)
+		return err == nil && len(protos) > 0
+	})
 }
 
 func TestPairTranscriptIsUnambiguous(t *testing.T) {
@@ -473,5 +495,161 @@ func TestPairNonceValidation(t *testing.T) {
 		if err := validPairNonce(bad); err == nil {
 			t.Fatalf("invalid nonce %q accepted", bad)
 		}
+	}
+}
+
+// A peer that is connected but has not yet been identified is one worth
+// waiting for: the redeem must block until identify reports its protocols, not
+// conclude the network is empty. This is the state a busy or slow device is in
+// when the owner enters the code. Ordering is asserted through the returned
+// channel rather than elapsed time, so a loaded machine cannot make it flake.
+func TestAwaitPairablePeersWaitsForIdentify(t *testing.T) {
+	remote, client := newIsolatedHost(t), newIsolatedHost(t)
+	connectHosts(t, client, remote)
+	// Let the real identify exchange finish, then return the client to the
+	// pre-identify state. Driving the peerstore first would race identify,
+	// which would land afterwards and overwrite the state under test.
+	waitForIdentify(t, client, remote.ID())
+	if err := client.Peerstore().SetProtocols(remote.ID()); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan []peer.ID, 1)
+	go func() { done <- awaitPairablePeers(context.Background(), client) }()
+
+	// The peer is connected but unidentified, so the wait must still be running.
+	select {
+	case got := <-done:
+		t.Fatalf("returned %v while the only peer was still unidentified; it was not waited for", got)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	if err := client.Peerstore().SetProtocols(remote.ID(), pairProtocol); err != nil {
+		t.Fatal(err)
+	}
+	emitted := time.Now()
+	emit(t, client, event.EvtPeerIdentificationCompleted{Peer: remote.ID()})
+
+	select {
+	case got := <-done:
+		if len(got) != 1 || got[0] != remote.ID() {
+			t.Fatalf("returned %v, want the remote peer once identify completed", got)
+		}
+		// Without this bound the test also passes on a wait that ignores the
+		// event and simply runs out the grace. The bound has to be well under
+		// identifyGrace: the grace began before the emit, so a grace-driven
+		// wake lands just under it. An event-driven one takes microseconds.
+		if elapsed := time.Since(emitted); elapsed >= identifyGrace/2 {
+			t.Fatalf("returned %s after the event: the grace elapsed rather than the event waking the wait", elapsed)
+		}
+	case <-time.After(2 * identifyGrace):
+		t.Fatal("never returned after identify completed")
+	}
+}
+
+// Identify can fail, and libp2p records nothing in the peerstore when it does.
+// The wait must still end on the event, because a peer that will never be
+// identified is not a peer worth waiting for.
+func TestAwaitPairablePeersStopsWaitingWhenIdentifyFails(t *testing.T) {
+	remote, client := newIsolatedHost(t), newIsolatedHost(t)
+	connectHosts(t, client, remote)
+	waitForIdentify(t, client, remote.ID())
+	if err := client.Peerstore().SetProtocols(remote.ID()); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan []peer.ID, 1)
+	go func() { done <- awaitPairablePeers(context.Background(), client) }()
+	select {
+	case got := <-done:
+		t.Fatalf("returned %v before identify resolved either way", got)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	emitted := time.Now()
+	emit(t, client, event.EvtPeerIdentificationFailed{Peer: remote.ID()})
+
+	select {
+	case got := <-done:
+		if len(got) != 0 {
+			t.Fatalf("returned %v, want none: identify failed for the only peer", got)
+		}
+		// The failure event is what must end the wait. Without this bound the
+		// test also passes on code that ignores the event and waits out the
+		// grace, which is the regression it exists to catch. The bound is well
+		// under identifyGrace because the grace began before the emit.
+		if elapsed := time.Since(emitted); elapsed >= identifyGrace/2 {
+			t.Fatalf("returned %s after the failure: the grace elapsed rather than the event ending the wait", elapsed)
+		}
+	case <-time.After(2 * identifyGrace):
+		t.Fatal("never returned after identify failed")
+	}
+}
+
+// Waiting is bounded by what can still change. Once every connected peer has
+// been identified and none speaks the pairing protocol, a longer wait cannot
+// produce a candidate, so the answer must come back at once.
+func TestAwaitPairablePeersDoesNotWaitOnIdentifiedNonPeers(t *testing.T) {
+	remote, client := newIsolatedHost(t), newIsolatedHost(t)
+	connectHosts(t, client, remote)
+	waitForIdentify(t, client, remote.ID())
+	if err := client.Peerstore().SetProtocols(remote.ID(), "/not-reverb/1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	got := awaitPairablePeers(context.Background(), client)
+	if len(got) != 0 {
+		t.Fatalf("returned %v, want none: the only peer is not a Reverb device", got)
+	}
+	if elapsed := time.Since(start); elapsed >= identifyGrace {
+		t.Fatalf("waited %s on a peer whose protocols are already known", elapsed)
+	}
+}
+
+// connectHosts dials to from and fails the test if the connection cannot be
+// established.
+func connectHosts(t *testing.T, from, to host.Host) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := from.Connect(ctx, peer.AddrInfo{ID: to.ID(), Addrs: to.Addrs()}); err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+}
+
+// emit publishes ev on h's event bus, standing in for the identify exchange
+// reaching a conclusion at a moment the test chooses.
+func emit(t *testing.T, h host.Host, ev any) {
+	t.Helper()
+	// The bus types an emitter from a pointer to the event type, but emits the
+	// value itself.
+	em, err := h.EventBus().Emitter(reflect.New(reflect.TypeOf(ev)).Interface())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer em.Close()
+	if err := em.Emit(ev); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Waiting for identify must not turn a genuinely empty network into a stall:
+// with nothing connected there is nothing to wait for, so the owner gets the
+// actionable error immediately rather than after the grace elapses.
+func TestRedeemViaDiscoveredPeersFailsFastWithNoPeers(t *testing.T) {
+	client := newIsolatedHost(t)
+	cq := newSyncDB(t, "client.db")
+
+	start := time.Now()
+	_, _, err := RedeemViaDiscoveredPeers(context.Background(), client, NewGuard(cq), cq, "ABC123", "laptop", "dev_local")
+	if err == nil {
+		t.Fatal("redeem succeeded with no peers connected")
+	}
+	if elapsed := time.Since(start); elapsed >= identifyGrace {
+		t.Fatalf("redeem took %s with no peers connected; it must not wait out the %s grace", elapsed, identifyGrace)
+	}
+	if !strings.Contains(err.Error(), "no other Reverb device was found") {
+		t.Fatalf("error %q does not tell the owner what to do", err)
 	}
 }
