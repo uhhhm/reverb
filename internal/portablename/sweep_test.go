@@ -6,8 +6,21 @@ import (
 	"testing"
 )
 
+// write lays down a fixture, skipping the test when this filesystem cannot
+// hold the name.
+//
+// Most of these cases are non-portable names sitting on disk, which is a state
+// only a filesystem permissive enough to create them can reach. Windows is the
+// platform the portable rules are drawn from, so it refuses those names
+// outright -- or worse, accepts the write and silently drops a trailing dot,
+// leaving a fixture that is not what the test asked for. Either way there is no
+// sweep to test there, and LocallyStorable is already the per-OS answer to
+// whether this device can hold a name.
 func write(t *testing.T, dir, name, body string) {
 	t.Helper()
+	if !LocallyStorable(name) {
+		t.Skipf("this filesystem cannot store %q, so the case cannot arise here", name)
+	}
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

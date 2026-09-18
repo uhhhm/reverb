@@ -912,6 +912,9 @@ func (s *SyncStore) materialize(ctx context.Context, accepted []SyncChange) erro
 	// Catalog entities first: a play or a rename names a track by its catalog
 	// id, so the entity has to exist before the row that points at it.
 	var first error
+	// Revisions whose projection has landed, cleared in batches by
+	// completeProjections rather than one at a time.
+	done := make([]int64, 0, projectionCompleteChunk)
 	for _, queued := range catalogFirst(accepted) {
 		// Work can wait behind another batch or survive a restart. Read the
 		// current winner so an old queued rename cannot undo a newer edit.
@@ -929,9 +932,7 @@ func (s *SyncStore) materialize(ctx context.Context, accepted []SyncChange) erro
 			// when RecoverUnusableChanges next runs; taking it out of the
 			// queue here is what the rest of the queue needs.
 			log.Printf("sync: giving up on play %s: its value is not valid JSON", ch.EntityID)
-			if err := s.q.CompleteSyncProjection(ctx, queued.Revision); err != nil && first == nil {
-				first = err
-			}
+			done = append(done, queued.Revision)
 			continue
 		}
 		if err == nil && ch != nil {
@@ -944,14 +945,64 @@ func (s *SyncStore) materialize(ctx context.Context, accepted []SyncChange) erro
 			}
 			continue
 		}
-		if err := s.q.CompleteSyncProjection(ctx, queued.Revision); err != nil && first == nil {
-			first = err
+		done = append(done, queued.Revision)
+		if len(done) >= projectionCompleteChunk {
+			if err := s.completeProjections(ctx, done); err != nil && first == nil {
+				first = err
+			}
+			done = done[:0]
 		}
+	}
+	if err := s.completeProjections(ctx, done); err != nil && first == nil {
+		first = err
 	}
 	if notify != nil {
 		notify()
 	}
 	return first
+}
+
+// projectionCompleteChunk bounds how many completions share one transaction.
+// Large enough that the fsync cost stops dominating, small enough that a crash
+// replays a bounded amount of already-projected work.
+const projectionCompleteChunk = 256
+
+// completeProjections clears the pending-projection rows for revisions that
+// have been applied.
+//
+// One transaction per chunk rather than one per revision. Each autocommit is a
+// disk sync, and on Windows that is milliseconds apiece: a first sync after
+// BackfillHistory queues thousands of changes, and clearing them one by one
+// took longer than the projection itself. The rows are only bookkeeping for
+// retry, so a crash between chunks costs an idempotent re-apply, not data.
+func (s *SyncStore) completeProjections(ctx context.Context, revisions []int64) error {
+	if len(revisions) == 0 {
+		return nil
+	}
+	sqlDB, ok := s.q.UnderlyingDB().(*sql.DB)
+	if !ok {
+		// A test adapter or an existing transaction: the per-revision path is
+		// the only one available and is correct, just slower.
+		var first error
+		for _, rev := range revisions {
+			if err := s.q.CompleteSyncProjection(ctx, rev); err != nil && first == nil {
+				first = err
+			}
+		}
+		return first
+	}
+	tx, err := sqlDB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	q := s.q.WithTx(tx)
+	for _, rev := range revisions {
+		if err := q.CompleteSyncProjection(ctx, rev); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // advanceVectorSeq raises deviceID's vector to the highest seq below which

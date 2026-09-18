@@ -50,6 +50,15 @@ func validateRelPath(relPath string) (string, error) {
 	if cleanRel == "." || cleanRel == "" || filepath.IsAbs(cleanRel) || cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("invalid relPath: %q", relPath)
 	}
+	// Rooted but volume-less — "/etc/passwd", which FromSlash turns into
+	// "\\etc\\passwd" — is absolute on Unix but not by filepath.IsAbs on
+	// Windows, where it names that drive's root. Join would quietly reroot it
+	// under the music directory rather than refuse it, so the same path from
+	// the same peer would validate on one platform and not the other. Testing
+	// the leading separator directly makes both answer the same.
+	if os.IsPathSeparator(cleanRel[0]) {
+		return "", fmt.Errorf("invalid relPath: %q", relPath)
+	}
 	return cleanRel, nil
 }
 

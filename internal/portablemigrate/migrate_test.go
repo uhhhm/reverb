@@ -11,8 +11,21 @@ import (
 	"github.com/uhhhm/reverb/internal/portablename"
 )
 
+// write lays down a fixture, skipping the test when this filesystem cannot
+// hold the path.
+//
+// The migration exists for a library that already holds names another platform
+// cannot store, which is a state only the permissive platform can reach.
+// Windows refuses those names outright -- or accepts the write having silently
+// dropped a trailing dot, leaving a fixture that is not what the test asked
+// for. There is nothing for the migration to do on a device that could never
+// have accumulated such a library, and LocallyStorable is already the per-OS
+// answer to whether this device can hold a path.
 func write(t *testing.T, root, rel, body string) {
 	t.Helper()
+	if !portablename.LocallyStorable(rel) {
+		t.Skipf("this filesystem cannot store %q, so the case cannot arise here", rel)
+	}
 	p := filepath.Join(root, filepath.FromSlash(rel))
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatal(err)
