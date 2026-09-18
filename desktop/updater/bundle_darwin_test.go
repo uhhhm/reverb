@@ -31,7 +31,7 @@ func TestMacBundleRemainsValidAfterUpdateAndCleanup(t *testing.T) {
 	if err := WriteStaged(dir, StagedUpdate{Tag: "v2.0.0", File: payload, SHA256: sum}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ApplyStaged(dir, exe); err != nil {
+	if _, err := ApplyStaged(dir, exe); err != nil {
 		t.Fatal(err)
 	}
 	verify := func() {

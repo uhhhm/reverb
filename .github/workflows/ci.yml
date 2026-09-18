@@ -21,6 +21,11 @@ jobs:
       # after the Windows job has finished building the whole desktop app.
       - name: Vet for Windows
         run: make vet-windows
+      # Same reasoning for macOS: the updater's .app/codesign seam and its
+      # _darwin_test.go compile on no other platform, and no CI job builds them
+      # until the release workflow is already running on a Mac runner.
+      - name: Vet for macOS
+        run: make vet-darwin
       - run: make test-race
   lint:
     runs-on: ubuntu-latest
