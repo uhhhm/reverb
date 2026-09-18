@@ -6,9 +6,9 @@
     "generate": "node generate.mjs"
   },
   "devDependencies": {
-    "ajv": "8.17.1",
+    "ajv": "8.18.0",
     "openapi-typescript": "7.13.0",
     "typescript": "5.9.3",
-    "yaml": "2.8.2"
+    "yaml": "2.8.3"
   }
 }
