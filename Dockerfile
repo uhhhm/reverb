@@ -101,6 +101,16 @@ RUN useradd --create-home --uid 1000 reverb \
  && mkdir -p /data /data/navidrome /music \
  && chown -R reverb:reverb /data /music
 ENV REVERB_DB=/data/reverb.db
+# A container's loopback is its own, so a listener on 127.0.0.1 is unreachable
+# through a published port — `docker run -p` would map to nothing. The image
+# therefore binds every interface and carries the acknowledgement Reverb
+# demands for that, because inside a container the bind is not the boundary:
+# publishing the port is, and that stays the operator's decision. The API
+# authenticates every request as the household owner, so publish to
+# 127.0.0.1:8090:8090 unless an authenticating proxy fronts it. docker-compose.yml
+# sets both of these too; they live here so a plain `docker run` also works.
+ENV REVERB_BIND=0.0.0.0
+ENV REVERB_ALLOW_NETWORK_ACCESS=1
 # spotDL is bundled and used as the default downloader out of the box; it writes
 # into /music (the bind-mounted host library). Reverb auto-configures it when no
 # downloader is set, so no Settings step is needed.
