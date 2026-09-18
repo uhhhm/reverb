@@ -129,15 +129,19 @@ func TestCheckNowStagesWithoutInstalling(t *testing.T) {
 	if got, _ := os.ReadFile(exe); !bytes.Equal(got, payload) {
 		t.Fatalf("binary was not replaced with the staged payload")
 	}
-	if backup != exe+backupSuffix {
-		t.Fatalf("backup = %q want %q", backup, exe+backupSuffix)
+	// ApplyStaged resolves the path it swaps, which on Windows expands the 8.3
+	// short form t.TempDir() hands out, so compare against the resolved name.
+	resolved, resolveErr := filepath.EvalSymlinks(exe)
+	if resolveErr != nil {
+		t.Fatal(resolveErr)
+	}
+	if backup != resolved+backupSuffix {
+		t.Fatalf("backup = %q want %q", backup, resolved+backupSuffix)
 	}
 	if got, err := os.ReadFile(backup); err != nil || !bytes.Equal(got, fakeBinary("v1")) {
 		t.Fatalf("outgoing binary was not kept as %s: %v", backupSuffix, err)
 	}
-	if fi, err := os.Stat(exe); err != nil || fi.Mode().Perm()&0o111 == 0 {
-		t.Fatalf("installed binary is not executable: %v", err)
-	}
+	assertRunnable(t, exe)
 }
 
 // A second check with the payload already staged must not download it again.

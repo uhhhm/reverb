@@ -1,6 +1,7 @@
 package embedded
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -28,8 +29,9 @@ func TestBuildNavidromeEnv_LocalhostAndCreds(t *testing.T) {
 	if m["ND_MUSICFOLDER"] != "/music" {
 		t.Errorf("ND_MUSICFOLDER = %q", m["ND_MUSICFOLDER"])
 	}
-	if m["ND_DATAFOLDER"] != "/data/navidrome" {
-		t.Errorf("ND_DATAFOLDER = %q, want /data/navidrome", m["ND_DATAFOLDER"])
+	// DefaultNaviOptions joins with filepath, so the separator is the host's.
+	if want := filepath.Join("/data", "navidrome"); m["ND_DATAFOLDER"] != want {
+		t.Errorf("ND_DATAFOLDER = %q, want %q", m["ND_DATAFOLDER"], want)
 	}
 	if m["ND_DEVAUTOCREATEADMINPASSWORD"] != "s3cret" {
 		t.Errorf("ND_DEVAUTOCREATEADMINPASSWORD = %q", m["ND_DEVAUTOCREATEADMINPASSWORD"])

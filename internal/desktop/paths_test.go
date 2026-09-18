@@ -92,9 +92,12 @@ func TestResolveDesktopDataDir(t *testing.T) {
 }
 
 func TestResolveDesktopDataDir_EnvOverride(t *testing.T) {
-	t.Setenv("REVERB_DB", "/tmp/foo/bar.db")
+	// Built with filepath rather than written as a literal: the data directory
+	// is the DB path's parent, and on Windows that comes back with backslashes.
+	db := filepath.Join(t.TempDir(), "foo", "bar.db")
+	t.Setenv("REVERB_DB", db)
 	got := ResolveDesktopDataDir()
-	want := "/tmp/foo"
+	want := filepath.Dir(db)
 	if got != want {
 		t.Fatalf("data dir env: got %q want %q", got, want)
 	}
