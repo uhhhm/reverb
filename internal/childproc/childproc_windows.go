@@ -243,8 +243,23 @@ func Alive(pid int) bool {
 // Windows reports the full path with its extension, so a caller naming a tool
 // without one still matches: "navidrome" and "navidrome.exe" are the same
 // program here, and nothing else is.
+//
+// The liveness check is not redundant. Windows keeps a process object — and
+// keeps answering for its image — for as long as anything holds a handle to
+// it: its parent before Wait, a debugger, any tool that opened the pid. An
+// exited process therefore still reports the name it ran under, so matching on
+// the image alone would accept exactly the stale pid file this guards against.
 func IsNamed(pid int, want string) bool {
-	got, err := processImageName(pid)
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return false
+	}
+	defer windows.CloseHandle(h)
+	var code uint32
+	if err := windows.GetExitCodeProcess(h, &code); err != nil || code != stillActive {
+		return false
+	}
+	got, err := processImageNameFromHandle(h)
 	if err != nil {
 		return false
 	}
@@ -331,15 +346,6 @@ func waitForHandleExit(h windows.Handle, timeout time.Duration) (bool, error) {
 		return false, err
 	}
 	return code != stillActive, nil
-}
-
-func processImageName(pid int) (string, error) {
-	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
-	if err != nil {
-		return "", err
-	}
-	defer windows.CloseHandle(h)
-	return processImageNameFromHandle(h)
 }
 
 func processImageNameFromHandle(h windows.Handle) (string, error) {
