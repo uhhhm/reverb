@@ -168,7 +168,7 @@ func radioSeeds(training []Play) []recommend.Seed {
 	trackSeeds := evaluationSeeds(training)
 	seeds := make([]recommend.Seed, 0, len(trackSeeds))
 	for _, seed := range trackSeeds {
-		seeds = append(seeds, recommend.Seed{Artist: seed.Artist, Title: seed.Title, MBID: seed.MBID})
+		seeds = append(seeds, recommend.Seed(seed))
 	}
 	return seeds
 }

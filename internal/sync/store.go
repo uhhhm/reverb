@@ -342,7 +342,7 @@ func (s *SyncStore) AppendChange(ctx context.Context, deviceID string, ch SyncCh
 		if err != nil {
 			return 0, err
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 		txStore := &SyncStore{q: s.q.WithTx(tx), hlc: s.hlc, signer: s.signer, localDeviceID: s.localDeviceID}
 		rev, err := txStore.appendLocal(ctx, deviceID, ch)
 		if err != nil {
@@ -827,7 +827,11 @@ func (s *SyncStore) reconcile(ctx context.Context, deviceID string, sinceRev int
 	if deferProjection {
 		s.enqueueProjection(accepted)
 	} else {
-		s.materialize(ctx, accepted)
+		// A projection failure leaves the batch in the durable pending queue,
+		// where RunProjectionRecovery retries it; the round itself succeeded.
+		if err := s.materialize(ctx, accepted); err != nil {
+			log.Printf("sync: project accepted changes: %v", err)
+		}
 	}
 	return outbound, newRev, rejected, nil
 }
@@ -844,7 +848,11 @@ func (s *SyncStore) enqueueProjection(accepted []SyncChange) {
 		s.projections = make(chan []SyncChange, 32)
 		go func() {
 			for batch := range s.projections {
-				s.materialize(context.Background(), batch)
+				// Same contract as the inline path: the queue keeps the batch
+				// for RunProjectionRecovery, so this only needs reporting.
+				if err := s.materialize(context.Background(), batch); err != nil {
+					log.Printf("sync: project accepted changes: %v", err)
+				}
 			}
 		}()
 	})
@@ -1012,7 +1020,7 @@ func (s *SyncStore) logSeqs(ctx context.Context, deviceID string, low int64) (ma
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make(map[int64]bool)
 	for rows.Next() {
 		var seq int64

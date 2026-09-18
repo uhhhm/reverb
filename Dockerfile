@@ -6,12 +6,14 @@ WORKDIR /app/web
 # Install deps first (cache layer) — copy lockfile + manifest only.
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
-# Then the source, and build.
+# Then the source, and build. build:app typechecks and bundles the application
+# alone: the unit tests read Go fixtures from ../../internal, which is outside
+# this stage's context by design.
 COPY web/ ./
-RUN npm run build
+RUN npm run build:app
 
 # ---------- Stage 2: build the Go binary with the SPA embedded ----------
-FROM golang:1.26.5 AS gobuild
+FROM golang:1.26.7 AS gobuild
 ARG VERSION=dev
 WORKDIR /src
 # Module cache layer.

@@ -209,13 +209,12 @@ func TestApplyTrackAlbumMergesFields(t *testing.T) {
 	if got.Album != "" {
 		t.Fatalf("Album not cleared: %q", got.Album)
 	}
-	// Verify ApplyTracks reflects all three fields via decorate
-	tracks := []core.Track{{ID: catID, Title: "orig", Artist: "orig", Album: "orig"}}
-	// Need to re-apply title/artist/album after clearing? Let's set them again
+	// Verify ApplyTracks reflects all three fields via decorate. The fields
+	// were cleared above, so set them again before asking for the projection.
 	_ = svc.Apply(ctx, reverbsync.SyncChange{EntityType: EntityTrack, EntityID: catID, Field: FieldTitle, Value: "Final Title", UpdatedAt: 1004})
 	_ = svc.Apply(ctx, reverbsync.SyncChange{EntityType: EntityTrack, EntityID: catID, Field: FieldArtist, Value: "Final Artist", UpdatedAt: 1005})
 	_ = svc.Apply(ctx, reverbsync.SyncChange{EntityType: EntityTrack, EntityID: catID, Field: FieldAlbum, Value: "Final Album", UpdatedAt: 1006})
-	tracks = []core.Track{{ID: catID}}
+	tracks := []core.Track{{ID: catID}}
 	overrides.ApplyTracks(ctx, tracks)
 	if tracks[0].Title != "Final Title" || tracks[0].Artist != "Final Artist" || tracks[0].Album != "Final Album" {
 		t.Fatalf("ApplyTracks after merge = %+v want all three", tracks[0])

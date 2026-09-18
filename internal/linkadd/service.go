@@ -70,7 +70,7 @@ type AddResult struct {
 	Jobs       []core.DownloadJob         `json:"jobs,omitempty"`
 }
 
-// BatchResult is the per-link outcome for the batch endpoint, including errors.
+// BatchItemResult is the per-link outcome for the batch endpoint, including errors.
 type BatchItemResult struct {
 	URL        string                     `json:"url"`
 	Resolve    *linkresolve.ResolveResult `json:"resolve,omitempty"`
@@ -468,8 +468,8 @@ func (s *Service) planDownloadRequests(ctx context.Context, base core.DownloadRe
 	return out, nil
 }
 
-// EnqueueForDownload is exported for tests that want to verify request building
-// without DB/sync overhead. It is the same logic as planDownloadRequests.
+// Plan is exported for tests that want to verify request building without
+// DB/sync overhead. It is the same logic as planDownloadRequests.
 func (s *Service) Plan(ctx context.Context, base core.DownloadRequest, res *linkresolve.ResolveResult, opts AddOptions) ([]core.DownloadRequest, error) {
 	return s.planDownloadRequests(ctx, base, res, opts)
 }

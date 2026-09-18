@@ -85,7 +85,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (err erro
 		if err := quality.WriteFixture(*recordCache, fixture); err != nil {
 			return fmt.Errorf("write recorded cache: %w", err)
 		}
-		fmt.Fprintf(stderr, "saved replayable fixture to %s\n", *recordCache)
+		_, _ = fmt.Fprintf(stderr, "saved replayable fixture to %s\n", *recordCache)
 	}
 	report, err := quality.Evaluate(ctx, fixture)
 	if err != nil {
@@ -104,7 +104,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (err erro
 		if err := quality.WriteReport(*baselinePath, report); err != nil {
 			return fmt.Errorf("write baseline: %w", err)
 		}
-		fmt.Fprintf(stderr, "saved baseline to %s\n", *baselinePath)
+		_, _ = fmt.Fprintf(stderr, "saved baseline to %s\n", *baselinePath)
 		return nil
 	}
 	if *databasePath != "" {
@@ -116,10 +116,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) (err erro
 	}
 	if regressions := quality.Compare(report, baseline); len(regressions) != 0 {
 		for _, regression := range regressions {
-			fmt.Fprintln(stderr, regression)
+			_, _ = fmt.Fprintln(stderr, regression)
 		}
 		return fmt.Errorf("recommendation quality regressed")
 	}
-	fmt.Fprintln(stderr, "recommendation quality meets the checked-in baseline")
+	_, _ = fmt.Fprintln(stderr, "recommendation quality meets the checked-in baseline")
 	return nil
 }

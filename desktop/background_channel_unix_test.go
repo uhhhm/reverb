@@ -30,7 +30,7 @@ func assertControlChannelPrivate(t *testing.T, dataDir string) {
 // A world-readable directory left by an older build must be tightened, not
 // trusted.
 func TestListenBackgroundControlTightensLooseDirectoryPermissions(t *testing.T) {
-	dir := t.TempDir()
+	dir := socketTempDir(t)
 	if err := os.MkdirAll(filepath.Dir(backgroundSocket(dir)), 0755); err != nil {
 		t.Fatal(err)
 	}

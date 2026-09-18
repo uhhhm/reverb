@@ -24,5 +24,10 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  /* Tests are typechecked by tsconfig.test.json, not here. They read Go
+     fixtures from ../../internal, which the production build does not have:
+     the Docker web stage copies web/ alone. Keeping them out of the app
+     project is what lets that build typecheck the app it actually ships. */
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/setupTests.ts", "src/test"]
 }

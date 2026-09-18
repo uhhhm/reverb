@@ -97,7 +97,7 @@ func (s *Store) reconcileSchema() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	repaired := 0
 	for _, e := range effects {

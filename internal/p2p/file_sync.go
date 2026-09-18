@@ -280,7 +280,7 @@ func (f *FileSyncer) Run(ctx context.Context) {
 	// fsnotify watcher for immediate file changes (debounced 1s).
 	watcher, err := fsnotify.NewWatcher()
 	if err == nil {
-		defer watcher.Close()
+		defer func() { _ = watcher.Close() }()
 		// Ensure musicDir exists before watching.
 		_ = os.MkdirAll(f.musicDir, 0o755)
 		_ = watcher.Add(f.musicDir)
@@ -423,7 +423,7 @@ func (f *FileSyncer) FetchFileViaPeer(ctx context.Context, h host.Host, peerIDSt
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	if err := root.MkdirAll(filepath.Dir(cleanRel), 0o755); err != nil {
 		return err
 	}
@@ -432,7 +432,7 @@ func (f *FileSyncer) FetchFileViaPeer(ctx context.Context, h host.Host, peerIDSt
 	if err != nil {
 		return err
 	}
-	defer root.Remove(tmpPath)
+	defer func() { _ = root.Remove(tmpPath) }()
 	cleanup := func() {
 		_ = tmp.Close()
 	}

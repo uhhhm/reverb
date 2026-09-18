@@ -1,4 +1,4 @@
-.PHONY: gen gen-check test test-go test-web test-race fmt-check vet vet-windows check check-web check-full recommend-quality setup-web setup-contracts contracts contracts-check contracts-test build web dev clean desktop desktop-windows desktop-dev desktop-deps package-mac
+.PHONY: gen gen-check test test-go test-web test-race fmt-check vet vet-windows check check-web check-full vulncheck recommend-quality setup-web setup-contracts contracts contracts-check contracts-test build web dev clean desktop desktop-windows desktop-dev desktop-deps package-mac
 
 VERSION ?= dev
 GO_PACKAGES := ./cmd/... ./internal/... ./desktop/...
@@ -38,6 +38,11 @@ vet-windows:
 
 check-web:
 	cd web && npm run typecheck && npm run lint && npm run test
+
+# The same gate CI applies: reachable vulnerabilities fail, with the accepted
+# exceptions recorded in the script itself.
+vulncheck:
+	@if command -v govulncheck >/dev/null 2>&1; then scripts/govulncheck.sh; else GOBIN=$$(go env GOPATH)/bin go install golang.org/x/vuln/cmd/govulncheck@v1.6.0 && PATH="$$(go env GOPATH)/bin:$$PATH" scripts/govulncheck.sh; fi
 
 check: fmt-check vet vet-windows test-go check-web gen-check contracts-check contracts-test
 

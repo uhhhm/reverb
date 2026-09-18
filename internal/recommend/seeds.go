@@ -48,7 +48,7 @@ func (s *Service) fromSeedsWith(ctx context.Context, lookup, exclude []Seed, pol
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			lists[i] = s.similarTracks(ctx, TrackSeed{Artist: sd.Artist, Title: sd.Title, MBID: sd.MBID})
+			lists[i] = s.similarTracks(ctx, TrackSeed(sd))
 		}()
 	}
 	wg.Wait()

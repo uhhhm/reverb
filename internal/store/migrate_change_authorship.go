@@ -60,16 +60,16 @@ func upChangeAuthorship(ctx context.Context, tx *sql.Tx) error {
 	for rows.Next() {
 		var rev int64
 		if err := rows.Scan(&rev); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		revisions = append(revisions, rev)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return err
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// Revision order preserves the rows' relative ordering. sig is cleared
 	// because these rows were never signed and the new seq is covered by the

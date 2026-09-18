@@ -173,8 +173,11 @@ func TestAttemptLimiterWindowExpiry(t *testing.T) {
 	l := newAttemptLimiter(2, 100, time.Minute)
 	now := time.Now()
 	l.now = func() time.Time { return now }
-	if !l.Allow("p") || !l.Allow("p") {
-		t.Fatal("first two attempts should pass")
+	if !l.Allow("p") {
+		t.Fatal("first attempt should pass")
+	}
+	if !l.Allow("p") {
+		t.Fatal("second attempt should pass")
 	}
 	if l.Allow("p") {
 		t.Fatal("third attempt in window must be throttled")

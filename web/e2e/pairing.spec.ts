@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { installApiMocks } from './mocks'
 import type { Route } from '@playwright/test'
 
-test('pairing: generate pairing code and redeem stores sync token', async ({ page }) => {
+test('pairing: generate a pairing code and redeem one against the issuing peer', async ({ page }) => {
   const authed = { value: true }
   await installApiMocks(page, authed)
 
@@ -48,16 +48,35 @@ test('pairing: generate pairing code and redeem stores sync token', async ({ pag
     return route.continue()
   })
 
-  await page.route('**/api/v1/pairing/redeem', (route: Route) => {
+  // Pairing happens over libp2p against the device that issued the code, not
+  // against this device's own HTTP API — the code lives only in the issuer's
+  // database. /p2p/pair/redeem is the endpoint the page actually calls.
+  await page.route('**/api/v1/p2p/pair/redeem', (route: Route) => {
     if (route.request().method() === 'POST') {
       return route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ deviceId: 'dev_123', token: 'abc', serverDeviceId: 'dev_srv' }),
+        body: JSON.stringify({ deviceId: 'dev_123', token: 'abc' }),
       })
     }
     return route.continue()
   })
+
+  await page.route('**/api/v1/p2p/status', (route: Route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        peerId: 'peer_self',
+        deviceId: 'dev_self',
+        addrs: [],
+        dialAddrs: ['/ip4/127.0.0.1/tcp/4331/p2p/peer_self'],
+        peerCount: 0,
+        vector: {},
+        hlc: 0,
+      }),
+    }),
+  )
 
   await page.routeWebSocket('**/api/v1/ws', () => {})
 
@@ -80,17 +99,18 @@ test('pairing: generate pairing code and redeem stores sync token', async ({ pag
   await expect(deviceNameInput).not.toBeEmpty()
   // Overwrite with a deterministic name
   await deviceNameInput.fill('My Device')
+  const redeemed = page.waitForRequest(
+    (req) => req.url().includes('/api/v1/p2p/pair/redeem') && req.method() === 'POST',
+  )
   await page.getByRole('button', { name: 'Pair device' }).click()
 
-  // UI shows paired success
-  await expect(page.getByText(/Device paired/)).toBeVisible()
-  await expect(page.getByText(/This device is paired/)).toBeVisible()
+  // The page offers the code to the peer, naming this device.
+  const request = await redeemed
+  expect(request.postDataJSON()).toEqual({ peerId: '', code: 'ABCD-1234', deviceName: 'My Device' })
 
-  // localStorage token stored
-  const token = await page.evaluate(() => window.localStorage.getItem('reverb:syncToken'))
-  expect(token).toBe('abc')
-  const deviceId = await page.evaluate(() => window.localStorage.getItem('reverb:syncDeviceId'))
-  expect(deviceId).toBe('dev_123')
+  // UI shows paired success and clears the code so it cannot be redeemed twice.
+  await expect(page.getByText(/Device paired/)).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Pairing code' })).toBeEmpty()
 })
 
 test('pairing: pairing code input formats with dash', async ({ page }) => {
@@ -114,11 +134,11 @@ test('pairing: pairing code input formats with dash', async ({ page }) => {
       body: JSON.stringify({ code: 'ABCD-1234', expiresAt: Math.floor(Date.now() / 1000) + 600 }),
     }),
   )
-  await page.route('**/api/v1/pairing/redeem', (route: Route) =>
+  await page.route('**/api/v1/p2p/pair/redeem', (route: Route) =>
     route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ deviceId: 'dev_123', token: 'abc', serverDeviceId: 'dev_srv' }),
+      body: JSON.stringify({ deviceId: 'dev_123', token: 'abc' }),
     }),
   )
   await page.routeWebSocket('**/api/v1/ws', () => {})

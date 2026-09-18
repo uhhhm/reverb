@@ -845,11 +845,11 @@ func TestCoverServeWithNoCoversConfiguredFallsThrough(t *testing.T) {
 	})
 	cookie := &http.Cookie{Name: sessionCookie, Value: tok}
 	rec := doAuthed(t, srv, http.MethodGet, "/api/v1/cover/custom:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png", cookie)
-	// With no library, it would be 404 or 503? The handler first checks serveUploadedCover which returns false when Covers nil/empty, then requires library.
-	// Library exists (batchLib) but its CoverArt not for custom id, but it will attempt to call lib.CoverArt and return 200 with dummy.
-	// We just ensure it does not panic.
+	// serveUploadedCover declines because no cover was uploaded, so the request
+	// falls through to the library. A library is wired here, so the handler must
+	// reach it rather than report the dependency missing.
 	if rec.Code == http.StatusServiceUnavailable {
-		// acceptable if library nil, but we have library
+		t.Fatalf("cover request reported no library although one is wired: %d", rec.Code)
 	}
 }
 

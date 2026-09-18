@@ -62,13 +62,7 @@ func TestBackgroundPreferenceAndShutdownHandoff(t *testing.T) {
 			if loaded.GetBackgroundSyncEnabled() != tc.enabled {
 				t.Fatal("preference was not persisted")
 			}
-			info, err := os.Stat(filepath.Join(a.dataDir, "desktop.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if info.Mode().Perm() != 0600 {
-				t.Fatalf("settings permissions: %v", info.Mode())
-			}
+			assertUserOnlyFile(t, filepath.Join(a.dataDir, "desktop.json"))
 			a.quitRequested.Store(tc.quit)
 			released := false
 			a.releaseLock = func() { released = true }

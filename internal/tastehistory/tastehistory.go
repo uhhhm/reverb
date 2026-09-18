@@ -327,7 +327,7 @@ func (s *Service) replace(ctx context.Context, link db.ScrobbleLink, rows []db.I
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	q := s.q.WithTx(tx)
 	current, err := q.GetScrobbleLink(ctx, db.GetScrobbleLinkParams{UserID: link.UserID, Provider: provider})
 	if errors.Is(err, sql.ErrNoRows) || err == nil && (current.Username != link.Username || current.CreatedAt != link.CreatedAt) {
@@ -359,7 +359,7 @@ func (s *Service) Remove(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	q := s.q.WithTx(tx)
 	if err := q.DeleteTasteHistory(ctx, provider); err != nil {
 		return err

@@ -32,7 +32,7 @@ func (s *SyncStore) RecoverUnusableChanges(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	q := s.q.WithTx(tx)
 	ss := NewSyncStore(q)
 	var revision int64

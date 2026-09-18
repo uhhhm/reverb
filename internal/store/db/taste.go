@@ -32,7 +32,7 @@ func (q *Queries) ListTastePlaysAfter(ctx context.Context, after int64, limit in
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []TastePlayRow
 	for rows.Next() {
 		var r TastePlayRow

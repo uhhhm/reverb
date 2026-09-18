@@ -89,7 +89,7 @@ func (s *Server) handleRemoveLibraryTrack(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not open music directory"})
 		return
 	}
-	defer managed.Close()
+	defer func() { _ = managed.Close() }()
 	file, err := managed.Open(rel)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "track file not found"})

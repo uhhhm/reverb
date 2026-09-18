@@ -628,7 +628,6 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 			if lerr != nil || localID == "" {
 				if id2, err2 := reverbsync.EnsureLocalDevice(ctx, r.Store.Q()); err2 == nil && id2 != "" {
 					localID = id2
-					lerr = nil
 				} else {
 					logf("WARNING: p2p file sync: local device not ready: %v", lerr)
 				}

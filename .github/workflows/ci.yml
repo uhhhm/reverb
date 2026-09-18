@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: '1.26.5', cache: true }
+        with: { go-version: '1.26.7', cache: true }
       - run: make gen-check
       - run: make vet
       # Windows-only files — the _windows_test.go guards for the paths and
@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: '1.26.5', cache: true }
+        with: { go-version: '1.26.7', cache: true }
       - name: Check Go formatting
         run: make fmt-check
       - name: Cache golangci-lint
@@ -47,7 +47,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: '1.26.5', cache: true }
+        with: { go-version: '1.26.7', cache: true }
       - name: Cache govulncheck
         id: govulncheck-cache
         uses: actions/cache@v4
@@ -57,13 +57,15 @@ jobs:
       - name: Install govulncheck
         if: steps.govulncheck-cache.outputs.cache-hit != 'true'
         run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
-      - run: govulncheck ./...
+      # Wrapped rather than run directly: one reachable advisory has no fixed
+      # version, and the script is where that exception is recorded.
+      - run: scripts/govulncheck.sh
   windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: '1.26.5', cache: true }
+        with: { go-version: '1.26.7', cache: true }
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -134,7 +136,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
-        with: { go-version: '1.26.5', cache: true }
+        with: { go-version: '1.26.7', cache: true }
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

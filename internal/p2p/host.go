@@ -267,7 +267,7 @@ func (h *Host) ID() string {
 	return h.h.ID().String()
 }
 
-// Host returns the underlying libp2p host (for advanced use).
+// LibHost returns the underlying libp2p host (for advanced use).
 func (h *Host) LibHost() host.Host { return h.h }
 
 // Connect dials a peer by multiaddr string (for manual relay addrs).

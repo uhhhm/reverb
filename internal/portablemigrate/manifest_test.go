@@ -30,14 +30,7 @@ func (m *fakeManifest) ListFileManifests(context.Context) ([]db.FileManifest, er
 }
 
 func (m *fakeManifest) UpsertFileManifest(_ context.Context, arg db.UpsertFileManifestParams) error {
-	m.rows[arg.CanonicalID] = db.FileManifest{
-		CanonicalID: arg.CanonicalID,
-		ContentHash: arg.ContentHash,
-		Size:        arg.Size,
-		RelPath:     arg.RelPath,
-		Mtime:       arg.Mtime,
-		DeviceID:    arg.DeviceID,
-	}
+	m.rows[arg.CanonicalID] = db.FileManifest(arg)
 	return nil
 }
 

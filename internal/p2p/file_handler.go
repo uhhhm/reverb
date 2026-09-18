@@ -55,7 +55,7 @@ func RegisterFileHandler(h host.Host, musicDir string, guard *Guard) {
 			_ = s.Reset()
 			return
 		}
-		defer root.Close()
+		defer func() { _ = root.Close() }()
 		f, err := root.Open(cleanRel)
 		if err != nil {
 			_ = s.Reset()

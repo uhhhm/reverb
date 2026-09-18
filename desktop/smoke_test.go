@@ -95,11 +95,13 @@ func TestBootWiresBundledTools(t *testing.T) {
 	if bin == "" {
 		t.Skip("no bundled navidrome present — run desktop/tools/fetch-navidrome.sh")
 	}
-	info, err := os.Stat(bin)
-	if err != nil {
+	if _, err := os.Stat(bin); err != nil {
 		t.Fatalf("REVERB_NAVIDROME_BIN=%q does not exist: %v", bin, err)
 	}
-	if info.Mode()&0o111 == 0 {
+	// What makes a file runnable differs by platform — an execute bit on unix,
+	// a PATHEXT extension on Windows — so ask the same helper the bundle search
+	// uses rather than testing for the unix bit everywhere.
+	if !isExecutable(bin) {
 		t.Errorf("REVERB_NAVIDROME_BIN=%q is not executable", bin)
 	}
 }

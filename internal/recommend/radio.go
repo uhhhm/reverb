@@ -83,7 +83,7 @@ func (s *Service) localRadio(ctx context.Context, seeds []Seed) TrackResult {
 	}
 	seen := map[string]bool{}
 	for _, seed := range seeds {
-		tracks, err := s.local.SimilarLocalTracks(ctx, TrackSeed{Artist: seed.Artist, Title: seed.Title, MBID: seed.MBID}, radioLimit)
+		tracks, err := s.local.SimilarLocalTracks(ctx, TrackSeed(seed), radioLimit)
 		if err != nil {
 			continue
 		}
