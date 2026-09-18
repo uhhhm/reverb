@@ -131,6 +131,27 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: web/package-lock.json
+      # The Windows desktop tests assert the bundled dependency tools resolve,
+      # so the release build fetches them exactly as the `windows` CI job does.
+      - name: Cache Windows desktop tools
+        id: windows-tools-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            desktop/tools/bin
+            desktop/tools/python
+          key: windows-desktop-tools-v1-${{ hashFiles('desktop/tools/fetch-ffmpeg.sh', 'desktop/tools/fetch-navidrome.sh', 'desktop/tools/fetch-deno.sh', 'desktop/tools/setup-python-venv.sh', 'desktop/tools/python-launcher/**') }}
+      - name: Fetch Windows desktop tools
+        if: steps.windows-tools-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          TARGETOS: windows
+          TARGETARCH: amd64
+        run: |
+          desktop/tools/fetch-ffmpeg.sh
+          desktop/tools/fetch-navidrome.sh
+          desktop/tools/fetch-deno.sh
+          desktop/tools/setup-python-venv.sh
       - name: Build and embed the SPA
         run: |
           npm ci --prefix web
