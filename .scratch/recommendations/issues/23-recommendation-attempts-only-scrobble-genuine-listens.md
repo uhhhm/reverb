@@ -9,7 +9,7 @@ Both must be fixed so that only genuine listens reach external services, while u
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
 Evidence (verified at `b18b9a4`):
 
@@ -22,9 +22,9 @@ Evidence (verified at `b18b9a4`):
 
 Acceptance criteria:
 
-- [ ] A play stored by `POST /plays` enqueues no scrobble when `qualified` is explicitly false, for both Last.fm and ListenBrainz links.
-- [ ] A qualified play still enqueues exactly one scrobble per active link; a play that omits `qualified` (older clients, ordinary playback) keeps the historical default and still scrobbles.
-- [ ] A recommendation with an unknown or zero duration is not submitted as completed on load; completion is only declared once `durationMs > 0` and playback reaches the end, matching ordinary plays.
-- [ ] API regression test: posting an unqualified play for a linked user inserts zero scrobble-queue rows; the existing qualified test still passes.
-- [ ] Web regression test: a recommendation whose `durationMs` is 0 is not recorded as completed immediately.
-- [ ] `go test ./internal/api/... ./internal/play/...` and the focused `playTracker` vitest suite pass.
+- [x] A play stored by `POST /plays` enqueues no scrobble when `qualified` is explicitly false, for both Last.fm and ListenBrainz links.
+- [x] A qualified play still enqueues exactly one scrobble per active link; a play that omits `qualified` (older clients, ordinary playback) keeps the historical default and still scrobbles.
+- [x] A recommendation with an unknown or zero duration is not submitted as completed on load; completion is only declared once `durationMs > 0` and playback reaches the end, matching ordinary plays.
+- [x] API regression test: posting an unqualified play for a linked user inserts zero scrobble-queue rows; the existing qualified test still passes.
+- [x] Web regression test: a recommendation whose `durationMs` is 0 is not recorded as completed immediately.
+- [x] `go test ./internal/api/... ./internal/play/...` and the focused `playTracker` vitest suite pass.

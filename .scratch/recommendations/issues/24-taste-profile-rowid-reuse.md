@@ -4,7 +4,7 @@
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
 Evidence (verified at `b18b9a4`):
 
@@ -15,7 +15,7 @@ Evidence (verified at `b18b9a4`):
 
 Acceptance criteria:
 
-- [ ] After deleting the most recent qualified play and recording another before the next profile build, the new play is reflected in the taste profile.
-- [ ] The existing incremental fold and rebuild-on-removal behaviour, and cross-device determinism, are unchanged.
-- [ ] A regression test reproduces rowid reuse (delete the max qualified play, insert a new play, fold again) and asserts the new play's signal is present.
-- [ ] `go test ./internal/recommend/...` passes.
+- [x] After deleting the most recent qualified play and recording another before the next profile build, the new play is reflected in the taste profile.
+- [x] The existing incremental fold and rebuild-on-removal behaviour, and cross-device determinism, are unchanged.
+- [x] A regression test reproduces rowid reuse (delete the max qualified play, insert a new play, fold again) and asserts the new play's signal is present.
+- [x] `go test ./internal/recommend/...` passes.

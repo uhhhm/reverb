@@ -9,7 +9,7 @@
 
 **Blocked by:** none
 
-**Status:** ready-for-agent
+**Status:** done
 
 Evidence (verified at `b18b9a4`):
 
@@ -20,8 +20,8 @@ Evidence (verified at `b18b9a4`):
 
 Acceptance criteria:
 
-- [ ] ListenBrainz upload requests carry a timeout independent of `http.DefaultClient`; a stalled `httptest` server test asserts the call returns a bounded error rather than hanging.
-- [ ] An artist candidate that gains an MBID during merge is indexed by MBID, so a later same-MBID candidate with a different name merges rather than duplicating. Regression test.
-- [ ] An unknown `/mix/:kind` issues no recommendations request and sets no wrong title; it renders the not-found state. Existing Mix tests still pass.
-- [ ] Last.fm JSON response reads are size-limited with no behavioural change for normal responses.
-- [ ] Focused Go tests for the touched packages and the focused web tests pass.
+- [x] ListenBrainz upload requests carry a timeout independent of `http.DefaultClient`; a stalled `httptest` server test asserts the call returns a bounded error rather than hanging.
+- [x] An artist candidate that gains an MBID during merge is indexed by MBID, so a later same-MBID candidate with a different name merges rather than duplicating. Regression test.
+- [x] An unknown `/mix/:kind` issues no recommendations request and sets no wrong title; it renders the not-found state. Existing Mix tests still pass.
+- [x] Last.fm JSON response reads are size-limited with no behavioural change for normal responses.
+- [x] Focused Go tests for the touched packages and the focused web tests pass.
