@@ -22,6 +22,17 @@ type ConfigSchema struct {
 	Fields []ConfigField `json:"fields"`
 }
 
+// Without returns the schema less the field with the given key.
+func (s ConfigSchema) Without(key string) ConfigSchema {
+	out := ConfigSchema{Fields: make([]ConfigField, 0, len(s.Fields))}
+	for _, f := range s.Fields {
+		if f.Key != key {
+			out.Fields = append(out.Fields, f)
+		}
+	}
+	return out
+}
+
 type Plugin interface {
 	Type() string
 	Name() string

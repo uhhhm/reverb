@@ -288,6 +288,17 @@ func RedeemViaPeer(ctx context.Context, h host.Host, guard *Guard, keys DeviceKe
 	if err != nil {
 		return "", "", err
 	}
+	return RedeemViaAddrs(ctx, h, guard, keys, pi, code, deviceName, localDeviceID)
+}
+
+// RedeemViaAddrs is RedeemViaPeer against a peer whose addresses are already
+// known, such as the several a pairing QR payload carries. Every address is
+// seeded before the dial, so whichever one this network can reach is used,
+// and all of them are remembered for later reconnects.
+func RedeemViaAddrs(ctx context.Context, h host.Host, guard *Guard, keys DeviceKeyStore, pi peer.AddrInfo, code, deviceName, localDeviceID string) (string, string, error) {
+	if h == nil {
+		return "", "", fmt.Errorf("host is nil")
+	}
 	pid := pi.ID
 	clientNonce, err := newPairNonce()
 	if err != nil {

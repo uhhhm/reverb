@@ -1,4 +1,5 @@
 import type { Page, Route, WebSocketRoute } from '@playwright/test'
+import { FakeQueue } from '../src/test/fakeQueue'
 
 // One external track that is NOT in the library yet (match.status = not_in_library).
 export const externalTrack = {
@@ -116,6 +117,32 @@ export async function installApiMocks(
     })
   })
   const me = opts.me ?? ownerMe
+
+  // The play queue lives in the core; a stand-in answers the player's queue
+  // requests the way the core does, one queue per page.
+  const queue = new FakeQueue().transport()
+  await page.route(/\/api\/v1\/player\/[^/]+(?:\/([a-z-]+))?$/, async (route: Route) => {
+    const op = /\/player\/[^/]+(?:\/([a-z-]+))?$/.exec(new URL(route.request().url()).pathname)?.[1] ?? ''
+    const body = (route.request().postDataJSON() ?? {}) as Record<string, never>
+    const ops: Record<string, () => Promise<unknown>> = {
+      '': () => queue.get(),
+      play: () => queue.play(body.tracks, body.start ?? 0, body.origin),
+      enqueue: () => queue.enqueue(body.tracks, body.origin),
+      remove: () => queue.remove(body.positions),
+      move: () => queue.move(body.from, body.to),
+      jump: () => queue.jump(body.index),
+      next: () => queue.next(body.entryId),
+      previous: () => queue.previous(),
+      ended: () => queue.ended(body.entryId),
+      shuffle: () => queue.setShuffle(body.on),
+      repeat: () => queue.setRepeat(body.mode),
+      'radio-ended': () => queue.radioEnded(),
+      clear: () => queue.clear(),
+    }
+    const run = ops[op]
+    if (!run) return route.fulfill({ status: 404, body: '' })
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(await run()) })
+  })
   // /me — the full Me shape when authed (the app hydrates its capability store
   // from /me on load), else a 401.
   await page.route('**/api/v1/me', (route: Route) =>

@@ -32,6 +32,7 @@ import (
 	"github.com/uhhhm/reverb/internal/events"
 	"github.com/uhhhm/reverb/internal/extstream"
 	"github.com/uhhhm/reverb/internal/library/embedded"
+	"github.com/uhhhm/reverb/internal/library/localfiles"
 	"github.com/uhhhm/reverb/internal/library/lyrics"
 	"github.com/uhhhm/reverb/internal/library/subsonic"
 	"github.com/uhhhm/reverb/internal/linkadd"
@@ -40,9 +41,11 @@ import (
 	"github.com/uhhhm/reverb/internal/override"
 	"github.com/uhhhm/reverb/internal/p2p"
 	"github.com/uhhhm/reverb/internal/play"
+	"github.com/uhhhm/reverb/internal/player"
 	"github.com/uhhhm/reverb/internal/playlistcrdt"
 	"github.com/uhhhm/reverb/internal/playlistsync"
 	"github.com/uhhhm/reverb/internal/portablemigrate"
+	"github.com/uhhhm/reverb/internal/pyrun"
 	"github.com/uhhhm/reverb/internal/recommend"
 	"github.com/uhhhm/reverb/internal/recommend/listenbrainz"
 	"github.com/uhhhm/reverb/internal/recommendationevent"
@@ -64,6 +67,26 @@ import (
 // syncInterval is how often the playlist-sync scheduler ticks.
 const syncInterval = 15 * time.Minute
 
+// Profile is the kind of Device the composition root builds.
+type Profile string
+
+const (
+	// ProfileDesktop is the desktop app and the server: a Navidrome library,
+	// bundled or external, and the bundled download tools.
+	ProfileDesktop Profile = ""
+	// ProfilePhone is a reduced Device (ADR 0003). Its library is a folder of
+	// files in its data directory, filled by P2P file sync, and it spawns no
+	// executables: there is no Navidrome, and yt-dlp and spotDL run as Python
+	// modules through Options.Python, for downloads and external streaming
+	// alike. Portable-name migration, a desktop action, is left out.
+	// Everything that replicates is wired as on the desktop.
+	ProfilePhone Profile = "phone"
+)
+
+// phoneMusicDir is the folder a phone keeps its library in, inside its data
+// directory. The platform hands the core a data directory and nothing else.
+const phoneMusicDir = "music"
+
 // Options is what genuinely differs between the two entry points.
 type Options struct {
 	DBPath     string
@@ -81,6 +104,16 @@ type Options struct {
 	Desktop bool
 	// Getenv is the environment source, injected so tests need no real env.
 	Getenv func(string) string
+	// Profile selects the kind of Device; the zero value is the desktop.
+	Profile Profile
+	// P2PNoDiscovery starts the libp2p host without mDNS or the DHT, so peers
+	// are reached only by stored or supplied addresses; see p2p.HostOptions.
+	P2PNoDiscovery bool
+	// Python runs yt-dlp and spotDL on a phone, which has no executables to
+	// spawn: the platform's embedded interpreter. Nil uses the host's Python
+	// (REVERB_PYTHON, else python3), which is how the phone profile runs on
+	// Linux. The desktop ignores it.
+	Python pyrun.Runner
 }
 
 // Runtime is the built application: everything an entry point needs to serve
@@ -112,6 +145,12 @@ type Runtime struct {
 	Playlists *playlistcrdt.Service
 	projector *materialize.Service
 	files     *p2p.FileSyncer
+	profile   Profile
+	// noDiscovery is Options.P2PNoDiscovery, kept for StartBackground.
+	noDiscovery bool
+	// musicDir is the folder this device's files sync from and into; empty when
+	// the library belongs to an external server Reverb must not write to.
+	musicDir string
 
 	// bg holds the background loops StartBackground launched, so Close can wait
 	// for them to stop rather than returning while they still hold handles.
@@ -169,9 +208,14 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		return nil, fmt.Errorf("seed identity: %w", err)
 	}
 
-	// spotDL ships with both builds, so present it as a configured downloader out
-	// of the box when none exists yet.
-	SeedBundledDownloader(ctx, st.Q(), opts.Getenv)
+	phone := opts.Profile == ProfilePhone
+	dataDir := filepath.Dir(opts.DBPath)
+	// spotDL ships with both desktop builds, so present it as a configured
+	// downloader out of the box when none exists yet. A phone has no spotDL
+	// executable to present.
+	if !phone {
+		SeedBundledDownloader(ctx, st.Q(), opts.Getenv)
+	}
 
 	if serverID, err := reverbsync.EnsureServerDevice(ctx, st.Q()); err != nil {
 		logf("WARNING: ensure server device: %v", err)
@@ -187,14 +231,26 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	// Registries — explicit registration at the composition root, no init()
 	// side-effects.
 	libraryReg := registry.NewRegistry("library")
-	libraryReg.Register("subsonic", func() registry.Plugin { return subsonic.New() })
 	searchReg := registry.NewRegistry("search")
 	searchReg.Register("spotify", func() registry.Plugin { return spotify.New() })
 	searchReg.Register("deezer", func() registry.Plugin { return deezer.New() })
 	downloaderReg := registry.NewRegistry("downloader")
-	downloaderReg.Register("spotdl", func() registry.Plugin { return spotdl.New() })
-	downloaderReg.Register("lidarr", func() registry.Plugin { return lidarr.New() })
-	downloaderReg.Register("ytdlp", func() registry.Plugin { return ytdlp.New() })
+	musicDir := embedded.MusicDir(opts.Getenv)
+	python := opts.Python
+	if phone {
+		musicDir = filepath.Join(dataDir, phoneMusicDir)
+		if python == nil {
+			python = pyrun.HostFromEnv(opts.Getenv)
+		}
+		libraryReg.Register(localfiles.Name, func() registry.Plugin { return localfiles.New() })
+		downloaderReg.Register("spotdl", func() registry.Plugin { return spotdl.NewInProcess(python) })
+		downloaderReg.Register("ytdlp", func() registry.Plugin { return ytdlp.NewInProcess(python) })
+	} else {
+		libraryReg.Register("subsonic", func() registry.Plugin { return subsonic.New() })
+		downloaderReg.Register("spotdl", func() registry.Plugin { return spotdl.New() })
+		downloaderReg.Register("lidarr", func() registry.Plugin { return lidarr.New() })
+		downloaderReg.Register("ytdlp", func() registry.Plugin { return ytdlp.New() })
+	}
 	// Surfaces the async capability to the admin UI (/adapters/available).
 	registry.RegisterCapability("async", func(p registry.Plugin) bool {
 		_, ok := p.(download.AsyncDownloader)
@@ -208,8 +264,11 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	builder := wiring.NewBuilder(
 		libraryReg, searchReg, downloaderReg,
 		st.Q(), st, bus, download.RealClock{}, opts.Getenv,
-		filepath.Dir(opts.DBPath),
+		dataDir,
 	)
+	if phone {
+		builder.SetLocalLibrary(musicDir)
+	}
 
 	// Construction order: reloader → resolver → SetResolverProvider → Build.
 	//
@@ -290,31 +349,21 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		Desktop:       opts.Desktop,
 		Version:       opts.Version,
 		UpdateRepo:    opts.UpdateRepo,
-		DataDir:       filepath.Dir(opts.DBPath),
-		MusicDir:      embedded.MusicDir(opts.Getenv),
+		DataDir:       dataDir,
+		MusicDir:      musicDir,
 		Resolver:      resolverSvc,
 		Catalog:       st.Q(),
 		Deletion:      bundle.Deletion,
-		// Plays a search result that is not in the library by streaming it from
-		// the source instead of downloading it. Reads the LIVE aggregator so it
-		// survives adapter hot-reloads.
-		ExternalStream: extstream.NewFromEnv(
-			ProviderLookup{Get: reloader.TrackLookupProvider()},
-			opts.Getenv,
-			// Resolves persist: the signed URL stays good for hours, and which
-			// upstream track this is never changes at all.
-			extstream.WithStore(st.Q()),
-		),
-		Overrides:    override.New(st.Q()),
-		Entities:     override.NewEntities(st.Q()),
-		Covers:       coverSvc,
-		TrackQuality: st.Q(),
-		Crop:         crop.New(st.Q()),
-		Loudness:     st.Q(),
-		Duration:     st.Q(),
-		Play:         playSvc,
-		Stats:        statsSvc,
-		Scrobble:     scrobbleSvc,
+		Overrides:     override.New(st.Q()),
+		Entities:      override.NewEntities(st.Q()),
+		Covers:        coverSvc,
+		TrackQuality:  st.Q(),
+		Crop:          crop.New(st.Q()),
+		Loudness:      st.Q(),
+		Duration:      st.Q(),
+		Play:          playSvc,
+		Stats:         statsSvc,
+		Scrobble:      scrobbleSvc,
 		Lyrics: &lyrics.Service{
 			Store: st.Q(),
 			Client: &lyrics.LRCLibClient{
@@ -331,9 +380,32 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		LinkAdd:      linkAddSvc,
 		FileStore:    st.Q(),
 	}
+	// Every player plays the core's queue. Each change is also announced on the
+	// event bus (session and revision only), for a client that did not make it.
+	deps.Player = player.NewService(func(e player.Event) {
+		bus.Publish(events.Event{Topic: player.TopicQueue, Payload: e})
+	})
 	// Track covers are keyed on the catalog id so they survive a library-backend
 	// swap and can name the same track on a paired device.
 	coverSvc.SetCatalogResolver(deps.Overrides.CatalogIDsForTracks)
+	// Plays a search result that is not in the library by streaming it from the
+	// source instead of downloading it. Reads the LIVE aggregator so it survives
+	// adapter hot-reloads. Resolves persist: the signed URL stays good for hours,
+	// and which upstream track this is never changes at all. The desktop runs
+	// its bundled yt-dlp; a phone runs the module through its Python.
+	if phone {
+		deps.ExternalStream = extstream.New(
+			ProviderLookup{Get: reloader.TrackLookupProvider()},
+			extstream.WithRunner(pyrun.Module(python, pyrun.YtDlp)),
+			extstream.WithStore(st.Q()),
+		)
+	} else {
+		deps.ExternalStream = extstream.NewFromEnv(
+			ProviderLookup{Get: reloader.TrackLookupProvider()},
+			opts.Getenv,
+			extstream.WithStore(st.Q()),
+		)
+	}
 
 	if deps.Pairing == nil {
 		deps.Pairing = reverbsync.NewPairingService(st.Q())
@@ -467,7 +539,6 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	// Without a materializer, everything replicated would land in the change log
 	// and stay invisible: nothing would write a peer's rename, playlist or play
 	// into the tables the app reads.
-	musicDir := deps.MusicDir
 	if bundle.Supervisor != nil && bundle.Supervisor.Health() == embedded.HealthExternal {
 		musicDir = ""
 	}
@@ -495,7 +566,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	// not repeated here. Listening history, playlists and ratings are keyed on
 	// catalog ids, which a rename does not touch, so they follow for free.
 	var portableMigration *portablemigrate.Service
-	if musicDir != "" {
+	if musicDir != "" && !phone {
 		portableMigration = portablemigrate.New(musicDir, func(c context.Context) error {
 			scheduleDownloadScan()
 			if lib := reloader.Current().Library; lib != nil {
@@ -545,6 +616,12 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	if bundle.Sync != nil {
 		deps.Sync = bundle.Sync
 	}
+	if phone {
+		// The folder library is neither built-in nor external: uploads and
+		// library deletion, which write to a library this device owns, stay
+		// with the desktop.
+		deps.LibraryStatus = func() (string, string) { return "local", "ready" }
+	}
 	if bundle.Supervisor != nil {
 		sup := bundle.Supervisor
 		// Boot-bound: backend-mode changes are restart-only, so the bundle is
@@ -573,10 +650,13 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		P2PPort:      opts.P2PPort,
 		Getenv:       opts.Getenv,
 
-		SyncEmit:  emitter,
-		Playlists: playlistProjection,
-		projector: projector,
-		files:     files,
+		SyncEmit:    emitter,
+		Playlists:   playlistProjection,
+		projector:   projector,
+		files:       files,
+		profile:     opts.Profile,
+		noDiscovery: opts.P2PNoDiscovery,
+		musicDir:    musicDir,
 	}
 	rt.Deps.P2P = func() *p2p.Host { return rt.P2P }
 	rt.Deps.P2PGuard = func() *p2p.Guard { return rt.P2PGuard }
@@ -595,7 +675,7 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 		priv, kerr := p2p.LoadOrCreateIdentity(ctx, r.Store.Q())
 		if kerr != nil {
 			logf("WARNING: p2p identity: %v", kerr)
-		} else if h, err := p2p.NewHost(ctx, priv, r.P2PPort); err != nil {
+		} else if h, err := p2p.NewHostWith(ctx, priv, r.P2PPort, p2p.HostOptions{NoDiscovery: r.noDiscovery}); err != nil {
 			logf("WARNING: p2p host: %v", err)
 		} else {
 			r.P2P = h
@@ -611,14 +691,7 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 				})
 			}
 			// File sync: hash local music dir and keep file_manifest up to date.
-			getenv := r.Getenv
-			if getenv == nil {
-				getenv = func(string) string { return "" }
-			}
-			musicDir := embedded.MusicDir(getenv)
-			if r.Bundle.Supervisor != nil && r.Bundle.Supervisor.Health() == embedded.HealthExternal {
-				musicDir = ""
-			}
+			musicDir := r.musicDir
 			coverDir := cover.Dir(r.Deps.DataDir)
 			if h.LibHost() != nil {
 				p2p.RegisterFileHandler(h.LibHost(), musicDir, guard)
@@ -706,8 +779,13 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 	}
 	if r.Bundle.Sync != nil {
 		go playlistsync.NewScheduler(r.Bundle.Sync, syncInterval).Run(ctx)
-		// Background so startup is not blocked; guarded by a settings flag.
+		// Background so startup is not blocked; guarded by a settings flag. A
+		// phone skips it: playlist files that reached its folder from a peer
+		// are that peer's, and adopting them would replicate duplicates.
 		go func() {
+			if r.profile == ProfilePhone {
+				return
+			}
 			if err := r.Bundle.Sync.MigrateLibraryPlaylists(ctx); err != nil {
 				logf("WARNING: library playlist migration: %v", err)
 			}

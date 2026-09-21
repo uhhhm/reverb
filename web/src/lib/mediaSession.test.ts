@@ -60,6 +60,7 @@ function makeState(overrides: Partial<PlayerState> = {}): PlayerState {
     shuffle: false,
     repeat: 'off',
     upNext: [],
+    origins: [],
     ...overrides,
   }
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/uhhhm/reverb/internal/download"
 	"github.com/uhhhm/reverb/internal/library"
 	"github.com/uhhhm/reverb/internal/library/embedded"
+	"github.com/uhhhm/reverb/internal/library/localfiles"
 	"github.com/uhhhm/reverb/internal/library/subsonic"
 	"github.com/uhhhm/reverb/internal/matching"
 	"github.com/uhhhm/reverb/internal/offlineset"
@@ -176,9 +177,46 @@ func BuildSearchSources(reg *registry.Registry, instances []db.AdapterInstance, 
 // plugin.SupportedGranularities() — the DEFAULT resolution; Task 2 adds config
 // parsing for per-granularity overrides. Per-source failures warn-and-skip.
 func BuildDownloaders(reg *registry.Registry, instances []db.AdapterInstance, getenv func(string) string) []download.DownloaderEntry {
-	out := []download.DownloaderEntry{}
-	hasDownloaderInstance := false
-	hasYtdlpInstance := false
+	return buildDownloaders(reg, instances, getenv, getenv("REVERB_DOWNLOAD_DIR"))
+}
+
+// buildDownloaders is BuildDownloaders with the default downloaders writing
+// into defaultDir; with defaultDir empty none are injected.
+func buildDownloaders(reg *registry.Registry, instances []db.AdapterInstance, getenv func(string) string, defaultDir string) []download.DownloaderEntry {
+	out, hasDownloaderInstance, hasYtdlpInstance := configuredDownloaders(reg, instances, getenv)
+
+	// Bundled default: the image ships spotDL + ffmpeg, so when the user has not
+	// configured any downloader, fall back to a spotDL instance writing to
+	// REVERB_DOWNLOAD_DIR (the Docker image sets this to /music). This makes
+	// downloads work out of the box with zero setup. We only inject the default
+	// when there is NO downloader instance at all — if the user configured (or
+	// deliberately disabled) one, that choice is respected. Gated on the env being
+	// set so local/dev runs without it are unaffected.
+	if len(out) == 0 && !hasDownloaderInstance && defaultDir != "" {
+		if entry := buildDefaultSpotdl(reg, defaultDir, getenv); entry != nil {
+			out = append(out, *entry)
+		}
+	}
+
+	// yt-dlp is bundled alongside spotDL and is what a pasted link needs: spotDL
+	// resolves Spotify metadata first and fails outright on a bare YouTube URL.
+	// It is therefore injected whenever the user has no ytdlp instance of their
+	// own, even when another downloader IS configured — unlike the spotDL default
+	// above, which only fills a completely empty chain. It sorts behind everything
+	// else, so it only ever runs when asked for by name or as a last resort.
+	if !hasYtdlpInstance && defaultDir != "" {
+		if entry := buildDefaultYtdlp(reg, defaultDir, getenv); entry != nil {
+			out = append(out, *entry)
+		}
+	}
+	return out
+}
+
+// configuredDownloaders builds the enabled downloader instances, and reports
+// whether any downloader instance exists at all and whether a ytdlp one does,
+// which is what decides the bundled defaults.
+func configuredDownloaders(reg *registry.Registry, instances []db.AdapterInstance, getenv func(string) string) (out []download.DownloaderEntry, hasDownloaderInstance, hasYtdlpInstance bool) {
+	out = []download.DownloaderEntry{}
 	for i := range instances {
 		inst := instances[i]
 		if inst.Type != "downloader" {
@@ -244,36 +282,7 @@ func BuildDownloaders(reg *registry.Registry, instances []db.AdapterInstance, ge
 			Order:      resolveGranularityOrder(cfg, dl.SupportedGranularities(), int(inst.Priority)),
 		})
 	}
-
-	// Bundled default: the image ships spotDL + ffmpeg, so when the user has not
-	// configured any downloader, fall back to a spotDL instance writing to
-	// REVERB_DOWNLOAD_DIR (the Docker image sets this to /music). This makes
-	// downloads work out of the box with zero setup. We only inject the default
-	// when there is NO downloader instance at all — if the user configured (or
-	// deliberately disabled) one, that choice is respected. Gated on the env being
-	// set so local/dev runs without it are unaffected.
-	if len(out) == 0 && !hasDownloaderInstance {
-		if dir := getenv("REVERB_DOWNLOAD_DIR"); dir != "" {
-			if entry := buildDefaultSpotdl(reg, dir, getenv); entry != nil {
-				out = append(out, *entry)
-			}
-		}
-	}
-
-	// yt-dlp is bundled alongside spotDL and is what a pasted link needs: spotDL
-	// resolves Spotify metadata first and fails outright on a bare YouTube URL.
-	// It is therefore injected whenever the user has no ytdlp instance of their
-	// own, even when another downloader IS configured — unlike the spotDL default
-	// above, which only fills a completely empty chain. It sorts behind everything
-	// else, so it only ever runs when asked for by name or as a last resort.
-	if !hasYtdlpInstance {
-		if dir := getenv("REVERB_DOWNLOAD_DIR"); dir != "" {
-			if entry := buildDefaultYtdlp(reg, dir, getenv); entry != nil {
-				out = append(out, *entry)
-			}
-		}
-	}
-	return out
+	return out, hasDownloaderInstance, hasYtdlpInstance
 }
 
 // buildDefaultSpotdl constructs the bundled spotDL downloader entry (output_dir=dir).
@@ -563,6 +572,21 @@ type Builder struct {
 	// downloadCompletion is applied to every manager Build creates, including
 	// replacement managers produced by live adapter reloads.
 	downloadCompletion func(context.Context, core.DownloadRequest)
+	// localLibraryDir, when set, makes the library a plain folder read by the
+	// localfiles adapter; see SetLocalLibrary.
+	localLibraryDir string
+}
+
+// SetLocalLibrary builds the library from a plain folder of files rather than
+// from a Subsonic server, for a device that has no Navidrome (the phone
+// profile, ADR 0003). The builder then starts no Navidrome supervisor, the
+// default downloaders write into the folder rather than REVERB_DOWNLOAD_DIR
+// (whichever implementations the downloader registry holds under their
+// names), and the download manager is built even with no downloader, since
+// managed playlists hang off it. The library registry must hold the
+// localfiles adapter.
+func (b *Builder) SetLocalLibrary(dir string) {
+	b.localLibraryDir = dir
 }
 
 // SetResolverProvider injects the resolver provider into the Builder. Call this
@@ -648,6 +672,10 @@ func (b *Builder) Build(ctx context.Context) (ServiceBundle, error) {
 		return ServiceBundle{}, err
 	}
 
+	if b.localLibraryDir != "" {
+		return b.buildLocal(ctx, serverDeviceID, instances)
+	}
+
 	var bundle ServiceBundle
 
 	// Resolve effective backend mode and (if built-in) ensure internal creds.
@@ -727,6 +755,58 @@ func (b *Builder) Build(ctx context.Context) (ServiceBundle, error) {
 		bundle.Matcher = matcher
 	}
 
+	downloaders := BuildDownloaders(b.downloaderReg, instances, b.getenv)
+	b.buildServices(ctx, &bundle, libAdapter, matcher, instances, downloaders, false)
+	bundle.ServerDeviceID = serverDeviceID
+	return bundle, nil
+}
+
+// buildLocal is Build for a folder library (SetLocalLibrary).
+func (b *Builder) buildLocal(ctx context.Context, serverDeviceID string, instances []db.AdapterInstance) (ServiceBundle, error) {
+	var bundle ServiceBundle
+	identity := localfiles.Name + ":" + b.localLibraryDir
+	if err := b.reconcileLibraryIdentity(ctx, identity); err != nil {
+		log.Printf("WARNING: library identity reconcile: %v", err)
+	}
+	if err := b.reconcileDownloadJobIdentity(ctx, identity); err != nil {
+		log.Printf("WARNING: download job identity reconcile: %v", err)
+	}
+	plugin, err := b.libraryReg.Create(localfiles.Name)
+	if err != nil {
+		return bundle, fmt.Errorf("local library: %w", err)
+	}
+	lib, ok := plugin.(library.LibraryAdapter)
+	if !ok {
+		return bundle, fmt.Errorf("local library: %s is not a LibraryAdapter", localfiles.Name)
+	}
+	if err := lib.Init(map[string]any{"dir": b.localLibraryDir}); err != nil {
+		return bundle, fmt.Errorf("local library init: %w", err)
+	}
+	log.Printf("library adapter active: %s (%s)", lib.Name(), b.localLibraryDir)
+	bundle.Library = lib
+	matcher := matching.NewService(lib, b.queries, b.version.LibraryVersion)
+	bundle.Matcher = matcher
+	// The default downloaders write into the folder itself, so a download is
+	// in the library as soon as it lands.
+	downloaders := buildDownloaders(b.downloaderReg, instances, b.getenv, b.localLibraryDir)
+	b.buildServices(ctx, &bundle, lib, matcher, instances, downloaders, true)
+	bundle.ServerDeviceID = serverDeviceID
+	return bundle, nil
+}
+
+// buildServices builds everything that hangs off the library: search, coverage,
+// the download manager, the playlist service and the stateless sync services.
+// managerWithoutDownloaders builds the manager even when no downloader is
+// configured, so the playlist service that needs it still comes up.
+func (b *Builder) buildServices(
+	ctx context.Context,
+	bundle *ServiceBundle,
+	libAdapter library.LibraryAdapter,
+	matcher *matching.Service,
+	instances []db.AdapterInstance,
+	downloaders []download.DownloaderEntry,
+	managerWithoutDownloaders bool,
+) {
 	// Search sources + matcher + aggregator.
 	sources := BuildSearchSources(b.searchReg, instances, b.getenv)
 	if len(sources) > 0 {
@@ -749,8 +829,7 @@ func (b *Builder) Build(ctx context.Context) (ServiceBundle, error) {
 	}
 
 	// Downloaders → Manager (constructed but not started).
-	downloaders := BuildDownloaders(b.downloaderReg, instances, b.getenv)
-	if len(downloaders) > 0 && libAdapter != nil {
+	if (len(downloaders) > 0 || managerWithoutDownloaders) && libAdapter != nil {
 		// Reuse the single matcher built above (libAdapter != nil guarantees it is
 		// non-nil here) — functionally identical to a fresh instance, one fewer alloc.
 		var rematcher download.Rematcher = matcher
@@ -819,11 +898,8 @@ func (b *Builder) Build(ctx context.Context) (ServiceBundle, error) {
 
 	// T8 multi-device: stateless sync/offline services. Reconstructed on every
 	// Build so live Reload picks up the current DB state without restart.
-	bundle.ServerDeviceID = serverDeviceID
 	bundle.Pairing = reverbsync.NewPairingService(b.queries)
 	bundle.SyncStore = reverbsync.NewSyncStore(b.queries)
 	bundle.Deletion = reverbsync.NewDeletionService(bundle.SyncStore, b.queries)
 	bundle.OfflineSet = offlineset.NewService(b.queries)
-
-	return bundle, nil
 }

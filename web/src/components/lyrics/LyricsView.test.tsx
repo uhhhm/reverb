@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { engine } from '../../lib/playerStore'
+import { queueState } from '../../test/fakeQueue'
 import type { Track } from '../../lib/types'
 import { useUI } from '../../lib/uiStore'
 import { useLyrics } from '../../lib/lyricsApi'
@@ -26,7 +27,7 @@ describe('LyricsView', () => {
   })
 
   it('renders synced lines with the active line marked', () => {
-    engine.playTrackList([track], 0)
+    engine.apply(queueState([track], 0), { autoplay: true })
     const eng = engine as unknown as { currentTimeMs: number; emit(): void }
     eng.currentTimeMs = 1000
     eng.emit()
@@ -56,7 +57,7 @@ describe('LyricsView', () => {
   })
 
   it('clicking a line calls seekMs with the line timeMs', () => {
-    engine.playTrackList([track], 0)
+    engine.apply(queueState([track], 0), { autoplay: true })
     vi.mocked(useLyrics).mockReturnValue({
       data: {
         synced: true,
@@ -76,7 +77,7 @@ describe('LyricsView', () => {
   })
 
   it('shows the empty state and stays open when there is no lyrics payload', () => {
-    engine.playTrackList([track], 0)
+    engine.apply(queueState([track], 0), { autoplay: true })
     vi.mocked(useLyrics).mockReturnValue({ data: null } as ReturnType<typeof useLyrics>)
     useUI.setState({ lyricsOpen: true })
     render(<LyricsView />)
@@ -86,7 +87,7 @@ describe('LyricsView', () => {
   })
 
   it('renders plain text as a single block with no line buttons', () => {
-    engine.playTrackList([track], 0)
+    engine.apply(queueState([track], 0), { autoplay: true })
     vi.mocked(useLyrics).mockReturnValue({
       data: { synced: false, plain: 'la la la\nla la la' },
     } as ReturnType<typeof useLyrics>)
@@ -98,7 +99,7 @@ describe('LyricsView', () => {
   })
 
   it('Escape key calls closeLyrics', () => {
-    engine.playTrackList([track], 0)
+    engine.apply(queueState([track], 0), { autoplay: true })
     useUI.setState({ lyricsOpen: true })
     render(<LyricsView />)
     fireEvent.keyDown(window, { key: 'Escape' })

@@ -20,6 +20,7 @@ import (
 
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/download"
+	"github.com/uhhhm/reverb/internal/pyrun"
 	"github.com/uhhhm/reverb/internal/registry"
 )
 
@@ -93,10 +94,21 @@ type Adapter struct {
 	clientID     string
 	clientSecret string
 	cookiesFile  string // path to a written cookies.txt, or "" if not configured
+	// inProcess marks an adapter that runs the spotdl module through a Python
+	// runner rather than an executable; it has no binary to configure and
+	// keeps the source's stream.
+	inProcess bool
 }
 
 func New() *Adapter {
 	return &Adapter{runner: ExecRunner{}, binary: "spotdl"}
+}
+
+// NewInProcess is the adapter for a device without the spotDL executable (the
+// phone profile): it runs the spotdl module through py, and every download
+// keeps the stream the source served, whatever its quality tier.
+func NewInProcess(py pyrun.Runner) *Adapter {
+	return &Adapter{runner: pyrun.Module(py, pyrun.SpotDL), binary: "spotdl", inProcess: true}
 }
 
 // WithRunner injects a Runner (test seam). Call before Init.
@@ -112,6 +124,14 @@ func (a *Adapter) SupportedGranularities() []core.DownloadGranularity {
 }
 
 func (a *Adapter) ConfigSchema() registry.ConfigSchema {
+	if a.inProcess {
+		// There is no executable to point at.
+		return a.configSchema().Without("binary_path")
+	}
+	return a.configSchema()
+}
+
+func (a *Adapter) configSchema() registry.ConfigSchema {
 	return registry.ConfigSchema{Fields: []registry.ConfigField{
 		{Key: "output_dir", Label: "Output directory", Type: "string", Required: true},
 		{Key: "binary_path", Label: "spotDL binary path", Type: "string", Required: false},
@@ -411,7 +431,11 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 	// logging) is what actually makes that detail reach stdout, where
 	// classifyFailure can see it.
 	args = append(args, "--log-level", "DEBUG")
-	args = append(args, qualityArgs(req.Quality)...)
+	if a.inProcess {
+		args = append(args, qualityArgs(core.QualityBest)...)
+	} else {
+		args = append(args, qualityArgs(req.Quality)...)
+	}
 	if req.ForceOverwrite {
 		// spotDL's default is --overwrite skip, which would silently no-op the
 		// re-download a quality upgrade depends on.

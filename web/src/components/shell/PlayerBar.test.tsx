@@ -4,11 +4,17 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { PlayerBar } from './PlayerBar'
 import { usePlayer, engine } from '../../lib/playerStore'
+import { queueState } from '../../test/fakeQueue'
 import { useUI } from '../../lib/uiStore'
 import type { Track } from '../../lib/types'
 import { useAlbumPalette } from '../../lib/useAlbumPalette'
 import { useLyrics } from '../../lib/lyricsApi'
 import { useWaveformPeaks } from '../../lib/peaksApi'
+
+/** Something playing, as the core would answer a new list; the queue transport is not under test here. */
+function playNow(tracks: Track[], index: number) {
+  engine.apply(queueState(tracks, index), { autoplay: true })
+}
 vi.mock('../../lib/useAlbumPalette', () => ({ useAlbumPalette: vi.fn(() => null) }))
 vi.mock('../../lib/peaksApi', () => ({ useWaveformPeaks: vi.fn(() => null) }))
 vi.mock('../../lib/lyricsApi', () => ({ useLyrics: vi.fn(() => ({ data: null })) }))
@@ -47,7 +53,7 @@ function track(id: string): Track {
 describe('PlayerBar (shell)', () => {
   beforeEach(() => {
     act(() => {
-      usePlayer.getState().playTrackList([track('1'), track('2')], 0)
+      playNow([track('1'), track('2')], 0)
       useUI.getState().closePanel()
       useUI.getState().closeLyrics()
     })
@@ -105,7 +111,7 @@ describe('PlayerBar (shell)', () => {
       { id: 'ar-7', name: 'boygenius', coverArtId: '', albumCount: 2 },
     ])
     act(() => {
-      usePlayer.getState().playTrackList([idless], 0)
+      playNow([idless], 0)
     })
     mockNavigate.mockClear()
     render(<PlayerBar />)
@@ -117,7 +123,7 @@ describe('PlayerBar (shell)', () => {
     const idless: Track = { ...track('1'), artistId: '', artist: 'Nobody' }
     vi.spyOn(api, 'get').mockResolvedValue([])
     act(() => {
-      usePlayer.getState().playTrackList([idless], 0)
+      playNow([idless], 0)
     })
     mockNavigate.mockClear()
     render(<PlayerBar />)
@@ -129,7 +135,7 @@ describe('PlayerBar (shell)', () => {
   it('artist button navigates to /artist/spotify/:id when artistExternalId is set', async () => {
     const trackWithExtId: Track = { ...track('1'), artistExternalId: 'ext-99' }
     act(() => {
-      usePlayer.getState().playTrackList([trackWithExtId], 0)
+      playNow([trackWithExtId], 0)
     })
     mockNavigate.mockClear()
     render(<PlayerBar />)
@@ -139,7 +145,7 @@ describe('PlayerBar (shell)', () => {
 
   it('artist button navigates to /artist/library/:id when no artistExternalId', async () => {
     act(() => {
-      usePlayer.getState().playTrackList([track('1')], 0)
+      playNow([track('1')], 0)
     })
     mockNavigate.mockClear()
     render(<PlayerBar />)
@@ -149,7 +155,7 @@ describe('PlayerBar (shell)', () => {
 
   // --- transport button actions ---
 
-  it('play/pause button click calls toggle on the engine', () => {
+  it('play/pause button click calls toggle on the player', () => {
     const spy = vi.spyOn(engine, 'toggle')
     render(<PlayerBar />)
     // Match exactly "Play" or "Pause", not "Mini player"
@@ -158,32 +164,32 @@ describe('PlayerBar (shell)', () => {
     spy.mockRestore()
   })
 
-  it('Previous button click calls prev on the engine', () => {
-    const spy = vi.spyOn(engine, 'prev')
+  it('Previous button click calls prev on the player', () => {
+    const spy = vi.spyOn(usePlayer.getState(), 'prev').mockImplementation(() => {})
     render(<PlayerBar />)
     fireEvent.click(screen.getByRole('button', { name: /previous/i }))
     expect(spy).toHaveBeenCalledTimes(1)
     spy.mockRestore()
   })
 
-  it('Next button click calls next on the engine', () => {
-    const spy = vi.spyOn(engine, 'next')
+  it('Next button click calls next on the player', () => {
+    const spy = vi.spyOn(usePlayer.getState(), 'next').mockImplementation(() => {})
     render(<PlayerBar />)
     fireEvent.click(screen.getByRole('button', { name: /next/i }))
     expect(spy).toHaveBeenCalledTimes(1)
     spy.mockRestore()
   })
 
-  it('Shuffle button click calls toggleShuffle on the engine', () => {
-    const spy = vi.spyOn(engine, 'toggleShuffle')
+  it('Shuffle button click calls toggleShuffle on the player', () => {
+    const spy = vi.spyOn(usePlayer.getState(), 'toggleShuffle').mockImplementation(() => {})
     render(<PlayerBar />)
     fireEvent.click(screen.getByRole('button', { name: /shuffle/i }))
     expect(spy).toHaveBeenCalledTimes(1)
     spy.mockRestore()
   })
 
-  it('Repeat button click calls cycleRepeat on the engine', () => {
-    const spy = vi.spyOn(engine, 'cycleRepeat')
+  it('Repeat button click calls cycleRepeat on the player', () => {
+    const spy = vi.spyOn(usePlayer.getState(), 'cycleRepeat').mockImplementation(() => {})
     render(<PlayerBar />)
     fireEvent.click(screen.getByRole('button', { name: /repeat/i }))
     expect(spy).toHaveBeenCalledTimes(1)
@@ -199,7 +205,7 @@ describe('PlayerBar (shell)', () => {
 
   it('hides the "Add to playlist" button when nothing is playing', () => {
     act(() => {
-      usePlayer.getState().playTrackList([], 0)
+      playNow([], 0)
     })
     render(<PlayerBar />)
     expect(screen.queryByRole('button', { name: /add to playlist/i })).not.toBeInTheDocument()
@@ -497,7 +503,7 @@ describe('PlayerBar (shell)', () => {
     })
 
     it('Shift+ArrowRight calls next and does NOT call seekMs', () => {
-      const nextSpy = vi.spyOn(engine, 'next')
+      const nextSpy = vi.spyOn(usePlayer.getState(), 'next').mockImplementation(() => {})
       const seekSpy = vi.spyOn(engine, 'seekMs')
       render(<PlayerBar />)
 
@@ -512,7 +518,7 @@ describe('PlayerBar (shell)', () => {
     })
 
     it('Shift+ArrowLeft calls prev and does NOT call seekMs', () => {
-      const prevSpy = vi.spyOn(engine, 'prev')
+      const prevSpy = vi.spyOn(usePlayer.getState(), 'prev').mockImplementation(() => {})
       const seekSpy = vi.spyOn(engine, 'seekMs')
       render(<PlayerBar />)
 
@@ -550,7 +556,7 @@ describe('PlayerBar (shell)', () => {
   describe('dynamic tint', () => {
     beforeEach(() => {
       act(() => {
-        usePlayer.getState().playTrackList([track('1')], 0)
+        playNow([track('1')], 0)
         useUI.getState().closePanel()
       })
       vi.mocked(useAlbumPalette).mockReset()

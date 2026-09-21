@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PlayerState } from './audioEngine'
+import type { QueueOrigin } from './playerApi'
 import { ARTIST_SKIP_LIMIT, RadioSession, type RadioHost, type RadioStart } from './radio'
 import type { Track } from './types'
 
@@ -11,9 +12,10 @@ function track(id: string, artist: string, seedTitle?: string): Track {
   }
 }
 
-/** A player with the engine's queue semantics and nothing else. */
+/** A player with the core queue's semantics and nothing else, applying each change at once. */
 class FakePlayer implements RadioHost {
   queue: Track[] = []
+  origins: QueueOrigin[] = []
   index = -1
   timeMs = 0
   session: RadioSession | null = null
@@ -30,20 +32,26 @@ class FakePlayer implements RadioHost {
       queue: this.queue, index: this.index, current, playing: true, currentTimeMs: this.timeMs,
       durationMs: current?.durationMs ?? 0, bufferedMs: 0, loading: false, volume: 1,
       shuffle: false, repeat: 'off', upNext: this.queue.map((_, i) => i).filter((i) => i > this.index),
+      origins: this.origins,
     }
   }
-  play(tracks: Track[]) {
+  play(tracks: Track[], origin: QueueOrigin) {
     this.queue = [...tracks]
+    this.origins = tracks.map(() => origin)
     this.index = 0
     this.timeMs = 0
     this.changed()
   }
-  append(t: Track) {
-    this.queue.push(t)
+  append(tracks: Track[]) {
+    this.queue.push(...tracks)
+    this.origins.push(...tracks.map((): QueueOrigin => 'radio'))
     this.changed()
   }
-  remove(i: number) {
-    this.queue.splice(i, 1)
+  remove(positions: number[]) {
+    for (const i of [...positions].sort((a, b) => b - a)) {
+      this.queue.splice(i, 1)
+      this.origins.splice(i, 1)
+    }
     this.changed()
   }
   prewarm() {}
@@ -78,6 +86,7 @@ class FakePlayer implements RadioHost {
   /** A track the listener queues to play next. */
   enqueueNext(t: Track) {
     this.queue.splice(this.index + 1, 0, t)
+    this.origins.splice(this.index + 1, 0, 'listener')
     this.changed()
   }
   currentId(): string {

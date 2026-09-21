@@ -1,4 +1,5 @@
 import type { PlayerState } from './audioEngine'
+import type { QueueOrigin } from './playerApi'
 import { normalize } from './trackRef'
 import type { Track } from './types'
 
@@ -43,15 +44,19 @@ function seedFromTrack(track: Track): RadioSeed {
   }
 }
 
-/** What a RadioSession needs from the player. */
+/**
+ * What a RadioSession needs from the player. The queue belongs to the core, so
+ * a change may complete later; the session plans nothing further until it has.
+ */
 export interface RadioHost {
   fetch(seeds: RadioSeed[]): Promise<Track[]>
   getState(): PlayerState
   /** Replaces the queue and starts playing. */
-  play(tracks: Track[]): void
-  append(track: Track): void
-  /** Removes one queued track (never the current one). */
-  remove(index: number): void
+  play(tracks: Track[], origin: QueueOrigin): Promise<void> | void
+  /** Queues tracks as Radio's own, after everything the listener queued. */
+  append(tracks: Track[]): Promise<void> | void
+  /** Removes queued tracks by position (never the current one). */
+  remove(positions: number[]): Promise<void> | void
   /** Starts resolving an external track so it plays without a wait. */
   prewarm(track: Track): void
   /** The session ended itself (nothing to play). */
@@ -126,8 +131,14 @@ export function radioFromTracks(tracks: Track[]): RadioStart {
  */
 export class RadioSession {
   private active = true
+  // Until begin, state changes are someone else's: the player may still be
+  // settling what came before the session.
+  private begun = false
   private started: boolean
   private busy = false
+  // Set while a queue change is on its way to the core. The state still shows
+  // the queue from before it, so planning from it would double up.
+  private mutating = false
   private fetching = false
   private retryAt = 0
   private pool: Track[] = []
@@ -136,7 +147,6 @@ export class RadioSession {
   private seen = new Set<string>()
   /** Recordings already used as seeds, or never to be (skipped). */
   private seeded = new Set<string>()
-  private radioTracks = new WeakSet<Track>()
   private prewarmed = new Set<string>()
   /** Session steering, keyed "artist:<artist>" or "seed:<recording>". */
   private steering = new Map<string, number>()
@@ -162,13 +172,9 @@ export class RadioSession {
     return this.active
   }
 
-  /** Whether the session queued this track (as opposed to the listener). */
-  isRadioTrack(t: Track): boolean {
-    return this.radioTracks.has(t)
-  }
-
   begin() {
-    if (this.started) this.host.play(this.start.lead)
+    this.begun = true
+    if (this.started) this.mutate(() => this.host.play(this.start.lead, 'listener'))
     else void this.refill()
   }
 
@@ -179,7 +185,7 @@ export class RadioSession {
 
   /** Called on every player state change. */
   update() {
-    if (!this.active || this.busy || !this.started) return
+    if (!this.active || !this.begun || this.busy || !this.started || this.mutating) return
     this.busy = true
     try {
       this.observe()
@@ -188,7 +194,28 @@ export class RadioSession {
     } finally {
       this.busy = false
     }
-    if (this.ahead() < RADIO_AHEAD) void this.refill()
+    if (!this.mutating && this.ahead() < RADIO_AHEAD) void this.refill()
+  }
+
+  /**
+   * Runs one queue change and plans again once it has landed. A host that
+   * applies changes at once needs no waiting; the core's queue answers later.
+   */
+  private mutate(change: () => Promise<void> | void) {
+    this.mutating = true
+    const done = () => {
+      this.mutating = false
+      this.update()
+    }
+    let pending: Promise<void> | void
+    try {
+      pending = change()
+    } catch {
+      done()
+      return
+    }
+    if (pending) void pending.catch(() => {}).finally(done)
+    else done()
   }
 
   private ahead(): number {
@@ -265,17 +292,22 @@ export class RadioSession {
    * pool, the pool re-sorts by steering, and the queue refills from it.
    */
   private restack() {
-    if (!this.active) return
-    const { queue, upNext } = this.host.getState()
-    const ours = upNext.filter((i) => this.radioTracks.has(queue[i])).sort((a, b) => a - b)
+    if (!this.active || this.mutating) return
+    const { queue, upNext, origins } = this.host.getState()
+    const ours = upNext.filter((i) => origins[i] === 'radio').sort((a, b) => a - b)
     const taken = ours.map((i) => queue[i])
-    for (const i of [...ours].reverse()) this.host.remove(i)
     this.pool = [...taken, ...this.pool]
     this.sortPool()
     // As many go back as were taken, even past RADIO_AHEAD when the listener's
-    // own tracks are queued too.
-    for (let n = 0; n < taken.length && this.appendNext(); n++);
-    this.fill()
+    // own tracks are queued too; and never fewer than it takes to refill.
+    const kept = queue.filter((_, i) => !ours.includes(i))
+    const picks = this.pick(kept, Math.max(taken.length, RADIO_AHEAD - (upNext.length - ours.length)))
+    if (ours.length === 0 && picks.length === 0) return
+    this.mutate(() => {
+      const removed = ours.length ? this.host.remove(ours) : undefined
+      const append = () => (picks.length ? this.host.append(picks) : undefined)
+      return removed ? removed.then(append) : append()
+    })
   }
 
   /** Drops blocked artists and orders the pool by steering; ties keep the server's order. */
@@ -287,17 +319,26 @@ export class RadioSession {
   }
 
   private fill() {
-    while (this.ahead() < RADIO_AHEAD && this.appendNext());
+    if (this.mutating) return
+    const picks = this.pick(this.host.getState().queue, RADIO_AHEAD - this.ahead())
+    if (picks.length) this.mutate(() => this.host.append(picks))
   }
 
-  /** Queues the best pooled track that keeps artist runs short, if there is one. */
-  private appendNext(): boolean {
-    const i = this.pickIndex(this.host.getState().queue)
-    if (i < 0) return false
-    const [t] = this.pool.splice(i, 1)
-    this.radioTracks.add(t)
-    this.host.append(t)
-    return true
+  /**
+   * Takes up to n of the best pooled tracks, in the order they would line up
+   * after queue, keeping artist runs short.
+   */
+  private pick(queue: Track[], n: number): Track[] {
+    const lined = [...queue]
+    const picks: Track[] = []
+    while (picks.length < n) {
+      const i = this.pickIndex(lined)
+      if (i < 0) break
+      const [t] = this.pool.splice(i, 1)
+      picks.push(t)
+      lined.push(t)
+    }
+    return picks
   }
 
   /** The first pooled track that would not extend a run of one artist too far. */
@@ -379,8 +420,7 @@ export class RadioSession {
         return
       }
       this.started = true
-      this.radioTracks.add(first)
-      this.host.play([first])
+      this.mutate(() => this.host.play([first], 'radio'))
       return
     }
     this.update()

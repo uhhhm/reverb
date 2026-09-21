@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/uhhhm/reverb/internal/api"
 	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/library/localfiles"
 	"github.com/uhhhm/reverb/internal/store"
 	"github.com/uhhhm/reverb/internal/store/db"
 )
@@ -33,9 +35,13 @@ type syncDevice struct {
 	name     string
 	dbPath   string
 	musicDir string
-	rt       *Runtime
-	srv      *httptest.Server
-	stop     func()
+	profile  Profile
+	// noDiscovery boots the device without mDNS or the DHT, the way it is
+	// across a VPN.
+	noDiscovery bool
+	rt          *Runtime
+	srv         *httptest.Server
+	stop        func()
 }
 
 // fakeSubsonic is an external library backend that owns nothing. Every
@@ -64,11 +70,15 @@ func fakeSubsonic(t *testing.T) *httptest.Server {
 	return srv
 }
 
-func newSyncDevice(t *testing.T, name string) *syncDevice {
+// deviceOption adjusts a device before it first boots.
+type deviceOption func(*syncDevice)
+
+func withoutDiscovery(d *syncDevice) { d.noDiscovery = true }
+
+func newSyncDevice(t *testing.T, name string, opts ...deviceOption) *syncDevice {
 	t.Helper()
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "reverb.db")
-	musicDir := filepath.Join(tmp, "music")
 	lib := fakeSubsonic(t)
 
 	// An enabled library row makes wiring pick external mode and build the
@@ -88,32 +98,62 @@ func newSyncDevice(t *testing.T, name string) *syncDevice {
 	}
 	_ = st.Close()
 
-	env := map[string]string{"REVERB_DOWNLOAD_DIR": musicDir}
+	d := &syncDevice{t: t, name: name, dbPath: dbPath, musicDir: filepath.Join(tmp, "music")}
+	for _, o := range opts {
+		o(d)
+	}
+	d.boot()
+	t.Cleanup(func() { d.stop() })
+	return d
+}
+
+// newPhoneDevice boots a phone-profile runtime: a folder library in its data
+// directory, no Navidrome and no bundled tools.
+func newPhoneDevice(t *testing.T, name string, opts ...deviceOption) *syncDevice {
+	t.Helper()
+	tmp := t.TempDir()
+	d := &syncDevice{t: t, name: name, dbPath: filepath.Join(tmp, "reverb.db"), musicDir: filepath.Join(tmp, "music"), profile: ProfilePhone}
+	for _, o := range opts {
+		o(d)
+	}
+	d.boot()
+	t.Cleanup(func() { d.stop() })
+	return d
+}
+
+// boot builds and starts the runtime from the device's database. The phone
+// profile derives its music folder from the data directory, so it is given no
+// download directory.
+func (d *syncDevice) boot() {
+	d.t.Helper()
+	env := map[string]string{}
+	if d.profile != ProfilePhone {
+		env["REVERB_DOWNLOAD_DIR"] = d.musicDir
+	}
 	rt, err := Build(context.Background(), Options{
-		DBPath:  dbPath,
-		Version: "test",
-		Getenv:  func(k string) string { return env[k] },
+		DBPath:         d.dbPath,
+		Version:        "test",
+		Profile:        d.profile,
+		P2PNoDiscovery: d.noDiscovery,
+		Getenv:         func(k string) string { return env[k] },
 	})
 	if err != nil {
-		t.Fatalf("%s: Build: %v", name, err)
+		d.t.Fatalf("%s: Build: %v", d.name, err)
 	}
 	if rt.Bundle.Sync == nil {
-		t.Fatalf("%s: playlist service was not built", name)
+		d.t.Fatalf("%s: playlist service was not built", d.name)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	rt.StartBackground(ctx)
 	srv := httptest.NewServer(api.NewServer(rt.Deps).Handler())
-	d := &syncDevice{t: t, name: name, dbPath: dbPath, musicDir: musicDir, rt: rt, srv: srv}
-	d.stop = func() {
+	d.rt, d.srv, d.stop = rt, srv, func() {
 		cancel()
 		srv.Close()
 		rt.Close()
 	}
-	t.Cleanup(func() { d.stop() })
 	if rt.P2P == nil || rt.P2PSyncer == nil {
-		t.Fatalf("%s: p2p did not start", name)
+		d.t.Fatalf("%s: p2p did not start", d.name)
 	}
-	return d
 }
 
 // call issues one API request and decodes the JSON reply into out (when non-nil).
@@ -226,26 +266,7 @@ func pairWith(t *testing.T, responder, redeemer *syncDevice, target string) {
 func (d *syncDevice) restart() {
 	d.t.Helper()
 	d.stop()
-	env := map[string]string{"REVERB_DOWNLOAD_DIR": d.musicDir}
-	rt, err := Build(context.Background(), Options{
-		DBPath:  d.dbPath,
-		Version: "test",
-		Getenv:  func(k string) string { return env[k] },
-	})
-	if err != nil {
-		d.t.Fatalf("%s: rebuild: %v", d.name, err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	rt.StartBackground(ctx)
-	srv := httptest.NewServer(api.NewServer(rt.Deps).Handler())
-	d.rt, d.srv, d.stop = rt, srv, func() {
-		cancel()
-		srv.Close()
-		rt.Close()
-	}
-	if rt.P2P == nil || rt.P2PSyncer == nil {
-		d.t.Fatalf("%s: p2p did not start after restart", d.name)
-	}
+	d.boot()
 }
 
 // converge runs sync rounds on both devices until cond holds. Projection is
@@ -466,4 +487,150 @@ func TestTwoDevicesConvergeOverP2P(t *testing.T) {
 	if !b.hasPlayTitled("Beta Song") || !a.hasPlayTitled("Beta Song") {
 		t.Fatal("the surviving play was lost")
 	}
+}
+
+// A phone is a reduced Device, not a remote: it pairs by typed code like any
+// other device and the same history flows both ways through ordinary sync.
+func TestPhoneConvergesWithDesktop(t *testing.T) {
+	if testing.Short() {
+		t.Skip("boots two runtimes with real libp2p hosts")
+	}
+	desktop := newSyncDevice(t, "desktop")
+	phone := newPhoneDevice(t, "phone")
+	pair(t, desktop, phone)
+
+	// The phone's library is whatever is in its folder; file sync is what puts
+	// files there, and a rescan is what it asks for once they land.
+	if phone.rt.Deps.MusicDir != phone.musicDir {
+		t.Fatalf("phone music folder = %q, want %q", phone.rt.Deps.MusicDir, phone.musicDir)
+	}
+	if err := os.MkdirAll(filepath.Join(phone.musicDir, "Band", "Record"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(phone.musicDir, "Band", "Record", "01 Held.mp3"), []byte("not really audio"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := phone.rt.Bundle.Library.StartScan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var songs []core.Track
+	phone.must(http.MethodGet, "/library/songs", nil, &songs, http.StatusOK)
+	if len(songs) != 1 || songs[0].Title != "01 Held" || songs[0].Artist != "Band" {
+		t.Fatalf("phone library = %+v", songs)
+	}
+
+	var created core.SyncedPlaylistDetail
+	desktop.must(http.MethodPost, "/playlists", map[string]string{"name": "Commute"}, &created, http.StatusCreated)
+	pl := created.ID
+	desktop.must(http.MethodPost, "/playlists/"+pl+"/tracks", trackBody(1), nil, http.StatusOK)
+	desktop.must(http.MethodPost, "/plays", map[string]any{
+		"title": "Desk Song", "artist": "Band", "album": "Record", "durationMs": 180000, "msPlayed": 170000, "completed": true,
+	}, nil, http.StatusNoContent)
+	var deskMark struct {
+		Key string `json:"key"`
+	}
+	desktop.must(http.MethodPost, "/not-interested", map[string]any{
+		"kind": "track", "source": "deezer", "externalId": "dz-8", "title": "Track 8", "artist": "Band",
+	}, &deskMark, http.StatusOK)
+	desktop.must(http.MethodPut, "/recommendations/settings", map[string]any{"adventurousness": 30}, nil, http.StatusOK)
+
+	converge(t, desktop, phone, "the desktop's playlist, play, mark and settings reach the phone", func() bool {
+		det, ok := phone.playlist(pl)
+		if !ok || det.Name != "Commute" || len(det.Tracks) != 1 {
+			return false
+		}
+		adv, _ := phone.settings()
+		return phone.hasPlayTitled("Desk Song") && phone.markKeys()[deskMark.Key] && adv == 30
+	})
+
+	phone.must(http.MethodPost, "/playlists/"+pl+"/tracks", trackBody(2), nil, http.StatusOK)
+	phone.must(http.MethodPost, "/plays", map[string]any{
+		"title": "Pocket Song", "artist": "Band", "album": "Record", "durationMs": 200000, "msPlayed": 190000, "completed": true,
+	}, nil, http.StatusNoContent)
+	var phoneMark struct {
+		Key string `json:"key"`
+	}
+	phone.must(http.MethodPost, "/not-interested", map[string]any{
+		"kind": "artist", "source": "deezer", "id": "41", "name": "Somebody Else",
+	}, &phoneMark, http.StatusOK)
+	phone.must(http.MethodPut, "/recommendations/settings", map[string]any{"onlineRecommendations": false}, nil, http.StatusOK)
+
+	converge(t, desktop, phone, "the phone's track, play, mark and settings reach the desktop", func() bool {
+		det, ok := desktop.playlist(pl)
+		if !ok || len(det.Tracks) != 2 {
+			return false
+		}
+		_, online := desktop.settings()
+		return desktop.hasPlayTitled("Pocket Song") && desktop.markKeys()[phoneMark.Key] && !online
+	})
+
+	// A restarted phone keeps its pairing and its folder library.
+	phone.restart()
+	if phone.rt.Bundle.Library.Name() != localfiles.Name {
+		t.Fatalf("phone came back with library %s", phone.rt.Bundle.Library.Name())
+	}
+	desktop.must(http.MethodPost, "/plays", map[string]any{
+		"title": "After Phone Restart", "artist": "Band", "album": "Record", "durationMs": 100000, "msPlayed": 100000, "completed": true,
+	}, nil, http.StatusNoContent)
+	converge(t, desktop, phone, "a play reaches the restarted phone", func() bool { return phone.hasPlayTitled("After Phone Restart") })
+}
+
+// Scanning the desktop's pairing QR code pairs a phone with no discovery at
+// all: the payload says where the desktop is, and the code is still proved
+// rather than sent.
+func TestPhonePairsFromQRPayloadWithoutDiscovery(t *testing.T) {
+	if testing.Short() {
+		t.Skip("boots two runtimes with real libp2p hosts")
+	}
+	desktop := newSyncDevice(t, "desktop", withoutDiscovery)
+	phone := newPhoneDevice(t, "phone", withoutDiscovery)
+
+	var code struct {
+		Code      string `json:"code"`
+		QRPayload string `json:"qrPayload"`
+		QRSvg     string `json:"qrSvg"`
+	}
+	desktop.must(http.MethodPost, "/pairing/code", nil, &code, http.StatusOK)
+	if code.QRPayload == "" {
+		t.Skip("the desktop has no non-loopback address to put in a QR code")
+	}
+	if code.QRSvg == "" {
+		t.Fatal("the pairing screen has no QR code to show")
+	}
+	if n := len(phone.rt.P2P.LibHost().Network().ConnsToPeer(desktop.rt.P2P.LibHost().ID())); n != 0 {
+		t.Fatalf("the phone already had %d connection(s) to the desktop; nothing would prove the payload was used", n)
+	}
+
+	var redeemed struct {
+		DeviceID string `json:"deviceId"`
+	}
+	phone.must(http.MethodPost, "/p2p/pair/redeem-qr", map[string]string{
+		"payload": code.QRPayload, "deviceName": "phone",
+	}, &redeemed, http.StatusOK)
+	var devices []struct {
+		ID string `json:"id"`
+	}
+	desktop.must(http.MethodGet, "/pairing/devices", nil, &devices, http.StatusOK)
+	found := false
+	for _, d := range devices {
+		found = found || d.ID == redeemed.DeviceID
+	}
+	if !found {
+		t.Fatalf("the phone paired as %s but the desktop lists %v", redeemed.DeviceID, devices)
+	}
+
+	// The code is single-use: scanning it again is refused.
+	var again struct {
+		Error string `json:"error"`
+	}
+	if got := phone.call(http.MethodPost, "/p2p/pair/redeem-qr", map[string]string{
+		"payload": code.QRPayload, "deviceName": "phone",
+	}, &again); got == http.StatusOK {
+		t.Fatal("a used pairing code paired a second time")
+	}
+
+	desktop.must(http.MethodPost, "/plays", map[string]any{
+		"title": "Scanned Song", "artist": "Band", "album": "Record", "durationMs": 100000, "msPlayed": 100000, "completed": true,
+	}, nil, http.StatusNoContent)
+	converge(t, desktop, phone, "a play reaches the phone paired by QR", func() bool { return phone.hasPlayTitled("Scanned Song") })
 }

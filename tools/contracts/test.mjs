@@ -26,6 +26,7 @@ try {
     ['queue', '/downloads/queue', 'get'], ['retry', '/downloads/{id}/retry', 'post'],
   ]) validate(doc.paths[path][method].responses['200'].content['application/json'].schema, samples[sample])
   validate(doc.paths['/downloads'].post.requestBody.content['application/json'].schema, samples.request)
+  validate(doc.paths['/player/{session}/enqueue'].post.responses['200'].content['application/json'].schema, samples.player)
   for (const event of samples.events) validate(doc.components.schemas.RealtimeEvent, event)
-  console.log('Download HTTP and event contracts passed')
+  console.log('Download and player HTTP and event contracts passed')
 } finally { rmSync(dir, { recursive: true, force: true }) }

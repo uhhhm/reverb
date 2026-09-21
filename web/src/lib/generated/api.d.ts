@@ -3215,6 +3215,779 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/player/{session}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The play queue of one player session
+         * @description The core owns the play queue; a player tells it what the listener did and plays whatever it then says is current. Each open player (a desktop window, a browser tab, the phone) names its own session, so two tabs never share a queue. An unknown session is an empty queue.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The player's own session id, 1-64 letters, digits, '-' or '_'. */
+                    session: components["parameters"]["PlayerSession"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description queue */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QueueState"];
+                    };
+                };
+                /** @description invalid session */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description player unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/{session}/play": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace the queue with a list and start playing it
+         * @description Starts at `start`, clamped into the list; an empty list empties the queue.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The player's own session id, 1-64 letters, digits, '-' or '_'. */
+                    session: components["parameters"]["PlayerSession"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PlayerTracksRequest"];
+                };
+            };
+            responses: {
+                /** @description queue after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QueueState"];
+                    };
+                };
+                /** @description invalid session or request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description the queue would hold more than 20000 tracks */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description player unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/{session}/enqueue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue tracks
+         * @description A listener's tracks go after everything the listener queued and ahead of the first upcoming track a Radio session lined up; Radio's go at the end.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The player's own session id, 1-64 letters, digits, '-' or '_'. */
+                    session: components["parameters"]["PlayerSession"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PlayerTracksRequest"];
+                };
+            };
+            responses: {
+                /** @description queue after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QueueState"];
+                    };
+                };
+                /** @description invalid session or request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description the queue would hold more than 20000 tracks */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description player unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/{session}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove entries by position
+         * @description Removing the current entry moves on to the one that would have played next.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The player's own session id, 1-64 letters, digits, '-' or '_'. */
+                    session: components["parameters"]["PlayerSession"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PlayerRemoveRequest"];
+                };
+            };
+            responses: {
+                /** @description queue after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QueueState"];
+                    };
+                };
+                /** @description invalid session or request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description player unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/{session}/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Move one entry; the current entry stays current wherever it goes */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The player's own session id, 1-64 letters, digits, '-' or '_'. */
+                    session: components["parameters"]["PlayerSession"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PlayerMoveRequest"];
+                };
+            };
+            responses: {
+                /** @description queue after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QueueState"];
+                    };
+                };
+                /** @description invalid session or request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description player unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/{session}/jump": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make the entry at a position current and start it
+         * @description Under shuffle the picked entry moves to right after the current place in the shuffle order, so nothing in between drops out of the cycle.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The player's own session id, 1-64 letters, digits, '-' or '_'. */
+                    session: components["parameters"]["PlayerSession"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PlayerJumpRequest"];
+                };
+            };
+            responses: {
+                /** @description queue after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QueueState"];
+                    };
+                };
+                /** @description invalid session or request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description player unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/{session}/next": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Skip to the next entry
+         * @description At the end with repeat off nothing changes.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The player's own session id, 1-64 letters, digits, '-' or '_'. */
+                    session: components["parameters"]["PlayerSession"];
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["PlayerEntryRequest"];
+                };
+            };
+            responses: {
+                /** @description queue after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QueueState"];
+                    };
+                };
+                /** @description invalid session or request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description player unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/{session}/previous": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Go back one entry, staying on the first
+         * @description Restarting a track that is well under way is the player's call.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The player's own session id, 1-64 letters, digits, '-' or '_'. */
+                    session: components["parameters"]["PlayerSession"];
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["PlayerEntryRequest"];
+                };
+            };
+            responses: {
+                /** @description queue after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QueueState"];
+                    };
+                };
+                /** @description invalid session or request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description player unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/{session}/ended": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report that the current entry played to its end
+         * @description With repeat one it starts again; otherwise the next entry starts, and past the last one with repeat off the queue is finished.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The player's own session id, 1-64 letters, digits, '-' or '_'. */
+                    session: components["parameters"]["PlayerSession"];
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["PlayerEntryRequest"];
+                };
+            };
+            responses: {
+                /** @description queue after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QueueState"];
+                    };
+                };
+                /** @description invalid session or request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description player unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/{session}/shuffle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Turn shuffle on or off
+         * @description Turning it on draws a new order led by the current entry.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The player's own session id, 1-64 letters, digits, '-' or '_'. */
+                    session: components["parameters"]["PlayerSession"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PlayerShuffleRequest"];
+                };
+            };
+            responses: {
+                /** @description queue after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QueueState"];
+                    };
+                };
+                /** @description invalid session or request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description player unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/{session}/repeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set the repeat mode */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The player's own session id, 1-64 letters, digits, '-' or '_'. */
+                    session: components["parameters"]["PlayerSession"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PlayerRepeatRequest"];
+                };
+            };
+            responses: {
+                /** @description queue after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QueueState"];
+                    };
+                };
+                /** @description invalid session or request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description player unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/{session}/radio-ended": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report that the Radio session stopped
+         * @description The tracks Radio lined up stay queued, but as the listener's own, so a track queued afterwards goes after them rather than ahead.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The player's own session id, 1-64 letters, digits, '-' or '_'. */
+                    session: components["parameters"]["PlayerSession"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description queue after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QueueState"];
+                    };
+                };
+                /** @description invalid session */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description player unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/{session}/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Empty the queue */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description The player's own session id, 1-64 letters, digits, '-' or '_'. */
+                    session: components["parameters"]["PlayerSession"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description queue after the change */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QueueState"];
+                    };
+                };
+                /** @description invalid session or request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description player unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/plays": {
         parameters: {
             query?: never;
@@ -4606,6 +5379,13 @@ export interface paths {
                             code: string;
                             /** Format: int64 */
                             expiresAt: number;
+                            /**
+                             * @description The code as a versioned pairing link for a QR code: reverb://pair?v=1 with the code, its expiry (exp, Unix seconds), this device's peer ID (peer) and each address another device can dial it on (addr, repeated; LAN and VPN). Redeem it with POST /p2p/pair/redeem-qr. Omitted when this device has no dialable address.
+                             * @example reverb://pair?v=1&code=AB12CD34&exp=1800000000&peer=12D3KooW...&addr=%2Fip4%2F192.168.1.20%2Ftcp%2F4331
+                             */
+                            qrPayload?: string;
+                            /** @description qrPayload drawn as a QR code, as a standalone SVG document. */
+                            qrSvg?: string;
                         };
                     };
                 };
@@ -5180,6 +5960,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/p2p/pair/redeem-qr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redeem a scanned pairing QR payload over libp2p (manage-library capability required)
+         * @description Dials the addresses the payload carries, so it needs no discovery, and pairs with the same code-possession challenge as /p2p/pair/redeem: the code never crosses the wire. Every address is remembered for later reconnects.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @description The qrPayload from POST /pairing/code on the other device. */
+                        payload: string;
+                        deviceName: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description paired */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            deviceId: string;
+                            token: string;
+                        };
+                    };
+                };
+                /** @description missing fields */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description the payload's code has expired */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description pairing failed */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description p2p unavailable or peer trust store unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/p2p/manifests": {
         parameters: {
             query?: never;
@@ -5487,6 +6345,85 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description A track as the player plays it. The core stores it exactly as sent and hands it back; only the player reads its fields. The desktop sends its library or external track object. */
+        PlayerTrack: {
+            id?: string;
+            title?: string;
+            artist?: string;
+            album?: string;
+            durationMs?: number;
+        } & {
+            [key: string]: unknown;
+        };
+        QueueEntry: {
+            /** @description Unique to this entry */
+            id: string;
+            /**
+             * @description Who queued it. A listener's tracks play before Radio's.
+             * @enum {string}
+             */
+            origin: "listener" | "radio";
+            track: components["schemas"]["PlayerTrack"];
+        };
+        QueueState: {
+            entries: components["schemas"]["QueueEntry"][];
+            /** @description The current entry */
+            index: number;
+            shuffle: boolean;
+            /** @enum {string} */
+            repeat: "off" | "all" | "one";
+            /** @description Positions that play after the current one, in play order (under shuffle, the rest of the shuffle order). At most 20. */
+            upNext: number[];
+            /**
+             * Format: int64
+             * @description Changes whenever the current entry has to start again from its beginning; a player loads the current entry when it does.
+             */
+            playId: number;
+            /** @description The last track ended with nothing after it. */
+            finished: boolean;
+            /**
+             * Format: int64
+             * @description Changes on every change to the queue.
+             */
+            revision: number;
+        };
+        /** @description A session's queue changed; fetch GET /player/{session} for it. */
+        PlayerQueueEvent: {
+            session: string;
+            /** Format: int64 */
+            revision: number;
+        };
+        PlayerTracksRequest: {
+            tracks: components["schemas"]["PlayerTrack"][];
+            /**
+             * @default listener
+             * @enum {string}
+             */
+            origin: "listener" | "radio";
+            /** @description For play */
+            start?: number;
+        };
+        PlayerRemoveRequest: {
+            positions: number[];
+        };
+        PlayerMoveRequest: {
+            from: number;
+            to: number;
+        };
+        PlayerJumpRequest: {
+            index: number;
+        };
+        PlayerEntryRequest: {
+            /** @description The entry the player was on. When it is no longer current the request is stale and changes nothing. */
+            entryId?: string;
+        };
+        PlayerShuffleRequest: {
+            on: boolean;
+        };
+        PlayerRepeatRequest: {
+            /** @enum {string} */
+            mode: "off" | "all" | "one";
+        };
         FileFetchFailure: {
             /** @description The paired device this file could not be copied from. A file can fail from one device and succeed from another */
             peerId: string;
@@ -5708,6 +6645,10 @@ export interface components {
             /** @enum {string} */
             type: "sync.finished";
             payload: unknown;
+        } | {
+            /** @enum {string} */
+            type: "player.queue";
+            payload: components["schemas"]["PlayerQueueEvent"];
         };
         ExternalArtist: {
             source: string;
@@ -5893,7 +6834,10 @@ export interface components {
         };
     };
     responses: never;
-    parameters: never;
+    parameters: {
+        /** @description The player's own session id, 1-64 letters, digits, '-' or '_'. */
+        PlayerSession: string;
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;

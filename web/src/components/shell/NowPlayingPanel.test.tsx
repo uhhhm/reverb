@@ -3,7 +3,8 @@ import { render, screen, fireEvent, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { NowPlayingPanel } from './NowPlayingPanel'
-import { usePlayer } from '../../lib/playerStore'
+import { usePlayer, engine } from '../../lib/playerStore'
+import { queueState } from '../../test/fakeQueue'
 import { useUI } from '../../lib/uiStore'
 import type { Track, Artist } from '../../lib/types'
 
@@ -28,6 +29,11 @@ vi.mock('../../lib/coverageApi', () => ({
   useArtistProfile: vi.fn(() => ({ data: undefined })),
 }))
 import { useArtistProfile } from '../../lib/coverageApi'
+
+/** Something playing, as the core would answer a new list; the queue transport is not under test here. */
+function playNow(tracks: Track[], index: number) {
+  engine.apply(queueState(tracks, index), { autoplay: true })
+}
 
 vi.mock('../../lib/lyricsApi', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/lyricsApi')>()
@@ -77,7 +83,7 @@ describe('NowPlayingPanel', () => {
     vi.mocked(useArtist).mockReturnValue({ data: artist } as ReturnType<typeof useArtist>)
     vi.mocked(useArtistProfile).mockReturnValue({ data: undefined } as ReturnType<typeof useArtistProfile>)
     act(() => {
-      usePlayer.getState().playTrackList([track('1'), track('2'), track('3')], 0)
+      playNow([track('1'), track('2'), track('3')], 0)
       useUI.getState().openPanel('nowplaying')
     })
   })
@@ -105,11 +111,13 @@ describe('NowPlayingPanel', () => {
   })
 
   it('clicking a queue item calls jumpTo with the correct index', () => {
+    const jumpTo = vi.spyOn(usePlayer.getState(), 'jumpTo').mockImplementation(() => {})
     renderPanel()
     const playBtn = screen.getByRole('button', { name: /play song 2/i })
     fireEvent.click(playBtn)
     // Song 2 is at queue index 1
-    expect(usePlayer.getState().index).toBe(1)
+    expect(jumpTo).toHaveBeenCalledWith(1)
+    jumpTo.mockRestore()
   })
 
   it('close button calls closePanel', () => {
@@ -176,7 +184,7 @@ describe('NowPlayingPanel', () => {
     } as ReturnType<typeof useArtistProfile>)
 
     act(() => {
-      usePlayer.getState().playTrackList(
+      playNow(
         [track('1', { artistExternalId: 'sp-artist-1' }), track('2'), track('3')],
         0,
       )
@@ -205,7 +213,7 @@ describe('NowPlayingPanel', () => {
     } as ReturnType<typeof useArtistProfile>)
 
     act(() => {
-      usePlayer.getState().playTrackList(
+      playNow(
         [track('1', { artistExternalId: 'sp-artist-1' }), track('2'), track('3')],
         0,
       )

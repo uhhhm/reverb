@@ -52,6 +52,19 @@ const mdnsTag = "_reverb._tcp"
 // every pairing bound to the resulting peer ID is invalidated. See
 // LoadOrCreateIdentity.
 func NewHost(ctx context.Context, priv crypto.PrivKey, port int) (*Host, error) {
+	return NewHostWith(ctx, priv, port, HostOptions{})
+}
+
+// HostOptions adjusts what NewHostWith starts.
+type HostOptions struct {
+	// NoDiscovery starts neither mDNS nor the DHT, so peers are reached only
+	// by addresses that were stored or supplied, the way they are across a
+	// VPN. Tests use it to prove a path does not lean on discovery.
+	NoDiscovery bool
+}
+
+// NewHostWith is NewHost with options.
+func NewHostWith(ctx context.Context, priv crypto.PrivKey, port int, opts HostOptions) (*Host, error) {
 	h, err := newLibp2pHost(priv, port)
 	if err != nil && port != 0 {
 		log.Printf("WARNING: p2p listen on port %d failed (%v); falling back to a random port. "+
@@ -60,6 +73,10 @@ func NewHost(ctx context.Context, priv crypto.PrivKey, port int) (*Host, error) 
 	}
 	if err != nil {
 		return nil, err
+	}
+	if opts.NoDiscovery {
+		setPlaceholderHandlers(h)
+		return &Host{h: h}, nil
 	}
 	// DHT for WAN discovery (client mode so LAN-only works without bootstrap).
 	d, err := dht.New(ctx, h, dht.Mode(dht.ModeClient))
@@ -83,15 +100,19 @@ func NewHost(ctx context.Context, priv crypto.PrivKey, port int) (*Host, error) 
 		log.Printf("WARNING: p2p mdns start failed: %v", err)
 	}
 
-	// No-op handlers until the concrete ones are registered by Syncer,
-	// FileSyncer, RegisterPairingHandler, and the cover service; a dial in that
-	// startup window closes cleanly instead of failing protocol negotiation.
+	setPlaceholderHandlers(h)
+	return &Host{h: h, d: d, mdns: ser}, nil
+}
+
+// setPlaceholderHandlers mounts no-op handlers until the concrete ones are
+// registered by Syncer, FileSyncer, RegisterPairingHandler, and the cover
+// service; a dial in that startup window closes cleanly instead of failing
+// protocol negotiation.
+func setPlaceholderHandlers(h host.Host) {
 	h.SetStreamHandler("/reverb/sync/1.0.0", func(s network.Stream) { s.Close() })
 	h.SetStreamHandler(pairProtocol, func(s network.Stream) { s.Close() })
 	h.SetStreamHandler("/reverb/file/1.0.0", func(s network.Stream) { s.Close() })
 	h.SetStreamHandler(coverProtocol, func(s network.Stream) { s.Close() })
-
-	return &Host{h: h, d: d, mdns: ser}, nil
 }
 
 func newLibp2pHost(priv crypto.PrivKey, port int) (host.Host, error) {

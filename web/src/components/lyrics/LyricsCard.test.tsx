@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { engine } from '../../lib/playerStore'
+import { queueState } from '../../test/fakeQueue'
 import type { Track } from '../../lib/types'
 import { useUI } from '../../lib/uiStore'
 import { useLyrics } from '../../lib/lyricsApi'
@@ -17,7 +18,7 @@ describe('LyricsCard', () => {
   beforeEach(() => {
     useUI.setState({ lyricsOpen: false })
     vi.mocked(useLyrics).mockReturnValue({ data: null } as ReturnType<typeof useLyrics>)
-    engine.playTrackList([track], 0)
+    engine.apply(queueState([track], 0), { autoplay: true })
   })
 
   it('renders nothing when there is no lyrics payload', () => {

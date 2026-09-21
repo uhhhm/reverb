@@ -1,6 +1,64 @@
 import { describe, expect, it, afterEach, beforeEach, vi } from 'vitest'
 import { AudioEngine, type AudioElement } from './audioEngine'
 import type { Track } from './types'
+import { FakeQueue } from '../test/fakeQueue'
+
+/**
+ * The engine with a queue to play: FakeQueue stands in for the core, and these
+ * methods drive the engine the way the player store does — send the listener's
+ * action to the queue, then apply its answer. The queue's own behaviour is
+ * covered by the core's tests (internal/api/player_test.go).
+ */
+class TestEngine extends AudioEngine {
+  q = new FakeQueue()
+
+  constructor(...args: ConstructorParameters<typeof AudioEngine>) {
+    super(...args)
+    this.setQueueHandler({
+      ended: (id) => {
+        if (id === this.q.current()) this.q.ended()
+        this.apply(this.q.state(), { autoplay: true, fromEnded: true })
+      },
+      skip: (id) => {
+        if (id === this.q.current()) this.q.next()
+        this.apply(this.q.state(), { autoplay: true })
+      },
+    })
+  }
+
+  private keepPlaying() {
+    return { autoplay: this.getState().playing }
+  }
+  playTrackList(tracks: Track[], index: number) {
+    this.q.play(tracks, index)
+    this.apply(this.q.state(), { autoplay: true })
+  }
+  enqueue(t: Track) {
+    this.q.enqueue([t])
+    this.apply(this.q.state())
+  }
+  removeAt(i: number) {
+    this.q.remove([i])
+    this.apply(this.q.state(), this.keepPlaying())
+  }
+  next() {
+    this.q.next()
+    this.apply(this.q.state(), this.keepPlaying())
+  }
+  prev() {
+    this.q.previous()
+    this.apply(this.q.state(), this.keepPlaying())
+  }
+  clear() {
+    this.q.clear()
+    this.apply(this.q.state())
+  }
+  cycleRepeat() {
+    this.q.repeat = this.q.repeat === 'off' ? 'all' : this.q.repeat === 'all' ? 'one' : 'off'
+    this.q.revision++
+    this.apply(this.q.state())
+  }
+}
 
 function track(id: string): Track {
   return {
@@ -51,7 +109,7 @@ class FakeAudio implements AudioElement {
 
 function newEngine(measured: (trackId: string) => Promise<number | null> = async () => null) {
   const audios: FakeAudio[] = []
-  const engine = new AudioEngine(() => {
+  const engine = new TestEngine(() => {
     const a = new FakeAudio()
     audios.push(a)
     return a
@@ -77,12 +135,12 @@ class LifecycleAudio extends FakeAudio {
 }
 
 describe('AudioEngine playback lifecycle regressions', () => {
-  let engine: AudioEngine
+  let engine: TestEngine
   let audios: LifecycleAudio[]
   beforeEach(() => {
     vi.useFakeTimers()
     audios = []
-    engine = new AudioEngine(() => {
+    engine = new TestEngine(() => {
       const a = new LifecycleAudio()
       audios.push(a)
       return a
@@ -112,22 +170,6 @@ describe('AudioEngine playback lifecycle regressions', () => {
     engine.enqueue(track('new'))
     engine.play()
     expect(audios[0].src).toBe('mock://new?t=0')
-  })
-
-  it('keeps the current queue occurrence when duplicate tracks are reordered', () => {
-    engine.playTrackList([track('1'), track('2'), track('1'), track('3')], 2)
-    engine.moveItem(3, 1)
-    expect(engine.getState().index).toBe(3)
-    expect(engine.getState().upNext).toEqual([])
-  })
-
-  it('does not replay shuffle history when a new track is queued', () => {
-    engine.playTrackList(list, 0)
-    engine.toggleShuffle()
-    engine.next()
-    engine.enqueue(track('4'))
-    expect(engine.getState().upNext).not.toContain(0)
-    expect(engine.getState().upNext).toHaveLength(2)
   })
 
   it('stops audible playback at the final crop end and can replay from its start', () => {
@@ -332,163 +374,100 @@ describe('AudioEngine playback lifecycle regressions', () => {
   })
 })
 
-describe('AudioEngine queue + transport', () => {
-  let engine: AudioEngine
+// The queue itself (next, previous, repeat, shuffle, jumping, reordering, up
+// next) belongs to the core and is covered by internal/api/player_test.go.
+// What stays here is how the engine plays the core's answers.
+describe('AudioEngine playing the core queue', () => {
+  let engine: TestEngine
   let audios: FakeAudio[]
   beforeEach(() => {
     ;({ engine, audios } = newEngine())
   })
 
-  it('plays a track list from an index', () => {
+  it('plays the current entry of a new list', () => {
     engine.playTrackList(list, 1)
     const s = engine.getState()
     expect(s.index).toBe(1)
     expect(s.current?.id).toBe('2')
     expect(s.playing).toBe(true)
+    expect(audios[0].src).toBe('mock://2')
   })
 
-  it('next advances and wraps only with repeat all', () => {
-    engine.playTrackList(list, 2)
-    engine.next() // at last track, repeat off → NO-OP (playing stays true, index unchanged)
-    expect(engine.getState().playing).toBe(true)
-    expect(engine.getState().index).toBe(2)
-
-    engine.cycleRepeat() // off -> all
-    engine.playTrackList(list, 2)
-    engine.next()
-    expect(engine.getState().index).toBe(0) // wrapped
-  })
-
-  it('prev goes back, clamps at start', () => {
-    engine.playTrackList(list, 1)
-    engine.prev()
-    expect(engine.getState().index).toBe(0)
-    engine.prev()
-    expect(engine.getState().index).toBe(0)
-  })
-
-  it('prev restarts current track when >3s in', () => {
-    engine.playTrackList(list, 1)
-    audios[0].currentTime = 5 // active element; >3s in
-    audios[0].fire('timeupdate')
-    expect(engine.getState().currentTimeMs).toBeGreaterThan(3000)
-    engine.prev()
-    const s = engine.getState()
-    expect(s.index).toBe(1) // unchanged
-    expect(s.currentTimeMs).toBe(0) // restarted
-  })
-
-  it('repeat one replays same index on track end', () => {
+  it('keeps playing through an answer that does not restart the current entry', () => {
     engine.playTrackList(list, 0)
-    engine.cycleRepeat() // off -> all
-    engine.cycleRepeat() // all -> one
-    expect(engine.getState().repeat).toBe('one')
+    audios[0].currentTime = 5
+    audios[0].fire('timeupdate')
+    engine.enqueue(track('4'))
+    expect(engine.getState().currentTimeMs).toBe(5000)
+    expect(engine.getState().queue).toHaveLength(4)
+  })
+
+  it('restarts the current entry when the core says so, even if it is the same track', () => {
+    engine.playTrackList(list, 0)
+    engine.cycleRepeat()
+    engine.cycleRepeat() // one
+    audios[0].currentTime = 0.9
+    audios[0].fire('timeupdate')
     audios[0].fire('ended')
     expect(engine.getState().index).toBe(0)
+    expect(engine.getState().currentTimeMs).toBe(0)
     expect(engine.getState().playing).toBe(true)
   })
 
-  it('ended advances to next track when repeat off', () => {
+  it('moves on when the current track ends', () => {
     engine.playTrackList(list, 0)
     audios[0].fire('ended')
     expect(engine.getState().index).toBe(1)
+    expect(audios[0].src).toBe('mock://2')
   })
 
-  it('cycleRepeat goes off -> all -> one -> off', () => {
-    expect(engine.getState().repeat).toBe('off')
-    engine.cycleRepeat()
-    expect(engine.getState().repeat).toBe('all')
-    engine.cycleRepeat()
-    expect(engine.getState().repeat).toBe('one')
-    engine.cycleRepeat()
-    expect(engine.getState().repeat).toBe('off')
-  })
-
-  it('shuffle produces a permutation covering all tracks', () => {
+  it('reports an end once, and only for the entry it was playing', () => {
+    const ended: string[] = []
+    engine.setQueueHandler({ ended: (id) => ended.push(id), skip: () => {} })
     engine.playTrackList(list, 0)
-    engine.toggleShuffle()
-    const seen = new Set<string>()
-    seen.add(engine.getState().current!.id)
-    engine.next()
-    seen.add(engine.getState().current!.id)
-    engine.next()
-    seen.add(engine.getState().current!.id)
-    expect(seen.size).toBe(3) // all three visited, no repeats within a cycle
+    audios[0].fire('ended')
+    audios[0].fire('ended')
+    expect(ended).toEqual([engine.q.state().entries[0].id])
   })
 
-  it('enqueue and removeAt mutate the queue', () => {
-    engine.setQueue(list, 0)
-    engine.enqueue(track('4'))
-    expect(engine.getState().queue.length).toBe(4)
-    engine.removeAt(3)
-    expect(engine.getState().queue.length).toBe(3)
-  })
-
-  it('moveItem reorders and keeps current track index correct', () => {
-    engine.playTrackList(list, 0) // current = '1'
-    engine.moveItem(0, 2) // move current to the end
-    const s = engine.getState()
-    expect(s.current?.id).toBe('1')
-    expect(s.index).toBe(2)
-    expect(s.queue.map((t) => t.id)).toEqual(['2', '3', '1'])
-  })
-
-  it('playAt jumps to the given index and plays', () => {
-    engine.playTrackList(list, 0)
-    engine.playAt(2)
-    const s = engine.getState()
-    expect(s.index).toBe(2)
-    expect(s.current?.id).toBe('3')
-    expect(s.playing).toBe(true)
-  })
-
-  it('playAt is a no-op for out-of-range indices', () => {
-    engine.playTrackList(list, 0)
-    engine.playAt(99)
-    expect(engine.getState().index).toBe(0) // unchanged
-    engine.playAt(-1)
-    expect(engine.getState().index).toBe(0) // unchanged
-  })
-
-  it('playAt aligns shufflePos so next stays coherent', () => {
-    engine.playTrackList(list, 0)
-    engine.toggleShuffle()
-    engine.playAt(2)
-    expect(engine.getState().index).toBe(2)
-    expect(engine.getState().current?.id).toBe('3')
-  })
-
-  it('upNext follows the shuffle order, not the tail of the queue', () => {
-    engine.playTrackList(list, 2) // start on the LAST row
-    engine.toggleShuffle()
-    const s = engine.getState()
-    expect(s.upNext.length).toBe(2) // two unplayed tracks still ahead
-    expect(new Set(s.upNext)).toEqual(new Set([0, 1]))
-  })
-
-  it('upNext is empty on the last shuffled track with repeat off', () => {
-    engine.playTrackList(list, 0)
-    engine.toggleShuffle()
-    engine.next()
-    engine.next()
-    expect(engine.getState().upNext).toEqual([])
-  })
-
-  it('upNext wraps when repeat is all', () => {
+  it('stops when the core says the queue is finished', () => {
     engine.playTrackList(list, 2)
-    engine.cycleRepeat() // 'all'
-    expect(engine.getState().upNext).toEqual([0, 1])
+    audios[0].fire('ended')
+    const s = engine.getState()
+    expect(s.index).toBe(2)
+    expect(s.playing).toBe(false)
+    engine.play()
+    expect(engine.getState().playing).toBe(true)
+    expect(engine.getState().currentTimeMs).toBe(0)
   })
 
-  it('playAt under shuffle keeps the tracks that have not played yet', () => {
+  it('preloads what the core says is up next', () => {
     engine.playTrackList(list, 0)
-    engine.toggleShuffle()
-    const upcoming = engine.getState().upNext
-    engine.playAt(upcoming[1]) // pick the second one ahead
-    const after = engine.getState()
-    expect(after.index).toBe(upcoming[1])
-    expect(after.upNext).toContain(upcoming[0]) // the skipped one is still queued
-    expect(after.upNext.length).toBe(1)
+    expect(audios[1].src).toBe('mock://2')
+    engine.q.move(2, 1)
+    engine.apply(engine.q.state())
+    expect(audios[1].src).toBe('mock://3')
+  })
+
+  it('resumes where it was after the queue is shown again', () => {
+    engine.playTrackList(list, 0)
+    audios[0].currentTime = 12
+    audios[0].fire('timeupdate')
+    engine.pause()
+    // A fresh copy of the same queue: new objects, same entries and playId.
+    engine.apply(engine.q.state())
+    const reload = vi.spyOn(audios[0], 'load')
+    engine.play()
+    expect(reload).not.toHaveBeenCalled()
+    expect(engine.getState().currentTimeMs).toBe(12000)
+  })
+
+  it('unloads when the queue empties', () => {
+    engine.playTrackList(list, 0)
+    engine.clear()
+    expect(engine.getState().current).toBeNull()
+    expect(engine.getState().playing).toBe(false)
+    expect(audios[0].paused).toBe(true)
   })
 
   it('setVolume clamps 0..1 and notifies subscribers', () => {
@@ -503,7 +482,7 @@ describe('AudioEngine queue + transport', () => {
 })
 
 describe('AudioEngine stream-error recovery', () => {
-  let engine: AudioEngine
+  let engine: TestEngine
   let audios: FakeAudio[]
   beforeEach(() => {
     ;({ engine, audios } = newEngine())
@@ -579,7 +558,7 @@ describe('AudioEngine stream-error recovery', () => {
 describe('AudioEngine default source resolution', () => {
   function engineWithDefaultResolver() {
     const audios: FakeAudio[] = []
-    const engine = new AudioEngine(() => {
+    const engine = new TestEngine(() => {
       const a = new FakeAudio()
       audios.push(a)
       return a
@@ -672,7 +651,7 @@ describe('AudioEngine normalization', () => {
   function normEngine(gains: Record<string, number | null>) {
     const audios: FakeAudio[] = []
     const fetched: string[] = []
-    const engine = new AudioEngine(
+    const engine = new TestEngine(
       () => {
         const a = new FakeAudio()
         audios.push(a)
@@ -912,7 +891,7 @@ describe('AudioEngine crop', () => {
     function opusEngine() {
       const audios: FakeAudio[] = []
       const starts: number[] = []
-      const engine = new AudioEngine(
+      const engine = new TestEngine(
         () => {
           const a = new FakeAudio()
           audios.push(a)

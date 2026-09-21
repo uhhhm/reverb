@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/player"
 	"net/http/httptest"
 	"os"
 	"testing"
@@ -35,6 +36,12 @@ func TestDownloadHTTPContract(t *testing.T) {
 		t.Fatalf("request forwarding changed: %+v", mgr.lastReq)
 	}
 	samples["request"] = json.RawMessage(request)
+
+	queue := newPlayerClient(t, nil)
+	queue.do("play", map[string]any{"tracks": tracks("1", "2"), "start": 0})
+	_, playerState, raw := queue.call("enqueue", map[string]any{"tracks": tracks("r1"), "origin": "radio"})
+	samples["player"] = json.RawMessage(raw)
+
 	events := []wsEnvelope{
 		{"download.progress", core.DownloadEvent{JobID: "j", Status: core.DownloadRunning, Progress: -1}},
 		{"library.updated", core.LibraryUpdatedEvent{}},
@@ -42,6 +49,7 @@ func TestDownloadHTTPContract(t *testing.T) {
 		{"download.removed", core.DownloadRemovedEvent{}},
 		{"sync.started", nil},
 		{"sync.finished", map[string]any{"durationMs": 12}},
+		{"player.queue", player.Event{Session: "tab-1", Revision: playerState.Revision}},
 	}
 	data, err := json.Marshal(events)
 	if err != nil {

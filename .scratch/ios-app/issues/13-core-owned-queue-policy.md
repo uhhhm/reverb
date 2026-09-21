@@ -4,9 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A core player service owns the queue (play, enqueue, next, previous, reorder, clear) through an API described in OpenAPI
-- [ ] The desktop SPA drives playback from the core queue, and the queue logic it replaces is removed
-- [ ] Single-runtime API tests cover the queue behaviours the existing web player tests cover
-- [ ] No owner-visible change on desktop; `make check-full` passes
+- [x] A core player service owns the queue (play, enqueue, next, previous, reorder, clear) through an API described in OpenAPI
+- [x] The desktop SPA drives playback from the core queue, and the queue logic it replaces is removed
+- [x] Single-runtime API tests cover the queue behaviours the existing web player tests cover
+- [x] No owner-visible change on desktop; `make check-full` passes

@@ -10,6 +10,7 @@ import (
 	"github.com/uhhhm/reverb/internal/download"
 	"github.com/uhhhm/reverb/internal/events"
 	"github.com/uhhhm/reverb/internal/p2p"
+	"github.com/uhhhm/reverb/internal/player"
 )
 
 // wsTopics are the EventBus topics streamed to WS clients.
@@ -24,6 +25,7 @@ var wsTopics = []string{
 	events.TopicUpdate,
 	p2p.TopicSyncStarted,
 	p2p.TopicSyncFinished,
+	player.TopicQueue,
 }
 
 // wsEnvelope is the JSON frame written to the client: {type, payload}.

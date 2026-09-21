@@ -3,7 +3,7 @@ import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Search from './Search'
-import { engine } from '../lib/playerStore'
+import { usePlayer } from '../lib/playerStore'
 import { useSearch } from '../lib/searchStore'
 import { makeTrack, makeAlbum } from '../test/factories'
 
@@ -95,8 +95,8 @@ describe('Search (blended results)', () => {
     vi.unstubAllGlobals()
   })
 
-  it('calls engine.playTrackList with track list and index when a track row is double-clicked', async () => {
-    const spy = vi.spyOn(engine, 'playTrackList').mockImplementation(() => {})
+  it('calls playTrackList with track list and index when a track row is double-clicked', async () => {
+    const spy = vi.spyOn(usePlayer.getState(), 'playTrackList').mockImplementation(() => {})
     render(wrap(<Search />))
     fireEvent.change(screen.getByPlaceholderText(/search your library/i), { target: { value: 'found' } })
     await waitFor(() => expect(screen.getByText('Found Song')).toBeInTheDocument())
@@ -170,7 +170,7 @@ describe('Search (blended results)', () => {
     }
     vi.stubGlobal('EventSource', StubES as unknown as typeof EventSource)
     postDownloadMock.mockClear()
-    const spy = vi.spyOn(engine, 'playTrackList').mockImplementation(() => {})
+    const spy = vi.spyOn(usePlayer.getState(), 'playTrackList').mockImplementation(() => {})
 
     render(wrap(<Search />))
     fireEvent.change(screen.getByPlaceholderText(/search your library/i), { target: { value: 'found' } })

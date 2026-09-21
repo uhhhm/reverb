@@ -301,6 +301,21 @@ export default function Pairing() {
                 {copied ? 'Copied' : 'Copy'}
               </Button>
             </div>
+            {pairingCode.qrSvg && !expired && (
+              <div className="flex items-center gap-4">
+                <img
+                  src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(pairingCode.qrSvg)}`}
+                  alt="Pairing QR code"
+                  width={176}
+                  height={176}
+                  className="rounded-md bg-white"
+                />
+                <p className="text-xs text-text-secondary">
+                  Scan this with Reverb on your phone to pair it. The QR code carries this device&apos;s addresses
+                  too, so it also works across a VPN.
+                </p>
+              </div>
+            )}
             {expired ? (
               <p className="text-xs text-error">Pairing code expired. Generate a new pairing code.</p>
             ) : (

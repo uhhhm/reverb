@@ -910,6 +910,186 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/CreateDownloadRequest' }
       responses: { "200": { description: DownloadJob, content: { application/json: { schema: { $ref: '#/components/schemas/DownloadJob' } } } }, "400": { description: invalid } }
+  /player/{session}:
+    get:
+      summary: The play queue of one player session
+      description: >
+        The core owns the play queue; a player tells it what the listener did
+        and plays whatever it then says is current. Each open player (a desktop
+        window, a browser tab, the phone) names its own session, so two tabs
+        never share a queue. An unknown session is an empty queue.
+      parameters: [{ $ref: '#/components/parameters/PlayerSession' }]
+      responses:
+        "200": { description: queue, content: { application/json: { schema: { $ref: '#/components/schemas/QueueState' } } } }
+        "400": { description: invalid session }
+        "503": { description: player unavailable }
+  /player/{session}/play:
+    post:
+      summary: Replace the queue with a list and start playing it
+      description: >
+        Starts at `start`, clamped into the list; an empty list empties the queue.
+      parameters: [{ $ref: '#/components/parameters/PlayerSession' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlayerTracksRequest' }
+      responses:
+        "200": { description: queue after the change, content: { application/json: { schema: { $ref: '#/components/schemas/QueueState' } } } }
+        "400": { description: invalid session or request }
+        "413": { description: the queue would hold more than 20000 tracks }
+        "503": { description: player unavailable }
+  /player/{session}/enqueue:
+    post:
+      summary: Queue tracks
+      description: >
+        A listener's tracks go after everything the listener queued and ahead of the first upcoming track a Radio session lined up; Radio's go at the end.
+      parameters: [{ $ref: '#/components/parameters/PlayerSession' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlayerTracksRequest' }
+      responses:
+        "200": { description: queue after the change, content: { application/json: { schema: { $ref: '#/components/schemas/QueueState' } } } }
+        "400": { description: invalid session or request }
+        "413": { description: the queue would hold more than 20000 tracks }
+        "503": { description: player unavailable }
+  /player/{session}/remove:
+    post:
+      summary: Remove entries by position
+      description: >
+        Removing the current entry moves on to the one that would have played next.
+      parameters: [{ $ref: '#/components/parameters/PlayerSession' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlayerRemoveRequest' }
+      responses:
+        "200": { description: queue after the change, content: { application/json: { schema: { $ref: '#/components/schemas/QueueState' } } } }
+        "400": { description: invalid session or request }
+        "503": { description: player unavailable }
+  /player/{session}/move:
+    post:
+      summary: Move one entry; the current entry stays current wherever it goes
+      parameters: [{ $ref: '#/components/parameters/PlayerSession' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlayerMoveRequest' }
+      responses:
+        "200": { description: queue after the change, content: { application/json: { schema: { $ref: '#/components/schemas/QueueState' } } } }
+        "400": { description: invalid session or request }
+        "503": { description: player unavailable }
+  /player/{session}/jump:
+    post:
+      summary: Make the entry at a position current and start it
+      description: >
+        Under shuffle the picked entry moves to right after the current place in the shuffle order, so nothing in between drops out of the cycle.
+      parameters: [{ $ref: '#/components/parameters/PlayerSession' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlayerJumpRequest' }
+      responses:
+        "200": { description: queue after the change, content: { application/json: { schema: { $ref: '#/components/schemas/QueueState' } } } }
+        "400": { description: invalid session or request }
+        "503": { description: player unavailable }
+  /player/{session}/next:
+    post:
+      summary: Skip to the next entry
+      description: >
+        At the end with repeat off nothing changes.
+      parameters: [{ $ref: '#/components/parameters/PlayerSession' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlayerEntryRequest' }
+      responses:
+        "200": { description: queue after the change, content: { application/json: { schema: { $ref: '#/components/schemas/QueueState' } } } }
+        "400": { description: invalid session or request }
+        "503": { description: player unavailable }
+  /player/{session}/previous:
+    post:
+      summary: Go back one entry, staying on the first
+      description: >
+        Restarting a track that is well under way is the player's call.
+      parameters: [{ $ref: '#/components/parameters/PlayerSession' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlayerEntryRequest' }
+      responses:
+        "200": { description: queue after the change, content: { application/json: { schema: { $ref: '#/components/schemas/QueueState' } } } }
+        "400": { description: invalid session or request }
+        "503": { description: player unavailable }
+  /player/{session}/ended:
+    post:
+      summary: Report that the current entry played to its end
+      description: >
+        With repeat one it starts again; otherwise the next entry starts, and past the last one with repeat off the queue is finished.
+      parameters: [{ $ref: '#/components/parameters/PlayerSession' }]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlayerEntryRequest' }
+      responses:
+        "200": { description: queue after the change, content: { application/json: { schema: { $ref: '#/components/schemas/QueueState' } } } }
+        "400": { description: invalid session or request }
+        "503": { description: player unavailable }
+  /player/{session}/shuffle:
+    post:
+      summary: Turn shuffle on or off
+      description: >
+        Turning it on draws a new order led by the current entry.
+      parameters: [{ $ref: '#/components/parameters/PlayerSession' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlayerShuffleRequest' }
+      responses:
+        "200": { description: queue after the change, content: { application/json: { schema: { $ref: '#/components/schemas/QueueState' } } } }
+        "400": { description: invalid session or request }
+        "503": { description: player unavailable }
+  /player/{session}/repeat:
+    post:
+      summary: Set the repeat mode
+      parameters: [{ $ref: '#/components/parameters/PlayerSession' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlayerRepeatRequest' }
+      responses:
+        "200": { description: queue after the change, content: { application/json: { schema: { $ref: '#/components/schemas/QueueState' } } } }
+        "400": { description: invalid session or request }
+        "503": { description: player unavailable }
+  /player/{session}/radio-ended:
+    post:
+      summary: Report that the Radio session stopped
+      description: >
+        The tracks Radio lined up stay queued, but as the listener's own, so a
+        track queued afterwards goes after them rather than ahead.
+      parameters: [{ $ref: '#/components/parameters/PlayerSession' }]
+      responses:
+        "200": { description: queue after the change, content: { application/json: { schema: { $ref: '#/components/schemas/QueueState' } } } }
+        "400": { description: invalid session }
+        "503": { description: player unavailable }
+  /player/{session}/clear:
+    post:
+      summary: Empty the queue
+      parameters: [{ $ref: '#/components/parameters/PlayerSession' }]
+      responses:
+        "200": { description: queue after the change, content: { application/json: { schema: { $ref: '#/components/schemas/QueueState' } } } }
+        "400": { description: invalid session or request }
+        "503": { description: player unavailable }
   /plays:
     post:
       summary: Record a qualifying play or a completed recommendation attempt, including short skips
@@ -1270,6 +1450,19 @@ paths:
                 properties:
                   code: { type: string, example: "AB12-CD34" }
                   expiresAt: { type: integer, format: int64 }
+                  qrPayload:
+                    type: string
+                    description: >
+                      The code as a versioned pairing link for a QR code:
+                      reverb://pair?v=1 with the code, its expiry (exp, Unix
+                      seconds), this device's peer ID (peer) and each address
+                      another device can dial it on (addr, repeated; LAN and
+                      VPN). Redeem it with POST /p2p/pair/redeem-qr. Omitted
+                      when this device has no dialable address.
+                    example: "reverb://pair?v=1&code=AB12CD34&exp=1800000000&peer=12D3KooW...&addr=%2Fip4%2F192.168.1.20%2Ftcp%2F4331"
+                  qrSvg:
+                    type: string
+                    description: qrPayload drawn as a QR code, as a standalone SVG document.
                 required: [code, expiresAt]
         "503": { description: pairing unavailable }
   /pairing/redeem:
@@ -1507,6 +1700,39 @@ paths:
         "400": { description: code and deviceName are required }
         "500": { description: pairing failed }
         "503": { description: p2p unavailable or peer trust store unavailable }
+  /p2p/pair/redeem-qr:
+    post:
+      summary: Redeem a scanned pairing QR payload over libp2p (manage-library capability required)
+      description: >
+        Dials the addresses the payload carries, so it needs no discovery, and
+        pairs with the same code-possession challenge as /p2p/pair/redeem: the
+        code never crosses the wire. Every address is remembered for later
+        reconnects.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payload: { type: string, description: The qrPayload from POST /pairing/code on the other device. }
+                deviceName: { type: string }
+              required: [payload, deviceName]
+      responses:
+        "200":
+          description: paired
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deviceId: { type: string }
+                  token: { type: string }
+                required: [deviceId, token]
+        "400": { description: missing fields, a payload that is not a Reverb pairing link, or one in a format this version does not read }
+        "410": { description: the payload's code has expired }
+        "500": { description: pairing failed }
+        "503": { description: p2p unavailable or peer trust store unavailable }
   /p2p/manifests:
     get:
       summary: List the local file manifest (manage-library capability required)
@@ -1645,7 +1871,104 @@ paths:
             application/json:
               schema: { type: array, items: { $ref: "#/components/schemas/RecommendationStats" } }
 components:
+  parameters:
+    PlayerSession:
+      name: session
+      in: path
+      required: true
+      description: The player's own session id, 1-64 letters, digits, '-' or '_'.
+      schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,64}$' }
   schemas:
+    PlayerTrack:
+      type: object
+      additionalProperties: true
+      description: >
+        A track as the player plays it. The core stores it exactly as sent and
+        hands it back; only the player reads its fields. The desktop sends its
+        library or external track object.
+      properties:
+        id: { type: string }
+        title: { type: string }
+        artist: { type: string }
+        album: { type: string }
+        durationMs: { type: integer }
+    QueueEntry:
+      type: object
+      required: [id, origin, track]
+      properties:
+        id: { type: string, description: Unique to this entry, even when the same track is queued twice. }
+        origin: { type: string, enum: [listener, radio], description: Who queued it. A listener's tracks play before Radio's. }
+        track: { $ref: '#/components/schemas/PlayerTrack' }
+    QueueState:
+      type: object
+      required: [entries, index, shuffle, repeat, upNext, playId, finished, revision]
+      properties:
+        entries: { type: array, items: { $ref: '#/components/schemas/QueueEntry' } }
+        index: { type: integer, description: The current entry, or -1 with nothing to play. }
+        shuffle: { type: boolean }
+        repeat: { type: string, enum: ["off", all, one] }
+        upNext:
+          type: array
+          items: { type: integer }
+          description: >
+            Positions that play after the current one, in play order (under
+            shuffle, the rest of the shuffle order). At most 20.
+        playId:
+          type: integer
+          format: int64
+          description: >
+            Changes whenever the current entry has to start again from its
+            beginning; a player loads the current entry when it does.
+        finished: { type: boolean, description: The last track ended with nothing after it. }
+        revision: { type: integer, format: int64, description: Changes on every change to the queue. }
+    PlayerQueueEvent:
+      type: object
+      description: A session's queue changed; fetch GET /player/{session} for it.
+      required: [session, revision]
+      properties:
+        session: { type: string }
+        revision: { type: integer, format: int64 }
+    PlayerTracksRequest:
+      type: object
+      required: [tracks]
+      properties:
+        tracks: { type: array, items: { $ref: '#/components/schemas/PlayerTrack' } }
+        origin: { type: string, enum: [listener, radio], default: listener }
+        start: { type: integer, description: For play, the position to start at. }
+    PlayerRemoveRequest:
+      type: object
+      required: [positions]
+      properties:
+        positions: { type: array, items: { type: integer } }
+    PlayerMoveRequest:
+      type: object
+      required: [from, to]
+      properties:
+        from: { type: integer }
+        to: { type: integer }
+    PlayerJumpRequest:
+      type: object
+      required: [index]
+      properties:
+        index: { type: integer }
+    PlayerEntryRequest:
+      type: object
+      properties:
+        entryId:
+          type: string
+          description: >
+            The entry the player was on. When it is no longer current the
+            request is stale and changes nothing.
+    PlayerShuffleRequest:
+      type: object
+      required: ["on"]
+      properties:
+        "on": { type: boolean }
+    PlayerRepeatRequest:
+      type: object
+      required: [mode]
+      properties:
+        mode: { type: string, enum: ["off", all, one] }
     FileFetchFailure:
       type: object
       properties:
@@ -2152,6 +2475,17 @@ components:
             enum:
             - sync.finished
           payload: {}
+        required:
+        - type
+        - payload
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - player.queue
+          payload:
+            $ref: '#/components/schemas/PlayerQueueEvent'
         required:
         - type
         - payload

@@ -2,8 +2,28 @@ import type { Track } from './types'
 import { isExternalTrack, needsBackendSeek, streamUrlFor } from './trackRef'
 import { fetchTrackGainDb } from './gainApi'
 import { fetchTrackDurationMs } from './durationApi'
+import { EMPTY_QUEUE, type QueueOrigin, type QueueState, type RepeatMode } from './playerApi'
 
-export type RepeatMode = 'off' | 'all' | 'one'
+export type { RepeatMode } from './playerApi'
+
+/**
+ * Where the engine reports the two moments playback itself decides the queue
+ * should move on. The core owns the queue, so the engine only says what
+ * happened, for the entry it was playing; the answer comes back through apply.
+ */
+export interface QueueHandler {
+  /** The entry played to its end. */
+  ended(entryId: string): void
+  /** The entry could not be played and has been given up on. */
+  skip(entryId: string): void
+}
+
+export interface ApplyOptions {
+  /** Whether a newly started entry plays. Defaults to whether playback is on. */
+  autoplay?: boolean
+  /** The state answers an ended report, so a finished queue stops playback. */
+  fromEnded?: boolean
+}
 
 export interface AudioElement {
   src: string
@@ -51,13 +71,13 @@ export interface PlayerState {
    * end of playback even with most tracks still unplayed.
    */
   upNext: number[]
+  /** Who queued each entry, parallel to queue. */
+  origins: QueueOrigin[]
 }
 
 function realAudioFactory(): AudioElement {
   return new Audio() as unknown as AudioElement
 }
-
-const UP_NEXT_LIMIT = 20
 
 // The largest forward step still read as playing rather than jumping.
 // 'timeupdate' fires about every 250 ms; a stalled stream can stretch that, so
@@ -94,19 +114,24 @@ export class AudioEngine {
   private finished = false
   private listeners = new Set<(s: PlayerState) => void>()
 
-  private queue: Track[] = []
-  private index = -1
+  // The core's queue as last applied, and its tracks. The engine plays the
+  // current entry and preloads the first one up next; what those are is the
+  // core's decision, never the engine's.
+  private snap: QueueState = EMPTY_QUEUE
+  private tracks: Track[] = []
+  private queueHandler: QueueHandler | null = null
+  // The entry the loaded track belongs to. Tracks arrive as fresh objects on
+  // every apply, so the entry id, not object identity, says whether the
+  // loaded audio is still the current entry.
+  private loadedEntry = ''
+  // The entry an end has already been reported for, so the ticks that follow
+  // the end do not report it again while the answer is on its way.
+  private endReported = ''
   private playing = false
   private currentTimeMs = 0
   private durationMs = 0
   private bufferedMs = 0
   private volume = 1
-  private shuffle = false
-  private repeat: RepeatMode = 'off'
-
-  // shuffle order: a permutation of queue indices; shufflePos points into it.
-  private shuffleOrder: number[] = []
-  private shufflePos = -1
 
   private loading = false
   // Last raw media position seen by onTime, used to tell real stalling from a
@@ -538,8 +563,8 @@ export class AudioEngine {
     this.clearStall()
     this.loading = false
 
-    const next = this.peekNextIndex()
-    if (this.repeat === 'one' || next < 0 || next === this.index) {
+    const next = this.snap.upNext[0]
+    if (this.snap.repeat === 'one' || next === undefined || next === this.snap.index || !this.queueHandler) {
       // Nothing else to try. Keep the position for an explicit retry, and
       // stop the element too (a watchdog can arrive while it is still active).
       this.pause()
@@ -554,17 +579,54 @@ export class AudioEngine {
       return
     }
 
-    // Skip the dead track and autoplay the next one.
-    this.advance(1, true)
+    // Skip the dead track; the core's answer starts the next one.
+    this.queueHandler.skip(this.loadedEntry)
   }
 
   private onEnded = () => {
-    if (!this.playing || !this.loadedTrack) return
-    if (this.repeat === 'one') {
-      this.loadCurrent(true)
+    if (!this.playing || !this.loadedTrack || this.endReported === this.loadedEntry) return
+    if (!this.queueHandler) {
+      this.finishPlayback()
       return
     }
-    this.advance(1, true)
+    this.endReported = this.loadedEntry
+    this.queueHandler.ended(this.loadedEntry)
+  }
+
+  /** Sets where the engine reports ends and skips. */
+  setQueueHandler(h: QueueHandler | null) {
+    this.queueHandler = h
+  }
+
+  /**
+   * Plays the core's queue. A new playId means the current entry starts from
+   * its beginning; otherwise whatever is playing carries on, and only what is
+   * preloaded next can change.
+   */
+  apply(state: QueueState, opts: ApplyOptions = {}) {
+    const prevPlayId = this.snap.playId
+    this.snap = state
+    this.tracks = state.entries.map((e) => e.track as unknown as Track)
+    if (!this.getState().current) {
+      this.unload()
+      this.emit()
+      return
+    }
+    if (state.playId !== prevPlayId) {
+      this.loadCurrent(opts.autoplay ?? this.playing)
+      return
+    }
+    if (opts.fromEnded && state.finished && this.loadedEntry === this.currentEntry()) {
+      this.finishPlayback()
+      return
+    }
+    if (this.active.src) this.preloadNext()
+    this.emit()
+  }
+
+  /** The current entry's id, or '' with nothing to play. */
+  private currentEntry(): string {
+    return this.snap.entries[this.snap.index]?.id ?? ''
   }
 
   /**
@@ -647,100 +709,27 @@ export class AudioEngine {
   }
 
   getState(): PlayerState {
+    const index = this.snap.index
     return {
-      queue: [...this.queue],
-      index: this.index,
-      current: this.index >= 0 && this.index < this.queue.length ? this.queue[this.index] : null,
+      queue: [...this.tracks],
+      index,
+      current: index >= 0 && index < this.tracks.length ? this.tracks[index] : null,
       playing: this.playing,
       currentTimeMs: this.currentTimeMs,
       durationMs: this.durationMs,
       bufferedMs: this.bufferedMs,
       loading: this.loading,
       volume: this.volume,
-      shuffle: this.shuffle,
-      repeat: this.repeat,
-      upNext: this.upcomingIndices(UP_NEXT_LIMIT),
+      shuffle: this.snap.shuffle,
+      repeat: this.snap.repeat,
+      upNext: [...this.snap.upNext],
+      origins: this.snap.entries.map((e) => e.origin),
     }
-  }
-
-  /** The next `limit` queue indices in play order. */
-  private upcomingIndices(limit: number): number[] {
-    const out: number[] = []
-    if (this.queue.length === 0 || this.index < 0) return out
-    if (this.shuffle) {
-      for (let p = this.shufflePos + 1; out.length < limit; p++) {
-        if (p >= this.shuffleOrder.length) {
-          if (this.repeat !== 'all') break
-          p = -1
-          continue
-        }
-        const i = this.shuffleOrder[p]
-        if (i === this.index) break
-        out.push(i)
-      }
-      return out
-    }
-    for (let i = this.index + 1; out.length < limit; i++) {
-      if (i >= this.queue.length) {
-        if (this.repeat !== 'all') break
-        i = -1
-        continue
-      }
-      if (i === this.index) break
-      out.push(i)
-    }
-    return out
   }
 
   private emit() {
     const s = this.getState()
     this.listeners.forEach((cb) => cb(s))
-  }
-
-  private replaceQueue(tracks: Track[], startIndex: number) {
-    this.queue = tracks.slice()
-    this.index = tracks.length ? Math.min(Math.max(startIndex, 0), tracks.length - 1) : -1
-    this.rebuildShuffle()
-  }
-
-  setQueue(tracks: Track[], startIndex = 0) {
-    this.replaceQueue(tracks, startIndex)
-    if (!tracks.length) this.unload()
-    this.emit()
-  }
-
-  playTrackList(tracks: Track[], startIndex: number) {
-    // Publish the new track together with its own position and duration.
-    this.replaceQueue(tracks, startIndex)
-    this.loadCurrent(true)
-  }
-
-  enqueue(track: Track) {
-    this.insertAt(this.queue.length, track)
-  }
-
-  /** Inserts a track at a queue position without interrupting the current one. */
-  insertAt(at: number, track: Track) {
-    const i = Math.min(Math.max(at, 0), this.queue.length)
-    const q = this.queue.slice()
-    q.splice(i, 0, track)
-    this.queue = q
-    if (this.index === -1) this.index = 0
-    else if (i <= this.index) this.index++
-    if (this.shuffle) {
-      this.shuffleOrder = this.shuffleOrder.map((idx) => idx >= i ? idx + 1 : idx)
-      this.shuffleOrder.push(i)
-      this.shufflePos = this.shuffleOrder.indexOf(this.index)
-    }
-    // The track after the current one may have just changed; start fetching it
-    // now rather than when the current one ends.
-    if (this.active.src) this.preloadNext()
-    this.emit()
-  }
-
-  /** Stops playback and empties the queue. */
-  clear() {
-    this.setQueue([])
   }
 
   private release(audio: AudioElement) {
@@ -755,6 +744,8 @@ export class AudioEngine {
     this.clearRetry()
     this.clearStall()
     this.loadedTrack = null
+    this.loadedEntry = ''
+    this.endReported = ''
     this.playing = false
     this.loading = false
     this.finished = false
@@ -768,41 +759,6 @@ export class AudioEngine {
     this.release(this.preload)
   }
 
-  removeAt(i: number) {
-    if (i < 0 || i >= this.queue.length) return
-    const wasCurrent = i === this.index
-    const nextShuffled = this.shuffleOrder[this.shufflePos + 1] ?? this.shuffleOrder[this.shufflePos - 1]
-    this.queue = this.queue.filter((_, idx) => idx !== i)
-    if (wasCurrent && this.shuffle && nextShuffled !== undefined) this.index = nextShuffled
-    if (i < this.index) this.index--
-    if (this.index >= this.queue.length) this.index = this.queue.length - 1
-    if (this.shuffle) {
-      this.shuffleOrder = this.shuffleOrder.filter((idx) => idx !== i).map((idx) => idx > i ? idx - 1 : idx)
-      this.shufflePos = this.shuffleOrder.indexOf(this.index)
-    }
-    if (wasCurrent) this.loadCurrent(this.playing)
-    else this.preloadNext()
-    this.emit()
-  }
-
-  moveItem(from: number, to: number) {
-    if (from < 0 || from >= this.queue.length || to < 0 || to >= this.queue.length) return
-    const q = this.queue.slice()
-    const [item] = q.splice(from, 1)
-    q.splice(to, 0, item)
-    this.queue = q
-    const movedIndex = (i: number) => {
-      if (i === from) return to
-      if (from < i && i <= to) return i - 1
-      if (to <= i && i < from) return i + 1
-      return i
-    }
-    this.index = movedIndex(this.index)
-    this.shuffleOrder = this.shuffleOrder.map(movedIndex)
-    this.preloadNext()
-    this.emit()
-  }
-
   private loadCurrent(autoplay: boolean) {
     const t = this.getState().current
     if (!t) {
@@ -814,6 +770,8 @@ export class AudioEngine {
     this.clearStall()
     this.playRequest++
     this.loadedTrack = t
+    this.loadedEntry = this.currentEntry()
+    this.endReported = ''
     this.finished = false
     this.playing = autoplay
     this.loading = true
@@ -853,13 +811,13 @@ export class AudioEngine {
   }
 
   private preloadNext() {
-    const ni = this.peekNextIndex()
-    if (ni < 0 || ni >= this.queue.length) {
+    const ni = this.snap.upNext[0]
+    if (ni === undefined || ni < 0 || ni >= this.tracks.length) {
       if (this.preloadedSrc) this.release(this.preload)
       this.preloadedSrc = ''
       return
     }
-    const src = this.resolveSrc(this.queue[ni], 0)
+    const src = this.resolveSrc(this.tracks[ni], 0)
     if (src === this.preloadedSrc) return
     this.preloadedSrc = src
     this.preload.src = src
@@ -868,10 +826,9 @@ export class AudioEngine {
   }
 
   play() {
-    if (this.index < 0 && this.queue.length) this.index = 0
     if (this.getState().current) {
       const retrying = this.retryTimer !== null || this.awaitingNetwork
-      if (this.loadedTrack !== this.getState().current || this.finished || !this.active.src) this.loadCurrent(true)
+      if (this.loadedEntry !== this.currentEntry() || this.finished || !this.active.src) this.loadCurrent(true)
       else if (retrying || this.sourceLost()) {
         // Pressing play is a request to try now, whatever the backoff says.
         this.clearRetry()
@@ -970,71 +927,6 @@ export class AudioEngine {
     else this.play()
   }
 
-  private rebuildShuffle() {
-    if (!this.shuffle) {
-      this.shuffleOrder = []
-      this.shufflePos = -1
-      return
-    }
-    const idxs = this.queue.map((_, i) => i)
-    // Fisher-Yates shuffle
-    for (let i = idxs.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1))
-      ;[idxs[i], idxs[j]] = [idxs[j], idxs[i]]
-    }
-    // ensure current track is first in the shuffle cycle
-    if (this.index >= 0) {
-      const at = idxs.indexOf(this.index)
-      if (at > 0) [idxs[0], idxs[at]] = [idxs[at], idxs[0]]
-    }
-    this.shuffleOrder = idxs
-    this.shufflePos = 0
-  }
-
-  private peekNextIndex(): number {
-    if (this.queue.length === 0) return -1
-    if (this.shuffle) {
-      const np = this.shufflePos + 1
-      if (np < this.shuffleOrder.length) return this.shuffleOrder[np]
-      if (this.repeat === 'all') return this.shuffleOrder[0]
-      return -1
-    }
-    const ni = this.index + 1
-    if (ni < this.queue.length) return ni
-    if (this.repeat === 'all') return 0
-    return -1
-  }
-
-  private advance(dir: 1 | -1, fromEnded = false) {
-    if (this.queue.length === 0) return
-    if (this.shuffle) {
-      let np = this.shufflePos + dir
-      if (np >= this.shuffleOrder.length) {
-        if (this.repeat === 'all') np = 0
-        else {
-          if (fromEnded) this.finishPlayback()
-          return
-        }
-      }
-      if (np < 0) np = 0
-      this.shufflePos = np
-      this.index = this.shuffleOrder[np]
-      this.loadCurrent(this.playing || fromEnded)
-      return
-    }
-    let ni = this.index + dir
-    if (ni >= this.queue.length) {
-      if (this.repeat === 'all') ni = 0
-      else {
-        if (fromEnded) this.finishPlayback()
-        return
-      }
-    }
-    if (ni < 0) ni = 0
-    this.index = ni
-    this.loadCurrent(this.playing || fromEnded)
-  }
-
   private finishPlayback() {
     this.finished = true
     this.loading = false
@@ -1042,39 +934,10 @@ export class AudioEngine {
     this.pause()
   }
 
-  playAt(index: number) {
-    if (this.queue.length === 0 || index < 0 || index >= this.queue.length) return
-    if (this.shuffle) {
-      // Move the picked track to right after the current position instead of
-      // jumping to wherever it sat in the shuffle order — jumping would drop
-      // every track between here and there from the cycle.
-      const at = this.shuffleOrder.indexOf(index)
-      if (at >= 0) this.shuffleOrder.splice(at, 1)
-      const insert = Math.min(Math.max(this.shufflePos + (at >= 0 && at <= this.shufflePos ? 0 : 1), 0), this.shuffleOrder.length)
-      this.shuffleOrder.splice(insert, 0, index)
-      this.shufflePos = insert
-    }
-    this.index = index
-    this.loadCurrent(true)
-  }
-
-  next() {
-    this.advance(1)
-  }
-
-  prev() {
-    // restart current if >3s in, else go back
-    if (this.currentTimeMs > 3000) {
-      this.seekMs(0)
-      return
-    }
-    this.advance(-1)
-  }
-
   /** Seeks within the cropped window; ms is relative to the crop start. */
   seekMs(ms: number) {
     if (!Number.isFinite(ms) || !this.getState().current) return
-    if (this.loadedTrack !== this.getState().current) this.loadCurrent(false)
+    if (this.loadedEntry !== this.currentEntry()) this.loadCurrent(false)
     this.finished = false
     this.pendingSeekMs = -1
     const retrying = this.retryTimer !== null || this.awaitingNetwork
@@ -1107,16 +970,4 @@ export class AudioEngine {
     this.emit()
   }
 
-  toggleShuffle() {
-    this.shuffle = !this.shuffle
-    this.rebuildShuffle()
-    if (this.loadedTrack) this.preloadNext()
-    this.emit()
-  }
-
-  cycleRepeat() {
-    this.repeat = this.repeat === 'off' ? 'all' : this.repeat === 'all' ? 'one' : 'off'
-    if (this.loadedTrack) this.preloadNext()
-    this.emit()
-  }
 }

@@ -72,7 +72,16 @@ export function AppShell() {
   useEffect(() => engine.setNormalization(normalization), [normalization])
 
   useEffect(() => startNowPlaying(engine), [])
-  useEffect(() => startMediaSession(engine), [])
+  // Media keys play and seek the audio here, but skipping moves the queue,
+  // which the core owns.
+  useEffect(() => startMediaSession({
+    subscribe: (cb) => engine.subscribe(cb),
+    play: () => engine.play(),
+    pause: () => engine.pause(),
+    seekMs: (ms) => engine.seekMs(ms),
+    next: () => usePlayer.getState().next(),
+    prev: () => usePlayer.getState().prev(),
+  }), [])
 
   const current = usePlayer((s) => s.current)
   const rightPanel = useUI((s) => s.rightPanel)

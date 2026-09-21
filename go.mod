@@ -4,6 +4,7 @@ go 1.25.7
 
 require (
 	github.com/coder/websocket v1.8.15
+	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-chi/chi/v5 v5.3.0
 	github.com/google/uuid v1.6.0
@@ -16,6 +17,7 @@ require (
 	golang.org/x/sync v0.22.0
 	golang.org/x/sys v0.47.0
 	modernc.org/sqlite v1.34.1
+	rsc.io/qr v0.2.0
 )
 
 require (

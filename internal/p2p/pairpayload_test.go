@@ -1,0 +1,93 @@
+package p2p
+
+import (
+	"errors"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
+)
+
+func newPeerID(t *testing.T) string {
+	t.Helper()
+	priv, _, err := crypto.GenerateEd25519Key(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := peer.IDFromPrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id.String()
+}
+
+var payloadNow = time.Unix(1_800_000_000, 0)
+
+func TestPairPayloadRoundTrips(t *testing.T) {
+	payloadPeer := newPeerID(t)
+	lanAddr := "/ip4/192.168.1.20/tcp/4331/p2p/" + payloadPeer
+	vpnAddr := "/ip4/100.64.0.7/udp/4331/quic-v1/p2p/" + payloadPeer
+	enc, err := EncodePairPayload(PairPayload{Code: "ab12-cd34", ExpiresAt: payloadNow.Add(time.Minute).Unix(), Addrs: []string{lanAddr, vpnAddr}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(enc, "reverb://pair?") {
+		t.Fatalf("payload %q is not a reverb pairing link", enc)
+	}
+	got, pi, err := ParsePairPayload(enc, payloadNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Code != "AB12CD34" || len(got.Addrs) != 2 || got.Addrs[0] != lanAddr || got.Addrs[1] != vpnAddr {
+		t.Fatalf("decoded %+v", got)
+	}
+	if pi.ID.String() != payloadPeer || len(pi.Addrs) != 2 {
+		t.Fatalf("addr info %+v", pi)
+	}
+}
+
+func TestPairPayloadRefusesWhatItCannotUse(t *testing.T) {
+	valid := func(mut func(url.Values)) string {
+		v := url.Values{}
+		v.Set("v", "1")
+		v.Set("code", "AB12CD34")
+		v.Set("exp", "1800000060")
+		v.Set("peer", newPeerID(t))
+		v.Add("addr", "/ip4/192.168.1.20/tcp/4331")
+		mut(v)
+		return "reverb://pair?" + v.Encode()
+	}
+	otherPeer := "/ip4/10.0.0.2/tcp/4331/p2p/" + newPeerID(t)
+	cases := map[string]struct {
+		payload string
+		want    error
+	}{
+		"not a link":     {"AB12-CD34", ErrPairPayloadMalformed},
+		"another scheme": {strings.Replace(valid(func(url.Values) {}), "reverb://", "https://", 1), ErrPairPayloadMalformed},
+		"newer version":  {valid(func(v url.Values) { v.Set("v", "2") }), ErrPairPayloadVersion},
+		"no version":     {valid(func(v url.Values) { v.Del("v") }), ErrPairPayloadVersion},
+		"no code":        {valid(func(v url.Values) { v.Del("code") }), ErrPairPayloadMalformed},
+		"no address":     {valid(func(v url.Values) { v.Del("addr") }), ErrPairPayloadMalformed},
+		"no peer":        {valid(func(v url.Values) { v.Del("peer") }), ErrPairPayloadMalformed},
+		"not an address": {valid(func(v url.Values) { v.Set("addr", "192.168.1.20:4331") }), ErrPairPayloadMalformed},
+		"two peers":      {valid(func(v url.Values) { v.Add("addr", otherPeer) }), ErrPairPayloadMalformed},
+		"no expiry":      {valid(func(v url.Values) { v.Del("exp") }), ErrPairPayloadMalformed},
+		"expired":        {valid(func(v url.Values) { v.Set("exp", "1799999999") }), ErrPairPayloadExpired},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := ParsePairPayload(c.payload, payloadNow); !errors.Is(err, c.want) {
+				t.Fatalf("err = %v, want %v", err, c.want)
+			}
+		})
+	}
+}
+
+func TestEncodePairPayloadNeedsAnAddress(t *testing.T) {
+	if _, err := EncodePairPayload(PairPayload{Code: "AB12CD34", ExpiresAt: 1}); err == nil {
+		t.Fatal("a payload with nowhere to dial was encoded")
+	}
+}

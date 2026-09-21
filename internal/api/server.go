@@ -21,6 +21,7 @@ import (
 	"github.com/uhhhm/reverb/internal/override"
 	"github.com/uhhhm/reverb/internal/p2p"
 	"github.com/uhhhm/reverb/internal/play"
+	"github.com/uhhhm/reverb/internal/player"
 	"github.com/uhhhm/reverb/internal/portablemigrate"
 	"github.com/uhhhm/reverb/internal/recommendationevent"
 	"github.com/uhhhm/reverb/internal/registry"
@@ -178,6 +179,9 @@ type Deps struct {
 	// from, so history can play a track the library has no copy of. Nil disables
 	// that fallback (the stream endpoint then 404s, as before).
 	Catalog CatalogLookup
+	// Player owns each player session's play queue. Nil disables the
+	// /player endpoints (503).
+	Player *player.Service
 	// ExternalStream resolves and proxies audio for a search result that is not
 	// in the library, so it can be played without being downloaded. Nil when no
 	// search source is configured — the endpoint then reports unavailable.
@@ -483,6 +487,7 @@ func (s *Server) routes() {
 			pr.Get("/downloads", s.handleListDownloads)
 			pr.Get("/ws", s.handleWS)
 			pr.Post("/plays", s.handlePlay)
+			s.routePlayer(pr)
 			pr.Delete("/plays/{id}", s.handleDeletePlay)
 			pr.Post("/scrobble/lastfm/auth-url", s.handleScrobbleAuthURL)
 			pr.Post("/scrobble/lastfm/complete", s.handleScrobbleComplete)
@@ -531,6 +536,7 @@ func (s *Server) routes() {
 				pr2.Get("/p2p/status", s.handleP2PStatus)
 				pr2.Get("/p2p/peers", s.handleP2PPeers)
 				pr2.Post("/p2p/pair/redeem", s.handleP2PRedeem)
+				pr2.Post("/p2p/pair/redeem-qr", s.handleP2PRedeemQR)
 				pr2.Get("/p2p/manifests", s.handleP2PManifests)
 				pr2.Get("/p2p/file-failures", s.handleP2PFileFailures)
 				pr2.Get("/p2p/portable-names", s.handleP2PPortableNamesPending)

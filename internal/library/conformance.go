@@ -8,6 +8,22 @@ import (
 	"github.com/uhhhm/reverb/internal/core"
 )
 
+// Fixture names the entities RunConformanceWith reads. An adapter whose ids
+// are derived from its data (a folder of files) cannot be told to call its
+// first artist "ar1", so it passes the ids its fixture produced instead.
+type Fixture struct {
+	Query      string
+	ArtistID   string
+	AlbumID    string
+	PlaylistID string
+	TrackID    string
+	CoverID    string
+}
+
+// DefaultFixture is the ids RunConformance uses, which an adapter backed by a
+// fake server can simply answer to.
+var DefaultFixture = Fixture{Query: "test", ArtistID: "ar1", AlbumID: "al1", PlaylistID: "p1", TrackID: "t1", CoverID: "co1"}
+
 // RunConformance exercises the LibraryAdapter contract. Call it from each
 // adapter's test package with a configured, ready-to-use adapter.
 //
@@ -16,6 +32,12 @@ import (
 // no-ops. The suite only asserts they do not panic and return a usable value /
 // nil-or-error pair; it never requires a scan to actually run.
 func RunConformance(t *testing.T, a LibraryAdapter) {
+	t.Helper()
+	RunConformanceWith(t, a, DefaultFixture)
+}
+
+// RunConformanceWith is RunConformance against the entities f names.
+func RunConformanceWith(t *testing.T, a LibraryAdapter, f Fixture) {
 	t.Helper()
 	ctx := context.Background()
 
@@ -29,7 +51,7 @@ func RunConformance(t *testing.T, a LibraryAdapter) {
 	})
 
 	t.Run("Search/returns-non-nil-slices", func(t *testing.T) {
-		res, err := a.Search(ctx, "test", []core.EntityType{core.EntityTrack, core.EntityAlbum, core.EntityArtist})
+		res, err := a.Search(ctx, f.Query, []core.EntityType{core.EntityTrack, core.EntityAlbum, core.EntityArtist})
 		if err != nil {
 			t.Fatalf("Search: %v", err)
 		}
@@ -40,7 +62,7 @@ func RunConformance(t *testing.T, a LibraryAdapter) {
 	})
 
 	t.Run("GetArtist", func(t *testing.T) {
-		ar, err := a.GetArtist(ctx, "ar1")
+		ar, err := a.GetArtist(ctx, f.ArtistID)
 		if err != nil {
 			t.Fatalf("GetArtist: %v", err)
 		}
@@ -50,7 +72,7 @@ func RunConformance(t *testing.T, a LibraryAdapter) {
 	})
 
 	t.Run("GetAlbum", func(t *testing.T) {
-		al, err := a.GetAlbum(ctx, "al1")
+		al, err := a.GetAlbum(ctx, f.AlbumID)
 		if err != nil {
 			t.Fatalf("GetAlbum: %v", err)
 		}
@@ -66,7 +88,7 @@ func RunConformance(t *testing.T, a LibraryAdapter) {
 	})
 
 	t.Run("GetPlaylist/tracks-populated", func(t *testing.T) {
-		pl, err := a.GetPlaylist(ctx, "p1")
+		pl, err := a.GetPlaylist(ctx, f.PlaylistID)
 		if err != nil {
 			t.Fatalf("GetPlaylist: %v", err)
 		}
@@ -79,7 +101,7 @@ func RunConformance(t *testing.T, a LibraryAdapter) {
 	})
 
 	t.Run("Stream/range-aware", func(t *testing.T) {
-		h, err := a.Stream(ctx, "t1", core.StreamOpts{}, "")
+		h, err := a.Stream(ctx, f.TrackID, core.StreamOpts{}, "")
 		if err != nil {
 			t.Fatalf("Stream: %v", err)
 		}
@@ -96,7 +118,7 @@ func RunConformance(t *testing.T, a LibraryAdapter) {
 	})
 
 	t.Run("CoverArt", func(t *testing.T) {
-		c, err := a.CoverArt(ctx, "co1", 300)
+		c, err := a.CoverArt(ctx, f.CoverID, 300)
 		if err != nil {
 			t.Fatalf("CoverArt: %v", err)
 		}

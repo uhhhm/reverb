@@ -3,6 +3,10 @@ import { api } from './api'
 export interface PairingCode {
   code: string
   expiresAt: number
+  /** The code as a reverb://pair link carrying this device's addresses, for a phone to scan. */
+  qrPayload?: string
+  /** qrPayload drawn as a QR code (a standalone SVG document). */
+  qrSvg?: string
 }
 
 export interface RedeemResult {

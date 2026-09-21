@@ -131,3 +131,18 @@ func TestBuildDownloadersNoYtdlpInjectionWhenUserConfiguredIt(t *testing.T) {
 		t.Fatalf("want 0 (respect disabled ytdlp instance), got %d", len(out))
 	}
 }
+
+// A folder library's defaults download into the folder, whatever the
+// environment says, so what a phone downloads is in its library at once.
+func TestBuildDownloadersDefaultsIntoTheGivenDir(t *testing.T) {
+	reg := registry.NewRegistry("downloader")
+	reg.Register("spotdl", func() registry.Plugin { return spotdl.New() })
+	reg.Register("ytdlp", func() registry.Plugin { return ytdlp.New() })
+	out := buildDownloaders(reg, nil, env(nil), "/phone/music")
+	if len(out) != 2 || out[0].Downloader.Name() != "spotdl" || out[1].Downloader.Name() != "ytdlp" {
+		t.Fatalf("want the spotdl and ytdlp defaults, got %d", len(out))
+	}
+	if none := buildDownloaders(reg, nil, env(nil), ""); len(none) != 0 {
+		t.Fatalf("no directory, yet %d defaults", len(none))
+	}
+}

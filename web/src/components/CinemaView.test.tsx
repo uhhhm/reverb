@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { engine } from '../lib/playerStore'
+import { queueState } from '../test/fakeQueue'
 import type { Track } from '../lib/types'
 import { useUI } from '../lib/uiStore'
 import { useWaveformPeaks } from '../lib/peaksApi'
@@ -23,7 +24,7 @@ describe('CinemaView', () => {
   })
   it('renders nothing when closed', () => { render(<CinemaView />); expect(screen.queryByTestId('cinema-view')).toBeNull() })
   it('shows the current track and closes on Escape', () => {
-    engine.playTrackList([track], 0)
+    engine.apply(queueState([track], 0), { autoplay: true })
     useUI.setState({ cinemaOpen: true })
     render(<CinemaView />)
     expect(screen.getByTestId('cinema-view')).toBeInTheDocument()
@@ -34,7 +35,7 @@ describe('CinemaView', () => {
 
   it('seek bar is keyboard operable via ArrowRight (+5s)', () => {
     const eng = engine as unknown as { durationMs: number; currentTimeMs: number; emit(): void }
-    engine.playTrackList([track], 0)
+    engine.apply(queueState([track], 0), { autoplay: true })
     eng.durationMs = 200000
     eng.currentTimeMs = 10000
     eng.emit()
@@ -57,7 +58,7 @@ describe('CinemaView', () => {
 
   it('renders the waveform when peaks are available', () => {
     vi.mocked(useWaveformPeaks).mockReturnValueOnce([0.2, 0.5, 0.8, 0.3])
-    engine.playTrackList([track], 0)
+    engine.apply(queueState([track], 0), { autoplay: true })
     useUI.setState({ cinemaOpen: true })
     render(<CinemaView />)
     expect(screen.getByTestId('waveform')).toBeInTheDocument()
@@ -73,7 +74,7 @@ describe('CinemaView', () => {
         ],
       },
     } as ReturnType<typeof useLyrics>)
-    engine.playTrackList([track], 0)
+    engine.apply(queueState([track], 0), { autoplay: true })
     useUI.setState({ cinemaOpen: true })
     render(<CinemaView />)
 
@@ -93,7 +94,7 @@ describe('CinemaView', () => {
 
   it('does not show a lyrics toggle when there are no lyrics', () => {
     vi.mocked(useLyrics).mockReturnValue({ data: null } as ReturnType<typeof useLyrics>)
-    engine.playTrackList([track], 0)
+    engine.apply(queueState([track], 0), { autoplay: true })
     useUI.setState({ cinemaOpen: true })
     render(<CinemaView />)
     expect(screen.queryByRole('button', { name: 'Show lyrics' })).not.toBeInTheDocument()

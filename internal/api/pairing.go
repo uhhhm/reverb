@@ -28,6 +28,10 @@ type PairingStore interface {
 type codeResponse struct {
 	Code      string `json:"code"`
 	ExpiresAt int64  `json:"expiresAt"`
+	// QRPayload and QRSvg are the code as a scannable pairing link; see
+	// pairingQR. Omitted when this device has no dialable address.
+	QRPayload string `json:"qrPayload,omitempty"`
+	QRSvg     string `json:"qrSvg,omitempty"`
 }
 
 func (s *Server) handlePairingCode(w http.ResponseWriter, r *http.Request) {
@@ -43,7 +47,8 @@ func (s *Server) handlePairingCode(w http.ResponseWriter, r *http.Request) {
 	// The owner is pairing right now; give the new code a full attempt budget
 	// rather than whatever a stranger left of it.
 	p2p.RearmPairAttempts()
-	writeJSON(w, http.StatusOK, codeResponse{Code: code, ExpiresAt: expiresAt})
+	payload, svg := s.pairingQR(code, expiresAt)
+	writeJSON(w, http.StatusOK, codeResponse{Code: code, ExpiresAt: expiresAt, QRPayload: payload, QRSvg: svg})
 }
 
 type redeemRequest struct {

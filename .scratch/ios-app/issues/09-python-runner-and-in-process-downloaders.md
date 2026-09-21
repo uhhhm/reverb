@@ -4,10 +4,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Python runner interface with a host-Python implementation
-- [ ] In-process yt-dlp and spotdl downloader adapters, registered through the existing downloader registry, pass the existing `download` conformance suite on Linux
-- [ ] External stream resolution works through the runner
-- [ ] Downloads keep source-native quality
-- [ ] The phone profile selects these adapters, and the desktop profile keeps its bundled-executable adapters
+- [x] Python runner interface with a host-Python implementation
+- [x] In-process yt-dlp and spotdl downloader adapters, registered through the existing downloader registry, pass the existing `download` conformance suite on Linux
+- [x] External stream resolution works through the runner
+- [x] Downloads keep source-native quality
+- [x] The phone profile selects these adapters, and the desktop profile keeps its bundled-executable adapters

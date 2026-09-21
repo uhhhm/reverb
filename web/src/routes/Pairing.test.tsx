@@ -157,6 +157,30 @@ describe('Pairing', () => {
     expect(await screen.findByTestId('dial-addr')).toHaveTextContent('/ip4/10.8.0.2/tcp/4331/p2p/12D3KooWlocal')
   })
 
+  // A phone pairs by scanning, so the code is also shown as a QR code that
+  // carries this device's addresses; the typed code stays beside it.
+  it('shows the pairing code as a QR code when one is available', async () => {
+    mockGeneratePairingCode.mockResolvedValueOnce({
+      code: 'AB12-CD34',
+      expiresAt: Math.floor(Date.now() / 1000) + 600,
+      qrPayload: 'reverb://pair?v=1&code=AB12CD34',
+      qrSvg: '<svg xmlns="http://www.w3.org/2000/svg"><path d="M4 4h1v1h-1z"/></svg>',
+    })
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: /generate pairing code/i }))
+    const qr = await screen.findByRole('img', { name: /pairing qr code/i })
+    expect(qr.getAttribute('src')).toMatch(/^data:image\/svg\+xml;charset=utf-8,/)
+    expect(decodeURIComponent(qr.getAttribute('src') ?? '')).toContain('<path d="M4 4h1v1h-1z"/>')
+    expect(screen.getByTestId('pairing-code')).toHaveTextContent('AB12-CD34')
+  })
+
+  it('shows no QR code when the device has no address to put in one', async () => {
+    wrap()
+    fireEvent.click(await screen.findByRole('button', { name: /generate pairing code/i }))
+    await screen.findByTestId('pairing-code')
+    expect(screen.queryByRole('img', { name: /pairing qr code/i })).not.toBeInTheDocument()
+  })
+
   it('pairing code input auto-uppercases and formats with dash', async () => {
     wrap()
     await screen.findByLabelText(/pairing code/i)

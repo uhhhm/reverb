@@ -6,7 +6,8 @@ import type { ReactNode } from 'react'
 import { AppShell } from './AppShell'
 import { useUI } from '../lib/uiStore'
 import { useDownloads } from '../lib/downloadStore'
-import { usePlayer } from '../lib/playerStore'
+import { engine } from '../lib/playerStore'
+import { queueState } from '../test/fakeQueue'
 import type { Track } from '../lib/types'
 
 vi.mock('../lib/realtimeWiring', () => ({ useRealtime: () => {} }))
@@ -103,7 +104,7 @@ describe('AppShell', () => {
   })
 
   it('right column renders NowPlayingPanel when rightPanel is nowplaying', () => {
-    act(() => { usePlayer.getState().playTrackList([track('1')], 0) })
+    act(() => { engine.apply(queueState([track('1')], 0), { autoplay: true }) })
     useUI.setState({ rightPanel: 'nowplaying' })
     renderShell()
     expect(screen.getByTestId('right-panel-column')).toBeInTheDocument()
@@ -125,7 +126,7 @@ describe('AppShell', () => {
   it('paints an ambient background when a palette is present', () => {
     vi.mocked(useAlbumPalette).mockReturnValue({ rgb: [200, 30, 40], text: '#FFFFFF', scrim: false })
     useUI.setState({ rightPanel: null })
-    act(() => { usePlayer.getState().playTrackList([track('1')], 0) })
+    act(() => { engine.apply(queueState([track('1')], 0), { autoplay: true }) })
     renderShell()
     const root = screen.getByTestId('app-shell-root')
     expect(root.style.background).not.toBe('')

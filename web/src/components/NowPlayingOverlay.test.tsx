@@ -2,8 +2,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { NowPlayingOverlay } from './NowPlayingOverlay'
 import { usePlayer, engine } from '../lib/playerStore'
+import { queueState } from '../test/fakeQueue'
 import { useUI } from '../lib/uiStore'
 import type { Track } from '../lib/types'
+
+/** Something playing, as the core would answer a new list; the queue transport is not under test here. */
+function playNow(tracks: Track[], index: number) {
+  engine.apply(queueState(tracks, index), { autoplay: true })
+}
 
 vi.mock('../lib/useAlbumPalette', () => ({ useAlbumPalette: vi.fn(() => null) }))
 
@@ -17,7 +23,7 @@ function track(id: string): Track {
 
 describe('NowPlayingOverlay', () => {
   beforeEach(() => {
-    act(() => { usePlayer.getState().playTrackList([track('1'), track('2')], 0) })
+    act(() => { playNow([track('1'), track('2')], 0) })
   })
 
   it('renders nothing when closed', () => {
@@ -40,9 +46,9 @@ describe('NowPlayingOverlay', () => {
     expect(useUI.getState().nowPlayingOpen).toBe(false)
   })
 
-  it('transport buttons drive the engine', () => {
+  it('transport buttons drive the player', () => {
     act(() => { useUI.getState().openNowPlaying() })
-    const nextSpy = vi.spyOn(engine, 'next')
+    const nextSpy = vi.spyOn(usePlayer.getState(), 'next').mockImplementation(() => {})
     render(<NowPlayingOverlay />)
     fireEvent.click(screen.getByRole('button', { name: /^next$/i }))
     expect(nextSpy).toHaveBeenCalledTimes(1)
