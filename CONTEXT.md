@@ -10,10 +10,16 @@ one-click downloads in one UI.
 ### Devices & topology
 
 **Device**:
-Any single running instance of Reverb (a laptop or the server).
+Any single running instance of Reverb: the server, a desktop app, or a phone.
+Every device runs the same Go core. The desktop app (Wails) serves it on
+127.0.0.1:0. A phone runs a reduced device (ADR 0003): its only library is its
+offline set, and it streams other library tracks through a Delegated request.
 _Avoid_: Client, node, peer
 
-Device now includes desktop app (Wails) — same binary, local server on 127.0.0.1:0.
+**Delegated request**:
+A request one device sends to a paired device to do what it cannot do itself,
+such as a phone streaming a library track that is not in its offline set.
+_Avoid_: Remote call, proxy
 
 **Server**:
 The always-on device that holds the canonical library and is the sync rendezvous
@@ -34,8 +40,9 @@ network.
 _Avoid_: Login, account, invite
 
 **Offline set**:
-The subset of the library a laptop keeps locally so it can be played with no
-internet connection. Managed per-playlist.
+The subset of the library a laptop or phone keeps locally so it can be played
+with no internet connection. Chosen per playlist, on each device separately, and
+never synced.
 _Avoid_: Offline library, cache
 
 ### Downloads
@@ -43,7 +50,9 @@ _Avoid_: Offline library, cache
 **Download**:
 Acquiring a track or album from an external source (Spotify, YouTube) at the
 source's best available quality. Runs on whichever device is chosen, but the
-result always syncs to the canonical library.
+result always syncs to the canonical library. A Download made on a phone is
+*pending upload* until a peer confirms it holds the file; until then it is kept
+on the phone.
 _Avoid_: Import, fetch
 
 **Add from link**:
