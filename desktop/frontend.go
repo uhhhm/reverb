@@ -8,6 +8,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/menu/keys"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/linux"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -32,6 +33,7 @@ func quitApp(app *App) {
 // same-origin inside the window (cookies and the WebSocket work unchanged).
 // The 127.0.0.1 listener still runs — paired devices reach the API there.
 func runApp(app *App) error {
+	configureWebView()
 	app.startBackground = func() error { return spawnBackground(app.dataDir, app.backgroundArgs) }
 	appMenu := menu.NewMenu()
 	reverbMenu := appMenu.AddSubmenu("Reverb")
@@ -49,5 +51,11 @@ func runApp(app *App) error {
 		OnShutdown:    app.OnShutdown,
 		OnBeforeClose: app.OnBeforeClose,
 		Bind:          []interface{}{app},
+		// The Wayland app ID and X11 WM_CLASS, which the desktop matches to
+		// reverb-desktop.desktop to group the window under the launcher's
+		// entry and icon. It also names WebKit's storage directory
+		// (~/.local/share/reverb-desktop), so changing it loses that storage.
+		// Explicit so neither follows the binary's file name.
+		Linux: &linux.Options{ProgramName: "reverb-desktop"},
 	})
 }

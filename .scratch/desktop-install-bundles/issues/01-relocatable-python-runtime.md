@@ -4,10 +4,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] One shared build step produces the relocatable runtime for the host OS/arch (macOS amd64/arm64, Linux amd64/arm64), with pinned Python, python-build-standalone and spotDL versions overridable by environment variable.
-- [ ] macOS packaging uses the shared step and still produces a `.app` whose bundled spotDL, yt-dlp and ffmpeg pass their version checks.
-- [ ] On Linux, the runtime copied to a fresh directory (and the original deleted) runs `spotdl --version` and `yt-dlp --version` through its wrappers.
-- [ ] The wrappers keep their own directory off `sys.path`, so a script never shadows its package.
-- [ ] The app's bundled-Python lookup finds the runtime in the bundle layout, so the daily yt-dlp hot-upgrade targets it and never a system Python.
+- [x] One shared build step produces the relocatable runtime for the host OS/arch (macOS amd64/arm64, Linux amd64/arm64), with pinned Python, python-build-standalone and spotDL versions overridable by environment variable.
+- [ ] macOS packaging uses the shared step and still produces a `.app` whose bundled spotDL, yt-dlp and ffmpeg pass their version checks. (Wired up, and `package-mac.sh` now gates on `verify-bundle.sh`, but not yet run on a Mac; ticket 04 runs it in CI.)
+- [x] On Linux, the runtime copied to a fresh directory (and the original deleted) runs `spotdl --version` and `yt-dlp --version` through its wrappers.
+- [x] The wrappers keep their own directory off `sys.path`, so a script never shadows its package.
+- [x] The app's bundled-Python lookup finds the runtime in the bundle layout, so the daily yt-dlp hot-upgrade targets it and never a system Python.

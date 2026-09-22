@@ -85,6 +85,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev pkg-config zip
       - run: make setup-web
+      # The Linux install bundle ships these beside the binary. Fetched before
+      # the tests so TestBootWiresBundledTools checks the real Navidrome
+      # instead of skipping.
+      - name: Fetch the Linux bundle tools
+        if: runner.os == 'Linux'
+        run: |
+          desktop/tools/fetch-ffmpeg.sh
+          desktop/tools/fetch-navidrome.sh
+          desktop/tools/fetch-deno.sh
       - name: Build and test the native desktop update
         env:
           TAG: ${{ needs.verify.outputs.tag }}
@@ -106,10 +115,27 @@ jobs:
           artifact="reverb-desktop-${TAG#v}-${TARGET_OS}-${TARGET_ARCH}.zip"
           (cd dist && zip "$artifact" reverb-desktop)
           unzip -t "dist/$artifact"
+      # The first-install asset: the same binary the update payload above
+      # carries, with the bundled tools, the relocatable Python and the
+      # per-user install script. package-linux.sh extracts the finished tarball
+      # and fails unless every tool resolves from inside it through the app's
+      # own lookup and runs, with none of them on PATH.
+      - name: Build and verify the Linux install bundle
+        if: runner.os == 'Linux'
+        env:
+          TAG: ${{ needs.verify.outputs.tag }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          BINARY=dist/reverb-desktop VERSION="$TAG" desktop/tools/package-linux.sh
+          bundle="Reverb-${TAG#v}-linux-${TARGET_ARCH}.tar.gz"
+          mv "dist/Reverb-linux-${TARGET_ARCH}.tar.gz" "dist/$bundle"
+          tar -tzf "dist/$bundle" >/dev/null
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.goos }}-${{ matrix.arch }}
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
           if-no-files-found: error
 
   # Windows is a separate job rather than a matrix row: the build, the GUI and
@@ -195,11 +221,12 @@ jobs:
           pattern: desktop-*
           path: dist
           merge-multiple: true
-      - name: Attach all five verified builds to the existing release
+      - name: Attach the five update payloads and two Linux install bundles
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.verify.outputs.tag }}
         run: |
           test "$(find dist -name '*.zip' | wc -l)" -eq 5
-          gh release upload "$TAG" dist/*.zip --clobber
+          test "$(find dist -name '*.tar.gz' | wc -l)" -eq 2
+          gh release upload "$TAG" dist/*.zip dist/*.tar.gz --clobber

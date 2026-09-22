@@ -6,11 +6,11 @@ This is a tarball plus a script rather than an AppImage on purpose: an AppImage 
 
 **Blocked by:** 01 (Shared relocatable Python runtime build)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A make target builds the tarball for the host arch from already-fetched tools, failing clearly if any tool is missing.
-- [ ] The install script installs per-user without root, writes a desktop entry whose `Exec` and `Icon` point at the installed files (no reliance on `PATH` or an icon-theme name that doesn't exist), and refreshes the desktop database when the tool is available.
-- [ ] After install on Nobara/KDE, Reverb appears in launcher search with its icon, launches, and the window groups under its own taskbar entry.
-- [ ] A download completes using only bundled tools, with none of them on the system `PATH`.
-- [ ] Re-running the install script over an existing install upgrades it in place without losing app data; the uninstall script removes the installed files, desktop entry and icon, and leaves user data alone.
-- [ ] Self-update from an installed bundle replaces only the binary, relaunches, and the bundled tools still resolve afterwards.
+- [x] A make target builds the tarball for the host arch from already-fetched tools, failing clearly if any tool is missing.
+- [x] The install script installs per-user without root, writes a desktop entry whose `Exec` and `Icon` point at the installed files (no reliance on `PATH` or an icon-theme name that doesn't exist), and refreshes the desktop database when the tool is available.
+- [x] After install on Nobara/KDE, Reverb appears in launcher search with its icon, launches, and the window groups under its own taskbar entry.
+- [x] A download completes using only bundled tools, with none of them on the system `PATH`.
+- [x] Re-running the install script over an existing install upgrades it in place without losing app data; the uninstall script removes the installed files, desktop entry and icon, and leaves user data alone.
+- [x] Self-update from an installed bundle replaces only the binary, relaunches, and the bundled tools still resolve afterwards.

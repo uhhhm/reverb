@@ -1,4 +1,4 @@
-.PHONY: gen gen-check test test-go test-web test-race fmt-check vet vet-windows vet-darwin vet-ios ios-core ios-project ios-testpeer ios-test check check-web check-full vulncheck recommend-quality setup-web setup-contracts contracts contracts-check contracts-test build web dev clean desktop desktop-windows desktop-dev desktop-deps package-mac
+.PHONY: gen gen-check test test-go test-web test-race fmt-check vet vet-windows vet-darwin vet-ios ios-core ios-project ios-testpeer ios-test check check-web check-full vulncheck recommend-quality setup-web setup-contracts contracts contracts-check contracts-test build web dev clean desktop desktop-windows desktop-dev desktop-deps package-mac package-linux
 
 VERSION ?= dev
 GO_PACKAGES := ./cmd/... ./internal/... ./desktop/... ./mobile/...
@@ -145,6 +145,12 @@ desktop-dev:
 # (spotDL/yt-dlp) rather than desktop/tools/python, which only works in-tree.
 package-mac:
 	VERSION=$(VERSION) desktop/tools/package-mac.sh
+
+# Linux install bundle dist/Reverb-linux-<arch>.tar.gz: the binary, the bundled
+# tools and the same relocatable Python, plus a per-user install script. Needs
+# the tools from desktop-deps.
+package-linux:
+	VERSION=$(VERSION) WAILS_TAGS=$(WAILS_TAGS) desktop/tools/package-linux.sh
 
 desktop-deps: # fetch ffmpeg, navidrome, deno and the spotDL venv into desktop/tools/
 	desktop/tools/fetch-ffmpeg.sh

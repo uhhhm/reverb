@@ -7,6 +7,10 @@ import (
 	"strings"
 )
 
+// executablePath locates the running binary, which is what an installed
+// bundle's tools are found relative to. Tests replace it to stand in a bundle.
+var executablePath = os.Executable
+
 // ResolveBundledTools checks executable-relative Resources/bin and
 // desktop/tools/bin, then PATH. Returns "" for any tool not found.
 // Env overrides are assumed to have been handled by the caller via
@@ -38,7 +42,7 @@ func bundledToolDirs(name string) []string {
 	var dirs []string
 	venv := inPythonVenv(name)
 
-	if exe, err := os.Executable(); err == nil {
+	if exe, err := executablePath(); err == nil {
 		dir := filepath.Dir(exe)
 		dirs = append(dirs,
 			filepath.Join(dir, "../Resources/bin"),
@@ -127,7 +131,7 @@ func findBundledExecutable(name string, dirs []string) string {
 
 func bundledPythonDirs() []string {
 	var roots []string
-	if exe, err := os.Executable(); err == nil {
+	if exe, err := executablePath(); err == nil {
 		dir := filepath.Dir(exe)
 		roots = append(roots,
 			filepath.Join(dir, "../Resources/python"),
