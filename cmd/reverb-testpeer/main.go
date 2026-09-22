@@ -34,6 +34,9 @@ const (
 	trackTitle   = "Smoke Tone"
 	trackArtist  = "Smoke"
 	trackAlbum   = "Tests"
+	// Long enough for the UI test to see progress, pause, seek and resume
+	// before it ends.
+	toneSeconds = 20
 )
 
 func main() {
@@ -72,7 +75,7 @@ func run(ctx context.Context, addr string, p2pPort int, dir string, ready func(a
 	if err := os.MkdirAll(music, 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(music, trackTitle+".wav"), tone(5), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(music, trackTitle+".wav"), tone(toneSeconds), 0o644); err != nil {
 		return err
 	}
 	rt, err := app.Build(context.Background(), app.Options{
@@ -164,7 +167,7 @@ func seedPlaylist(h http.Handler) error {
 	}
 	return call(h, http.MethodPost, "/playlists/"+created.ID+"/tracks", map[string]any{
 		"source": "testpeer", "externalId": "smoke-tone", "title": trackTitle, "artist": trackArtist,
-		"album": trackAlbum, "durationMs": 5000, "download": false,
+		"album": trackAlbum, "durationMs": toneSeconds * 1000, "download": false,
 	}, nil)
 }
 

@@ -13,6 +13,7 @@ screen and remote controls, the camera, and backup exclusion.
 | `project.yml` | XcodeGen spec; `make ios-project` writes `Reverb.xcodeproj` from it |
 | `Reverb/` | The app: `Core/` starts and stops the Go core, `Player/` plays the core's queue, `Views/` |
 | `ReverbKit/` | Swift package with `ReverbAPI`, the client generated from OpenAPI |
+| `ReverbTests/` | Native AVPlayer regressions: decoded duration, variable-bitrate MP3, heard audio against the clock after seeks, queue races, failure recovery and skipping, interruptions and completion |
 | `ReverbUITests/` | XCUITest smoke test: launch, pair with a test runtime, play an offline track |
 | `Frameworks/` | `Reverbcore.xcframework`, built by `make ios-core` (not checked in) |
 
@@ -51,7 +52,7 @@ operation, add it to `iosOperations` in `tools/contracts/generate.mjs` and run
 
 Everything in the core is tested on Linux with `make check`. That includes
 `cmd/reverb-testpeer`'s `TestAppFlowAgainstTestPeer`, which drives the linked
-core through the same calls the app makes. On a Mac, the UI smoke test runs on
+core through the same calls the app makes. On a Mac, native playback regressions and the UI smoke test run on
 a simulator against the test peer:
 
 ```bash
@@ -60,8 +61,17 @@ make ios-test
 
 `make ios-test` builds the core and the project, starts `reverb-testpeer` on
 127.0.0.1:47300 (the simulator shares the Mac's loopback), and runs the
-XCUITest. Set `IOS_DESTINATION` for another simulator. To run the test from
+native tests and XCUITest. The smoke test checks clock progress, duration,
+pause, seek, resume and completion while the paired device is stopped. Set `IOS_DESTINATION` for another simulator. To run the test from
 Xcode instead, start `make ios-testpeer` first.
+
+For a faster playback-only loop after building the core and generating the project:
+
+```bash
+xcodebuild test -project ios/Reverb.xcodeproj -scheme Reverb \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -skipPackagePluginValidation -only-testing:ReverbTests
+```
 
 ## Behaviour worth knowing
 
@@ -69,10 +79,14 @@ Xcode instead, start `make ios-testpeer` first.
   the offline set and is excluded from iCloud and device backups; the database
   is backed up.
 - Audio keeps playing locked and in the background (`UIBackgroundModes`
-  `audio`). A call pauses playback and it resumes afterwards if it was playing;
-  unplugging headphones pauses.
+  `audio`). A call pauses playback and it resumes afterwards if it was playing
+  and iOS says it should; unplugging headphones pauses.
 - iOS may reclaim the core's listening socket while the app is suspended. When
   the app comes back to the foreground it checks the core answers and starts it
-  again if not.
+  again if not. A track that fails to load, such as one played from the lock
+  screen after that, is loaded once more after the same check.
+- A track AVPlayer cannot open is skipped with a message: WebM is the one
+  format Reverb indexes that iOS cannot play; the downloaders write MP3, M4A and
+  Ogg Opus. Three failures in a row stop playback rather than walk the queue.
 - Scanning a pairing QR code with the system Camera opens the app through the
   `reverb://` URL scheme and pairs.

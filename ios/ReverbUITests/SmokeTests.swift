@@ -51,6 +51,28 @@ final class SmokeTests: XCTestCase {
         XCTAssertEqual(title.label, pairing.track)
         let playPause = app.buttons["nowPlaying.playPause"]
         wait(for: [expectation(for: NSPredicate(format: "value == 'playing'"), evaluatedWith: playPause)], timeout: 20)
+
+        // Sound must actually advance; a play request alone also succeeds
+        // when a decoder is stuck waiting or has failed. Each query takes
+        // about a second, so the checks accept a range rather than a moment.
+        let elapsed = app.staticTexts["nowPlaying.elapsed"]
+        wait(for: [expectation(for: NSPredicate(format: "label IN {'0:01', '0:02', '0:03', '0:04', '0:05', '0:06', '0:07', '0:08'}"), evaluatedWith: elapsed)], timeout: 10)
+        XCTAssertEqual(app.staticTexts["nowPlaying.duration"].label, "0:20")
+
+        playPause.tap()
+        wait(for: [expectation(for: NSPredicate(format: "value == 'paused'"), evaluatedWith: playPause)], timeout: 5)
+        let pausedAt = elapsed.label
+        sleep(2)
+        XCTAssertEqual(elapsed.label, pausedAt, "the clock moved while paused")
+
+        // A seek while paused moves the clock and stays paused.
+        app.sliders["nowPlaying.position"].adjust(toNormalizedSliderPosition: 0.85)
+        wait(for: [expectation(for: NSPredicate(format: "label IN {'0:16', '0:17', '0:18'}"), evaluatedWith: elapsed)], timeout: 5)
+        XCTAssertEqual(playPause.value as? String, "paused")
+
+        playPause.tap()
+        wait(for: [expectation(for: NSPredicate(format: "value == 'playing'"), evaluatedWith: playPause)], timeout: 5)
+        XCTAssertTrue(waitForDisappearance(title, timeout: 15), "the final track did not finish its queue")
     }
 
     // MARK: Helpers
