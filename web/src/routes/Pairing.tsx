@@ -12,6 +12,7 @@ import { ManualSyncControl } from '../components/ManualSyncControl'
 import { useSyncStore } from '../lib/syncStore'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
 import { Button } from '../components/ui/Button'
+import { SyncAdvanced } from '../components/SyncAdvanced'
 
 function formatPairingInput(value: string): string {
   const raw = value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 8)
@@ -36,7 +37,7 @@ function formatExpiry(seconds: number): string {
 }
 
 export default function Pairing() {
-  useDocumentTitle('Pairing')
+  useDocumentTitle('Devices & sync')
 
   // The identity this device authors changes under, for the "this device"
   // badge in the paired list. It comes from the p2p status, so it is empty
@@ -69,6 +70,9 @@ export default function Pairing() {
   const [devices, setDevices] = useState<DeviceInfo[] | null>(null)
   const [devicesLoading, setDevicesLoading] = useState(true)
   const [devicesError, setDevicesError] = useState<string | null>(null)
+
+  // Mounted only while open, so its peer and failure polls stop when collapsed.
+  const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const [confirmUnpairId, setConfirmUnpairId] = useState<string | null>(null)
   const [unpairingId, setUnpairingId] = useState<string | null>(null)
@@ -234,10 +238,10 @@ export default function Pairing() {
   return (
     <div className="max-w-4xl space-y-6 pb-8">
       <header>
-        <h1 className="text-3xl font-black tracking-tight text-text-primary">Pairing</h1>
+        <h1 className="text-3xl font-black tracking-tight text-text-primary">Devices &amp; sync</h1>
         <p className="mt-1 text-sm text-text-secondary">
-          Connect two devices with a one-time code. One device generates the code, the other enters it — no
-          passwords to type twice. Once paired, the two devices find each other and sync directly.
+          Pair a phone or another computer with a one-time code, then manage the devices that share this
+          library. Once paired, devices find each other and sync directly.
         </p>
       </header>
 
@@ -253,7 +257,7 @@ export default function Pairing() {
           </li>
           <li>
             <span className="font-semibold text-text-primary">On Device B — the new device you want to add</span>:
-            open Reverb → <span className="font-semibold">Pairing</span> → paste that code into{' '}
+            open Reverb → <span className="font-semibold">Devices &amp; sync</span> → paste that code into{' '}
             <span className="font-semibold text-text-primary">Pairing code from your other device</span> in Step 2,
             give <em>this</em> device a name, then tap <span className="font-semibold">Pair device</span>.
           </li>
@@ -556,6 +560,25 @@ export default function Pairing() {
           </Button>
         </form>
       </section>
+
+      <details
+        className="group rounded-lg border border-border-subtle bg-raised"
+        onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
+      >
+        <summary className="cursor-pointer list-none px-6 py-4 text-sm font-semibold text-text-secondary group-open:text-text-primary">
+          <span className="inline-flex items-center gap-2">
+            <span className="transition-transform group-open:rotate-90">›</span> Advanced sync
+          </span>
+          <span className="mt-1 block text-xs font-normal text-text-muted">
+            Background sync, files that are not syncing, file-name repair, and diagnostics.
+          </span>
+        </summary>
+        {advancedOpen && (
+          <div className="border-t border-border-subtle p-4">
+            <SyncAdvanced />
+          </div>
+        )}
+      </details>
     </div>
   )
 }

@@ -114,10 +114,10 @@ describe('TopBar', () => {
     expect(screen.getByRole('menuitem', { name: /^admin$/i })).toBeInTheDocument()
   })
 
-  it('Pair a phone menu item navigates to the pairing page', () => {
+  it('Devices & sync menu item navigates to the pairing page', () => {
     renderBar()
     fireEvent.click(screen.getByRole('button', { name: /account menu/i }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /^pair a phone$/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /^devices & sync$/i }))
     expect(mockNavigate).toHaveBeenCalledWith('/pairing')
   })
 
