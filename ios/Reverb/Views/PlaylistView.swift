@@ -112,6 +112,14 @@ struct TrackRow: View {
     let track: PlaylistTrack
     let offline: OfflineTrackStatus?
 
+    /// A file counts as on this iPhone once it lands, but it plays only after
+    /// the library's next scan indexes it; until then it still shows as copying.
+    private var shownOffline: OfflineTrackStatus? {
+        guard var status = offline, status.state == .ready, track.libraryTrack == nil else { return offline }
+        status.state = .fetching
+        return status
+    }
+
     var body: some View {
         HStack {
             VStack(alignment: .leading) {
@@ -121,7 +129,7 @@ struct TrackRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if let offline {
+            if let offline = shownOffline {
                 OfflineBadge(status: offline)
             } else if track.libraryTrack == nil {
                 Image(systemName: "icloud.slash")
@@ -133,7 +141,7 @@ struct TrackRow: View {
         .opacity(track.libraryTrack == nil ? 0.45 : 1)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("track.\(track.title)")
-        .accessibilityValue(offline?.state.rawValue ?? (track.libraryTrack == nil ? "unavailable" : "ready"))
+        .accessibilityValue(shownOffline?.state.rawValue ?? (track.libraryTrack == nil ? "unavailable" : "ready"))
     }
 }
 

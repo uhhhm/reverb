@@ -30,6 +30,8 @@ targets:
         product: ReverbAPI
       # Built by `make ios-core` (gomobile bind); not checked in.
       - framework: Frameworks/Reverbcore.xcframework
+      # Go's DNS resolver on Darwin calls res_9_* from libresolv.
+      - sdk: libresolv.tbd
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.uhhhm.reverb

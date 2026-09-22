@@ -59,16 +59,17 @@ struct MainView: View {
 
     var body: some View {
         TabView {
+            // The bar sits on the stack, not its root, so pushed screens show it too.
             NavigationStack {
                 PlaylistsView()
-                    .safeAreaInset(edge: .bottom) { NowPlayingBar() }
             }
+            .safeAreaInset(edge: .bottom) { NowPlayingBar() }
             .tabItem { Label("Playlists", systemImage: "music.note.list") }
 
             NavigationStack {
                 DevicesView()
-                    .safeAreaInset(edge: .bottom) { NowPlayingBar() }
             }
+            .safeAreaInset(edge: .bottom) { NowPlayingBar() }
             .tabItem { Label("Devices", systemImage: "laptopcomputer.and.iphone") }
         }
         .sheet(isPresented: $pairing.isPresented) {

@@ -53,7 +53,7 @@ vet-ios:
 # iOS app (macOS and Xcode only; see ios/README.md). gomobile and gobind come
 # from the version go.mod pins.
 IOS_BIN := $(CURDIR)/ios/build/bin
-IOS_DESTINATION ?= platform=iOS Simulator,name=iPhone 16
+IOS_DESTINATION ?= platform=iOS Simulator,name=iPhone 17
 
 ios-core:
 	GOBIN=$(IOS_BIN) go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
