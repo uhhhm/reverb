@@ -81,6 +81,13 @@ xcodebuild test -project ios/Reverb.xcodeproj -scheme Reverb \
 - Audio keeps playing locked and in the background (`UIBackgroundModes`
   `audio`). A call pauses playback and it resumes afterwards if it was playing
   and iOS says it should; unplugging headphones pauses.
+- Home, Library, Search, Playlists, and Devices are native views over the
+  phone's loopback API. Library tracks play locally or through a reachable
+  paired device; outside-library search results stay visibly unavailable until
+  external playback is installed in the phone profile.
+- The app syncs when it enters the foreground and every five minutes while
+  audio is playing. It also schedules a bounded `BGAppRefreshTask`; iOS decides
+  whether and when that task runs, and Reverb uses no keep-alive workaround.
 - iOS may reclaim the core's listening socket while the app is suspended. When
   the app comes back to the foreground it checks the core answers and starts it
   again if not. A track that fails to load, such as one played from the lock

@@ -429,6 +429,19 @@ func (notFoundResolver) Resolve(context.Context, string) (resolver.Addressing, e
 	return resolver.Addressing{Found: false}, nil
 }
 
+type fakeDelegatedStream struct {
+	catalogID string
+	opts      core.StreamOpts
+	byteRange string
+}
+
+func (f *fakeDelegatedStream) Stream(_ context.Context, catalogID string, opts core.StreamOpts, byteRange string) (core.StreamHandle, error) {
+	f.catalogID, f.opts, f.byteRange = catalogID, opts, byteRange
+	return core.StreamHandle{Body: io.NopCloser(strings.NewReader("PEER AUDIO")), ContentType: "audio/mpeg", ContentLength: 10, AcceptRanges: "bytes", StatusCode: http.StatusOK}, nil
+}
+
+func (*fakeDelegatedStream) Playable(context.Context, string) bool { return true }
+
 func canonicalStreamServer(t *testing.T, cat CatalogLookup, ext ExternalStreamResolver) (*Server, *http.Cookie) {
 	t.Helper()
 	st, err := store.Open(t.TempDir() + "/canon.db")
@@ -477,6 +490,25 @@ func TestStreamFallsBackToTheSourceForATrackNotInTheLibrary(t *testing.T) {
 	// up by when the source id alone is not enough.
 	if ext.lastArtist != "Artist" || ext.lastTitle != "Title" {
 		t.Fatalf("hints = %q/%q, want Artist/Title", ext.lastArtist, ext.lastTitle)
+	}
+}
+
+func TestStreamDelegatesCanonicalTrackBeforeExternalPlayback(t *testing.T) {
+	delegated := &fakeDelegatedStream{}
+	srv, cookie := canonicalStreamServer(t, nil, nil)
+	srv.deps.DelegatedStream = delegated
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stream/trk_peer?t=12000", nil)
+	req.AddCookie(cookie)
+	req.Header.Set("Range", "bytes=100-")
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK || rec.Body.String() != "PEER AUDIO" {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if delegated.catalogID != "trk_peer" || delegated.opts.TimeOffsetSec != 12 || delegated.byteRange != "" {
+		t.Fatalf("delegated request = id %q opts %+v range %q", delegated.catalogID, delegated.opts, delegated.byteRange)
 	}
 }
 

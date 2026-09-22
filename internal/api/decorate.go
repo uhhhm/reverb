@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/store/db"
@@ -124,9 +126,31 @@ func (s *Server) decorateDetailTracks(ctx context.Context, rows []core.AlbumDeta
 	at := make([]int, 0, len(rows))
 	for i := range rows {
 		if rows[i].LibraryTrack != nil {
+			rows[i].Playback = core.PlaybackLocal
 			owned = append(owned, *rows[i].LibraryTrack)
 			at = append(at, i)
+		} else {
+			rows[i].Playback = core.PlaybackUnavailable
 		}
+	}
+	if s.deps.DelegatedStream != nil {
+		var wg sync.WaitGroup
+		for i := range rows {
+			if rows[i].LibraryTrack != nil || rows[i].CanonicalID == "" {
+				continue
+			}
+			i := i
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+				defer cancel()
+				if s.deps.DelegatedStream.Playable(probeCtx, rows[i].CanonicalID) {
+					rows[i].Playback = core.PlaybackDelegated
+				}
+			}()
+		}
+		wg.Wait()
 	}
 	s.deps.Covers.ApplyTracks(ctx, owned)
 	s.deps.Entities.ApplyTracks(ctx, owned)

@@ -111,6 +111,13 @@ type Resolver interface {
 	Resolve(ctx context.Context, catalogID string) (resolver.Addressing, error)
 }
 
+// DelegatedStreamer asks a paired Device to serve a canonical library track
+// when this Device has no local copy. *p2p.Delegator satisfies it.
+type DelegatedStreamer interface {
+	Stream(ctx context.Context, catalogID string, opts core.StreamOpts, byteRange string) (core.StreamHandle, error)
+	Playable(ctx context.Context, catalogID string) bool
+}
+
 // CatalogLookup reads catalog entities and their aliases, so a canonical id can
 // be traced back to the source it was played from. *db.Queries satisfies it.
 type CatalogLookup interface {
@@ -174,6 +181,9 @@ type Deps struct {
 	// the LIVE matcher, so it survives adapter hot-reloads (the matcher is rebuilt
 	// on each reload). Nil in tests/legacy that don't use the addressing boundary.
 	Resolver Resolver
+	// DelegatedStream is present on the phone profile. It tries the always-on
+	// Server first, then the most recently reached paired Device.
+	DelegatedStream DelegatedStreamer
 
 	// Catalog traces a canonical id back to the search source it was played
 	// from, so history can play a track the library has no copy of. Nil disables

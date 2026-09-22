@@ -4,13 +4,16 @@ import SwiftUI
 struct ReverbApp: App {
     @StateObject private var core: CoreHost
     @StateObject private var player: Player
+    @StateObject private var sync: SyncManager
     @StateObject private var pairing = PairingModel()
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let core = CoreHost()
         _core = StateObject(wrappedValue: core)
-        _player = StateObject(wrappedValue: Player(core: core))
+        let player = Player(core: core)
+        _player = StateObject(wrappedValue: player)
+        _sync = StateObject(wrappedValue: SyncManager(core: core))
         core.start()
     }
 
@@ -19,16 +22,23 @@ struct ReverbApp: App {
             RootView()
                 .environmentObject(core)
                 .environmentObject(player)
+                .environmentObject(sync)
                 .environmentObject(pairing)
                 // The system Camera opens a scanned pairing QR code here.
                 .onOpenURL { url in
                     pairing.scanned(url.absoluteString)
                 }
+                .task { await sync.foregrounded() }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                Task { await core.ensureRunning() }
+                Task { await sync.foregrounded() }
+            } else if phase == .background {
+                sync.scheduleBackgroundRefresh()
             }
+        }
+        .onChange(of: player.isPlaying) { _, playing in
+            sync.setPlaybackActive(playing)
         }
     }
 }
@@ -61,10 +71,28 @@ struct MainView: View {
         TabView {
             // The bar sits on the stack, not its root, so pushed screens show it too.
             NavigationStack {
+                HomeView()
+            }
+            .safeAreaInset(edge: .bottom) { NowPlayingBar() }
+            .tabItem { Label("Home", systemImage: "house") }
+
+            NavigationStack {
                 PlaylistsView()
             }
             .safeAreaInset(edge: .bottom) { NowPlayingBar() }
             .tabItem { Label("Playlists", systemImage: "music.note.list") }
+
+            NavigationStack {
+                LibraryView()
+            }
+            .safeAreaInset(edge: .bottom) { NowPlayingBar() }
+            .tabItem { Label("Library", systemImage: "music.note") }
+
+            NavigationStack {
+                SearchView()
+            }
+            .safeAreaInset(edge: .bottom) { NowPlayingBar() }
+            .tabItem { Label("Search", systemImage: "magnifyingglass") }
 
             NavigationStack {
                 DevicesView()

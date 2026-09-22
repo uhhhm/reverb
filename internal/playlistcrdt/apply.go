@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/uhhhm/reverb/internal/catalog"
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/playlistsync"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
@@ -86,6 +87,16 @@ func (s *Service) Apply(ctx context.Context, id string) error {
 			}
 			entry := *e
 			entry.CanonicalID = local[k]
+			if entry.CanonicalID == "" && entry.Source == "library" && s.catalogLookup != nil {
+				if cid, found, lookupErr := s.catalogLookup(ctx, catalog.Identity{
+					Kind: "track", Title: entry.Title, Artist: entry.Artist, Album: entry.Album,
+					ISRC: entry.ISRC, MBID: entry.MBID, DurationMs: entry.DurationMs,
+				}); lookupErr != nil {
+					return lookupErr
+				} else if found {
+					entry.CanonicalID = cid
+				}
+			}
 			tracks = append(tracks, entry)
 		}
 		encoded, mErr := json.Marshal(tracks)

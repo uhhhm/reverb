@@ -10,6 +10,9 @@ struct PlaylistsView: View {
     @State private var offline: Set<String> = []
     @State private var storage: OfflineStatus?
     @State private var loaded = false
+    @State private var creating = false
+    @State private var renaming: Components.Schemas.SyncedPlaylist?
+    @State private var draftName = ""
 
     var body: some View {
         List {
@@ -37,6 +40,13 @@ struct PlaylistsView: View {
                         }
                     }
                     .accessibilityIdentifier("playlist.\(playlist.name)")
+                    .swipeActions {
+                        Button("Delete", role: .destructive) { Task { await delete(playlist) } }
+                        Button("Rename") {
+                            draftName = playlist.name
+                            renaming = playlist
+                        }.tint(.blue)
+                    }
                 }
             }
         }
@@ -52,6 +62,20 @@ struct PlaylistsView: View {
             }
         }
         .navigationTitle("Playlists")
+        .toolbar {
+            Button { draftName = ""; creating = true } label: { Image(systemName: "plus") }
+                .accessibilityLabel("New playlist")
+        }
+        .alert("New playlist", isPresented: $creating) {
+            TextField("Name", text: $draftName)
+            Button("Create") { Task { await create() } }
+            Button("Cancel", role: .cancel) {}
+        }
+        .alert("Rename playlist", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+            TextField("Name", text: $draftName)
+            Button("Rename") { Task { await rename() } }
+            Button("Cancel", role: .cancel) { renaming = nil }
+        }
         .navigationDestination(for: String.self) { id in
             PlaylistView(playlistID: id)
         }
@@ -78,6 +102,25 @@ struct PlaylistsView: View {
         }
         storage = try? await client.getOfflineStatus().ok.body.json
         loaded = true
+    }
+
+    private func create() async {
+        guard let client = core.client, !draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        _ = try? await client.createPlaylist(body: .json(.init(name: draftName))).created
+        await load()
+    }
+
+    private func rename() async {
+        guard let playlist = renaming, let client = core.client else { return }
+        _ = try? await client.renamePlaylist(path: .init(id: playlist.id), body: .json(.init(name: draftName))).ok
+        renaming = nil
+        await load()
+    }
+
+    private func delete(_ playlist: Components.Schemas.SyncedPlaylist) async {
+        guard let client = core.client else { return }
+        _ = try? await client.deletePlaylist(path: .init(id: playlist.id)).ok
+        await load()
     }
 }
 

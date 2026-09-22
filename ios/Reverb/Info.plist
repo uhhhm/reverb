@@ -50,6 +50,11 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>io.github.uhhhm.reverb.sync</string>
 	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>

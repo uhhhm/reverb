@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/uhhhm/reverb/internal/library/localfiles"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 func buildForTest(t *testing.T, opts Options) *Runtime {
@@ -139,8 +140,11 @@ func TestPhoneProfileBuildsWithoutDesktopServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(instances) != 0 {
-		t.Errorf("a phone seeded adapter rows: %+v", instances)
+	if len(instances) != 1 || instances[0].Type != "search" || instances[0].Name != "deezer" || instances[0].Enabled != 1 {
+		t.Errorf("phone search defaults = %+v, want keyless Deezer", instances)
+	}
+	if rt.Deps.SearchAggregator == nil {
+		t.Error("a fresh phone cannot search Deezer without a peer")
 	}
 	if rt.Deps.ExternalStream == nil {
 		t.Error("external streaming is not wired; a phone resolves through its Python")
@@ -155,6 +159,44 @@ func TestPhoneProfileBuildsWithoutDesktopServices(t *testing.T) {
 	}
 	if rt.Deps.Pairing == nil || rt.Deps.SyncStore == nil || rt.Deps.SyncEmit == nil {
 		t.Error("replication is not wired")
+	}
+}
+
+func TestSeedPhoneSearchSourcesPreservesOwnerSettings(t *testing.T) {
+	rt := buildForTest(t, Options{Version: "test", Profile: ProfilePhone, Python: &recordingPython{}})
+	ctx := context.Background()
+	instances, err := rt.Store.Q().ListAdapterInstances(ctx)
+	if err != nil || len(instances) != 1 {
+		t.Fatalf("initial search sources = %+v, %v", instances, err)
+	}
+	if err := rt.Store.Q().SetAdapterInstanceEnabled(ctx, db.SetAdapterInstanceEnabledParams{ID: instances[0].ID, Enabled: 0}); err != nil {
+		t.Fatal(err)
+	}
+	SeedPhoneSearchSources(ctx, rt.Store.Q(), func(string) string { return "" })
+	instances, err = rt.Store.Q().ListAdapterInstances(ctx)
+	if err != nil || len(instances) != 1 || instances[0].Enabled != 0 {
+		t.Fatalf("disabled source was overwritten: %+v, %v", instances, err)
+	}
+}
+
+func TestPhoneSearchCanUseProvisionedSpotifyCredentialsWithoutPeer(t *testing.T) {
+	env := map[string]string{
+		"REVERB_SPOTIFY_CLIENT_ID":     "phone-client",
+		"REVERB_SPOTIFY_CLIENT_SECRET": "phone-secret",
+	}
+	rt := buildForTest(t, Options{Version: "test", Profile: ProfilePhone, Python: &recordingPython{},
+		Getenv: func(key string) string { return env[key] },
+	})
+	instances, err := rt.Store.Q().ListAdapterInstances(context.Background())
+	if err != nil || len(instances) != 2 || instances[0].Name != "deezer" || instances[1].Name != "spotify" {
+		t.Fatalf("phone search sources = %+v, %v", instances, err)
+	}
+	if rt.Deps.SearchAggregator == nil {
+		t.Fatal("provisioned phone search aggregator is nil")
+	}
+	sources := rt.Bundle.Aggregator.Sources()
+	if len(sources) != 2 || sources[0].Name() != "deezer" || sources[1].Name() != "spotify" {
+		t.Fatalf("active phone sources = %+v", sources)
 	}
 }
 

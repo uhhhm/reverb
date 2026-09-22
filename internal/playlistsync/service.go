@@ -205,7 +205,7 @@ func (s *Service) Detail(ctx context.Context, id string) (core.SyncedPlaylistDet
 	det.TotalCount = len(tracks)
 	det.Tracks = []core.AlbumDetailTrack{} // never emit null; always an array
 	for i, tr := range tracks {
-		dt := core.AlbumDetailTrack{Title: tr.Title, Artist: tr.Artist, Album: tr.Album, TrackNumber: i + 1, DurationMs: tr.DurationMs, CoverURL: tr.CoverURL,
+		dt := core.AlbumDetailTrack{CanonicalID: tr.CanonicalID, Title: tr.Title, Artist: tr.Artist, Album: tr.Album, TrackNumber: i + 1, DurationMs: tr.DurationMs, CoverURL: tr.CoverURL,
 			ArtistExternalID: tr.ArtistExternalID, AlbumExternalID: tr.AlbumExternalID}
 		if tr.Source == "library" {
 			// Task 5: if this track has a stable CanonicalID AND a resolver is available,

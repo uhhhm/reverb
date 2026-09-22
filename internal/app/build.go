@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	libp2phost "github.com/libp2p/go-libp2p/core/host"
 	"github.com/uhhhm/reverb/internal/api"
 	"github.com/uhhhm/reverb/internal/auth"
 	"github.com/uhhhm/reverb/internal/catalog"
@@ -220,6 +221,9 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 
 	phone := opts.Profile == ProfilePhone
 	dataDir := filepath.Dir(opts.DBPath)
+	if phone {
+		SeedPhoneSearchSources(ctx, st.Q(), opts.Getenv)
+	}
 	// spotDL ships with both desktop builds, so present it as a configured
 	// downloader out of the box when none exists yet. A phone has no spotDL
 	// executable to present.
@@ -541,7 +545,8 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		}
 	})
 
-	playlistProjection := playlistcrdt.New(deps.SyncStore, wiring.NewSyncStore(st.Q()), authorDevice)
+	playlistProjection := playlistcrdt.New(deps.SyncStore, wiring.NewSyncStore(st.Q()), authorDevice).
+		WithCatalogLookup(catalogSvc.Lookup)
 	if bundle.Sync != nil {
 		bundle.Sync.WithEmitter(playlistProjection)
 	}
@@ -699,6 +704,18 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	rt.Deps.P2P = func() *p2p.Host { return rt.P2P }
 	rt.Deps.P2PGuard = func() *p2p.Guard { return rt.P2PGuard }
 	rt.Deps.P2PSyncer = func() *p2p.Syncer { return rt.P2PSyncer }
+	if phone {
+		rt.Deps.DelegatedStream = p2p.NewDelegator(
+			func() libp2phost.Host {
+				if rt.P2P == nil {
+					return nil
+				}
+				return rt.P2P.LibHost()
+			},
+			func() *p2p.Guard { return rt.P2PGuard },
+			st.Q(),
+		)
+	}
 	return rt, nil
 }
 
@@ -734,6 +751,7 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 			if h.LibHost() != nil {
 				p2p.RegisterFileHandler(h.LibHost(), musicDir, guard)
 				p2p.RegisterCoverHandler(h.LibHost(), coverDir, guard)
+				p2p.RegisterDelegatedHandler(h.LibHost(), guard, r.openDelegatedStream)
 			}
 			localID, lerr := reverbsync.LocalDeviceID(ctx, r.Store.Q())
 			if lerr != nil || localID == "" {
@@ -852,6 +870,24 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 	if r.Recommend != nil {
 		go r.Recommend.RunSchedule(ctx)
 	}
+}
+
+func (r *Runtime) openDelegatedStream(ctx context.Context, catalogID string, opts core.StreamOpts, byteRange string) (core.StreamHandle, error) {
+	if r.Deps.Resolver == nil || r.Reloader == nil {
+		return core.StreamHandle{}, core.ErrLibraryItemNotFound
+	}
+	addr, err := r.Deps.Resolver.Resolve(ctx, catalogID)
+	if err != nil {
+		return core.StreamHandle{}, err
+	}
+	if !addr.Found || addr.BackendID == "" {
+		return core.StreamHandle{}, core.ErrLibraryItemNotFound
+	}
+	lib := r.Reloader.Current().Library
+	if lib == nil {
+		return core.StreamHandle{}, core.ErrLibraryItemNotFound
+	}
+	return lib.Stream(ctx, addr.BackendID, opts, byteRange)
 }
 
 // Close stops the download manager and closes the store. The HTTP server and the

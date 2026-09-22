@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/uhhhm/reverb/internal/catalog"
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/fracidx"
 	"github.com/uhhhm/reverb/internal/playlistsync"
@@ -26,10 +27,11 @@ type DeviceResolver func(ctx context.Context) string
 // Service publishes local playlist edits into the change log and projects
 // accepted changes back onto the playlist store.
 type Service struct {
-	log    Log
-	store  playlistsync.Store
-	device DeviceResolver
-	now    func() int64
+	log           Log
+	store         playlistsync.Store
+	device        DeviceResolver
+	now           func() int64
+	catalogLookup func(context.Context, catalog.Identity) (string, bool, error)
 }
 
 // New constructs a Service. Any of log, store, or device may be absent, in
@@ -37,6 +39,14 @@ type Service struct {
 // pairing, or a test without a log, stays working.
 func New(l Log, store playlistsync.Store, device DeviceResolver) *Service {
 	return &Service{log: l, store: store, device: device, now: func() int64 { return time.Now().UnixMilli() }}
+}
+
+// WithCatalogLookup lets projection attach this Device's catalog id to a
+// library track whose membership arrived from a peer. The peer's random id is
+// deliberately not on the playlist wire; identity metadata finds the local id.
+func (s *Service) WithCatalogLookup(lookup func(context.Context, catalog.Identity) (string, bool, error)) *Service {
+	s.catalogLookup = lookup
+	return s
 }
 
 // Publish brings the log up to date with the playlist as it now stands.

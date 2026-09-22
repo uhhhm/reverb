@@ -45,6 +45,23 @@ final class PlayerTests: XCTestCase {
         player.pause()
     }
 
+    func testCropStartsAtOffsetAndEndsBeforeFileFinishes() async throws {
+        let url = try fixture()
+        let core = CoreHost()
+        core.start()
+        try await waitUntil { core.client != nil }
+        let av = AVPlayer()
+        let player = Player(core: core, avPlayer: av, streamURL: { _ in url })
+        let track = PlayerTrack(id: "clip", title: "Clip", durationMs: 2000,
+                                cropStartMs: 500, cropEndMs: 1300)
+        await player.play([track], startAt: 0)
+        try await waitUntil { av.currentTime().seconds >= 0.6 }
+        XCTAssertEqual(player.duration, 0.8, accuracy: 0.05)
+        XCTAssertLessThan(player.elapsed, 0.5)
+        try await waitUntil { player.queue?.finished == true }
+        XCTAssertNil(av.currentItem)
+    }
+
     func testDelayedQueueResponseCannotReplaceNewerTrack() throws {
         let url = try fixture()
         let player = Player(core: CoreHost(), streamURL: { _ in url })

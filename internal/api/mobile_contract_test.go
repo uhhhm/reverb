@@ -54,7 +54,7 @@ func TestMobileHTTPContract(t *testing.T) {
 			{State: core.CoverageFull, Title: "One", Artist: "Band", Album: "Record", TrackNumber: 1,
 				LibraryTrack: &core.Track{ID: "tr-1", Title: "One", Artist: "Band", Album: "Record", AlbumID: "al-1", ArtistID: "ar-1", Suffix: "mp3", ContentType: "audio/mpeg"},
 				Key:          &core.TrackKey{Source: "deezer", ExternalID: "1"}},
-			{State: core.CoverageNone, Title: "Two", Artist: "Band", TrackNumber: 2, DurationMs: 180000,
+			{State: core.CoverageNone, CanonicalID: "trk_peer", Title: "Two", Artist: "Band", TrackNumber: 2, DurationMs: 180000,
 				ExternalRef: &core.ExternalTrackRef{Source: "deezer", ExternalID: "2", Title: "Two", Artist: "Band", DurationMs: 180000},
 				Key:         &core.TrackKey{Source: "deezer", ExternalID: "2"}},
 		}},
@@ -69,6 +69,7 @@ func TestMobileHTTPContract(t *testing.T) {
 	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth: authSvc, Sync: sync, PlaylistOwner: st.Q(), OfflineSet: st.Q(), OfflineKeeper: keeper, PairingStore: st.Q(),
 		Search: registry.NewRegistry("search"), Downloader: registry.NewRegistry("downloader"),
+		DelegatedStream: &fakeDelegatedStream{},
 	})
 	samples := map[string]json.RawMessage{}
 	for _, c := range []struct{ key, method, path, body string }{
@@ -104,6 +105,13 @@ func TestMobileHTTPContract(t *testing.T) {
 	}
 	if keeper.changed != 2 {
 		t.Fatalf("the keeper heard of %d offline set changes, want 2", keeper.changed)
+	}
+	var playlist core.SyncedPlaylistDetail
+	if err := json.Unmarshal(samples["playlist"], &playlist); err != nil {
+		t.Fatal(err)
+	}
+	if playlist.Tracks[0].Playback != core.PlaybackLocal || playlist.Tracks[1].Playback != core.PlaybackDelegated {
+		t.Fatalf("playback states = %q, %q", playlist.Tracks[0].Playback, playlist.Tracks[1].Playback)
 	}
 	if path := os.Getenv("REVERB_MOBILE_CONTRACT_OUTPUT"); path != "" {
 		data, err := json.Marshal(samples)

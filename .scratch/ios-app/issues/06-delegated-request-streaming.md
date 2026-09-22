@@ -4,11 +4,11 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] A versioned Delegated request protocol, authenticated by existing peer trust, streams a library track by catalog id through the serving device's library adapter
-- [ ] The phone profile resolves playback of a non-offline track to a Delegated request, choosing the Server first and otherwise the paired device reached most recently
-- [ ] The API marks tracks as playable-now or unavailable, based on the offline set and reachable devices
-- [ ] E2E: the phone runtime streams a non-offline track from the desktop runtime; with the desktop stopped, the same track reports unavailable
-- [ ] iOS plays streamed tracks and visibly marks unavailable ones
-- [ ] E2E: an unpaired peer's Delegated request is refused
+- [x] A versioned Delegated request protocol, authenticated by existing peer trust, streams a library track by catalog id through the serving device's library adapter
+- [x] The phone profile resolves playback of a non-offline track to a Delegated request, choosing the Server first and otherwise the paired device reached most recently
+- [x] The API marks tracks as playable-now or unavailable, based on the offline set and reachable devices
+- [x] E2E: the phone runtime streams a non-offline track from the desktop runtime; with the desktop stopped, the same track reports unavailable
+- [x] iOS plays streamed tracks and visibly marks unavailable ones
+- [x] E2E: an unpaired peer's Delegated request is refused

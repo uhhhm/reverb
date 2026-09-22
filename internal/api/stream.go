@@ -48,6 +48,17 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !addr.Found || addr.BackendID == "" {
+			if s.deps.DelegatedStream != nil {
+				opts, seeking := seekOptsFor(r)
+				byteRange := r.Header.Get("Range")
+				if seeking {
+					byteRange = ""
+				}
+				if handle, err := s.deps.DelegatedStream.Stream(r.Context(), id, opts, byteRange); err == nil {
+					s.serveStreamHandle(w, handle)
+					return
+				}
+			}
 			// No copy in the library. The track may still be playable from the
 			// source it was played from before — history and anything else that
 			// addresses tracks canonically would otherwise dead-end on a track
@@ -177,8 +188,11 @@ func (s *Server) serveStream(w http.ResponseWriter, r *http.Request, lib library
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
 	}
-	defer handle.Body.Close()
+	s.serveStreamHandle(w, handle)
+}
 
+func (s *Server) serveStreamHandle(w http.ResponseWriter, handle core.StreamHandle) {
+	defer handle.Body.Close()
 	h := w.Header()
 	if handle.ContentType != "" {
 		h.Set("Content-Type", handle.ContentType)

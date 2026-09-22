@@ -264,9 +264,8 @@ func applyTo(t *core.Track, n Name) {
 }
 
 // ApplyDetailTracks rewrites album- and playlist-detail rows in place. Both the
-// row's own display fields and the embedded LibraryTrack are updated, keyed on
-// the library track id — missing (unowned) rows have no id and are left alone.
-// For P2P, catalog_id is preferred.
+// row's own display fields and the embedded LibraryTrack are updated. A
+// delegated row has no local track but still carries the catalog id used by P2P.
 func (s *Service) ApplyDetailTracks(ctx context.Context, rows []core.AlbumDetailTrack) {
 	if s == nil || s.q == nil || len(rows) == 0 {
 		return
@@ -285,26 +284,33 @@ func (s *Service) ApplyDetailTracks(ctx context.Context, rows []core.AlbumDetail
 	catalogMap := s.catalogIDsForTracks(ctx, trackIDs)
 	for i := range rows {
 		lt := rows[i].LibraryTrack
-		if lt == nil {
-			continue
-		}
 		var n Name
 		var ok bool
-		if cid, hasCID := catalogMap[lt.ID]; hasCID {
-			n, ok = m[cid]
+		if rows[i].CanonicalID != "" {
+			n, ok = m[rows[i].CanonicalID]
 		}
-		if !ok {
+		if !ok && lt != nil {
+			if cid, hasCID := catalogMap[lt.ID]; hasCID {
+				n, ok = m[cid]
+			}
+		}
+		if !ok && lt != nil {
 			n, ok = m[lt.ID]
 		}
 		if !ok {
 			continue
 		}
-		applyTo(lt, n)
+		if lt != nil {
+			applyTo(lt, n)
+		}
 		if n.Title != "" {
 			rows[i].Title = n.Title
 		}
 		if n.Artist != "" {
 			rows[i].Artist = n.Artist
+		}
+		if n.Album != "" {
+			rows[i].Album = n.Album
 		}
 	}
 }

@@ -113,6 +113,7 @@ func setPlaceholderHandlers(h host.Host) {
 	h.SetStreamHandler(pairProtocol, func(s network.Stream) { s.Close() })
 	h.SetStreamHandler("/reverb/file/1.0.0", func(s network.Stream) { s.Close() })
 	h.SetStreamHandler(coverProtocol, func(s network.Stream) { s.Close() })
+	h.SetStreamHandler(delegatedProtocol, func(s network.Stream) { s.Close() })
 }
 
 func newLibp2pHost(priv crypto.PrivKey, port int) (host.Host, error) {

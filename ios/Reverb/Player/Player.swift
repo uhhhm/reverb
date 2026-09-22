@@ -39,6 +39,8 @@ final class Player: ObservableObject {
     private var seekVersion = 0
     private var seeking = false
     private var handledEnd = false
+    private var cropStart: Double = 0
+    private var cropEnd: Double = 0
     /// The play already reloaded once after a failure; a second failure skips it.
     private var reloadedPlayID: Int64?
     private weak var failedItem: AVPlayerItem?
@@ -82,7 +84,13 @@ final class Player: ObservableObject {
 
     /// Replaces the queue with tracks and starts the one at start.
     func play(_ tracks: [LibraryTrack], startAt start: Int) async {
-        let body = Components.Schemas.PlayerTracksRequest(tracks: tracks.map(Self.playerTrack), start: start)
+        await play(tracks.map(Self.playerTrack), startAt: start)
+    }
+
+    /// Plays already-resolved queue tracks. Playlist and recommendation views
+    /// use the stable catalog id here when playback is delegated to a peer.
+    func play(_ tracks: [PlayerTrack], startAt start: Int) async {
+        let body = Components.Schemas.PlayerTracksRequest(tracks: tracks, start: start)
         await change { client, session in
             try await client.playTracks(path: .init(session: session), body: .json(body)).ok.body.json
         }
@@ -151,14 +159,14 @@ final class Player: ObservableObject {
         tracker.seeked(to: target)
         elapsed = target
         updateNowPlaying()
-        avPlayer.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self, weak item] finished in
+        avPlayer.seek(to: CMTime(seconds: cropStart + target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self, weak item] finished in
             Task { @MainActor in
                 guard let self, let item, self.avPlayer.currentItem === item,
                       self.seekVersion == version else { return }
                 self.seeking = false
                 let actual = self.avPlayer.currentTime().seconds
                 if actual.isFinite {
-                    self.elapsed = max(0, actual)
+                    self.elapsed = max(0, actual - self.cropStart)
                     self.tracker.seeked(to: self.elapsed)
                 }
                 if !finished { self.lastError = "Playback: Could not seek to that position." }
@@ -200,6 +208,8 @@ final class Player: ObservableObject {
             isPlaying = false
             elapsed = 0
             duration = 0
+            cropStart = 0
+            cropEnd = 0
             artworkTask?.cancel()
             artwork = nil
             updateNowPlaying()
@@ -258,10 +268,13 @@ final class Player: ObservableObject {
             }
         }
         avPlayer.replaceCurrentItem(with: item)
+        cropStart = max(0, Double(track.cropStartMs ?? 0) / 1000)
+        cropEnd = max(0, Double(track.cropEndMs ?? 0) / 1000)
         elapsed = seconds
-        duration = max(0, Double(track.durationMs ?? 0) / 1000)
+        let estimatedEnd = cropEnd > cropStart ? cropEnd : Double(track.durationMs ?? 0) / 1000
+        duration = max(0, estimatedEnd - cropStart)
         if !continuing { tracker.start(track) }
-        if seconds > 0 { seek(to: seconds) }
+        if cropStart > 0 || seconds > 0 { seek(to: seconds) }
         wantsToPlay = playing
         if playing {
             activateSession()
@@ -276,7 +289,7 @@ final class Player: ObservableObject {
         handledEnd = true
         refreshDuration(item)
         let actual = item.currentTime().seconds
-        if actual.isFinite { tracker.advance(to: actual) }
+        if actual.isFinite { tracker.advance(to: max(0, actual - cropStart)) }
         elapsed = duration
         isPlaying = false
         updateNowPlaying()
@@ -353,8 +366,11 @@ final class Player: ObservableObject {
 
     private func refreshDuration(_ item: AVPlayerItem) {
         let seconds = item.duration.seconds
-        guard seconds.isFinite, seconds > 0, seconds != duration else { return }
-        duration = seconds
+        guard seconds.isFinite, seconds > 0 else { return }
+        let effectiveEnd = cropEnd > cropStart ? min(cropEnd, seconds) : seconds
+        let cropped = max(0, effectiveEnd - cropStart)
+        guard cropped != duration else { return }
+        duration = cropped
         updateNowPlaying()
     }
 
@@ -442,8 +458,14 @@ final class Player: ObservableObject {
         refreshDuration(item)
         let seconds = item.currentTime().seconds
         guard seconds.isFinite else { return }
-        if avPlayer.timeControlStatus == .playing { tracker.advance(to: seconds) }
-        elapsed = max(0, duration > 0 ? min(seconds, duration) : seconds)
+        let position = max(0, seconds - cropStart)
+        if avPlayer.timeControlStatus == .playing { tracker.advance(to: position) }
+        elapsed = max(0, duration > 0 ? min(position, duration) : position)
+        if cropEnd > cropStart, seconds >= cropEnd, wantsToPlay {
+            let item = item
+            let entryID = currentEntry?.id
+            Task { await ended(item: item, entryID: entryID) }
+        }
     }
 
     // MARK: Lock screen, Control Center, headphones
@@ -524,6 +546,7 @@ final class Player: ObservableObject {
         if let isrc = t.isrc { extra["isrc"] = isrc }
         return PlayerTrack(
             id: t.id, title: t.title, artist: t.artist, album: t.album, durationMs: t.durationMs,
+            cropStartMs: t.cropStartMs, cropEndMs: t.cropEndMs,
             additionalProperties: (try? OpenAPIObjectContainer(unvalidatedValue: extra)) ?? .init()
         )
     }
