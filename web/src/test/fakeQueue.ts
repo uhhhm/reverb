@@ -75,6 +75,7 @@ export class FakeQueue {
     this.changed()
   }
   enqueue(tracks: Track[], origin: QueueOrigin = 'listener') {
+    if (tracks.length === 0) return
     let at = this.entries.length
     if (origin === 'listener') {
       const r = this.entries.findIndex((e, i) => i > this.index && e.origin === 'radio')
@@ -86,6 +87,7 @@ export class FakeQueue {
     this.changed()
   }
   remove(positions: number[]) {
+    let removed = false
     for (const p of [...new Set(positions)].sort((a, b) => b - a)) {
       if (p < 0 || p >= this.entries.length) continue
       const wasCurrent = p === this.index
@@ -93,10 +95,13 @@ export class FakeQueue {
       if (p < this.index) this.index--
       if (this.index >= this.entries.length) this.index = this.entries.length - 1
       if (wasCurrent) this.restart()
+      removed = true
     }
-    this.changed()
+    if (removed) this.changed()
   }
   move(from: number, to: number) {
+    const n = this.entries.length
+    if (from < 0 || from >= n || to < 0 || to >= n || from === to) return
     const [e] = this.entries.splice(from, 1)
     this.entries.splice(to, 0, e)
     if (this.index === from) this.index = to
@@ -142,6 +147,7 @@ export class FakeQueue {
     this.next(true)
   }
   clear() {
+    if (this.entries.length === 0 && this.index === -1) return
     this.entries = []
     this.index = -1
     this.restart()
@@ -169,16 +175,24 @@ export class FakeQueue {
         if (entryId === this.current()) this.ended()
       }),
       setShuffle: (on) => answer(() => {
+        if (this.shuffle === on) return
         this.shuffle = on
         this.changed()
       }),
       setRepeat: (mode) => answer(() => {
+        if (this.repeat === mode) return
         this.repeat = mode
         this.changed()
       }),
       radioEnded: () => answer(() => {
-        for (const e of this.entries) e.origin = 'listener'
-        this.changed()
+        let changed = false
+        for (const e of this.entries) {
+          if (e.origin === 'radio') {
+            e.origin = 'listener'
+            changed = true
+          }
+        }
+        if (changed) this.changed()
       }),
       clear: () => answer(() => this.clear()),
     }

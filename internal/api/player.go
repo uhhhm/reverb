@@ -103,7 +103,14 @@ func (s *Server) playerTracks(change func(*player.Queue, playerTracksRequest) er
 func (s *Server) playerEntry(move func(*player.Queue)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body playerEntryRequest
-		s.playerUpdate(w, r, &body, func(q *player.Queue) error {
+		// Entry filter is optional: no body means apply unconditionally.
+		if r.ContentLength != 0 {
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPlayerBody)).Decode(&body); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+				return
+			}
+		}
+		s.playerUpdate(w, r, nil, func(q *player.Queue) error {
 			if body.EntryID == "" || body.EntryID == q.Current() {
 				move(q)
 			}
@@ -119,7 +126,14 @@ func (s *Server) playerUpdate(w http.ResponseWriter, r *http.Request, body any, 
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "player unavailable"})
 		return
 	}
-	if body != nil && r.ContentLength != 0 {
+	if body != nil {
+		// Routes that take a body require one: without it the struct stays at
+		// its zero value and e.g. jump would silently go to the first track
+		// or shuffle would silently turn off.
+		if r.ContentLength == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "request body is required"})
+			return
+		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPlayerBody)).Decode(body); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return

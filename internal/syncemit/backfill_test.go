@@ -6,11 +6,22 @@ import (
 	"time"
 
 	"github.com/uhhhm/reverb/internal/catalog"
+	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/store"
 	"github.com/uhhhm/reverb/internal/store/db"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
 	"github.com/uhhhm/reverb/internal/syncemit"
 )
+
+type trackLibrary []core.Track
+
+func (l trackLibrary) GetSongsBrowse(_ context.Context, size, offset int) ([]core.Track, error) {
+	if offset >= len(l) {
+		return []core.Track{}, nil
+	}
+	end := min(offset+size, len(l))
+	return l[offset:end], nil
+}
 
 func newBackfillStore(t *testing.T) (*store.Store, *syncemit.Service) {
 	t.Helper()
@@ -92,5 +103,37 @@ func TestBackfillWaitsForADeviceIdentity(t *testing.T) {
 	emit.BackfillHistory(ctx, st.Q(), nil)
 	if done, _ := st.Q().GetSetting(ctx, "sync:history_published"); done == "true" {
 		t.Fatal("backfill marked itself done with no device to author under")
+	}
+}
+
+func TestLibraryMetadataPublishesWithoutAPlayOrPlaylist(t *testing.T) {
+	st, err := store.Open(t.TempDir() + "/reverb.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := st.Q().CreateDevice(ctx, db.CreateDeviceParams{ID: "dev_local", Name: "local", TokenHash: "hash"}); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	cat := catalog.NewService(st.Q(), time.Now, func() string { n++; return string(rune('a' + n)) })
+	emit := syncemit.New(reverbsync.NewSyncStore(st.Q()), cat, func(context.Context) string { return "dev_local" })
+	cat.WithEmitter(emit)
+	library := trackLibrary{
+		{ID: "backend-1", Title: "One", Artist: "Band", Album: "Record", DurationMs: 180000},
+		{ID: "backend-2", Title: "Two", Artist: "Band", Album: "Record", DurationMs: 200000},
+	}
+
+	emit.PublishLibrary(ctx, library, cat)
+	if got := changeCount(t, st); got != 2 {
+		t.Fatalf("published %d changes, want one identity per library track", got)
+	}
+	emit.PublishLibrary(ctx, library, cat)
+	if got := changeCount(t, st); got != 2 {
+		t.Fatalf("second publish appended duplicates: %d changes", got)
 	}
 }

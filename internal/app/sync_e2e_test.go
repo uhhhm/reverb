@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/uhhhm/reverb/internal/api"
+	"github.com/uhhhm/reverb/internal/catalog"
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/library/localfiles"
 	"github.com/uhhhm/reverb/internal/store"
@@ -53,7 +54,7 @@ func fakeSubsonic(t *testing.T) *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		switch filepath.Base(r.URL.Path) {
 		case "search3":
-			_, _ = io.WriteString(w, `{"subsonic-response":{"status":"ok","version":"1.16.1","searchResult3":{}}}`)
+			_, _ = io.WriteString(w, `{"subsonic-response":{"status":"ok","version":"1.16.1","searchResult3":{"song":[{"id":"desktop-only","title":"Desktop Only","artist":"Band","album":"Record","duration":180}]}}}`)
 		case "getPlaylists":
 			_, _ = io.WriteString(w, `{"subsonic-response":{"status":"ok","version":"1.16.1","playlists":{"playlist":[]}}}`)
 		case "getArtists":
@@ -498,6 +499,15 @@ func TestPhoneConvergesWithDesktop(t *testing.T) {
 	desktop := newSyncDevice(t, "desktop")
 	phone := newPhoneDevice(t, "phone")
 	pair(t, desktop, phone)
+
+	// Library metadata is replicated even for a desktop track that has never
+	// been played or placed in a playlist. Its audio remains on the desktop;
+	// later Delegated-request work can use this identity to address it.
+	desktopOnly := catalog.Identity{Kind: "track", Title: "Desktop Only", Artist: "Band", Album: "Record", DurationMs: 180000}
+	converge(t, desktop, phone, "the desktop's library metadata reaches the phone", func() bool {
+		_, found, err := phone.rt.catalog.Lookup(context.Background(), desktopOnly)
+		return err == nil && found
+	})
 
 	// The phone's library is whatever is in its folder; file sync is what puts
 	// files there, and a rescan is what it asks for once they land.

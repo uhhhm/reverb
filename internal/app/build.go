@@ -145,6 +145,7 @@ type Runtime struct {
 	Playlists *playlistcrdt.Service
 	projector *materialize.Service
 	files     *p2p.FileSyncer
+	catalog   *catalog.Service
 	profile   Profile
 	// noDiscovery is Options.P2PNoDiscovery, kept for StartBackground.
 	noDiscovery bool
@@ -654,6 +655,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		Playlists:   playlistProjection,
 		projector:   projector,
 		files:       files,
+		catalog:     catalogSvc,
 		profile:     opts.Profile,
 		noDiscovery: opts.P2PNoDiscovery,
 		musicDir:    musicDir,
@@ -771,11 +773,18 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 	if r.Bundle.Supervisor != nil && r.Bundle.Manager != nil {
 		go WaitReadyThenBackfill(ctx, r.Bundle.Supervisor.Ready, r.Bundle.Manager.BackfillUnlinked)
 	}
-	// Replication only ever carried renames and crops before, so a library built
-	// up over months would reach a newly paired device empty. Publish what is
-	// already here, once, in the background — it reads the whole play history.
+	// Replication only ever carried referenced catalog entities before, so a
+	// library built up over months would reach a newly paired device incomplete.
+	// Publish existing history once, then enumerate library metadata on every
+	// boot so files added outside Reverb also become visible to peers. Keep the
+	// passes serial: both can ensure catalog entities in the sync log.
 	if r.SyncEmit != nil {
-		go r.SyncEmit.BackfillHistory(ctx, r.Store.Q(), r.Playlists)
+		go func() {
+			r.SyncEmit.BackfillHistory(ctx, r.Store.Q(), r.Playlists)
+			if browser, ok := r.Bundle.Library.(syncemit.LibraryBrowser); ok {
+				r.SyncEmit.PublishLibrary(ctx, browser, r.catalog)
+			}
+		}()
 	}
 	if r.Bundle.Sync != nil {
 		go playlistsync.NewScheduler(r.Bundle.Sync, syncInterval).Run(ctx)

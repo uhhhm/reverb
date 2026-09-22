@@ -58,18 +58,19 @@ function change(
   onFail?: () => void,
 ): Promise<boolean> {
   const run = pending.then(async () => {
-    let state: QueueState
     try {
-      state = await request()
+      const state = await request()
+      engine.apply(state, typeof opts === 'function' ? opts() : opts)
     } catch (err) {
       console.warn('player: queue request failed', err)
       onFail?.()
       return false
     }
-    engine.apply(state, typeof opts === 'function' ? opts() : opts)
     return true
   })
-  pending = run
+  // The chain itself never rejects: a throwing apply must not wedge every
+  // later change. Callers still see the per-request result via run.
+  pending = run.catch(() => false)
   return run
 }
 

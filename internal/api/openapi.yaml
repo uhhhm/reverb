@@ -1730,7 +1730,9 @@ paths:
                   token: { type: string }
                 required: [deviceId, token]
         "400": { description: missing fields, a payload that is not a Reverb pairing link, or one in a format this version does not read }
+        "409": { description: pairing code already used }
         "410": { description: the payload's code has expired }
+        "429": { description: too many pairing attempts }
         "500": { description: pairing failed }
         "503": { description: p2p unavailable or peer trust store unavailable }
   /p2p/manifests:

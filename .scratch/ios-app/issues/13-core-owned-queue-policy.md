@@ -1,6 +1,6 @@
 # 13: Core-owned queue policy (desktop refactor)
 
-**What to build:** Queue state and advance logic move from the web player into a core service with an HTTP/WebSocket API. The desktop SPA becomes a thin player: it reports position, skips, and completions, and plays what the core says is next. Desktop behaviour is unchanged. This is the prefactor for Radio on iOS (ADR 0003).
+**What to build:** Queue state and advance logic move from the web player into a core service with an HTTP/WebSocket API. The desktop SPA becomes a thin queue player: it reports skips and completions, and plays what the core says is next. Desktop behaviour is unchanged. Position reporting arrives with the core-owned Radio session in ticket 14, where policy first needs it. This is the prefactor for Radio on iOS (ADR 0003).
 
 **Blocked by:** None (can start immediately)
 

@@ -18,6 +18,10 @@ export interface RadioStart {
 
 /** How many tracks Radio keeps queued after the current one. */
 export const RADIO_AHEAD = 3
+
+function isPromise(v: unknown): v is Promise<void> {
+  return !!v && typeof (v as Promise<void>).then === 'function'
+}
 /** The most tracks in a row Radio plays by one artist. */
 export const MAX_ARTIST_RUN = 2
 /** Skips of one artist that stop it for the rest of the session. */
@@ -290,62 +294,124 @@ export class RadioSession {
   /**
    * Re-ranks what Radio has lined up: the tracks it queued go back into the
    * pool, the pool re-sorts by steering, and the queue refills from it.
+   *
+   * The pool only changes once the queue has: taken return to it after the
+   * remove lands, and picks leave it after the append lands. A failed change
+   * therefore neither loses tracks nor leaves them in both places.
    */
   private restack() {
     if (!this.active || this.mutating) return
     const { queue, upNext, origins } = this.host.getState()
     const ours = upNext.filter((i) => origins[i] === 'radio').sort((a, b) => a - b)
     const taken = ours.map((i) => queue[i])
-    this.pool = [...taken, ...this.pool]
-    this.sortPool()
+    const poolBefore = [...this.pool]
+    const combined = this.sorted([...taken, ...poolBefore])
     // As many go back as were taken, even past RADIO_AHEAD when the listener's
     // own tracks are queued too; and never fewer than it takes to refill.
     const kept = queue.filter((_, i) => !ours.includes(i))
-    const picks = this.pick(kept, Math.max(taken.length, RADIO_AHEAD - (upNext.length - ours.length)))
+    const need = Math.max(taken.length, RADIO_AHEAD - (upNext.length - ours.length))
+    const { picks, remaining } = this.select(kept, need, combined)
     if (ours.length === 0 && picks.length === 0) return
     this.mutate(() => {
-      const removed = ours.length ? this.host.remove(ours) : undefined
-      const append = () => (picks.length ? this.host.append(picks) : undefined)
-      return removed ? removed.then(append) : append()
+      const commitRemove = () => {
+        // The remove landed: taken are out of the queue, so they now live in
+        // the pool (minus whatever is about to go back). Keep anything a
+        // refill fetched while the remove was on its way.
+        const added = this.pool.filter((t) => !poolBefore.includes(t))
+        this.pool = this.sorted([...remaining, ...added])
+      }
+      const doAppend = (): Promise<void> | void => {
+        if (!picks.length) return
+        let appended: Promise<void> | void
+        try {
+          appended = this.host.append(picks)
+        } catch (err) {
+          this.pool.unshift(...picks)
+          this.sortPool()
+          throw err
+        }
+        if (isPromise(appended)) {
+          return appended.catch((err) => {
+            // The append failed: put the picks back so a later refill retries
+            // them rather than losing them.
+            this.pool.unshift(...picks)
+            this.sortPool()
+            throw err
+          })
+        }
+        // Sync success: pool already excludes picks via remaining.
+      }
+      if (!ours.length) return doAppend()
+      // A sync throw leaves the pool untouched: taken were never added to it.
+      const removed: Promise<void> | void = this.host.remove(ours)
+      if (isPromise(removed)) {
+        return removed.then(() => {
+          commitRemove()
+          return doAppend()
+        })
+      }
+      commitRemove()
+      return doAppend()
     })
   }
 
   /** Drops blocked artists and orders the pool by steering; ties keep the server's order. */
   private sortPool() {
-    this.pool = this.pool.filter((t) => !this.blocked.has(normalize(t.artist)))
-    if (this.steering.size === 0) return
-    const scores = new Map(this.pool.map((t) => [t, this.score(t)]))
-    this.pool.sort((a, b) => scores.get(b)! - scores.get(a)!)
+    this.pool = this.sorted(this.pool)
+  }
+
+  private sorted(tracks: Track[]): Track[] {
+    const kept = tracks.filter((t) => !this.blocked.has(normalize(t.artist)))
+    if (this.steering.size === 0) return kept
+    const scores = new Map(kept.map((t) => [t, this.score(t)]))
+    return [...kept].sort((a, b) => scores.get(b)! - scores.get(a)!)
   }
 
   private fill() {
     if (this.mutating) return
-    const picks = this.pick(this.host.getState().queue, RADIO_AHEAD - this.ahead())
-    if (picks.length) this.mutate(() => this.host.append(picks))
+    const need = RADIO_AHEAD - this.ahead()
+    if (need <= 0) return
+    // Selected but still pooled: only leaving the pool after the append
+    // lands, so a failed append retries them instead of losing them.
+    const { picks } = this.select(this.host.getState().queue, need, this.pool)
+    if (!picks.length) return
+    this.mutate(() => {
+      const commit = () => {
+        const picked = new Set(picks)
+        this.pool = this.pool.filter((t) => !picked.has(t))
+      }
+      // A sync throw leaves the pool untouched, so the picks stay pooled.
+      const appended: Promise<void> | void = this.host.append(picks)
+      if (isPromise(appended)) return appended.then(commit)
+      commit()
+    })
   }
 
   /**
    * Takes up to n of the best pooled tracks, in the order they would line up
-   * after queue, keeping artist runs short.
+   * after queue, keeping artist runs short. Reads from source without
+   * changing the session pool; the caller commits after the queue change
+   * lands.
    */
-  private pick(queue: Track[], n: number): Track[] {
+  private select(queue: Track[], n: number, source: Track[]): { picks: Track[]; remaining: Track[] } {
+    const pool = [...source]
     const lined = [...queue]
     const picks: Track[] = []
     while (picks.length < n) {
-      const i = this.pickIndex(lined)
+      const i = this.pickIndex(lined, pool)
       if (i < 0) break
-      const [t] = this.pool.splice(i, 1)
+      const [t] = pool.splice(i, 1)
       picks.push(t)
       lined.push(t)
     }
-    return picks
+    return { picks, remaining: pool }
   }
 
   /** The first pooled track that would not extend a run of one artist too far. */
-  private pickIndex(queue: Track[]): number {
+  private pickIndex(queue: Track[], pool: Track[] = this.pool): number {
     const tail = queue.slice(-MAX_ARTIST_RUN).map((t) => normalize(t.artist))
     const blocked = tail.length === MAX_ARTIST_RUN && tail.every((a) => a === tail[0]) ? tail[0] : null
-    return this.pool.findIndex((t) => normalize(t.artist) !== blocked)
+    return pool.findIndex((t) => normalize(t.artist) !== blocked)
   }
 
   private prewarmUpcoming() {

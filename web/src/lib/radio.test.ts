@@ -97,6 +97,16 @@ class FakePlayer implements RadioHost {
   }
 }
 
+class FlakyAppendPlayer extends FakePlayer {
+  appendAttempts = 0
+
+  override append(tracks: Track[]): Promise<void> | void {
+    this.appendAttempts++
+    if (this.appendAttempts === 1) return Promise.reject(new Error('offline'))
+    return super.append(tracks)
+  }
+}
+
 const START: RadioStart = { lead: [track('seed', 'Seed Artist')], seeds: [{ artist: 'Seed Artist', title: 'Tseed' }] }
 const SKIP = 10_000
 const WHOLE = 200_000
@@ -124,6 +134,16 @@ describe('RadioSession queueing', () => {
 
     for (let i = 0; i < 6 && player.index < player.queue.length - 1; i++) player.next(NEUTRAL)
     expect(player.queue.map((t) => t.id)).toEqual(['seed', 'a1', 'b1', 'a2', 'a3', 'c1', 'a4'])
+  })
+
+  it('retries the same pooled tracks after an append fails', async () => {
+    const player = new FlakyAppendPlayer([[
+      track('a1', 'A'), track('b1', 'B'), track('c1', 'C'),
+    ]])
+    await startRadio(player)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(player.appendAttempts).toBeGreaterThanOrEqual(2)
+    expect(player.upcoming()).toEqual(['a1', 'b1', 'c1'])
   })
 })
 

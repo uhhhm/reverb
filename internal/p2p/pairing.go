@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -30,6 +31,35 @@ type PairingService interface {
 	// RedeemAs binds the pairing to the device ID the redeemer already authors
 	// under. An empty deviceID mints one.
 	RedeemAs(ctx context.Context, rawCode, deviceName, deviceID string) (string, string, error)
+}
+
+var (
+	// ErrPairingRateLimited is returned when the peer refuses another pairing
+	// attempt in the current window.
+	ErrPairingRateLimited = errors.New("too many pairing attempts; try again later")
+	// ErrPairingProofInvalid is returned when the responder does not prove it
+	// holds the same code. Nothing the responder says can be trusted then.
+	ErrPairingProofInvalid = errors.New("pairing possession proof failed")
+)
+
+// remotePairingError restores stable error identities after an error has
+// crossed the pairing wire as text. The protocol predates structured errors,
+// so only its fixed messages are classified; unknown failures stay opaque.
+func remotePairingError(message string) error {
+	switch message {
+	case sync.ErrCodeInvalid.Error():
+		return sync.ErrCodeInvalid
+	case "invalid pairing proof":
+		return fmt.Errorf("%w: invalid pairing proof", sync.ErrCodeInvalid)
+	case sync.ErrCodeExpired.Error():
+		return sync.ErrCodeExpired
+	case sync.ErrCodeUsed.Error():
+		return sync.ErrCodeUsed
+	case "too many pairing attempts; try again later":
+		return ErrPairingRateLimited
+	default:
+		return errors.New(message)
+	}
 }
 
 // pairHello opens the exchange. It carries the redeemer's identity and a fresh
@@ -323,7 +353,7 @@ func RedeemViaAddrs(ctx context.Context, h host.Host, guard *Guard, keys DeviceK
 		return "", "", err
 	}
 	if challenge.Error != "" {
-		return "", "", fmt.Errorf("%s", challenge.Error)
+		return "", "", remotePairingError(challenge.Error)
 	}
 	if err := validPairNonce(challenge.Nonce); err != nil {
 		return "", "", fmt.Errorf("responder sent no pairing challenge")
@@ -343,14 +373,14 @@ func RedeemViaAddrs(ctx context.Context, h host.Host, guard *Guard, keys DeviceK
 		return "", "", err
 	}
 	if resp.Error != "" {
-		return "", "", fmt.Errorf("%s", resp.Error)
+		return "", "", remotePairingError(resp.Error)
 	}
 	// The responder proves possession before anything it says is believed:
 	// otherwise a rogue that answers "success" would be trusted and its token
 	// used, which is exactly how pairing was forged before the proof existed.
 	responderProof, err := decodePairProof(resp.Proof)
 	if err != nil || !hmac.Equal(responderProof, pairCtx.proof(key, pairLabelResponder)) {
-		return "", "", fmt.Errorf("responder did not prove possession of the pairing code")
+		return "", "", fmt.Errorf("%w: responder did not prove possession of the pairing code", ErrPairingProofInvalid)
 	}
 	if resp.DeviceID == "" || resp.Token == "" {
 		return "", "", fmt.Errorf("invalid pair response")

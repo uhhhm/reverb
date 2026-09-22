@@ -9,6 +9,7 @@ import (
 
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/uhhhm/reverb/internal/sync"
 )
 
 func newPeerID(t *testing.T) string {
@@ -89,5 +90,25 @@ func TestPairPayloadRefusesWhatItCannotUse(t *testing.T) {
 func TestEncodePairPayloadNeedsAnAddress(t *testing.T) {
 	if _, err := EncodePairPayload(PairPayload{Code: "AB12CD34", ExpiresAt: 1}); err == nil {
 		t.Fatal("a payload with nowhere to dial was encoded")
+	}
+}
+
+func TestRemotePairingErrorsKeepStableIdentities(t *testing.T) {
+	cases := []struct {
+		message string
+		want    error
+	}{
+		{sync.ErrCodeInvalid.Error(), sync.ErrCodeInvalid},
+		{sync.ErrCodeExpired.Error(), sync.ErrCodeExpired},
+		{sync.ErrCodeUsed.Error(), sync.ErrCodeUsed},
+		{"too many pairing attempts; try again later", ErrPairingRateLimited},
+	}
+	for _, c := range cases {
+		if err := remotePairingError(c.message); !errors.Is(err, c.want) {
+			t.Errorf("remotePairingError(%q) = %v, want %v", c.message, err, c.want)
+		}
+	}
+	if err := remotePairingError("trust peer: disk full"); errors.Is(err, sync.ErrCodeInvalid) {
+		t.Fatalf("unknown remote failure was classified as invalid code: %v", err)
 	}
 }

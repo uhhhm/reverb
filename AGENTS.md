@@ -37,6 +37,7 @@ Reverb is a Go modular monolith with an embedded React/TypeScript SPA. **Desktop
 - Register adapters explicitly at the composition root. Keep existing conformance suites and consumer-owned interfaces.
 - Preserve catalog IDs versus backend IDs, catalog-first projection, non-emitting peer application, and local-only offline sets. See the architecture reference before changing these paths.
 - The product has one household owner. Keep loopback/Host/Origin guards and paired-device authentication; capability gates do not imply a planned account system.
+- In code review, treat ticket boundaries as planning aids, not deletion criteria: keep correct, useful work that belongs to another pending ticket, and clarify the ticket boundary instead of removing it solely as scope creep. Rework it when it conflicts with the architecture, breaks a contract, or carries material correctness risk.
 - Write current truth in documentation and comments. Replace stale claims rather than appending corrections or completed-task history.
 - Secrets belong in environment variables or ignored `.env` files. Keep `.env.example` free of credentials.
 

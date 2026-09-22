@@ -6009,8 +6009,22 @@ export interface paths {
                     };
                     content?: never;
                 };
+                /** @description pairing code already used */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
                 /** @description the payload's code has expired */
                 410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description too many pairing attempts */
+                429: {
                     headers: {
                         [name: string]: unknown;
                     };

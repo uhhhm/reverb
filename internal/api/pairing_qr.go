@@ -10,6 +10,7 @@ import (
 	"rsc.io/qr"
 
 	"github.com/uhhhm/reverb/internal/p2p"
+	"github.com/uhhhm/reverb/internal/sync"
 )
 
 // pairingQR is the QR form of a freshly minted pairing code: the payload a
@@ -75,6 +76,13 @@ func (s *Server) handleP2PRedeemQR(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "payload and deviceName are required"})
 		return
 	}
+	// Unauthenticated like the typed redeem, so it needs the same
+	// brute-force bound over the same secret.
+	limiterKey := pairingClientKey(r)
+	if !p2p.AllowPairAttempt(limiterKey) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many pairing attempts; try again later"})
+		return
+	}
 	payload, target, err := p2p.ParsePairPayload(body.Payload, time.Now())
 	switch {
 	case errors.Is(err, p2p.ErrPairPayloadExpired):
@@ -95,8 +103,20 @@ func (s *Server) handleP2PRedeemQR(w http.ResponseWriter, r *http.Request) {
 	deviceID, token, err := p2p.RedeemViaAddrs(r.Context(), h.LibHost(), guard, s.deps.DeviceKeys, target,
 		payload.Code, strings.TrimSpace(body.DeviceName), s.localSyncDeviceID(r.Context()))
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		switch {
+		case errors.Is(err, p2p.ErrPairingRateLimited):
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": err.Error()})
+		case errors.Is(err, sync.ErrCodeExpired):
+			writeJSON(w, http.StatusGone, map[string]string{"error": err.Error()})
+		case errors.Is(err, sync.ErrCodeUsed):
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		case errors.Is(err, sync.ErrCodeInvalid), errors.Is(err, p2p.ErrPairingProofInvalid):
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		default:
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
 		return
 	}
+	p2p.ResetPairAttempts(limiterKey)
 	writeJSON(w, http.StatusOK, map[string]string{"deviceId": deviceID, "token": token})
 }

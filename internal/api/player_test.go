@@ -407,6 +407,19 @@ func TestPlayerRefusesWhatIsNotATrack(t *testing.T) {
 	}
 }
 
+func TestPlayerRequiresBodiesOnlyForOperationsThatNeedThem(t *testing.T) {
+	c := newPlayerClient(t, nil)
+	for _, op := range []string{"play", "enqueue", "remove", "move", "jump", "shuffle", "repeat"} {
+		if code, _, raw := c.call(op, nil); code != http.StatusBadRequest {
+			t.Errorf("%s without a body = %d: %s", op, code, raw)
+		}
+	}
+	c.play(0, "1", "2")
+	if code, st, raw := c.call("next", nil); code != http.StatusOK || st.Index != 1 {
+		t.Fatalf("next without a body = %d %+v: %s", code, st, raw)
+	}
+}
+
 func TestPlayerPublishesEachChange(t *testing.T) {
 	var got []player.Event
 	c := newPlayerClient(t, func(e player.Event) { got = append(got, e) })

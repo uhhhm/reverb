@@ -149,6 +149,19 @@ describe('playerStore', () => {
     expect(warn).toHaveBeenCalled()
     warn.mockRestore()
   })
+
+  it('continues sending changes after applying one answer throws', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const apply = vi.spyOn(engine, 'apply').mockImplementationOnce(() => {
+      throw new Error('bad queue answer')
+    })
+    await run(() => usePlayer.getState().playTrackList([track('1')], 0))
+    await run(() => usePlayer.getState().enqueue(track('2')))
+    expect(ids()).toEqual(['1', '2'])
+    expect(warn).toHaveBeenCalled()
+    apply.mockRestore()
+    warn.mockRestore()
+  })
 })
 
 describe('Radio', () => {
