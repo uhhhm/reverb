@@ -108,15 +108,19 @@ type deviceDTO struct {
 	IsServer  bool   `json:"isServer"`
 	CreatedAt int64  `json:"createdAt"`
 	LastSeen  int64  `json:"lastSeen"`
+	// ThisDevice marks the rows that are this device itself, not a device
+	// paired with it.
+	ThisDevice bool `json:"thisDevice"`
 }
 
-func toDeviceDTO(d db.Device) deviceDTO {
+func toDeviceDTO(d db.Device, self map[string]bool) deviceDTO {
 	return deviceDTO{
-		ID:        d.ID,
-		Name:      d.Name,
-		IsServer:  d.IsServer == 1,
-		CreatedAt: d.CreatedAt,
-		LastSeen:  d.LastSeen,
+		ID:         d.ID,
+		Name:       d.Name,
+		IsServer:   d.IsServer == 1,
+		CreatedAt:  d.CreatedAt,
+		LastSeen:   d.LastSeen,
+		ThisDevice: self[d.ID],
 	}
 }
 
@@ -130,9 +134,18 @@ func (s *Server) handlePairingDevices(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not list devices"})
 		return
 	}
+	// This device appears twice: the server row it answers pairing as, and
+	// the device it authors changes under.
+	self := map[string]bool{}
+	if id, err := sync.ServerDeviceID(r.Context(), s.deps.PairingStore); err == nil {
+		self[id] = true
+	}
+	if id, err := sync.LocalDeviceID(r.Context(), s.deps.PairingStore); err == nil {
+		self[id] = true
+	}
 	out := make([]deviceDTO, 0, len(devices))
 	for _, d := range devices {
-		out = append(out, toDeviceDTO(d))
+		out = append(out, toDeviceDTO(d, self))
 	}
 	writeJSON(w, http.StatusOK, out)
 }

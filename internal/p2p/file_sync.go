@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/uhhhm/reverb/internal/audiotag"
 	"github.com/uhhhm/reverb/internal/store/db"
 )
 
@@ -71,10 +72,77 @@ type FileSyncer struct {
 	deviceID  string
 	musicDir  string
 	onChanged func()
+	progress  func(contentHash string, done int64)
 }
 
 // WithOnChanged refreshes the library after incoming files or deletions land.
 func (f *FileSyncer) WithOnChanged(fn func()) *FileSyncer { f.onChanged = fn; return f }
+
+// WithProgress reports each fetch's bytes as they arrive, keyed on the content
+// being fetched: once with zero as it starts, then as the copy goes.
+func (f *FileSyncer) WithProgress(fn func(contentHash string, done int64)) *FileSyncer {
+	f.progress = fn
+	return f
+}
+
+// progressWriter counts bytes into a FileSyncer's progress report, at most
+// once per step so a large file does not report on every chunk.
+type progressWriter struct {
+	hash       string
+	done, next int64
+	report     func(string, int64)
+}
+
+const progressStep = 256 << 10
+
+func (w *progressWriter) Write(b []byte) (int, error) {
+	w.done += int64(len(b))
+	if w.done >= w.next {
+		w.report(w.hash, w.done)
+		w.next = w.done + progressStep
+	}
+	return len(b), nil
+}
+
+// FileTagStore records what each audio file's tags say, keyed on its content.
+// Optional: a store without it advertises files by path and hash alone, which
+// is all a device replicating everything needs. *db.Queries satisfies it.
+type FileTagStore interface {
+	UpsertFileTag(ctx context.Context, arg db.UpsertFileTagParams) error
+	ListFileTags(ctx context.Context) ([]db.FileTag, error)
+	DeleteOrphanFileTags(ctx context.Context) error
+}
+
+// taggedHashes is the set of contents whose tags are already recorded, or nil
+// when the store cannot record tags.
+func (f *FileSyncer) taggedHashes(ctx context.Context) (FileTagStore, map[string]bool, error) {
+	tags, ok := f.store.(FileTagStore)
+	if !ok {
+		return nil, nil, nil
+	}
+	rows, err := tags.ListFileTags(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	have := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		have[r.ContentHash] = true
+	}
+	return tags, have, nil
+}
+
+// recordTags stores what the audio file at path says it is, once per content.
+func recordTags(ctx context.Context, tags FileTagStore, have map[string]bool, path, relSlash, hash string) {
+	if tags == nil || have[hash] || !audiotag.IsAudio(relSlash) {
+		return
+	}
+	info := audiotag.Read(path, relSlash)
+	if err := tags.UpsertFileTag(ctx, db.UpsertFileTagParams{
+		ContentHash: hash, Title: info.Title, Artist: info.Artist, Album: info.Album, Isrc: info.ISRC,
+	}); err == nil {
+		have[hash] = true
+	}
+}
 
 func (f *FileSyncer) deletedHashes(ctx context.Context) (map[string]bool, error) {
 	deleted := map[string]bool{}
@@ -112,6 +180,10 @@ func (f *FileSyncer) ScanAndSync(ctx context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	deleted, err := f.deletedHashes(ctx)
+	if err != nil {
+		return err
+	}
+	tags, tagged, err := f.taggedHashes(ctx)
 	if err != nil {
 		return err
 	}
@@ -177,7 +249,9 @@ func (f *FileSyncer) ScanAndSync(ctx context.Context) error {
 		seen[canonicalID] = true
 		seenRel[relSlash] = true
 		if prev, ok := existingByID[canonicalID]; ok && prev.Mtime == mtime && prev.Size == size && prev.DeviceID == f.deviceID && !deleted[prev.ContentHash] {
-			// Unchanged — skip hashing.
+			// Unchanged — skip hashing. A file hashed before tags were
+			// recorded has them read now, without hashing it again.
+			recordTags(ctx, tags, tagged, path, relSlash, prev.ContentHash)
 			return nil
 		}
 		h := sha256.New()
@@ -222,6 +296,7 @@ func (f *FileSyncer) ScanAndSync(ctx context.Context) error {
 			// Don't fail whole scan on single upsert error.
 			return nil
 		}
+		recordTags(ctx, tags, tagged, path, relSlash, hash)
 		return nil
 	})
 	if walkErr != nil {
@@ -263,6 +338,9 @@ func (f *FileSyncer) ScanAndSync(ctx context.Context) error {
 		if !seen[id] {
 			_ = f.store.DeleteFileManifest(ctx, id)
 		}
+	}
+	if tags != nil {
+		_ = tags.DeleteOrphanFileTags(ctx)
 	}
 	return nil
 }
@@ -447,7 +525,12 @@ func (f *FileSyncer) FetchFileViaPeer(ctx context.Context, h host.Host, peerIDSt
 	}
 	// Hash while copying so the file is read once.
 	digest := sha256.New()
-	n, copyErr := copyStreamIdle(io.MultiWriter(tmp, digest), io.LimitReader(s, maxFileBytes), s)
+	sink := io.MultiWriter(tmp, digest)
+	if f.progress != nil {
+		f.progress(expHash, 0)
+		sink = io.MultiWriter(sink, &progressWriter{hash: expHash, next: progressStep, report: f.progress})
+	}
+	n, copyErr := copyStreamIdle(sink, io.LimitReader(s, maxFileBytes), s)
 	if copyErr != nil {
 		cleanup()
 		return copyErr

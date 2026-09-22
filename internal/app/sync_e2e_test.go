@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,9 +41,16 @@ type syncDevice struct {
 	// noDiscovery boots the device without mDNS or the DHT, the way it is
 	// across a VPN.
 	noDiscovery bool
-	rt          *Runtime
-	srv         *httptest.Server
-	stop        func()
+	// freeSpace stands in for the phone's disk.
+	freeSpace func(dir string) (int64, error)
+	// builtIn gives a desktop the built-in library, whose music folder file
+	// sync serves from; env points it at the fake backend instead of a
+	// bundled Navidrome, which never starts.
+	builtIn bool
+	env     map[string]string
+	rt      *Runtime
+	srv     *httptest.Server
+	stop    func()
 }
 
 // fakeSubsonic is an external library backend that owns nothing. Every
@@ -76,32 +84,46 @@ type deviceOption func(*syncDevice)
 
 func withoutDiscovery(d *syncDevice) { d.noDiscovery = true }
 
+// withBuiltInLibrary boots a desktop whose library is its own music folder,
+// which is what a desktop that holds files and replicates them is.
+func withBuiltInLibrary(d *syncDevice) { d.builtIn = true }
+
 func newSyncDevice(t *testing.T, name string, opts ...deviceOption) *syncDevice {
 	t.Helper()
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "reverb.db")
 	lib := fakeSubsonic(t)
 
-	// An enabled library row makes wiring pick external mode and build the
-	// playlist service; the bundled spotDL downloader row is seeded by Build.
-	st, err := store.Open(dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Migrate(); err != nil {
-		t.Fatal(err)
-	}
-	cfg, _ := json.Marshal(map[string]any{"url": lib.URL, "username": "u", "password": "p"})
-	if err := st.Q().CreateAdapterInstance(context.Background(), db.CreateAdapterInstanceParams{
-		ID: uuid.NewString(), Type: "library", Name: "subsonic", Enabled: 1, ConfigJson: string(cfg),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	_ = st.Close()
-
 	d := &syncDevice{t: t, name: name, dbPath: dbPath, musicDir: filepath.Join(tmp, "music")}
 	for _, o := range opts {
 		o(d)
+	}
+	if d.builtIn {
+		u, err := url.Parse(lib.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.env = map[string]string{
+			"REVERB_NAVIDROME_PORT": u.Port(),
+			"REVERB_NAVIDROME_BIN":  filepath.Join(tmp, "no-navidrome"),
+		}
+	} else {
+		// An enabled library row makes wiring pick external mode and build the
+		// playlist service; the bundled spotDL downloader row is seeded by Build.
+		st, err := store.Open(dbPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.Migrate(); err != nil {
+			t.Fatal(err)
+		}
+		cfg, _ := json.Marshal(map[string]any{"url": lib.URL, "username": "u", "password": "p"})
+		if err := st.Q().CreateAdapterInstance(context.Background(), db.CreateAdapterInstanceParams{
+			ID: uuid.NewString(), Type: "library", Name: "subsonic", Enabled: 1, ConfigJson: string(cfg),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		_ = st.Close()
 	}
 	d.boot()
 	t.Cleanup(func() { d.stop() })
@@ -128,6 +150,9 @@ func newPhoneDevice(t *testing.T, name string, opts ...deviceOption) *syncDevice
 func (d *syncDevice) boot() {
 	d.t.Helper()
 	env := map[string]string{}
+	for k, v := range d.env {
+		env[k] = v
+	}
 	if d.profile != ProfilePhone {
 		env["REVERB_DOWNLOAD_DIR"] = d.musicDir
 	}
@@ -136,6 +161,7 @@ func (d *syncDevice) boot() {
 		Version:        "test",
 		Profile:        d.profile,
 		P2PNoDiscovery: d.noDiscovery,
+		FreeSpace:      d.freeSpace,
 		Getenv:         func(k string) string { return env[k] },
 	})
 	if err != nil {
@@ -147,7 +173,12 @@ func (d *syncDevice) boot() {
 	ctx, cancel := context.WithCancel(context.Background())
 	rt.StartBackground(ctx)
 	srv := httptest.NewServer(api.NewServer(rt.Deps).Handler())
+	stopped := false
 	d.rt, d.srv, d.stop = rt, srv, func() {
+		if stopped {
+			return
+		}
+		stopped = true
 		cancel()
 		srv.Close()
 		rt.Close()

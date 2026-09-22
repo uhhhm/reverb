@@ -9,6 +9,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 // manifestProtocol carries "what files do you have?". It is the discovery half
@@ -48,6 +49,14 @@ func RegisterManifestHandler(h host.Host, store FileStore, localDeviceID string,
 			_ = json.NewEncoder(s).Encode(map[string]string{"error": err.Error()})
 			return
 		}
+		tags := map[string]db.FileTag{}
+		if ts, ok := store.(FileTagStore); ok {
+			if list, err := ts.ListFileTags(ctx); err == nil {
+				for _, t := range list {
+					tags[t.ContentHash] = t
+				}
+			}
+		}
 		resp := manifestResponse{DeviceID: localDeviceID, Files: make([]FileManifest, 0, len(rows))}
 		for _, r := range rows {
 			// Only advertise our own files. Rows learned from other peers are
@@ -56,6 +65,7 @@ func RegisterManifestHandler(h host.Host, store FileStore, localDeviceID string,
 			if r.DeviceID != localDeviceID {
 				continue
 			}
+			tag := tags[r.ContentHash]
 			resp.Files = append(resp.Files, FileManifest{
 				CanonicalID: r.CanonicalID,
 				ContentHash: r.ContentHash,
@@ -63,6 +73,10 @@ func RegisterManifestHandler(h host.Host, store FileStore, localDeviceID string,
 				RelPath:     r.RelPath,
 				Mtime:       r.Mtime,
 				DeviceID:    r.DeviceID,
+				Title:       tag.Title,
+				Artist:      tag.Artist,
+				Album:       tag.Album,
+				ISRC:        tag.Isrc,
 			})
 		}
 		if err := json.NewEncoder(s).Encode(resp); err != nil {

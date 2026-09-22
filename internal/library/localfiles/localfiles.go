@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/uhhhm/reverb/internal/audiotag"
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/registry"
 )
@@ -42,21 +43,8 @@ const (
 	playlistPrefix = "pl-"
 )
 
-// contentTypes are the audio files the adapter indexes, by extension, with the
-// type a player needs to be told. Source-native downloads land as AAC in MP4
-// and Opus in WebM or Ogg, so those are here beside the usual formats.
-var contentTypes = map[string]string{
-	".mp3":  "audio/mpeg",
-	".flac": "audio/flac",
-	".m4a":  "audio/mp4",
-	".mp4":  "audio/mp4",
-	".aac":  "audio/aac",
-	".ogg":  "audio/ogg",
-	".oga":  "audio/ogg",
-	".opus": "audio/ogg",
-	".webm": "audio/webm",
-	".wav":  "audio/wav",
-}
+// contentTypes are the audio files the adapter indexes; see audiotag.
+var contentTypes = audiotag.ContentTypes
 
 // folderImages are the names a directory's own cover is looked for under,
 // when a track carries no embedded picture.

@@ -292,6 +292,14 @@ func cachedToResult(row db.MatchCache) core.MatchResult {
 	}
 }
 
+// Resolve is the matcher's decision for ext among cands, with no library search
+// and no cache. It is for callers that hold the candidates themselves, such as
+// a phone choosing which of a peer's files its offline set needs, so they
+// decide exactly as the matcher later will against the files they fetched.
+func Resolve(ext core.ExternalResult, cands []core.Track) core.MatchResult {
+	return (&Service{}).resolve(ext, cands)
+}
+
 // resolve runs the priority chain against cands and returns the match decision.
 // Chain: ISRC exact → MBID exact → normalized fuzzy+duration → not_in_library.
 func (s *Service) resolve(ext core.ExternalResult, cands []core.Track) core.MatchResult {
@@ -344,8 +352,14 @@ func (s *Service) resolve(ext core.ExternalResult, cands []core.Track) core.Matc
 		// reject when the album corroborates: a YouTube-sourced download drifts
 		// several seconds from Spotify's metadata, and title+artist+album is a
 		// stronger signal than a tight duration window.
+		// The same holds for a candidate with no duration: a library that
+		// never decodes audio (the phone's folder library) knows none. Such a
+		// candidate counts as the least close one that still passes, so a
+		// candidate whose duration is known to agree beats it.
 		delta := 0
-		if ext.DurationMs > 0 {
+		if ext.DurationMs > 0 && c.DurationMs == 0 {
+			delta = DurationToleranceMs
+		} else if ext.DurationMs > 0 {
 			delta = absInt(c.DurationMs - ext.DurationMs)
 			if delta > DurationToleranceMs && !albumMatch {
 				continue

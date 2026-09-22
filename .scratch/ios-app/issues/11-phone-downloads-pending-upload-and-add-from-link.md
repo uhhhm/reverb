@@ -11,3 +11,5 @@
 - [ ] E2E: a phone Download that belongs to an offline playlist is kept after upload
 - [ ] Pending uploads are exposed through the API, shown in sync status, and never pruned, including when storage is full
 - [ ] Add from link resolves Spotify and YouTube links on the phone, from paste or the iOS share sheet, and can add the result to a playlist and/or download it
+
+**Note from 02:** the offline-set keeper records a file in `offline_file` when it selects it, before any bytes arrive, and prunes recorded files no offline playlist names. A phone Download that lands at the same path with the same content would count as an offline file; pending upload has to exclude its files from that pruning.

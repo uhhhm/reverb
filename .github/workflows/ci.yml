@@ -26,6 +26,10 @@ jobs:
       # until the release workflow is already running on a Mac runner.
       - name: Vet for macOS
         run: make vet-darwin
+      # And for the phone: the core as iOS compiles it, plus gobind's check
+      # that its exported surface binds, neither of which needs a Mac.
+      - name: Vet for iOS
+        run: make vet-ios
       - run: make test-race
   lint:
     runs-on: ubuntu-latest

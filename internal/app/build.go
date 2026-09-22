@@ -38,6 +38,7 @@ import (
 	"github.com/uhhhm/reverb/internal/linkadd"
 	"github.com/uhhhm/reverb/internal/materialize"
 	"github.com/uhhhm/reverb/internal/notinterested"
+	"github.com/uhhhm/reverb/internal/offlineset"
 	"github.com/uhhhm/reverb/internal/override"
 	"github.com/uhhhm/reverb/internal/p2p"
 	"github.com/uhhhm/reverb/internal/play"
@@ -114,6 +115,10 @@ type Options struct {
 	// (REVERB_PYTHON, else python3), which is how the phone profile runs on
 	// Linux. The desktop ignores it.
 	Python pyrun.Runner
+	// FreeSpace reports the bytes free on the disk holding a directory; a
+	// phone stops fetching its offline set before the disk fills. Nil asks the
+	// operating system. The desktop ignores it.
+	FreeSpace func(dir string) (int64, error)
 }
 
 // Runtime is the built application: everything an entry point needs to serve
@@ -136,6 +141,8 @@ type Runtime struct {
 	P2PGuard *p2p.Guard
 	// P2PSyncer is the anti-entropy syncer, set once the host starts.
 	P2PSyncer *p2p.Syncer
+	// P2PPuller copies peers' files here, set once the host starts.
+	P2PPuller *p2p.Puller
 	Getenv    func(string) string
 
 	// SyncEmit publishes locally-made changes; Playlists projects playlists in
@@ -145,8 +152,10 @@ type Runtime struct {
 	Playlists *playlistcrdt.Service
 	projector *materialize.Service
 	files     *p2p.FileSyncer
-	catalog   *catalog.Service
-	profile   Profile
+	// offline keeps a phone's offline set on it; nil on a desktop.
+	offline *offlineset.Keeper
+	catalog *catalog.Service
+	profile Profile
 	// noDiscovery is Options.P2PNoDiscovery, kept for StartBackground.
 	noDiscovery bool
 	// musicDir is the folder this device's files sync from and into; empty when
@@ -554,6 +563,27 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		}
 	}
 	files := p2p.NewFileSyncer(st.Q(), localID, musicDir).WithOnChanged(scheduleDownloadScan)
+	// A desktop replicates every file. A phone keeps only its offline set,
+	// so the keeper decides what it fetches and prunes (ADR 0003).
+	var offline *offlineset.Keeper
+	if phone && musicDir != "" {
+		offline = offlineset.NewKeeper(offlineset.KeeperConfig{
+			Store: st.Q(),
+			DeviceID: func(c context.Context) (string, error) {
+				return reverbsync.ServerDeviceID(c, st.Q())
+			},
+			FileDeviceID: localID,
+			MusicDir:     musicDir,
+			FreeSpace:    opts.FreeSpace,
+			Rescan: func(c context.Context) error {
+				err := files.ScanAndSync(c)
+				scheduleDownloadScan()
+				return err
+			},
+		})
+		files.WithProgress(offline.Progress)
+		deps.OfflineKeeper = offline
+	}
 	// Renaming the library's existing files is what lets a Windows device pair
 	// with a library built on Linux or macOS. It is exposed as a deliberate
 	// action rather than run at startup, because it touches the owner's own
@@ -597,6 +627,11 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	deps.SyncStore.SetMaterializer(projector)
 	notifyProjection := func() {
 		bus.Publish(events.Event{Topic: "library.updated", Payload: core.LibraryUpdatedEvent{}})
+		// A peer's playlist edit can add a track to, or take one from, the
+		// offline set.
+		if offline != nil {
+			offline.Changed()
+		}
 	}
 	deps.SyncStore.SetAfterProjection(notifyProjection)
 	if syncStoreForLink != deps.SyncStore {
@@ -655,6 +690,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		Playlists:   playlistProjection,
 		projector:   projector,
 		files:       files,
+		offline:     offline,
 		catalog:     catalogSvc,
 		profile:     opts.Profile,
 		noDiscovery: opts.P2PNoDiscovery,
@@ -740,6 +776,11 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 					p2p.RegisterManifestHandler(h.LibHost(), r.Store.Q(), localID, guard)
 					puller := p2p.NewPuller(h.LibHost(), r.Store.Q(), fs, guard, localID, musicDir).
 						WithCovers(r.Store.Q(), coverDir)
+					if r.offline != nil {
+						puller.WithSelection(r.offline)
+						r.offline.SetKick(puller.Kick)
+					}
+					r.P2PPuller = puller
 					r.goLoop(ctx, "file pull", func() { puller.Run(ctx) })
 				}
 				// P2P anti-entropy for sync changes over libp2p.

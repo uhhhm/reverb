@@ -606,3 +606,19 @@ func TestArtistMatchesExported(t *testing.T) {
 		t.Error("unrelated artists must not match")
 	}
 }
+
+// A library that knows no durations (the phone's folder library) still
+// matches; a candidate whose duration is known to agree wins over it.
+func TestResolveCandidateWithoutDuration(t *testing.T) {
+	ext := core.ExternalResult{Title: "Song", Artist: "Band", DurationMs: 180000, Type: core.EntityTrack}
+	if got := Resolve(ext, []core.Track{{ID: "unknown", Title: "Song", Artist: "Band"}}); got.LibraryTrackID != "unknown" {
+		t.Fatalf("a candidate with no duration did not match: %+v", got)
+	}
+	got := Resolve(ext, []core.Track{
+		{ID: "unknown", Title: "Song", Artist: "Band"},
+		{ID: "known", Title: "Song", Artist: "Band", DurationMs: 181000},
+	})
+	if got.LibraryTrackID != "known" {
+		t.Fatalf("matched %q, want the candidate whose duration agrees", got.LibraryTrackID)
+	}
+}

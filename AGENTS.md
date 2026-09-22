@@ -21,16 +21,17 @@ Reverb is a Go modular monolith with an embedded React/TypeScript SPA. **Desktop
 | Pairing, reconciliation | `internal/sync`, `internal/p2p` | `go test ./internal/sync ./internal/p2p` |
 | Adapters, live reload | `internal/registry`, `internal/wiring`, `internal/app/reload.go` | `go test ./internal/wiring ./internal/app` |
 | Desktop startup, tools, updates | `desktop/`, `internal/desktop` | `go test ./desktop/... ./internal/desktop/...` |
+| Phone core, offline set, iOS app | `mobile/reverbcore`, `internal/offlineset`, `ios/` (see `ios/README.md`) | `go test ./mobile/... ./cmd/reverb-testpeer ./internal/offlineset` and `make vet-ios`; Xcode builds need a Mac |
 | HTTP contract | `internal/api/openapi.yaml`, `web/src/lib/*Api.ts` | `go test ./internal/api` and frontend typecheck/tests |
 
 ## Setup and checks
 
 - `make setup-web` installs locked frontend dependencies; `make setup-contracts` installs the isolated contract tools. `make web` builds already-installed dependencies; `make desktop-dev` starts Wails development mode.
 - Go minimum is declared by `go.mod`; CI selects its toolchain in `.github/workflows/ci.yml`. Use Node 22+.
-- `make test` includes backend, desktop Go packages, and frontend unit tests. Use explicit Go package roots (`./cmd/... ./internal/... ./desktop/...`): repository-wide `./...` can traverse vendored Go in `web/node_modules`.
+- `make test` includes backend, desktop Go packages, and frontend unit tests. Use explicit Go package roots (`./cmd/... ./internal/... ./desktop/... ./mobile/...`): repository-wide `./...` can traverse vendored Go in `web/node_modules`.
 - For HTTP or WebSocket shape changes, read [docs/contracts.md](docs/contracts.md), edit OpenAPI, and run `make contracts`. Generated transport files are checked by `make contracts-check`.
 - `make gen` regenerates sqlc output; `make gen-check` checks drift. Edit SQL in `internal/store/queries`, migrations in `internal/store/migrations`, and handwritten extensions in separate files such as `internal/store/db/underlying.go`. Generated Go files are not hand-edited.
-- `make fmt-check`, `make vet`, `make vet-windows` and `make check-web` expose the individual fast checks. `make vet-windows` cross-compiles: the `_windows_test.go` guards are invisible to every other check, so a rename can break them while everything else stays green. Untagged desktop tests exercise boot and transport; they do not compile the native Wails window.
+- `make fmt-check`, `make vet`, `make vet-windows`, `make vet-ios` and `make check-web` expose the individual fast checks. `make vet-windows` cross-compiles: the `_windows_test.go` guards are invisible to every other check, so a rename can break them while everything else stays green. Untagged desktop tests exercise boot and transport; they do not compile the native Wails window.
 
 ## Rules
 

@@ -1,0 +1,59 @@
+# XcodeGen spec for the iOS app: `make ios-project` writes Reverb.xcodeproj
+# from it, so the project file is generated, not hand-edited.
+name: Reverb
+options:
+  bundleIdPrefix: io.github.uhhhm
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.10"
+    # Signing is the owner's: SideStore re-signs the unsigned IPA, or a paid
+    # account signs it (ADR 0004). Set a team here only to run on a device
+    # from Xcode.
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+packages:
+  ReverbKit:
+    path: ReverbKit
+targets:
+  Reverb:
+    type: application
+    platform: iOS
+    sources:
+      - path: Reverb
+    dependencies:
+      - package: ReverbKit
+        product: ReverbAPI
+      # Built by `make ios-core` (gomobile bind); not checked in.
+      - framework: Frameworks/Reverbcore.xcframework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.uhhhm.reverb
+        INFOPLIST_FILE: Reverb/Info.plist
+        TARGETED_DEVICE_FAMILY: "1"
+        ENABLE_BITCODE: NO
+  ReverbUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: ReverbUITests
+    dependencies:
+      - target: Reverb
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.uhhhm.reverb.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Reverb
+schemes:
+  Reverb:
+    build:
+      targets:
+        Reverb: all
+        ReverbUITests: [test]
+    test:
+      targets:
+        - ReverbUITests

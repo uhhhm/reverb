@@ -4,7 +4,11 @@
 
 **Blocked by:** 02, 03
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
+
+Implemented on Linux; needs the maintainer's Mac for the items that only Xcode can confirm. The app, the XcodeGen project and the XCUITest are written but have not been compiled or run: run `make ios-test` (see `ios/README.md`), then check the device-only items on a real phone. `TestAppFlowAgainstTestPeer` covers the core side of the smoke flow on Linux.
+
+The Swift client is generated at build time by the swift-openapi-generator plugin; `make contracts-check` checks its input, the app's OpenAPI subset. XCUITest cannot read Now Playing, so lock-screen metadata is checked by hand on a device.
 
 - [ ] The Xcode project builds on macOS and links the gomobile-packaged core, which starts and stops with the app's lifecycle
 - [ ] A Swift client is generated from the OpenAPI spec and drift-checked by `make contracts-check` beside the TypeScript client

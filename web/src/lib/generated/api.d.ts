@@ -26,7 +26,11 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            status: string;
+                        };
+                    };
                 };
             };
         };
@@ -198,7 +202,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description nothing staged */
+                /** @description nothing staged, or the swap failed */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -595,7 +599,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description ok */
+                /** @description ok, pendingRestart flag included */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -1182,7 +1186,7 @@ export interface paths {
                     "multipart/form-data": {
                         /**
                          * Format: binary
-                         * @description JPEG
+                         * @description JPEG, PNG, or WebP, up to 5 MB
                          */
                         image?: string;
                         /** @description One or more "album:<id>" or "track:<id>" values */
@@ -1207,7 +1211,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description unsupported image type */
+                /** @description unsupported image type, oversized image, or no valid target */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -1424,7 +1428,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description no ids */
+                /** @description no ids, over the 500-item limit, or an unknown quality */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -2636,7 +2640,7 @@ export interface paths {
                         "application/json": components["schemas"]["SimilarTracks"];
                     };
                 };
-                /** @description at least one seed */
+                /** @description at least one seed, each with an artist, is required */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -2959,7 +2963,7 @@ export interface paths {
                         "application/json": components["schemas"]["RecommendationSettings"];
                     };
                 };
-                /** @description an invalid body */
+                /** @description an invalid body, or adventurousness outside 0 to 100 */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -3044,7 +3048,7 @@ export interface paths {
                         "application/json": components["schemas"]["NotInterestedMark"];
                     };
                 };
-                /** @description missing or unknown kind */
+                /** @description missing or unknown kind, source, id or name */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -4635,6 +4639,101 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/playlists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List managed playlists */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description every managed playlist in the household library */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SyncedPlaylist"][];
+                    };
+                };
+                /** @description playlist sync unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/playlists/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A managed playlist with each track resolved against this device's library */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description playlist detail */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SyncedPlaylistDetail"];
+                    };
+                };
+                /** @description not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description playlist sync unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/playlists/{id}/tracks": {
         parameters: {
             query?: never;
@@ -4798,7 +4897,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List offline set for server device (local-only, per-playlist) */
+        /** List this device's offline set (local-only, per-playlist) */
         get: {
             parameters: {
                 query?: never;
@@ -4808,8 +4907,63 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description ok */
+                /** @description offline set entries */
                 200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfflineSetEntry"][];
+                    };
+                };
+                /** @description offline set unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/offline-set/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Storage and per-track progress of a phone's offline set
+         * @description A phone keeps only the playlists it marked offline, fetched from paired devices. Tracks are reported against what paired devices offered when last reached. When a track does not fit, fetching stops, `full` is set, and nothing on the phone is removed to make room. A desktop replicates every file and answers 503.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description offline set status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OfflineStatus"];
+                    };
+                };
+                /** @description not a phone */
+                503: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -4833,7 +4987,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Set offline enabled for a playlist (local-only, never syncs) */
+        /**
+         * Set offline enabled for a playlist (local-only, never syncs)
+         * @description On a phone, fetching and pruning start at once.
+         */
         put: {
             parameters: {
                 query?: never;
@@ -4851,12 +5008,19 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description ok */
+                /** @description the entry as stored */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            playlistId: string;
+                            enabled: boolean;
+                            /** Format: int64 */
+                            updatedAt: number;
+                        };
+                    };
                 };
                 /** @description not found */
                 404: {
@@ -4868,7 +5032,10 @@ export interface paths {
             };
         };
         post?: never;
-        /** Remove playlist from offline set (local-only) */
+        /**
+         * Remove playlist from offline set (local-only)
+         * @description On a phone, the files only it named are pruned.
+         */
         delete: {
             parameters: {
                 query?: never;
@@ -4880,12 +5047,16 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description ok */
+                /** @description removed */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            ok: boolean;
+                        };
+                    };
                 };
                 /** @description not found */
                 404: {
@@ -4960,7 +5131,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description already at that tier */
+                /** @description already at that tier, unknown source, or nothing can fetch it */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -5174,7 +5345,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description unsupported URL */
+                /** @description unsupported URL, bad time range, or chapter split not possible */
                 422: {
                     headers: {
                         [name: string]: unknown;
@@ -5508,8 +5679,13 @@ export interface paths {
                             isServer: boolean;
                             /** Format: int64 */
                             createdAt: number;
-                            /** Format: int64 */
+                            /**
+                             * Format: int64
+                             * @description Unix seconds
+                             */
                             lastSeen: number;
+                            /** @description This device itself, which is listed as well as the devices paired with it. */
+                            thisDevice: boolean;
                         }[];
                     };
                 };
@@ -5798,11 +5974,11 @@ export interface paths {
                             peerId: string;
                             /** @description The device ID this instance authors sync changes under; empty until an identity exists */
                             deviceId?: string;
-                            /** @description Raw listen multiaddrs */
+                            /** @description Raw listen multiaddrs, including wildcards */
                             addrs: string[];
                             /** @description Complete /p2p/-terminated addresses another device can dial this one on, with wildcard and loopback addresses removed. Give one of these to a device on a VPN, where mDNS and the DHT cannot resolve a bare peer ID. */
                             dialAddrs: string[];
-                            /** @description Currently connected peers */
+                            /** @description Currently connected peers, paired or not */
                             peerCount: number;
                             /** @description Per-device sequence vector */
                             vector?: {
@@ -6002,7 +6178,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description missing fields */
+                /** @description missing fields, a payload that is not a Reverb pairing link, or one in a format this version does not read */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -6270,7 +6446,7 @@ export interface paths {
                         peerId: string;
                         /** @description Path relative to the music dir; traversal and symlink escapes are rejected */
                         relPath: string;
-                        /** @description Expected SHA-256 */
+                        /** @description Expected SHA-256, hex encoded */
                         contentHash: string;
                     };
                 };
@@ -6287,7 +6463,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description peerId */
+                /** @description peerId, relPath and contentHash are required */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -6301,7 +6477,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description p2p unavailable */
+                /** @description p2p unavailable, file store unavailable, or local device not initialized */
                 503: {
                     headers: {
                         [name: string]: unknown;
@@ -6359,6 +6535,135 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description A track of this device's library. Its id is this device's own and means nothing on another. */
+        LibraryTrack: {
+            id: string;
+            title: string;
+            albumId: string;
+            album: string;
+            artistId: string;
+            artist: string;
+            /** @description Pass to GET /cover/{id}; empty when there is no art. */
+            coverArtId: string;
+            trackNumber: number;
+            discNumber: number;
+            /** @description Zero when this device's library does not know it. */
+            durationMs: number;
+            bitRate: number;
+            suffix: string;
+            contentType: string;
+            isrc?: string;
+            mbid?: string;
+            /** @description Where playback starts, when the track is cropped. */
+            cropStartMs?: number;
+            /** @description Where playback stops; zero plays to the end. */
+            cropEndMs?: number;
+        };
+        TrackKey: {
+            source: string;
+            externalId: string;
+        };
+        ExternalTrackRef: {
+            source: string;
+            externalId: string;
+            title: string;
+            artist?: string;
+            album?: string;
+            isrc?: string;
+            durationMs: number;
+        };
+        SyncedPlaylist: {
+            id: string;
+            /** @description local for a playlist made in Reverb. */
+            source: string;
+            externalId: string;
+            name: string;
+            coverUrl?: string;
+            /** @description once for a playlist whose tracklist replicates; synced for a mirror of an upstream playlist. */
+            mode: string;
+            syncEnabled: boolean;
+            syncIntervalSec: number;
+            autoDownload: boolean;
+            /** Format: int64 */
+            lastSyncedAt: number;
+            trackCount: number;
+        };
+        PlaylistTrack: {
+            /**
+             * @description full when this device's library holds the track, which libraryTrack then names.
+             * @enum {string}
+             */
+            state: "full" | "none" | "partial" | "pending";
+            libraryTrack?: components["schemas"]["LibraryTrack"];
+            externalRef?: components["schemas"]["ExternalTrackRef"];
+            key?: components["schemas"]["TrackKey"];
+            title: string;
+            artist: string;
+            album?: string;
+            trackNumber: number;
+            durationMs: number;
+            coverUrl?: string;
+            artistExternalId?: string;
+            albumExternalId?: string;
+        };
+        SyncedPlaylistDetail: components["schemas"]["SyncedPlaylist"] & {
+            ownedCount: number;
+            totalCount: number;
+            tracks: components["schemas"]["PlaylistTrack"][];
+        };
+        OfflineSetEntry: {
+            playlistId: string;
+            enabled: boolean;
+            playlistName: string;
+            /** Format: int64 */
+            updatedAt: number;
+        };
+        OfflineStatus: {
+            /**
+             * Format: int64
+             * @description Space the offline set's files take, each counted once.
+             */
+            usedBytes: number;
+            /**
+             * Format: int64
+             * @description What fetching may still use, after the space kept free for the rest of the phone.
+             */
+            availableBytes: number;
+            /** @description A track a paired device offers does not fit. Fetching has stopped; nothing was removed. */
+            full: boolean;
+            /** @description The phone's free space cannot be read; nothing is fetched until it can. */
+            spaceUnknown: boolean;
+            playlists: components["schemas"]["OfflinePlaylistStatus"][];
+        };
+        OfflinePlaylistStatus: {
+            playlistId: string;
+            playlistName: string;
+            /**
+             * Format: int64
+             * @description Space this playlist's files on the phone take.
+             */
+            bytes: number;
+            trackCount: number;
+            readyCount: number;
+            tracks: components["schemas"]["OfflineTrackStatus"][];
+        };
+        OfflineTrackStatus: {
+            title: string;
+            artist: string;
+            album?: string;
+            /**
+             * @description ready — on the phone; fetching — being copied; queued — a paired device offers it; noSpace — offered but does not fit; unavailable — no paired device reached since the phone started offers it.
+             * @enum {string}
+             */
+            state: "ready" | "fetching" | "queued" | "noSpace" | "unavailable";
+            /**
+             * Format: int64
+             * @description The file's size, once a file is known.
+             */
+            sizeBytes: number;
+            /** Format: int64 */
+            fetchedBytes: number;
+        };
         /** @description A track as the player plays it. The core stores it exactly as sent and hands it back; only the player reads its fields. The desktop sends its library or external track object. */
         PlayerTrack: {
             id?: string;
@@ -6370,7 +6675,7 @@ export interface components {
             [key: string]: unknown;
         };
         QueueEntry: {
-            /** @description Unique to this entry */
+            /** @description Unique to this entry, even when the same track is queued twice. */
             id: string;
             /**
              * @description Who queued it. A listener's tracks play before Radio's.
@@ -6381,7 +6686,7 @@ export interface components {
         };
         QueueState: {
             entries: components["schemas"]["QueueEntry"][];
-            /** @description The current entry */
+            /** @description The current entry, or -1 with nothing to play. */
             index: number;
             shuffle: boolean;
             /** @enum {string} */
@@ -6414,7 +6719,7 @@ export interface components {
              * @enum {string}
              */
             origin: "listener" | "radio";
-            /** @description For play */
+            /** @description For play, the position to start at. */
             start?: number;
         };
         PlayerRemoveRequest: {
@@ -6439,18 +6744,18 @@ export interface components {
             mode: "off" | "all" | "one";
         };
         FileFetchFailure: {
-            /** @description The paired device this file could not be copied from. A file can fail from one device and succeed from another */
+            /** @description The paired device this file could not be copied from. A file can fail from one device and succeed from another, so a failure is reported per device. */
             peerId: string;
             /** @description SHA-256 of the content that could not be copied */
             contentHash: string;
-            /** @description Path last attempted */
+            /** @description Path last attempted, as the peer advertises it */
             relPath: string;
             /**
              * @description unstorable-path — this device's filesystem cannot write that name; content-mismatch — the bytes served did not hash to what was advertised; unavailable — the peer did not serve the file.
              * @enum {string}
              */
             reason: "unstorable-path" | "content-mismatch" | "unavailable";
-            /** @description The underlying error */
+            /** @description The underlying error, for diagnosis */
             detail: string;
             /**
              * Format: int64
@@ -6484,7 +6789,7 @@ export interface components {
                 path: string;
                 reason: string;
             }[];
-            /** @description Entries considered */
+            /** @description Entries considered, migrated or not */
             examined: number;
         };
         /** @description Metadata exchange status. Local projection and file transfers run independently in the background. */
@@ -6839,7 +7144,7 @@ export interface components {
             downloading?: boolean;
             /** @description 0..1 while downloading */
             progress?: number;
-            /** @description Tag downloaded and verified */
+            /** @description Tag downloaded and verified, waiting for a restart */
             staged?: string;
             /** @description Last failure; cleared by the next successful step */
             error?: string;

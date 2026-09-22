@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"context"
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -40,6 +41,55 @@ type Puller struct {
 	// ones that can. Optional: a store without the capability degrades to the
 	// old behaviour of retrying everything every round.
 	failures *fetchFailures
+
+	// selection narrows what is fetched. Nil fetches everything, which is
+	// what a desktop does; a phone keeps only its offline set.
+	selection FileSelection
+
+	// kick asks Run for a round now; round serialises rounds, since one can
+	// come from Run and one from PullNow at the same time.
+	kick  chan struct{}
+	round sync.Mutex
+}
+
+// errNotAttempted is the outcome reported for a selected file the round did
+// not get to.
+var errNotAttempted = errors.New("not attempted this round")
+
+// FileSelection decides which of a peer's files this device keeps.
+type FileSelection interface {
+	// Select narrows missing, the files peerID offers that this device lacks,
+	// to the ones it wants, in the order to fetch them. offered is the peer's
+	// whole manifest.
+	Select(ctx context.Context, peerID string, offered, missing []FileManifest) []FileManifest
+	// Fetched reports that the round is done with a selected file: fetched
+	// when err is nil, failed, or not attempted.
+	Fetched(ctx context.Context, f FileManifest, err error)
+	// Prune runs after every round to drop what is no longer wanted.
+	Prune(ctx context.Context) error
+}
+
+// WithSelection makes the puller fetch only what sel selects.
+func (p *Puller) WithSelection(sel FileSelection) *Puller {
+	p.selection = sel
+	return p
+}
+
+// Kick asks for a round as soon as the current one, if any, is done. It
+// never blocks; kicks while one is pending collapse into it.
+func (p *Puller) Kick() {
+	select {
+	case p.kick <- struct{}{}:
+	default:
+	}
+}
+
+// PullNow runs one round and returns when it is done.
+func (p *Puller) PullNow(ctx context.Context) {
+	if p == nil || p.host == nil || p.store == nil || p.files == nil || p.guard == nil {
+		return
+	}
+	p.pullAll(ctx)
 }
 
 // CoverRefLister reads the covers this device knows about, whether or not it
@@ -67,6 +117,7 @@ func NewPuller(h host.Host, store FileStore, files *FileSyncer, guard *Guard, lo
 		// several rounds instead of saturating the link in one go.
 		maxPerRound: 50,
 		failures:    &fetchFailures{},
+		kick:        make(chan struct{}, 1),
 	}
 	if q, ok := store.(FetchFailureStore); ok {
 		p.failures.q = q
@@ -89,6 +140,9 @@ func (p *Puller) Run(ctx context.Context) {
 		return
 	case <-timer.C:
 		p.pullAll(ctx)
+	case <-p.kick:
+		timer.Stop()
+		p.pullAll(ctx)
 	}
 	for {
 		select {
@@ -96,11 +150,24 @@ func (p *Puller) Run(ctx context.Context) {
 			return
 		case <-t.C:
 			p.pullAll(ctx)
+		case <-p.kick:
+			p.pullAll(ctx)
 		}
 	}
 }
 
 func (p *Puller) pullAll(ctx context.Context) {
+	p.round.Lock()
+	defer p.round.Unlock()
+	if p.selection != nil {
+		// Pruning needs no peer: a playlist unmarked while every device is out
+		// of reach still gives its space back.
+		defer func() {
+			if err := p.selection.Prune(ctx); err != nil {
+				log.Printf("p2p pull: prune: %v", err)
+			}
+		}()
+	}
 	trusted, err := p.guard.TrustedPeers(ctx)
 	if err != nil {
 		log.Printf("p2p pull: trusted peer lookup failed: %v", err)
@@ -117,6 +184,7 @@ func (p *Puller) pullAll(ctx context.Context) {
 			defer wg.Done()
 			SafeRun("pull peer", func() {
 				if !EnsureConnected(ctx, p.host, p.guard, pid) {
+					p.offersNothing(ctx, pid)
 					return
 				}
 				if err := p.pullPeer(ctx, pid); err != nil {
@@ -128,9 +196,18 @@ func (p *Puller) pullAll(ctx context.Context) {
 	wg.Wait()
 }
 
+// offersNothing tells the selection that pid, unreachable or empty, offers no
+// file this round, so nothing is reported as on its way from it.
+func (p *Puller) offersNothing(ctx context.Context, pid peer.ID) {
+	if p.selection != nil {
+		p.selection.Select(ctx, pid.String(), nil, nil)
+	}
+}
+
 func (p *Puller) pullPeer(ctx context.Context, pid peer.ID) error {
 	resp, err := RequestManifest(ctx, p.host, pid)
 	if err != nil {
+		p.offersNothing(ctx, pid)
 		return err
 	}
 	// A round that got this far proves the current address works; persist it so
@@ -149,6 +226,7 @@ func (p *Puller) pullPeer(ctx context.Context, pid peer.ID) error {
 	if len(resp.Files) == 0 || p.musicDir == "" {
 		// A peer offering nothing cannot be the reason anything is stuck.
 		p.failures.prune(ctx, pid.String(), nil)
+		p.offersNothing(ctx, pid)
 		return nil
 	}
 	local, err := p.localManifests(ctx)
@@ -156,6 +234,21 @@ func (p *Puller) pullPeer(ctx context.Context, pid peer.ID) error {
 		return err
 	}
 	want := MissingFiles(local, resp.Files, p.musicDir)
+	// Every file the selection chose is handed back when the round is done
+	// with it, fetched or passed by (backed off, over the round's cap, a
+	// cancelled round), so it is not held for this peer after the round.
+	attempted := map[string]bool{}
+	if p.selection != nil {
+		want = p.selection.Select(ctx, pid.String(), resp.Files, want)
+		selected := append([]FileManifest(nil), want...)
+		defer func() {
+			for _, f := range selected {
+				if !attempted[f.ContentHash] {
+					p.selection.Fetched(ctx, f, errNotAttempted)
+				}
+			}
+		}()
+	}
 	deleted, err := p.files.deletedHashes(ctx)
 	if err != nil {
 		return err
@@ -212,8 +305,12 @@ func (p *Puller) pullPeer(ctx context.Context, pid peer.ID) error {
 		}
 		c := candidate{peerID: pid.String(), contentHash: f.ContentHash, relPath: f.RelPath}
 		fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		attempted[f.ContentHash] = true
 		err := p.files.FetchFileViaPeer(fetchCtx, p.host, pid.String(), f.RelPath, f.ContentHash)
 		cancel()
+		if p.selection != nil {
+			p.selection.Fetched(ctx, f, err)
+		}
 		if err != nil {
 			log.Printf("p2p pull: fetch %q from %s: %v", f.RelPath, pid, err)
 			p.failures.recordAttempt(ctx, c, err)

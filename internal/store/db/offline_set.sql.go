@@ -9,6 +9,15 @@ import (
 	"context"
 )
 
+const deleteOfflineFile = `-- name: DeleteOfflineFile :exec
+DELETE FROM offline_file WHERE rel_path = ?
+`
+
+func (q *Queries) DeleteOfflineFile(ctx context.Context, relPath string) error {
+	_, err := q.db.ExecContext(ctx, deleteOfflineFile, relPath)
+	return err
+}
+
 const deleteOfflineSetEntry = `-- name: DeleteOfflineSetEntry :exec
 DELETE FROM offline_set WHERE device_id = ? AND playlist_id = ?
 `
@@ -53,6 +62,33 @@ func (q *Queries) GetOfflineSetEntry(ctx context.Context, arg GetOfflineSetEntry
 	return i, err
 }
 
+const listOfflineFiles = `-- name: ListOfflineFiles :many
+SELECT rel_path, content_hash, fetched_at FROM offline_file ORDER BY rel_path
+`
+
+func (q *Queries) ListOfflineFiles(ctx context.Context) ([]OfflineFile, error) {
+	rows, err := q.db.QueryContext(ctx, listOfflineFiles)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OfflineFile
+	for rows.Next() {
+		var i OfflineFile
+		if err := rows.Scan(&i.RelPath, &i.ContentHash, &i.FetchedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOfflineSetForDevice = `-- name: ListOfflineSetForDevice :many
 SELECT device_id, playlist_id, enabled, updated_at FROM offline_set WHERE device_id = ? ORDER BY playlist_id
 `
@@ -83,6 +119,21 @@ func (q *Queries) ListOfflineSetForDevice(ctx context.Context, deviceID string) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const upsertOfflineFile = `-- name: UpsertOfflineFile :exec
+INSERT INTO offline_file (rel_path, content_hash, fetched_at) VALUES (?, ?, ?) ON CONFLICT(rel_path) DO UPDATE SET content_hash = excluded.content_hash, fetched_at = excluded.fetched_at
+`
+
+type UpsertOfflineFileParams struct {
+	RelPath     string `json:"rel_path"`
+	ContentHash string `json:"content_hash"`
+	FetchedAt   int64  `json:"fetched_at"`
+}
+
+func (q *Queries) UpsertOfflineFile(ctx context.Context, arg UpsertOfflineFileParams) error {
+	_, err := q.db.ExecContext(ctx, upsertOfflineFile, arg.RelPath, arg.ContentHash, arg.FetchedAt)
+	return err
 }
 
 const upsertOfflineSet = `-- name: UpsertOfflineSet :exec

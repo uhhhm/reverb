@@ -15,3 +15,12 @@ DELETE FROM file_manifest WHERE canonical_id = ?;
 
 -- name: CountFileManifests :one
 SELECT COUNT(*) FROM file_manifest;
+
+-- name: UpsertFileTag :exec
+INSERT INTO file_tag (content_hash, title, artist, album, isrc) VALUES (?, ?, ?, ?, ?) ON CONFLICT(content_hash) DO UPDATE SET title = excluded.title, artist = excluded.artist, album = excluded.album, isrc = excluded.isrc;
+
+-- name: ListFileTags :many
+SELECT * FROM file_tag;
+
+-- name: DeleteOrphanFileTags :exec
+DELETE FROM file_tag WHERE content_hash NOT IN (SELECT content_hash FROM file_manifest);

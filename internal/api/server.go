@@ -242,6 +242,9 @@ type Deps struct {
 	// OfflineSet backs the per-device offline set (local-only, never syncs).
 	// *db.Queries satisfies it. Nil in tests/legacy that don't exercise offline set.
 	OfflineSet OfflineSetStore
+	// OfflineKeeper keeps the offline set's files on a phone and reports their
+	// storage and progress. Nil on a desktop, which replicates every file.
+	OfflineKeeper OfflineKeeper
 	// Pairing and SyncStore back multi-device rendezvous. *sync.PairingService and
 	// *sync.SyncStore satisfy them (wired to the same DB). Nil in tests/legacy.
 	Pairing      *reverbsync.PairingService
@@ -510,6 +513,7 @@ func (s *Server) routes() {
 			// offline-set (T6) — per-playlist offline set, local-only, never emits sync_change.
 			pr.Group(func(or chi.Router) {
 				or.Get("/offline-set", s.handleListOfflineSet)
+				or.Get("/offline-set/status", s.handleOfflineSetStatus)
 				or.Put("/offline-set/{playlistId}", s.handleSetOfflineSet)
 				or.Delete("/offline-set/{playlistId}", s.handleDeleteOfflineSet)
 			})

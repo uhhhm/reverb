@@ -18,12 +18,8 @@ import (
 
 	"github.com/dhowden/tag"
 
+	"github.com/uhhhm/reverb/internal/audiotag"
 	"github.com/uhhhm/reverb/internal/core"
-)
-
-const (
-	unknownArtist = "Unknown Artist"
-	unknownAlbum  = "Unknown Album"
 )
 
 // index is one complete read of the directory. It is replaced whole by a scan
@@ -159,49 +155,14 @@ func isFolderImage(name string) bool {
 	return false
 }
 
-// readTags reads what the file's tags say. A file with no tags, or tags the
-// reader cannot parse, yields zero values and falls back to its path.
-func readTags(p string) (tag.Metadata, bool) {
-	f, err := os.Open(p)
-	if err != nil {
-		return nil, false
-	}
-	defer f.Close()
-	m, err := tag.ReadFrom(f)
-	if err != nil {
-		return nil, false
-	}
-	return m, true
-}
-
 func (ix *index) addTrack(p, rel, ext string, mod time.Time) {
-	dirs := strings.Split(path.Dir(rel), "/")
-	if len(dirs) == 1 && dirs[0] == "." {
-		dirs = nil
+	info := audiotag.Read(p, rel)
+	title, artist, album := info.Title, info.Artist, info.Album
+	trackNo, discNo, year, isrc, hasPicture := info.Track, info.Disc, info.Year, info.ISRC, info.HasPicture
+	albumArtist := info.AlbumArtist
+	if albumArtist == "" {
+		albumArtist = artist
 	}
-	title := strings.TrimSuffix(path.Base(rel), path.Ext(rel))
-	artist, album, albumArtist := unknownArtist, unknownAlbum, ""
-	if n := len(dirs); n >= 1 {
-		album = dirs[n-1]
-	}
-	if n := len(dirs); n >= 2 {
-		artist = dirs[n-2]
-	}
-	var trackNo, discNo, year int
-	var isrc string
-	hasPicture := false
-	if m, ok := readTags(p); ok {
-		title = firstNonEmpty(m.Title(), title)
-		artist = firstNonEmpty(m.Artist(), artist)
-		album = firstNonEmpty(m.Album(), album)
-		albumArtist = m.AlbumArtist()
-		trackNo, _ = m.Track()
-		discNo, _ = m.Disc()
-		year = m.Year()
-		isrc = rawString(m.Raw(), "TSRC", "isrc", "ISRC")
-		hasPicture = m.Picture() != nil && len(m.Picture().Data) > 0
-	}
-	albumArtist = firstNonEmpty(albumArtist, artist)
 
 	id := relID(trackPrefix, rel)
 	albumID := albumPrefix + digest(fold(albumArtist)+"\x00"+fold(album))
@@ -375,24 +336,6 @@ func (ix *index) sortAll() {
 	sort.Slice(ix.playlistOrder, func(i, j int) bool {
 		return fold(ix.playlists[ix.playlistOrder[i]].name) < fold(ix.playlists[ix.playlistOrder[j]].name)
 	})
-}
-
-func firstNonEmpty(vals ...string) string {
-	for _, v := range vals {
-		if s := strings.TrimSpace(v); s != "" {
-			return s
-		}
-	}
-	return ""
-}
-
-func rawString(raw map[string]interface{}, keys ...string) string {
-	for _, k := range keys {
-		if s, ok := raw[k].(string); ok && strings.TrimSpace(s) != "" {
-			return strings.TrimSpace(s)
-		}
-	}
-	return ""
 }
 
 // Stream serves the file byte for byte. rangeHeader may name one byte range

@@ -10,10 +10,12 @@ process.chdir(fileURLToPath(new URL('../..', import.meta.url)))
 const dir = mkdtempSync(join(tmpdir(), 'reverb-contract-'))
 try {
   const output = join(dir, 'responses.json')
-  execFileSync('go', ['test', './internal/api', '-run', '^TestDownloadHTTPContract$', '-count=1'], {
-    env: { ...process.env, REVERB_CONTRACT_OUTPUT: output }, stdio: 'inherit',
+  const mobileOutput = join(dir, 'mobile.json')
+  execFileSync('go', ['test', './internal/api', '-run', '^(TestDownloadHTTPContract|TestMobileHTTPContract)$', '-count=1'], {
+    env: { ...process.env, REVERB_CONTRACT_OUTPUT: output, REVERB_MOBILE_CONTRACT_OUTPUT: mobileOutput }, stdio: 'inherit',
   })
   const samples = JSON.parse(readFileSync(output, 'utf8'))
+  const mobile = JSON.parse(readFileSync(mobileOutput, 'utf8'))
   const doc = YAML.parse(readFileSync('internal/api/openapi.yaml', 'utf8'))
   const ajv = new Ajv({ strict: false, validateFormats: false })
   ajv.addSchema({ $id: 'reverb', components: doc.components })
@@ -28,5 +30,11 @@ try {
   validate(doc.paths['/downloads'].post.requestBody.content['application/json'].schema, samples.request)
   validate(doc.paths['/player/{session}/enqueue'].post.responses['200'].content['application/json'].schema, samples.player)
   for (const event of samples.events) validate(doc.components.schemas.RealtimeEvent, event)
-  console.log('Download and player HTTP and event contracts passed')
+  const okSchema = (path, method = 'get') => doc.paths[path][method].responses['200'].content['application/json'].schema
+  for (const [sample, path, method] of [
+    ['health', '/health'], ['devices', '/pairing/devices'], ['playlists', '/playlists'], ['playlist', '/playlists/{id}'],
+    ['offlineList', '/offline-set'], ['offlineStatus', '/offline-set/status'],
+    ['offlinePut', '/offline-set/{playlistId}', 'put'], ['offlineDelete', '/offline-set/{playlistId}', 'delete'],
+  ]) validate(okSchema(path, method), mobile[sample])
+  console.log('Download, player, playlist and offline set HTTP and event contracts passed')
 } finally { rmSync(dir, { recursive: true, force: true }) }

@@ -26,6 +26,34 @@ type OfflineSetStore interface {
 	ListDevices(ctx context.Context) ([]db.Device, error)
 }
 
+// OfflineKeeper is the phone's offline-set file keeper. *offlineset.Keeper
+// satisfies it.
+type OfflineKeeper interface {
+	Status(ctx context.Context) (offlineset.Status, error)
+	// Changed starts fetching and pruning for a changed offline set.
+	Changed()
+}
+
+// offlineSetChanged has the keeper act on a changed offline set now.
+func (s *Server) offlineSetChanged() {
+	if s.deps.OfflineKeeper != nil {
+		s.deps.OfflineKeeper.Changed()
+	}
+}
+
+func (s *Server) handleOfflineSetStatus(w http.ResponseWriter, r *http.Request) {
+	if s.deps.OfflineKeeper == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "offline storage is only tracked on a phone; a desktop keeps every file"})
+		return
+	}
+	st, err := s.deps.OfflineKeeper.Status(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read offline set status"})
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
 // serverDeviceID returns the server device id (is_server=1) via the single
 // canonical sync.ServerDeviceID implementation.
 func (s *Server) serverDeviceID(ctx context.Context) (string, error) {
@@ -110,6 +138,7 @@ func (s *Server) handleSetOfflineSet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.offlineSetChanged()
 	entry, err := svc.Get(ctx, deviceID, playlistID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read offline set entry"})
@@ -152,5 +181,6 @@ func (s *Server) handleDeleteOfflineSet(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	s.offlineSetChanged()
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

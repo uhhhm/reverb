@@ -127,3 +127,43 @@ func TestScanAndSync_DeletedFileDropsFromManifest(t *testing.T) {
 		t.Fatalf("stale manifest not removed: %+v", rows)
 	}
 }
+
+// A library hashed before tags were recorded still has its tags read, on the
+// next scan and without hashing again, and the manifest carries them; tags of
+// content no longer present are dropped.
+func TestScanRecordsTagsOfFilesAlreadyHashed(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	writeTrack(t, dir, "Band/Record/01 Song.flac", []byte("AUDIO"))
+	writeTrack(t, dir, "Band/Record/cover.jpg", []byte("IMAGE"))
+	q := newTrustStore(t)
+	mkDevice(t, q, "me")
+	f := NewFileSyncer(q, "me", dir)
+	if err := f.ScanAndSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// As a library scanned by an older build left it: manifest rows, no tags.
+	if _, err := q.UnderlyingDB().ExecContext(ctx, `DELETE FROM file_tag`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.ScanAndSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	tags, err := q.ListFileTags(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tags) != 1 || tags[0].ContentHash != hashOf([]byte("AUDIO")) || tags[0].Title != "01 Song" || tags[0].Artist != "Band" || tags[0].Album != "Record" {
+		t.Fatalf("tags = %+v, want the audio file's, named from its path", tags)
+	}
+
+	if err := os.Remove(filepath.Join(dir, "Band", "Record", "01 Song.flac")); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.ScanAndSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if tags, _ := q.ListFileTags(ctx); len(tags) != 0 {
+		t.Fatalf("tags of a removed file stay: %+v", tags)
+	}
+}

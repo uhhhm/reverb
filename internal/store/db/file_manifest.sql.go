@@ -29,6 +29,15 @@ func (q *Queries) DeleteFileManifest(ctx context.Context, canonicalID string) er
 	return err
 }
 
+const deleteOrphanFileTags = `-- name: DeleteOrphanFileTags :exec
+DELETE FROM file_tag WHERE content_hash NOT IN (SELECT content_hash FROM file_manifest)
+`
+
+func (q *Queries) DeleteOrphanFileTags(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, deleteOrphanFileTags)
+	return err
+}
+
 const getFileManifest = `-- name: GetFileManifest :one
 SELECT canonical_id, content_hash, size, rel_path, mtime, device_id FROM file_manifest WHERE canonical_id = ?
 `
@@ -115,6 +124,39 @@ func (q *Queries) ListFileManifestsByHash(ctx context.Context, contentHash strin
 	return items, nil
 }
 
+const listFileTags = `-- name: ListFileTags :many
+SELECT content_hash, title, artist, album, isrc FROM file_tag
+`
+
+func (q *Queries) ListFileTags(ctx context.Context) ([]FileTag, error) {
+	rows, err := q.db.QueryContext(ctx, listFileTags)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FileTag
+	for rows.Next() {
+		var i FileTag
+		if err := rows.Scan(
+			&i.ContentHash,
+			&i.Title,
+			&i.Artist,
+			&i.Album,
+			&i.Isrc,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertFileManifest = `-- name: UpsertFileManifest :exec
 INSERT INTO file_manifest (canonical_id, content_hash, size, rel_path, mtime, device_id) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(canonical_id) DO UPDATE SET content_hash = excluded.content_hash, size = excluded.size, rel_path = excluded.rel_path, mtime = excluded.mtime, device_id = excluded.device_id
 `
@@ -136,6 +178,29 @@ func (q *Queries) UpsertFileManifest(ctx context.Context, arg UpsertFileManifest
 		arg.RelPath,
 		arg.Mtime,
 		arg.DeviceID,
+	)
+	return err
+}
+
+const upsertFileTag = `-- name: UpsertFileTag :exec
+INSERT INTO file_tag (content_hash, title, artist, album, isrc) VALUES (?, ?, ?, ?, ?) ON CONFLICT(content_hash) DO UPDATE SET title = excluded.title, artist = excluded.artist, album = excluded.album, isrc = excluded.isrc
+`
+
+type UpsertFileTagParams struct {
+	ContentHash string `json:"content_hash"`
+	Title       string `json:"title"`
+	Artist      string `json:"artist"`
+	Album       string `json:"album"`
+	Isrc        string `json:"isrc"`
+}
+
+func (q *Queries) UpsertFileTag(ctx context.Context, arg UpsertFileTagParams) error {
+	_, err := q.db.ExecContext(ctx, upsertFileTag,
+		arg.ContentHash,
+		arg.Title,
+		arg.Artist,
+		arg.Album,
+		arg.Isrc,
 	)
 	return err
 }

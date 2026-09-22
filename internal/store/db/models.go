@@ -161,6 +161,14 @@ type FileManifest struct {
 	DeviceID    string `json:"device_id"`
 }
 
+type FileTag struct {
+	ContentHash string `json:"content_hash"`
+	Title       string `json:"title"`
+	Artist      string `json:"artist"`
+	Album       string `json:"album"`
+	Isrc        string `json:"isrc"`
+}
+
 type Lyric struct {
 	TrackKey  string `json:"track_key"`
 	Synced    int64  `json:"synced"`
@@ -193,6 +201,12 @@ type NotInterested struct {
 	Source     string `json:"source"`
 	ExternalID string `json:"external_id"`
 	MarkedAt   int64  `json:"marked_at"`
+}
+
+type OfflineFile struct {
+	RelPath     string `json:"rel_path"`
+	ContentHash string `json:"content_hash"`
+	FetchedAt   int64  `json:"fetched_at"`
 }
 
 type OfflineSet struct {

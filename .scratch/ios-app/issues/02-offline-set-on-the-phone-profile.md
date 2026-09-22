@@ -4,10 +4,10 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] E2E: a desktop playlist marked offline on the phone runtime has its files fetched, and its tracks stream from the phone runtime with the desktop runtime stopped
-- [ ] E2E: a track added to that playlist on the desktop arrives on the phone at the next sync, and a removed track's file is pruned
-- [ ] The phone's offline selection does not replicate to the desktop, and the desktop's does not replicate to the phone
-- [ ] The API reports offline storage per playlist and in total, plus per-track fetch progress
-- [ ] E2E: when the storage limit is reached, fetching stops, the API reports a storage-full state, and no existing offline file is removed
+- [x] E2E: a desktop playlist marked offline on the phone runtime has its files fetched, and its tracks stream from the phone runtime with the desktop runtime stopped
+- [x] E2E: a track added to that playlist on the desktop arrives on the phone at the next sync, and a removed track's file is pruned
+- [x] The phone's offline selection does not replicate to the desktop, and the desktop's does not replicate to the phone
+- [x] The API reports offline storage per playlist and in total, plus per-track fetch progress
+- [x] E2E: when the storage limit is reached, fetching stops, the API reports a storage-full state, and no existing offline file is removed

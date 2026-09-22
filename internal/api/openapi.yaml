@@ -15,7 +15,10 @@ paths:
   /health:
     get:
       summary: Liveness probe
-      responses: { "200": { description: ok } }
+      responses:
+        "200":
+          description: ok
+          content: { application/json: { schema: { type: object, properties: { status: { type: string } }, required: [status] } } }
   /version:
     get:
       summary: Build version and update-check repository
@@ -64,7 +67,7 @@ paths:
         down; the response may not arrive.
       responses:
         "200": { description: restarting }
-        "409": { description: nothing staged, or the swap failed }
+        "409": { description: "nothing staged, or the swap failed" }
         "503": { description: updates unavailable in this build }
   /update/dismiss:
     post:
@@ -136,7 +139,7 @@ paths:
                   type: boolean
                   description: Apply a per-track playback gain so tracks sound level. Files are never re-encoded.
       responses:
-        "200": { description: ok, pendingRestart flag included }
+        "200": { description: "ok, pendingRestart flag included" }
         "400": { description: invalid value }
   /config/pending-restart:
     get:
@@ -293,7 +296,7 @@ paths:
             schema:
               type: object
               properties:
-                image: { type: string, format: binary, description: JPEG, PNG, or WebP, up to 5 MB }
+                image: { type: string, format: binary, description: "JPEG, PNG, or WebP, up to 5 MB" }
                 target:
                   type: array
                   description: 'One or more "album:<id>" or "track:<id>" values'
@@ -311,7 +314,7 @@ paths:
                   errors:
                     type: object
                     additionalProperties: { type: string }
-        "400": { description: unsupported image type, oversized image, or no valid target }
+        "400": { description: "unsupported image type, oversized image, or no valid target" }
         "503": { description: cover uploads unavailable }
     delete:
       summary: Remove uploaded cover art, so the library backend's own art shows again
@@ -408,7 +411,7 @@ paths:
                   errors:
                     type: object
                     additionalProperties: { type: string }
-        "400": { description: no ids, over the 500-item limit, or an unknown quality }
+        "400": { description: "no ids, over the 500-item limit, or an unknown quality" }
         "503": { description: per-track quality unavailable }
   /library/track/{id}/quality:
     get:
@@ -739,7 +742,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/SimilarTracks" }
-        "400": { description: at least one seed, each with an artist, is required }
+        "400": { description: "at least one seed, each with an artist, is required" }
   /recommendations/shelves:
     get:
       summary: Home's "For you" shelves
@@ -845,7 +848,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/RecommendationSettings" }
-        "400": { description: an invalid body, or adventurousness outside 0 to 100 }
+        "400": { description: "an invalid body, or adventurousness outside 0 to 100" }
         "503": { description: recommendation settings unavailable }
   /not-interested:
     get:
@@ -875,7 +878,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/NotInterestedMark" }
-        "400": { description: missing or unknown kind, source, id or name }
+        "400": { description: "missing or unknown kind, source, id or name" }
         "503": { description: marks unavailable }
     delete:
       summary: Undo a mark on every device
@@ -1196,6 +1199,24 @@ paths:
         "200": { description: array of DownloadJob, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/DownloadJob' } } } } }
         "422": { description: could not enqueue }
         "503": { description: playlist sync unavailable }
+  /playlists:
+    get:
+      summary: List managed playlists
+      responses:
+        "200":
+          description: every managed playlist in the household library
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/SyncedPlaylist' } } } }
+        "503": { description: playlist sync unavailable }
+  /playlists/{id}:
+    get:
+      summary: A managed playlist with each track resolved against this device's library
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200":
+          description: playlist detail
+          content: { application/json: { schema: { $ref: '#/components/schemas/SyncedPlaylistDetail' } } }
+        "404": { description: not found }
+        "503": { description: playlist sync unavailable }
   /playlists/{id}/tracks:
     post:
       summary: Add a track to a managed playlist
@@ -1240,11 +1261,30 @@ paths:
         "503": { description: playlist sync unavailable }
   /offline-set:
     get:
-      summary: List offline set for server device (local-only, per-playlist)
-      responses: { "200": { description: ok } }
+      summary: List this device's offline set (local-only, per-playlist)
+      responses:
+        "200":
+          description: offline set entries
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/OfflineSetEntry' } } } }
+        "503": { description: offline set unavailable }
+  /offline-set/status:
+    get:
+      summary: Storage and per-track progress of a phone's offline set
+      description: >
+        A phone keeps only the playlists it marked offline, fetched from paired
+        devices. Tracks are reported against what paired devices offered when
+        last reached. When a track does not fit, fetching stops, `full` is set,
+        and nothing on the phone is removed to make room. A desktop replicates
+        every file and answers 503.
+      responses:
+        "200":
+          description: offline set status
+          content: { application/json: { schema: { $ref: '#/components/schemas/OfflineStatus' } } }
+        "503": { description: not a phone }
   /offline-set/{playlistId}:
     put:
       summary: Set offline enabled for a playlist (local-only, never syncs)
+      description: On a phone, fetching and pruning start at once.
       parameters: [{ name: playlistId, in: path, required: true, schema: { type: string } }]
       requestBody:
         required: true
@@ -1254,11 +1294,28 @@ paths:
               type: object
               properties: { enabled: { type: boolean } }
               required: [enabled]
-      responses: { "200": { description: ok }, "404": { description: not found } }
+      responses:
+        "200":
+          description: the entry as stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  playlistId: { type: string }
+                  enabled: { type: boolean }
+                  updatedAt: { type: integer, format: int64 }
+                required: [playlistId, enabled, updatedAt]
+        "404": { description: not found }
     delete:
       summary: Remove playlist from offline set (local-only)
+      description: On a phone, the files only it named are pruned.
       parameters: [{ name: playlistId, in: path, required: true, schema: { type: string } }]
-      responses: { "200": { description: ok }, "404": { description: not found } }
+      responses:
+        "200":
+          description: removed
+          content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } }, required: [ok] } } }
+        "404": { description: not found }
   /downloads/upgrade:
     post:
       summary: Re-download a track at a different quality tier (up or down), replacing the existing file
@@ -1295,7 +1352,7 @@ paths:
       responses:
         "200": { description: DownloadJob, content: { application/json: { schema: { $ref: '#/components/schemas/DownloadJob' } } } }
         "400": { description: missing artist/title or unknown tier }
-        "422": { description: already at that tier, unknown source, or nothing can fetch it }
+        "422": { description: "already at that tier, unknown source, or nothing can fetch it" }
   /downloads/upgradable:
     get:
       summary: Completed downloads whose tier differs from the target (below it, or above it when downgrading)
@@ -1372,7 +1429,7 @@ paths:
         "200": { description: "{ resolve, job?, jobs?, playlistId?, catalogId } — jobs is present only for a chapter split" }
         "400": { description: url is required }
         "404": { description: playlist not found }
-        "422": { description: unsupported URL, bad time range, or chapter split not possible }
+        "422": { description: "unsupported URL, bad time range, or chapter split not possible" }
         "503": { description: no downloader configured }
   /links/add-batch:
     post:
@@ -1511,8 +1568,9 @@ paths:
                     name: { type: string }
                     isServer: { type: boolean }
                     createdAt: { type: integer, format: int64 }
-                    lastSeen: { type: integer, format: int64 }
-                  required: [id, name, isServer, createdAt, lastSeen]
+                    lastSeen: { type: integer, format: int64, description: Unix seconds }
+                    thisDevice: { type: boolean, description: "This device itself, which is listed as well as the devices paired with it." }
+                  required: [id, name, isServer, createdAt, lastSeen, thisDevice]
         "503": { description: pairing unavailable }
   /pairing/devices/{id}:
     delete:
@@ -1614,7 +1672,7 @@ paths:
                 properties:
                   peerId: { type: string, description: Stable libp2p peer ID; also this device's Ed25519 verification key }
                   deviceId: { type: string, description: The device ID this instance authors sync changes under; empty until an identity exists }
-                  addrs: { type: array, items: { type: string }, description: Raw listen multiaddrs, including wildcards }
+                  addrs: { type: array, items: { type: string }, description: "Raw listen multiaddrs, including wildcards" }
                   dialAddrs:
                     type: array
                     items: { type: string }
@@ -1623,7 +1681,7 @@ paths:
                       this one on, with wildcard and loopback addresses removed.
                       Give one of these to a device on a VPN, where mDNS and the
                       DHT cannot resolve a bare peer ID.
-                  peerCount: { type: integer, description: Currently connected peers, paired or not }
+                  peerCount: { type: integer, description: "Currently connected peers, paired or not" }
                   vector:
                     type: object
                     additionalProperties: { type: integer, format: int64 }
@@ -1729,7 +1787,7 @@ paths:
                   deviceId: { type: string }
                   token: { type: string }
                 required: [deviceId, token]
-        "400": { description: missing fields, a payload that is not a Reverb pairing link, or one in a format this version does not read }
+        "400": { description: "missing fields, a payload that is not a Reverb pairing link, or one in a format this version does not read" }
         "409": { description: pairing code already used }
         "410": { description: the payload's code has expired }
         "429": { description: too many pairing attempts }
@@ -1844,7 +1902,7 @@ paths:
               properties:
                 peerId: { type: string }
                 relPath: { type: string, description: Path relative to the music dir; traversal and symlink escapes are rejected }
-                contentHash: { type: string, description: Expected SHA-256, hex encoded }
+                contentHash: { type: string, description: "Expected SHA-256, hex encoded" }
               required: [peerId, relPath, contentHash]
       responses:
         "200":
@@ -1856,9 +1914,9 @@ paths:
                 properties:
                   ok: { type: boolean }
                 required: [ok]
-        "400": { description: peerId, relPath and contentHash are required }
+        "400": { description: "peerId, relPath and contentHash are required" }
         "500": { description: fetch failed or hash mismatch }
-        "503": { description: p2p unavailable, file store unavailable, or local device not initialized }
+        "503": { description: "p2p unavailable, file store unavailable, or local device not initialized" }
 
   /stats/recommendations:
     get:
@@ -1881,6 +1939,131 @@ components:
       description: The player's own session id, 1-64 letters, digits, '-' or '_'.
       schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,64}$' }
   schemas:
+    LibraryTrack:
+      type: object
+      description: A track of this device's library. Its id is this device's own and means nothing on another.
+      required: [id, title, albumId, album, artistId, artist, coverArtId, trackNumber, discNumber, durationMs, bitRate, suffix, contentType]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        albumId: { type: string }
+        album: { type: string }
+        artistId: { type: string }
+        artist: { type: string }
+        coverArtId: { type: string, description: "Pass to GET /cover/{id}; empty when there is no art." }
+        trackNumber: { type: integer }
+        discNumber: { type: integer }
+        durationMs: { type: integer, description: "Zero when this device's library does not know it." }
+        bitRate: { type: integer }
+        suffix: { type: string }
+        contentType: { type: string }
+        isrc: { type: string }
+        mbid: { type: string }
+        cropStartMs: { type: integer, description: "Where playback starts, when the track is cropped." }
+        cropEndMs: { type: integer, description: "Where playback stops; zero plays to the end." }
+    TrackKey:
+      type: object
+      required: [source, externalId]
+      properties:
+        source: { type: string }
+        externalId: { type: string }
+    ExternalTrackRef:
+      type: object
+      required: [source, externalId, title, durationMs]
+      properties:
+        source: { type: string }
+        externalId: { type: string }
+        title: { type: string }
+        artist: { type: string }
+        album: { type: string }
+        isrc: { type: string }
+        durationMs: { type: integer }
+    SyncedPlaylist:
+      type: object
+      required: [id, source, externalId, name, mode, syncEnabled, syncIntervalSec, autoDownload, lastSyncedAt, trackCount]
+      properties:
+        id: { type: string }
+        source: { type: string, description: "local for a playlist made in Reverb." }
+        externalId: { type: string }
+        name: { type: string }
+        coverUrl: { type: string }
+        mode: { type: string, description: "once for a playlist whose tracklist replicates; synced for a mirror of an upstream playlist." }
+        syncEnabled: { type: boolean }
+        syncIntervalSec: { type: integer }
+        autoDownload: { type: boolean }
+        lastSyncedAt: { type: integer, format: int64 }
+        trackCount: { type: integer }
+    PlaylistTrack:
+      type: object
+      required: [state, title, artist, trackNumber, durationMs]
+      properties:
+        state:
+          type: string
+          enum: [full, none, partial, pending]
+          description: full when this device's library holds the track, which libraryTrack then names.
+        libraryTrack: { $ref: '#/components/schemas/LibraryTrack' }
+        externalRef: { $ref: '#/components/schemas/ExternalTrackRef' }
+        key: { $ref: '#/components/schemas/TrackKey' }
+        title: { type: string }
+        artist: { type: string }
+        album: { type: string }
+        trackNumber: { type: integer }
+        durationMs: { type: integer }
+        coverUrl: { type: string }
+        artistExternalId: { type: string }
+        albumExternalId: { type: string }
+    SyncedPlaylistDetail:
+      allOf:
+        - { $ref: '#/components/schemas/SyncedPlaylist' }
+        - type: object
+          required: [ownedCount, totalCount, tracks]
+          properties:
+            ownedCount: { type: integer }
+            totalCount: { type: integer }
+            tracks: { type: array, items: { $ref: '#/components/schemas/PlaylistTrack' } }
+    OfflineSetEntry:
+      type: object
+      required: [playlistId, enabled, playlistName, updatedAt]
+      properties:
+        playlistId: { type: string }
+        enabled: { type: boolean }
+        playlistName: { type: string }
+        updatedAt: { type: integer, format: int64 }
+    OfflineStatus:
+      type: object
+      required: [usedBytes, availableBytes, full, spaceUnknown, playlists]
+      properties:
+        usedBytes: { type: integer, format: int64, description: "Space the offline set's files take, each counted once." }
+        availableBytes: { type: integer, format: int64, description: "What fetching may still use, after the space kept free for the rest of the phone." }
+        full: { type: boolean, description: "A track a paired device offers does not fit. Fetching has stopped; nothing was removed." }
+        spaceUnknown: { type: boolean, description: "The phone's free space cannot be read; nothing is fetched until it can." }
+        playlists: { type: array, items: { $ref: '#/components/schemas/OfflinePlaylistStatus' } }
+    OfflinePlaylistStatus:
+      type: object
+      required: [playlistId, playlistName, bytes, trackCount, readyCount, tracks]
+      properties:
+        playlistId: { type: string }
+        playlistName: { type: string }
+        bytes: { type: integer, format: int64, description: "Space this playlist's files on the phone take." }
+        trackCount: { type: integer }
+        readyCount: { type: integer }
+        tracks: { type: array, items: { $ref: '#/components/schemas/OfflineTrackStatus' } }
+    OfflineTrackStatus:
+      type: object
+      required: [title, artist, state, sizeBytes, fetchedBytes]
+      properties:
+        title: { type: string }
+        artist: { type: string }
+        album: { type: string }
+        state:
+          type: string
+          enum: [ready, fetching, queued, noSpace, unavailable]
+          description: >
+            ready — on the phone; fetching — being copied; queued — a paired
+            device offers it; noSpace — offered but does not fit; unavailable —
+            no paired device reached since the phone started offers it.
+        sizeBytes: { type: integer, format: int64, description: "The file's size, once a file is known." }
+        fetchedBytes: { type: integer, format: int64 }
     PlayerTrack:
       type: object
       additionalProperties: true
@@ -1898,7 +2081,7 @@ components:
       type: object
       required: [id, origin, track]
       properties:
-        id: { type: string, description: Unique to this entry, even when the same track is queued twice. }
+        id: { type: string, description: "Unique to this entry, even when the same track is queued twice." }
         origin: { type: string, enum: [listener, radio], description: Who queued it. A listener's tracks play before Radio's. }
         track: { $ref: '#/components/schemas/PlayerTrack' }
     QueueState:
@@ -1906,7 +2089,7 @@ components:
       required: [entries, index, shuffle, repeat, upNext, playId, finished, revision]
       properties:
         entries: { type: array, items: { $ref: '#/components/schemas/QueueEntry' } }
-        index: { type: integer, description: The current entry, or -1 with nothing to play. }
+        index: { type: integer, description: "The current entry, or -1 with nothing to play." }
         shuffle: { type: boolean }
         repeat: { type: string, enum: ["off", all, one] }
         upNext:
@@ -1936,7 +2119,7 @@ components:
       properties:
         tracks: { type: array, items: { $ref: '#/components/schemas/PlayerTrack' } }
         origin: { type: string, enum: [listener, radio], default: listener }
-        start: { type: integer, description: For play, the position to start at. }
+        start: { type: integer, description: "For play, the position to start at." }
     PlayerRemoveRequest:
       type: object
       required: [positions]
@@ -1974,9 +2157,9 @@ components:
     FileFetchFailure:
       type: object
       properties:
-        peerId: { type: string, description: The paired device this file could not be copied from. A file can fail from one device and succeed from another, so a failure is reported per device. }
+        peerId: { type: string, description: "The paired device this file could not be copied from. A file can fail from one device and succeed from another, so a failure is reported per device." }
         contentHash: { type: string, description: SHA-256 of the content that could not be copied }
-        relPath: { type: string, description: Path last attempted, as the peer advertises it }
+        relPath: { type: string, description: "Path last attempted, as the peer advertises it" }
         reason:
           type: string
           description: >
@@ -1984,7 +2167,7 @@ components:
             content-mismatch — the bytes served did not hash to what was advertised;
             unavailable — the peer did not serve the file.
           enum: [unstorable-path, content-mismatch, unavailable]
-        detail: { type: string, description: The underlying error, for diagnosis }
+        detail: { type: string, description: "The underlying error, for diagnosis" }
         attempts: { type: integer, format: int64, description: Fetches actually attempted; 0 when the path was rejected without one }
         firstFailedAt: { type: integer, format: int64, description: Unix milliseconds }
         lastFailedAt: { type: integer, format: int64, description: Unix milliseconds }
@@ -2014,7 +2197,7 @@ components:
               path: { type: string }
               reason: { type: string }
             required: [path, reason]
-        examined: { type: integer, description: Entries considered, migrated or not }
+        examined: { type: integer, description: "Entries considered, migrated or not" }
       required: [renamed, failed, examined]
     SyncRound:
       type: object
@@ -2717,6 +2900,6 @@ components:
         notes: { type: string, description: Release body for `available` }
         downloading: { type: boolean }
         progress: { type: number, description: 0..1 while downloading }
-        staged: { type: string, description: Tag downloaded and verified, waiting for a restart }
+        staged: { type: string, description: "Tag downloaded and verified, waiting for a restart" }
         error: { type: string, description: Last failure; cleared by the next successful step }
         lastCheck: { type: string, format: date-time }
