@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -128,5 +129,78 @@ func TestUnzipRefusesAnotherPlatformsPayload(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), want) {
 		t.Fatalf("error %q does not name the entry that was missing", err)
+	}
+}
+
+// linuxBundleNames expands the workflow's bundle="..." assignment for every
+// Linux matrix row, keyed by arch.
+func linuxBundleNames(t *testing.T, source, tag string) map[string]string {
+	t.Helper()
+	m := regexp.MustCompile(`bundle="([^"]+)"`).FindStringSubmatch(source)
+	if m == nil {
+		t.Fatal("the workflow names no Linux install bundle")
+	}
+	names := map[string]string{}
+	for _, row := range regexp.MustCompile(`goos:\s*linux\s*\n\s*arch:\s*(\w+)`).FindAllStringSubmatch(source, -1) {
+		n := strings.ReplaceAll(m[1], "${TAG#v}", strings.TrimPrefix(tag, "v"))
+		names[row[1]] = strings.ReplaceAll(n, "${TARGET_ARCH}", row[1])
+	}
+	return names
+}
+
+// The Linux install bundles are published for both arches under names that
+// carry the version, beside -- and never mistaken for -- the update payloads.
+func TestReleaseWorkflowPublishesLinuxInstallBundles(t *testing.T) {
+	source := workflowSource(t)
+	bundles := linuxBundleNames(t, source, "v1.2.3")
+	for _, arch := range []string{"amd64", "arm64"} {
+		if got, want := bundles[arch], "Reverb-1.2.3-linux-"+arch+".tar.gz"; got != want {
+			t.Errorf("linux/%s install bundle = %q, want %q", arch, got, want)
+		}
+	}
+	if len(bundles) != 2 {
+		t.Errorf("the workflow builds %d Linux install bundles, want 2: %v", len(bundles), bundles)
+	}
+	// Built from the same binary the update payload carries, not a rebuild.
+	if !strings.Contains(source, "BINARY=dist/reverb-desktop VERSION=\"$TAG\" desktop/tools/package-linux.sh") {
+		t.Error("the Linux install bundle is no longer built from the update payload's binary")
+	}
+
+	// A release holding both kinds of asset still updates from the zip.
+	payloads := artifactNames(t, source, "v1.2.3")
+	for arch, bundle := range bundles {
+		rel := &Release{Tag: "v1.2.3", Assets: []Asset{
+			{Name: bundle, URL: "https://example.com/bundle"},
+			{Name: payloads["linux/"+arch], URL: "https://example.com/payload"},
+		}}
+		if got := PickAsset(rel, "linux", arch); got == nil || got.Name != payloads["linux/"+arch] {
+			t.Errorf("PickAsset(linux/%s) with the install bundle present = %+v, want the update payload", arch, got)
+		}
+	}
+}
+
+// The publish job's asset-count guards match what the build jobs produce, so a
+// missing build fails the release instead of publishing a partial one.
+func TestReleaseWorkflowAssetCountsMatch(t *testing.T) {
+	source := workflowSource(t)
+	count := func(glob string) int {
+		m := regexp.MustCompile(`-name '` + regexp.QuoteMeta(glob) + `' \| wc -l\)" -eq (\d+)`).FindStringSubmatch(source)
+		if m == nil {
+			t.Fatalf("the publish job no longer checks how many %s assets it uploads", glob)
+		}
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if got, want := count("*.zip"), len(artifactNames(t, source, "v1.2.3")); got != want {
+		t.Errorf("the publish job expects %d update zips, the builds produce %d", got, want)
+	}
+	if got, want := count("*.tar.gz"), len(linuxBundleNames(t, source, "v1.2.3")); got != want {
+		t.Errorf("the publish job expects %d install bundles, the builds produce %d", got, want)
+	}
+	if !strings.Contains(source, "gh release upload \"$TAG\" dist/*.zip dist/*.tar.gz") {
+		t.Error("the publish job no longer uploads both the update zips and the install bundles")
 	}
 }

@@ -3,6 +3,7 @@ package updater
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -242,14 +243,15 @@ func TestUpgradeYtDlpCommandConstruction(t *testing.T) {
 		t.Fatalf("args = %v want %v", capturedArgs, wantArgs)
 	}
 
-	// Default python bin when empty
+	// Without a bundled interpreter nothing runs: upgrading whatever python3 is
+	// on PATH would modify a system installation the app does not own.
 	capturedName = ""
-	capturedArgs = nil
-	if err := UpgradeYtDlp(context.Background(), ""); err != nil {
-		t.Fatalf("UpgradeYtDlp default error: %v", err)
+	t.Setenv("REVERB_YTDLP_PYTHON", "")
+	if err := UpgradeYtDlp(context.Background(), ""); !errors.Is(err, ErrNoBundledPython) {
+		t.Fatalf("UpgradeYtDlp without a bundled python = %v, want ErrNoBundledPython", err)
 	}
-	if capturedName != DefaultPythonBin {
-		t.Fatalf("default python = %q want %q", capturedName, DefaultPythonBin)
+	if capturedName != "" {
+		t.Fatalf("ran %q with no bundled python", capturedName)
 	}
 
 	// Desktop startup publishes the relocatable interpreter explicitly; no

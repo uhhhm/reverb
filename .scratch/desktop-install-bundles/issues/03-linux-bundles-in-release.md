@@ -4,10 +4,10 @@
 
 **Blocked by:** 02 (Linux install bundle, built and installed locally)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The desktop release workflow fetches the Linux tools and builds the install bundle for amd64 and arm64.
-- [ ] Before upload, CI extracts each bundle into a temporary directory and checks every bundled tool resolves from the bundle and runs (version checks), with the tools absent from `PATH`.
-- [ ] The tarball's archive name includes the version, or the release notes make the version unambiguous.
-- [ ] The publish job attaches both tarballs and its expected-asset-count check matches the new total.
-- [ ] The existing update zips are byte-for-byte the same format and still pass their integrity checks.
+- [x] The desktop release workflow fetches the Linux tools and builds the install bundle for amd64 and arm64.
+- [x] Before upload, CI extracts each bundle into a temporary directory and checks every bundled tool resolves from the bundle and runs (version checks), with the tools absent from `PATH`.
+- [x] The tarball's archive name includes the version, or the release notes make the version unambiguous.
+- [x] The publish job attaches both tarballs and its expected-asset-count check matches the new total.
+- [x] The existing update zips are byte-for-byte the same format and still pass their integrity checks.

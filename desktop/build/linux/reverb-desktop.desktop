@@ -6,4 +6,4 @@ Icon=reverb-desktop
 Terminal=false
 Type=Application
 Categories=AudioVideo;Audio;Music;
-StartupWMClass=Reverb
+StartupWMClass=reverb-desktop
