@@ -1,4 +1,4 @@
-.PHONY: gen gen-check test test-go test-web test-race fmt-check vet vet-windows vet-darwin vet-ios ios-core ios-project ios-testpeer ios-test check check-web check-full vulncheck recommend-quality setup-web setup-contracts contracts contracts-check contracts-test build web dev clean desktop desktop-windows desktop-dev desktop-deps package-mac package-linux
+.PHONY: gen gen-check test test-go test-web test-race fmt-check vet vet-windows vet-darwin vet-ios ios-core ios-project ios-testpeer ios-test check check-web check-full vulncheck recommend-quality setup-web setup-contracts contracts contracts-check contracts-test build web dev clean desktop desktop-windows desktop-dev desktop-deps package-mac package-linux package-windows
 
 VERSION ?= dev
 GO_PACKAGES := ./cmd/... ./internal/... ./desktop/... ./mobile/...
@@ -151,6 +151,11 @@ package-mac:
 # the tools from desktop-deps.
 package-linux:
 	VERSION=$(VERSION) WAILS_TAGS=$(WAILS_TAGS) desktop/tools/package-linux.sh
+
+# Windows portable first-install bundle. Run on Windows after desktop-deps and
+# desktop-windows; the release workflow passes its already-built update binary.
+package-windows:
+	powershell -NoProfile -File desktop/tools/package-windows.ps1 -Binary dist/reverb-desktop.exe -Output dist/Reverb-windows-amd64.zip
 
 desktop-deps: # fetch ffmpeg, navidrome, deno and the spotDL venv into desktop/tools/
 	desktop/tools/fetch-ffmpeg.sh

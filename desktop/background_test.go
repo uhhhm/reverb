@@ -147,6 +147,97 @@ func TestBackgroundControlWaitsForShutdown(t *testing.T) {
 	}
 }
 
+func TestWindowControlOpenActivatesWithoutStopping(t *testing.T) {
+	activated := make(chan struct{}, 1)
+	srv := httptest.NewServer(windowControl(func() { activated <- struct{}{} }))
+	defer srv.Close()
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/open", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.Header.Get(windowFocusedHeader) != "true" {
+		t.Fatalf("response = %s, focused=%q", resp.Status, resp.Header.Get(windowFocusedHeader))
+	}
+	select {
+	case <-activated:
+	case <-time.After(time.Second):
+		t.Fatal("open did not activate the window")
+	}
+}
+
+func TestSecondLaunchWaitsForStartingWindowControl(t *testing.T) {
+	dir := t.TempDir()
+	release, err := AcquireSingleInstanceLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	activated := make(chan struct{}, 1)
+	serverReady := make(chan *http.Server, 1)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		ln, listenErr := listenBackgroundControl(dir)
+		if listenErr != nil {
+			serverReady <- nil
+			return
+		}
+		srv := &http.Server{Handler: windowControl(func() { activated <- struct{}{} })}
+		serverReady <- srv
+		_ = srv.Serve(ln)
+	}()
+	focused, lockReleased, err := awaitExistingInstance(dir, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !focused || lockReleased {
+		t.Fatalf("focused=%v lockReleased=%v", focused, lockReleased)
+	}
+	select {
+	case <-activated:
+	case <-time.After(time.Second):
+		t.Fatal("starting window was not activated")
+	}
+	if srv := <-serverReady; srv != nil {
+		_ = srv.Close()
+	}
+}
+
+func TestBackgroundOpenStopsSoCallerCanBecomeTheWindow(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stopped := make(chan struct{})
+	srv := httptest.NewServer(backgroundControl(cancel, stopped))
+	defer srv.Close()
+	done := make(chan *http.Response, 1)
+	go func() {
+		resp, _ := http.Post(srv.URL+"/open", "", nil)
+		done <- resp
+	}()
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("open did not ask the background runtime to stop")
+	}
+	close(stopped)
+	select {
+	case resp := <-done:
+		if resp == nil {
+			t.Fatal("open request failed")
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get(windowFocusedHeader) != "" {
+			t.Fatal("background runtime claimed it focused a window")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("background runtime did not acknowledge shutdown")
+	}
+}
+
 // Run the actual headless entry point in a child: priority changes and signal
 // registration must never affect the test runner. The process has its own home,
 // database, music folder and random P2P port.

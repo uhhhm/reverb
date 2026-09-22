@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -17,9 +18,16 @@ import (
 	"github.com/uhhhm/reverb/internal/childproc"
 )
 
+const windowFocusedHeader = "X-Reverb-Window-Focused"
+
 // Background controls travel over a user-private channel, never the HTTP API or
 // Wails bindings. A website cannot request a shutdown through the loopback API.
 func backgroundRequest(ctx context.Context, dataDir, method, path string) error {
+	_, err := instanceRequest(ctx, dataDir, method, path)
+	return err
+}
+
+func instanceRequest(ctx context.Context, dataDir, method, path string) (http.Header, error) {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return dialBackgroundControl(ctx, dataDir)
 	}}
@@ -27,18 +35,18 @@ func backgroundRequest(ctx context.Context, dataDir, method, path string) error 
 	client := &http.Client{Transport: transport}
 	req, err := http.NewRequestWithContext(ctx, method, "http://localhost"+path, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("background control: %s", resp.Status)
+		return nil, fmt.Errorf("background control: %s", resp.Status)
 	}
 	_, err = io.Copy(io.Discard, resp.Body)
-	return err
+	return resp.Header.Clone(), err
 }
 
 // Wait for the acknowledgement: it is sent only after the background runtime
@@ -53,24 +61,104 @@ func stopBackgroundSync(dataDir string) error {
 	return err
 }
 
+// openExistingInstance either focuses the running window, or waits for a
+// headless background runtime to stop so this process can become the window.
+func openExistingInstance(dataDir string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	header, err := instanceRequest(ctx, dataDir, http.MethodPost, "/open")
+	if backgroundNotRunning(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return header.Get(windowFocusedHeader) == "true", nil
+}
+
+// awaitExistingInstance closes the startup race between the owner taking the
+// lock and publishing its control socket. It returns focused when a window
+// answered, or lockReleased when a background runtime stopped (or the owner
+// exited) and the caller should retry booting itself.
+func awaitExistingInstance(dataDir string, timeout time.Duration) (focused, lockReleased bool, err error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		focused, err := openExistingInstance(dataDir)
+		if err != nil {
+			return false, false, err
+		}
+		if focused {
+			return true, false, nil
+		}
+		release, lockErr := AcquireSingleInstanceLock(dataDir)
+		if lockErr == nil {
+			release()
+			return false, true, nil
+		}
+		if !errors.Is(lockErr, errInstanceAlreadyRunning) {
+			return false, false, lockErr
+		}
+		if time.Now().After(deadline) {
+			return false, false, fmt.Errorf("running instance did not publish its control channel within %s", timeout)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func backgroundControl(cancel context.CancelFunc, stopped <-chan struct{}) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	mux.HandleFunc("POST /stop", func(w http.ResponseWriter, r *http.Request) {
+	stop := func(w http.ResponseWriter, r *http.Request) {
 		cancel()
 		select {
 		case <-stopped:
 			w.WriteHeader(http.StatusOK)
 		case <-r.Context().Done():
 		}
+	}
+	mux.HandleFunc("POST /stop", stop)
+	mux.HandleFunc("POST /open", stop)
+	return privateControl(mux)
+}
+
+func windowControl(activate func()) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /status", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("POST /open", func(w http.ResponseWriter, _ *http.Request) {
+		activate()
+		w.Header().Set(windowFocusedHeader, "true")
+		w.WriteHeader(http.StatusOK)
 	})
+	return privateControl(mux)
+}
+
+func privateControl(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Origin") != "" {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		mux.ServeHTTP(w, r)
+		handler.ServeHTTP(w, r)
 	})
+}
+
+func startWindowControl(a *App) error {
+	ln, err := listenBackgroundControl(a.dataDir)
+	if err != nil {
+		return err
+	}
+	a.controlLn = ln
+	a.controlSrv = &http.Server{
+		Handler:           windowControl(a.requestActivation),
+		ReadHeaderTimeout: time.Second,
+		IdleTimeout:       time.Second,
+	}
+	go func() {
+		if err := a.controlSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
+			log.Printf("desktop: instance control failed: %v", err)
+		}
+	}()
+	return nil
 }
 
 // runBackground runs the ordinary desktop backend without initialising Wails,

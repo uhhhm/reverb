@@ -40,6 +40,10 @@ type App struct {
 	backgroundArgs    []string
 	startBackground   func() error
 	stopBackground    context.CancelFunc
+	controlLn         net.Listener
+	controlSrv        *http.Server
+	windowReady       atomic.Bool
+	activationPending atomic.Bool
 	shutdownOnce      sync.Once
 }
 
@@ -56,6 +60,10 @@ func (a *App) OnStartup(ctx context.Context) {
 		a.ctx, a.cancel = context.WithCancel(ctx)
 	} else {
 		a.ctx = ctx
+	}
+	a.windowReady.Store(true)
+	if a.activationPending.Swap(false) {
+		focusWindow(a)
 	}
 
 	if a.ln == nil {
@@ -98,6 +106,7 @@ func (a *App) OnShutdown(ctx context.Context) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	a.windowReady.Store(false)
 	if a.cancel != nil {
 		a.cancel()
 	}
@@ -115,6 +124,16 @@ func (a *App) shutdown(ctx context.Context) {
 		// Stops the download manager and closes the store.
 		a.runtime.Close()
 	}
+	if a.controlSrv != nil {
+		shutCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = a.controlSrv.Shutdown(shutCtx)
+		cancel()
+		a.controlSrv = nil
+	}
+	if a.controlLn != nil {
+		_ = a.controlLn.Close()
+		a.controlLn = nil
+	}
 	if a.releaseLock != nil {
 		a.releaseLock()
 		a.releaseLock = nil
@@ -124,6 +143,14 @@ func (a *App) shutdown(ctx context.Context) {
 			log.Printf("desktop: could not start background sync: %v", err)
 		}
 	}
+}
+
+func (a *App) requestActivation() {
+	if a.windowReady.Load() {
+		focusWindow(a)
+		return
+	}
+	a.activationPending.Store(true)
 }
 
 // OnBeforeClose lets the window process exit. OnShutdown may then hand the

@@ -1,12 +1,15 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
 )
+
+var errInstanceAlreadyRunning = errors.New("another instance is running")
 
 var (
 	singleMu   sync.Mutex
@@ -45,7 +48,7 @@ func AcquireSingleInstanceLock(dataDir string) (func(), error) {
 	defer singleMu.Unlock()
 
 	if _, ok := singleHeld[lockPath]; ok {
-		return nil, fmt.Errorf("another instance is running (lock %s)", lockPath)
+		return nil, fmt.Errorf("%w (lock %s)", errInstanceAlreadyRunning, lockPath)
 	}
 
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
@@ -58,7 +61,7 @@ func AcquireSingleInstanceLock(dataDir string) (func(), error) {
 			owner = fmt.Sprintf(" held by pid %s", string(b))
 		}
 		_ = f.Close()
-		return nil, fmt.Errorf("another instance is running (lock %s%s): %w", lockPath, owner, err)
+		return nil, fmt.Errorf("%w (lock %s%s): %v", errInstanceAlreadyRunning, lockPath, owner, err)
 	}
 
 	if err := f.Truncate(0); err == nil {

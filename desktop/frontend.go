@@ -8,7 +8,8 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/menu/keys"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	"github.com/wailsapp/wails/v2/pkg/options/linux"
+	linuxoptions "github.com/wailsapp/wails/v2/pkg/options/linux"
+	windowsoptions "github.com/wailsapp/wails/v2/pkg/options/windows"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -28,6 +29,14 @@ func quitApp(app *App) {
 	wailsruntime.Quit(app.ctx)
 }
 
+func focusWindow(app *App) {
+	if app == nil || app.ctx == nil {
+		return
+	}
+	wailsruntime.WindowUnminimise(app.ctx)
+	wailsruntime.WindowShow(app.ctx)
+}
+
 // runApp opens the native window. The webview is served by the same
 // api.Server handler as the local HTTP listener, so the SPA and /api/v1 are
 // same-origin inside the window (cookies and the WebSocket work unchanged).
@@ -39,6 +48,11 @@ func runApp(app *App) error {
 	reverbMenu := appMenu.AddSubmenu("Reverb")
 	reverbMenu.AddText("Quit Reverb and stop sync", keys.CmdOrCtrl("q"), func(_ *menu.CallbackData) { quitApp(app) })
 	appMenu.Append(menu.EditMenu())
+	windowsMessages := windowsoptions.DefaultMessages()
+	// The default download strategy shows this prompt before fetching WebView2.
+	// Keep it explicit: the GUI-subsystem process has no console, so silently
+	// waiting for the bootstrapper would look exactly like a failed launch.
+	windowsMessages.InstallationRequired = "Reverb needs the Microsoft WebView2 Runtime. Choose OK to download and install it; keep this window open while installation finishes."
 	return wails.Run(&options.App{
 		Title:         "Reverb",
 		Width:         1200,
@@ -56,6 +70,7 @@ func runApp(app *App) error {
 		// entry and icon. It also names WebKit's storage directory
 		// (~/.local/share/reverb-desktop), so changing it loses that storage.
 		// Explicit so neither follows the binary's file name.
-		Linux: &linux.Options{ProgramName: "reverb-desktop"},
+		Linux:   &linuxoptions.Options{ProgramName: "reverb-desktop"},
+		Windows: &windowsoptions.Options{Messages: windowsMessages},
 	})
 }

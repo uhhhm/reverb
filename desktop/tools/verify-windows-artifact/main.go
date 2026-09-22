@@ -12,6 +12,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
 )
 
 // Resource type ids from winuser.h. An exe carrying an application icon has
@@ -28,9 +31,10 @@ const subsystemGUI = 2
 func main() {
 	exePath := flag.String("exe", "", "reverb-desktop.exe to check")
 	zipPath := flag.String("zip", "", "release zip to check")
+	bundlePath := flag.String("bundle", "", "first-install bundle zip to check")
 	flag.Parse()
-	if *exePath == "" && *zipPath == "" {
-		log.Fatal("give -exe, -zip, or both")
+	if *exePath == "" && *zipPath == "" && *bundlePath == "" {
+		log.Fatal("give -exe, -zip, -bundle, or a combination")
 	}
 	if *exePath != "" {
 		if err := checkExe(*exePath); err != nil {
@@ -44,6 +48,86 @@ func main() {
 		}
 		fmt.Printf("%s: holds reverb-desktop.exe and decompresses clean\n", *zipPath)
 	}
+	if *bundlePath != "" {
+		if err := checkBundle(*bundlePath); err != nil {
+			log.Fatalf("%s: %v", *bundlePath, err)
+		}
+		fmt.Printf("%s: portable Reverb folder is complete and the app carries its icon\n", *bundlePath)
+	}
+}
+
+func checkBundle(path string) error {
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		return err
+	}
+	defer zr.Close()
+	want := map[string]bool{
+		"Reverb/reverb-desktop.exe":     false,
+		"Reverb/bin/ffmpeg.exe":         false,
+		"Reverb/bin/navidrome.exe":      false,
+		"Reverb/bin/deno.exe":           false,
+		"Reverb/bin/spotdl.exe":         false,
+		"Reverb/bin/yt-dlp.exe":         false,
+		"Reverb/python/python.exe":      false,
+		"Reverb/install-shortcut.ps1":   false,
+		"Reverb/uninstall-shortcut.ps1": false,
+	}
+	var exe *zip.File
+	for _, f := range zr.File {
+		name := filepath.ToSlash(f.Name)
+		if _, ok := want[name]; ok {
+			want[name] = true
+		}
+		if name == "Reverb/reverb-desktop.exe" {
+			exe = f
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.Copy(io.Discard, rc)
+		closeErr := rc.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+	}
+	var missing []string
+	for name, found := range want {
+		if !found {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing required entries: %s", strings.Join(missing, ", "))
+	}
+	tmp, err := os.CreateTemp("", "reverb-desktop-*.exe")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	rc, err := exe.Open()
+	if err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	_, copyErr := io.Copy(tmp, rc)
+	closeReadErr := rc.Close()
+	closeWriteErr := tmp.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeReadErr != nil {
+		return closeReadErr
+	}
+	if closeWriteErr != nil {
+		return closeWriteErr
+	}
+	return checkExe(tmpPath)
 }
 
 func checkExe(path string) error {

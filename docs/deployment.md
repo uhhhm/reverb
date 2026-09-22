@@ -207,7 +207,10 @@ otherwise progress may silently degrade to "indeterminate".
 
 ## Desktop (Wails)
 
-The desktop app wraps the same Go monolith in a Wails window and serves the SPA on `127.0.0.1:0` — no Docker, no `192.168.x.x:8090`. Downloads and sync run while the window is open (`close→quit`).
+The desktop app wraps the same Go monolith in a Wails window and serves the SPA
+on `127.0.0.1:0` — no Docker, no `192.168.x.x:8090`. Downloads and sync run in
+the window process and continue in a headless background runtime after the
+window closes unless background sync is disabled.
 
 ### Prerequisites
 
@@ -224,14 +227,47 @@ make desktop-deps # fetch per-OS ffmpeg static + Navidrome + deno + python venv 
 
 Bundled tools (ffmpeg static, Navidrome 0.62.0, spotDL 4.5.0, yt-dlp, deno) are embedded per-OS so the app is self-contained (~150–180 MB). `desktop/wails.json` sets frontend `../web`, build `npm run build`, dev server `http://localhost:5173`, fallback `index.html`.
 
+### First install and removal
+
+Use the capitalized first-install asset from the GitHub release page. The
+lowercase `reverb-desktop-<version>-<os>-<arch>.zip` assets each contain only
+the executable expected by Reverb's in-app updater; they are not meant to be
+installed or unpacked manually.
+
+- **Linux:** download `Reverb-<version>-linux-amd64.tar.gz` or
+  `Reverb-<version>-linux-arm64.tar.gz`, extract it, and run
+  `Reverb/install.sh`. This installs per user without root and registers Reverb
+  in the desktop app menu. Launch it there. Run
+  `~/.local/share/reverb-app/uninstall.sh` to remove the app and launcher entry;
+  the database and music remain.
+- **macOS:** download `Reverb-<version>-macOS-arm64.zip` for Apple Silicon or
+  `Reverb-<version>-macOS-x86_64.zip` for Intel. Extract the complete
+  `Reverb.app`, drag it to Applications, then right-click it and choose
+  **Open** → **Open** on first launch because the ad-hoc signature is not
+  notarized. Quit Reverb and move the app to Trash to uninstall; the database
+  and music remain.
+- **Windows:** download `Reverb-<version>-windows-amd64.zip`, extract the whole
+  `Reverb` folder to a writable location, and run `install-shortcut.ps1`. It
+  creates or updates one per-user Start Menu shortcut without elevation. Open
+  Reverb from Windows search; for the unsigned build, choose **More info** →
+  **Run anyway** if SmartScreen appears. Run `uninstall-shortcut.ps1` and then
+  delete the extracted folder to uninstall; the database and music remain.
+
+After first install, Reverb checks for stable releases and offers
+**Restart now** when an update is ready. It swaps only the app executable; the
+bundled tools remain in the installed app or portable folder.
+
 ### Data locations
 
 - **DB:** `~/Library/Application Support/reverb/reverb.db` (macOS) / `~/.config/reverb/reverb.db` (Linux, XDG via `os.UserConfigDir`) / `%AppData%\reverb\reverb.db` (Windows, roaming). `REVERB_DB` overrides. On first launch `MaybeMigrateLegacyDB` copies `./data/reverb.db` if the desktop DB is missing.
 - **Downloads:** `Music/Reverb` under the user's home directory (`%USERPROFILE%\Music\Reverb` on Windows) (`REVERB_DOWNLOAD_DIR` overrides, created if missing) — also the built-in Navidrome scan dir.
+- **Window log:** `reverb.log` next to the DB, with a single rotated
+  `reverb.log.old` after 5 MiB. Fatal startup dialogs include this path.
 
-### macOS Gatekeeper (unsigned v1)
+### macOS Gatekeeper (not notarized)
 
-The app is unsigned. On first launch right-click the `.app` / `.zip` → **Open** → **Open** to bypass Gatekeeper. A future release will be signed and notarized.
+The app is ad-hoc signed but not notarized. On first launch right-click
+`Reverb.app` → **Open** → **Open** to bypass Gatekeeper.
 
 ### Auto-update
 
@@ -241,11 +277,22 @@ When a newer semver tag is found, the asset for this `GOOS/GOARCH` is downloaded
 
 `POST /api/v1/update/install` is the only path that touches the binary. It renames the running executable to `<exe>.old`, moves the downloaded build into place, spawns it, and quits — the successor waits for the old process to exit (via `<dataDir>/updates/relaunch`) before opening the database or starting the bundled Navidrome, and clears the leftovers once it is up. Before any of that, the payload is re-hashed against the digest recorded at download time and checked for a plausible executable header, so a truncated or corrupted download cannot be swapped over a working binary. A `.deb` asset is refused: installing one needs root.
 
-Transport security is HTTPS to GitHub plus that digest; release artifacts are not signed, and replacing the binary inside a macOS `.app` invalidates the bundle's code signature.
+Transport security is HTTPS to GitHub plus that digest; release artifacts do
+not carry a trusted developer signature. Replacing the binary inside a macOS
+`.app` invalidates its ad-hoc signature, so the updater reseals the bundle
+before relaunching it.
 
 Server/Docker builds wire no updater — the update endpoints report 503 there, and the image tag is the update mechanism. `yt-dlp` is hot-upgraded separately every 24 h via `pip install --upgrade yt-dlp` without an app restart.
 
-`.github/workflows/desktop.yml` builds `reverb-desktop-$VERSION-$GOOS-$GOARCH.zip` for macOS and Linux on amd64 and arm64, and `reverb-desktop-$VERSION-windows-amd64.zip` on a Windows runner; the publish job attaches all five and fails if it does not see exactly that many. `ci.yml`'s `windows` job compiles `reverb-desktop.exe` on every push and runs the desktop, desktop-paths, embedded-library and child-process tests there. ARM64 Windows is out of scope.
+`.github/workflows/desktop.yml` builds five lowercase updater payloads:
+`reverb-desktop-$VERSION-$GOOS-$GOARCH.zip` for macOS and Linux on amd64 and
+arm64, and `reverb-desktop-$VERSION-windows-amd64.zip` on a Windows runner. It
+also publishes two Linux install tarballs, two macOS `Reverb.app` zips and one
+Windows portable zip, and fails unless all ten expected assets are present.
+Release notes list the first-install bundles before the updater payloads.
+`ci.yml`'s `windows` job compiles `reverb-desktop.exe` on every push and runs
+the desktop, desktop-paths, embedded-library and child-process tests there.
+ARM64 Windows is out of scope.
 
 On Windows the updater renames the running `reverb-desktop.exe` aside and moves the new build into its place — Windows locks a mapped image against deletion and writes, but not against a rename within the volume — so no helper process is involved. See `desktop/README.md` for the fallback when the old name cannot be reused.
 

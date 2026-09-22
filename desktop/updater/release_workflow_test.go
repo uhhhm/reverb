@@ -179,6 +179,40 @@ func TestReleaseWorkflowPublishesLinuxInstallBundles(t *testing.T) {
 	}
 }
 
+func TestReleaseWorkflowPublishesMacAppBundles(t *testing.T) {
+	source := workflowSource(t)
+	if !strings.Contains(source, "make package-mac VERSION=\"$TAG\"") {
+		t.Fatal("the macOS release jobs do not run the app packaging target")
+	}
+	if !strings.Contains(source, "desktop/tools/fetch-ffmpeg.sh") ||
+		!strings.Contains(source, "desktop/tools/fetch-navidrome.sh") ||
+		!strings.Contains(source, "desktop/tools/fetch-deno.sh") {
+		t.Fatal("the release workflow does not fetch the tools packaged in Reverb.app")
+	}
+	for _, arch := range []string{"x86_64", "arm64"} {
+		want := "Reverb-1.2.3-macOS-" + arch + ".zip"
+		if !strings.Contains(source, `app_bundle="Reverb-${TAG#v}-macOS-${PACKAGE_ARCH}.zip"`) {
+			t.Fatalf("the workflow does not version the macOS app bundle as %s", want)
+		}
+	}
+	if !strings.Contains(source, "package-mac") || !strings.Contains(source, "verify-bundle.sh") {
+		t.Fatal("macOS app packaging is no longer gated by the bundled-tool verification")
+	}
+}
+
+func TestReleaseWorkflowPublishesWindowsInstallBundle(t *testing.T) {
+	source := workflowSource(t)
+	if !strings.Contains(source, `desktop/tools/package-windows.ps1`) {
+		t.Fatal("the Windows release job does not assemble an install bundle")
+	}
+	if !strings.Contains(source, `install_bundle="Reverb-${TAG#v}-windows-amd64.zip"`) {
+		t.Fatal("the Windows install bundle is not versioned as Reverb-<version>-windows-amd64.zip")
+	}
+	if !strings.Contains(source, "verify-windows-artifact -bundle") {
+		t.Fatal("the extracted Windows install bundle is not verified before upload")
+	}
+}
+
 // The publish job's asset-count guards match what the build jobs produce, so a
 // missing build fails the release instead of publishing a partial one.
 func TestReleaseWorkflowAssetCountsMatch(t *testing.T) {
@@ -194,13 +228,19 @@ func TestReleaseWorkflowAssetCountsMatch(t *testing.T) {
 		}
 		return n
 	}
-	if got, want := count("*.zip"), len(artifactNames(t, source, "v1.2.3")); got != want {
-		t.Errorf("the publish job expects %d update zips, the builds produce %d", got, want)
+	if got, want := len(artifactNames(t, source, "v1.2.3")), 5; got != want {
+		t.Errorf("the workflow builds %d updater payloads, want %d", got, want)
 	}
 	if got, want := count("*.tar.gz"), len(linuxBundleNames(t, source, "v1.2.3")); got != want {
 		t.Errorf("the publish job expects %d install bundles, the builds produce %d", got, want)
 	}
+	if got, want := count("*.zip"), 8; got != want {
+		t.Errorf("the publish job expects %d zip assets, want %d (five updater payloads, two macOS apps, one Windows install bundle)", got, want)
+	}
 	if !strings.Contains(source, "gh release upload \"$TAG\" dist/*.zip dist/*.tar.gz") {
 		t.Error("the publish job no longer uploads both the update zips and the install bundles")
+	}
+	if !strings.Contains(source, "update-release-notes.sh") {
+		t.Error("the publish job no longer puts install bundles first in the release notes")
 	}
 }

@@ -4,9 +4,9 @@
 
 **Blocked by:** 03 (Linux install bundles in the release workflow), 04 (macOS Reverb.app in the release workflow), 05 (Windows install bundle)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Each platform's install steps name the exact asset and the steps to install, first launch, update and uninstall.
-- [ ] Docs describe the update zips as updater payloads and no longer suggest unzipping them to install.
-- [ ] Generated or templated release notes list the install bundles first.
-- [ ] Stale claims about installing by unzipping the bare binary are replaced, not appended to.
+- [x] Each platform's install steps name the exact asset and the steps to install, first launch, update and uninstall.
+- [x] Docs describe the update zips as updater payloads and no longer suggest unzipping them to install.
+- [x] Generated or templated release notes list the install bundles first.
+- [x] Stale claims about installing by unzipping the bare binary are replaced, not appended to.

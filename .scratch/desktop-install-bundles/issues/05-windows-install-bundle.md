@@ -4,11 +4,11 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The Windows release job assembles the portable folder from the fetched Windows tools and the built exe.
-- [ ] Before upload, CI extracts the zip and checks that the exe is a GUI application carrying the icon and that every bundled tool resolves from the extracted folder.
-- [ ] The shortcut script creates a per-user Start Menu shortcut without admin rights; running it again does not duplicate the shortcut, and a documented removal path exists.
-- [ ] The publish job attaches the bundle and its expected-asset-count check matches the new total.
-- [ ] Self-update from the extracted folder replaces only the exe and the bundled tools still resolve afterwards.
-- [ ] The existing Windows update zip still holds exactly the single exe the updater expects.
+- [x] The Windows release job assembles the portable folder from the fetched Windows tools and the built exe.
+- [x] Before upload, CI extracts the zip and checks that the exe is a GUI application carrying the icon and that every bundled tool resolves from the extracted folder.
+- [x] The shortcut script creates a per-user Start Menu shortcut without admin rights; running it again does not duplicate the shortcut, and a documented removal path exists.
+- [x] The publish job attaches the bundle and its expected-asset-count check matches the new total.
+- [x] Self-update from the extracted folder replaces only the exe and the bundled tools still resolve afterwards.
+- [x] The existing Windows update zip still holds exactly the single exe the updater expects.

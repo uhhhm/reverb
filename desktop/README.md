@@ -22,6 +22,7 @@ make desktop-deps   # fetch ffmpeg, Navidrome, Deno, Python, spotDL and yt-dlp
 make desktop-windows # cross-compile dist/reverb-desktop.exe from macOS or Linux
 make package-linux  # dist/Reverb-linux-<arch>.tar.gz install bundle (needs desktop-deps)
 make package-mac    # dist/stage/Reverb.app and dist/Reverb-macOS-<arch>.zip (on macOS)
+make package-windows # dist/Reverb-windows-amd64.zip (on Windows, after desktop-deps)
 ```
 
 On Windows, build the SPA into `internal/api/dist` (PowerShell, from the
@@ -52,10 +53,45 @@ Linux, Application Support on macOS, `%AppData%\reverb` on Windows — and
 downloads in `Music/Reverb` under the user's home directory. `REVERB_DB` and
 `REVERB_DOWNLOAD_DIR` override both on every platform.
 
-One instance owns a data directory at a time. The second launch fails with
-"another instance is running" rather than becoming a second writer on the same
-database; the lock is held by the operating system on an open file, so a crash
-or a force quit releases it.
+One instance owns a data directory at a time. A second launch brings the
+existing window forward; if only background sync is running, it stops that
+runtime and opens a window. The lock is held by the operating system on an open
+file, so a crash or force quit releases it.
+
+The window process logs to `reverb.log` beside the database (the paths are
+`~/Library/Application Support/reverb/reverb.log` on macOS,
+`~/.config/reverb/reverb.log` on Linux unless XDG overrides it, and
+`%AppData%\reverb\reverb.log` on Windows). The previous log is retained as
+`reverb.log.old` after the current file exceeds 5 MiB. A fatal startup failure
+shows the error and this path in a native dialog.
+
+## Installing a release
+
+The release page lists these first-install bundles before the automatic-update
+payloads:
+
+- **Linux:** download `Reverb-<version>-linux-amd64.tar.gz` (or `arm64`),
+  extract it, and run `Reverb/install.sh`. Launch Reverb from the desktop app
+  menu. To uninstall, run the installed
+  `~/.local/share/reverb-app/uninstall.sh`; app data and music are retained.
+- **macOS:** download `Reverb-<version>-macOS-arm64.zip` on Apple Silicon or
+  `Reverb-<version>-macOS-x86_64.zip` on Intel, extract it, and drag
+  `Reverb.app` to Applications. Because the app is ad-hoc signed rather than
+  notarized, first launch is right-click **Reverb** → **Open** → **Open**. To
+  uninstall, quit Reverb and move it from Applications to Trash; app data and
+  music are retained.
+- **Windows:** download `Reverb-<version>-windows-amd64.zip`, extract the whole
+  `Reverb` folder somewhere writable, and run `install-shortcut.ps1` once. It
+  creates a per-user Start Menu shortcut without administrator rights; running
+  it again updates the same shortcut. Start Reverb from Windows search and use
+  **More info** → **Run anyway** if SmartScreen warns about the unsigned app.
+  To uninstall, run `uninstall-shortcut.ps1`, then delete the extracted folder;
+  app data and music are retained.
+
+Reverb checks for stable updates itself and offers **Restart now** when one is
+ready. Files named `reverb-desktop-<version>-<os>-<arch>.zip` are the
+single-binary payloads consumed by that updater. They are not first-install
+archives and should not be extracted by hand.
 
 ## Install bundles and the bundled Python
 
@@ -125,10 +161,10 @@ ARM64 Windows is out of scope: there is no arm64 artifact and no arm64 bundled
 tool set, and an amd64 build runs under emulation without the download stack
 being exercised there.
 
-Installing is unzipping: put `reverb-desktop.exe` wherever it should live and
-run it. There is no installer and nothing is written outside `%AppData%\reverb`
-and `%USERPROFILE%\Music\Reverb`. Windows SmartScreen warns on first launch
-because the binary is unsigned — **More info** → **Run anyway**.
+The Windows install archive is portable rather than a full MSI/Inno installer:
+the app stays in the extracted folder and the included script creates only a
+per-user Start Menu shortcut. See [Installing a release](#installing-a-release)
+for first launch and removal.
 
 On Windows, `make desktop-deps` uses a relocatable python-build-standalone
 runtime rather than a machine-wide Python. The `spotdl.exe` and `yt-dlp.exe`
@@ -194,10 +230,15 @@ runs when a GitHub release is **published**:
    Each zip holds the bare `reverb-desktop` executable — `reverb-desktop.exe`
    on Windows — which is the only file the updater swaps; the bundled tools
    beside the app are left as they are.
-4. On each Linux runner it also wraps that same binary in the install bundle,
-   verifies the extracted bundle's tools as `make package-linux` does, and
-   attaches `Reverb-<version>-linux-<arch>.tar.gz` for amd64 and arm64. The
-   updater never selects these; they are for first installs.
+4. It also attaches first-install bundles: two Linux tarballs, two complete
+   macOS app zips and one Windows portable zip. The Linux jobs wrap the update
+   binary in `Reverb-<version>-linux-<arch>.tar.gz`; macOS publishes
+   `Reverb-<version>-macOS-<arch>.zip`; Windows publishes
+   `Reverb-<version>-windows-amd64.zip`. Each is extracted and checked before
+   upload, and the release notes put these downloads first.
+
+The updater selects only the lowercase payload matching its OS and architecture;
+the capitalized archives are never selected automatically.
 
 Between publishing and the assets landing, the updater sees the new tag with
 no payload for its platform and re-checks every fifteen minutes instead of

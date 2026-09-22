@@ -85,11 +85,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev pkg-config zip
       - run: make setup-web
-      # The Linux install bundle ships these beside the binary. Fetched before
-      # the tests so TestBootWiresBundledTools checks the real Navidrome
-      # instead of skipping.
-      - name: Fetch the Linux bundle tools
-        if: runner.os == 'Linux'
+      # The install bundles ship these beside the binary. Fetched before the
+      # tests so TestBootWiresBundledTools checks the real Navidrome instead of
+      # skipping. package-mac builds the relocatable Python runtime itself.
+      - name: Fetch the install bundle tools
         run: |
           desktop/tools/fetch-ffmpeg.sh
           desktop/tools/fetch-navidrome.sh
@@ -130,6 +129,24 @@ jobs:
           bundle="Reverb-${TAG#v}-linux-${TARGET_ARCH}.tar.gz"
           mv "dist/Reverb-linux-${TARGET_ARCH}.tar.gz" "dist/$bundle"
           tar -tzf "dist/$bundle" >/dev/null
+      - name: Build and verify the macOS app bundle
+        if: runner.os == 'macOS'
+        env:
+          TAG: ${{ needs.verify.outputs.tag }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          make package-mac VERSION="$TAG"
+          case "$TARGET_ARCH" in
+            amd64) PACKAGE_ARCH=x86_64 ;;
+            arm64) PACKAGE_ARCH=arm64 ;;
+          esac
+          app_bundle="Reverb-${TAG#v}-macOS-${PACKAGE_ARCH}.zip"
+          mv "dist/Reverb-macOS-${PACKAGE_ARCH}.zip" "dist/$app_bundle"
+          check="$(mktemp -d)"
+          trap 'rm -rf "$check"' EXIT
+          ditto -x -k "dist/$app_bundle" "$check"
+          desktop/tools/verify-bundle.sh "$check/Reverb.app/Contents/MacOS/reverb-desktop"
+          codesign --verify --deep --strict "$check/Reverb.app"
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.goos }}-${{ matrix.arch }}
@@ -204,6 +221,27 @@ jobs:
           artifact="reverb-desktop-${TAG#v}-windows-amd64.zip"
           powershell -Command "Compress-Archive -Path dist/reverb-desktop.exe -DestinationPath dist/$artifact"
           go run ./desktop/tools/verify-windows-artifact -zip "dist/$artifact"
+      - name: Package and verify the Windows install bundle
+        shell: bash
+        env:
+          TAG: ${{ needs.verify.outputs.tag }}
+        run: |
+          install_bundle="Reverb-${TAG#v}-windows-amd64.zip"
+          powershell -NoProfile -File desktop/tools/package-windows.ps1 \
+            -Binary dist/reverb-desktop.exe -Output "dist/$install_bundle"
+          go run ./desktop/tools/verify-windows-artifact -bundle "dist/$install_bundle"
+          check="dist/check-windows"
+          rm -rf "$check"
+          mkdir -p "$check"
+          powershell -NoProfile -Command "Expand-Archive -Path 'dist/$install_bundle' -DestinationPath '$check'"
+          REVERB_BUNDLE_EXE="$check/Reverb/reverb-desktop.exe" \
+            go test -count=1 -v -run '^TestInstalledBundle$' ./desktop
+          shortcut_dir="$check/shortcuts"
+          REVERB_START_MENU_DIR="$shortcut_dir" powershell -NoProfile -File "$check/Reverb/install-shortcut.ps1"
+          REVERB_START_MENU_DIR="$shortcut_dir" powershell -NoProfile -File "$check/Reverb/install-shortcut.ps1"
+          test "$(find "$shortcut_dir" -name 'Reverb.lnk' | wc -l)" -eq 1
+          REVERB_START_MENU_DIR="$shortcut_dir" powershell -NoProfile -File "$check/Reverb/uninstall-shortcut.ps1"
+          test ! -e "$shortcut_dir/Reverb.lnk"
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-windows-amd64
@@ -216,17 +254,21 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
       - uses: actions/download-artifact@v4
         with:
           pattern: desktop-*
           path: dist
           merge-multiple: true
-      - name: Attach the five update payloads and two Linux install bundles
+      - name: Attach update payloads and first-install bundles
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.verify.outputs.tag }}
         run: |
-          test "$(find dist -name '*.zip' | wc -l)" -eq 5
+          test "$(find dist -name '*.zip' | wc -l)" -eq 8
           test "$(find dist -name '*.tar.gz' | wc -l)" -eq 2
           gh release upload "$TAG" dist/*.zip dist/*.tar.gz --clobber
+          desktop/tools/update-release-notes.sh "$TAG"

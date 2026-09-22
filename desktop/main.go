@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -21,33 +22,79 @@ import (
 var version = "dev"
 
 func main() {
-	args := os.Args[1:]
+	os.Exit(run(os.Args[1:]))
+}
+
+func run(args []string) int {
 	if len(args) > 0 && args[0] == "--background" {
 		if err := runBackground(args[1:]); err != nil {
-			log.Fatal(err)
+			log.Printf("background runtime failed: %v", err)
+			return 1
 		}
-		return
+		return 0
 	}
 	if len(args) > 0 && args[0] == "--stop-background" {
 		cfg, err := desktopConfig(args[1:])
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("desktop configuration: %v", err)
+			return 1
 		}
 		if err := stopBackgroundSync(filepath.Dir(cfg.DBPath)); err != nil {
-			log.Fatal(err)
+			log.Printf("stop background sync: %v", err)
+			return 1
 		}
-		return
+		return 0
 	}
 	cfg, err := desktopConfig(args)
 	if err != nil {
-		log.Fatal(err)
+		dataDir := desktop.ResolveDesktopDataDir()
+		logPath, closeLog, logErr := openWindowLog(dataDir)
+		defer closeLog()
+		if logErr != nil {
+			log.Printf("desktop log: %v", logErr)
+		}
+		return reportStartupFailure(fmt.Errorf("configuration: %w", err), logPath)
 	}
-	if err := stopBackgroundSync(filepath.Dir(cfg.DBPath)); err != nil {
-		log.Fatal(err)
-	}
-	app, err := boot(args)
+	dataDir := filepath.Dir(cfg.DBPath)
+	logPath, closeLog, err := openWindowLog(dataDir)
 	if err != nil {
-		log.Fatal(err)
+		return reportStartupFailure(fmt.Errorf("open diagnostic log %s: %w", logPath, err), logPath)
+	}
+	defer closeLog()
+	log.Printf("desktop window starting (version=%s)", version)
+
+	// An updater successor is launched before its predecessor quits. Honour its
+	// marker before contacting the instance-control socket, or the successor
+	// would merely focus the outgoing window and exit without completing the
+	// update restart. boot repeats this harmlessly for non-window callers.
+	updater.WaitForPredecessor(dataDir, 30*time.Second)
+	if focused, err := openExistingInstance(dataDir); err != nil {
+		return reportStartupFailure(fmt.Errorf("contact running instance: %w", err), logPath)
+	} else if focused {
+		log.Printf("desktop: focused the running window")
+		return 0
+	}
+
+	app, err := boot(args)
+	if errors.Is(err, errInstanceAlreadyRunning) {
+		focused, retry, waitErr := awaitExistingInstance(dataDir, 45*time.Second)
+		if waitErr != nil {
+			return reportStartupFailure(waitErr, logPath)
+		}
+		if focused {
+			log.Printf("desktop: focused the starting window")
+			return 0
+		}
+		if retry {
+			app, err = boot(args)
+		}
+	}
+	if err != nil {
+		return reportStartupFailure(err, logPath)
+	}
+	if err := startWindowControl(app); err != nil {
+		app.OnShutdown(context.Background())
+		return reportStartupFailure(fmt.Errorf("start instance control: %w", err), logPath)
 	}
 	app.StartServices()
 
@@ -56,9 +103,10 @@ func main() {
 	if err := runApp(app); err != nil {
 		app.quitRequested.Store(true)
 		app.OnShutdown(context.Background())
-		log.Fatal(err)
+		return reportStartupFailure(err, logPath)
 	}
 	app.OnShutdown(context.Background())
+	return 0
 }
 
 func desktopConfig(args []string) (config.Config, error) {

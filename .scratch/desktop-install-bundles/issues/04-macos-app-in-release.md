@@ -4,10 +4,10 @@
 
 **Blocked by:** 01 (Shared relocatable Python runtime build)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The release workflow fetches the macOS tools and runs the macOS packaging target on both the Intel and Apple Silicon runners.
-- [ ] The packaging target's bundled-tool version checks gate the upload.
-- [ ] The publish job attaches both app zips and its expected-asset-count check matches the new total.
-- [ ] Self-update of an installed `.app` replaces the binary inside the bundle, relaunches, and the tools in the bundle's resources still resolve.
-- [ ] The existing macOS update zips and their codesign step are unaffected.
+- [x] The release workflow fetches the macOS tools and runs the macOS packaging target on both the Intel and Apple Silicon runners.
+- [x] The packaging target's bundled-tool version checks gate the upload.
+- [x] The publish job attaches both app zips and its expected-asset-count check matches the new total.
+- [x] Self-update of an installed `.app` replaces the binary inside the bundle, relaunches, and the tools in the bundle's resources still resolve.
+- [x] The existing macOS update zips and their codesign step are unaffected.

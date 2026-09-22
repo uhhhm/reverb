@@ -24,6 +24,10 @@ func quitApp(app *App) {
 	_ = app.srv.Shutdown(ctx)
 }
 
+// The fallback has no owned native window to raise. Production desktop builds
+// use frontend.go; this exists so the shared lifecycle remains testable.
+func focusWindow(*App) {}
+
 // runApp serves plain HTTP when built without the desktop tag (no Wails, no
 // cgo). Open the printed URL in a browser.
 func runApp(app *App) error {

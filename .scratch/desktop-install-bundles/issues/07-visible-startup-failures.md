@@ -11,11 +11,11 @@ Found while investigating the Windows report: under Wine the backend boots fully
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] The window process logs to a file in the data directory on every platform; the file is size-capped or rotated, and the background runtime's existing log is unaffected.
-- [ ] Every startup error path that currently ends the process silently instead shows a native error dialog with the error and the log path, then exits non-zero. A test covers the dispatch from startup error to the dialog seam without needing a display.
-- [ ] A second launch while an instance holds the lock focuses the running window, or asks the background runtime to open one, and exits cleanly; it never exits silently with nothing on screen.
-- [ ] On Windows, a missing WebView2 runtime produces a visible outcome (an install prompt the user can see, or the error dialog), never an invisible process that holds the lock.
+- [x] The window process logs to a file in the data directory on every platform; the file is size-capped or rotated, and the background runtime's existing log is unaffected.
+- [x] Every startup error path that currently ends the process silently instead shows a native error dialog with the error and the log path, then exits non-zero. A test covers the dispatch from startup error to the dialog seam without needing a display.
+- [x] A second launch while an instance holds the lock focuses the running window, or asks the background runtime to open one, and exits cleanly; it never exits silently with nothing on screen.
+- [x] On Windows, a missing WebView2 runtime produces a visible outcome (an install prompt the user can see, or the error dialog), never an invisible process that holds the lock.
 - [ ] Verified on a real Windows machine: an induced startup failure shows the dialog, and double-launching focuses the existing window.
 - [ ] The desktop README tells users where the log file lives on each platform.
