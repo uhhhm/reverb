@@ -114,6 +114,13 @@ describe('TopBar', () => {
     expect(screen.getByRole('menuitem', { name: /^admin$/i })).toBeInTheDocument()
   })
 
+  it('Pair a phone menu item navigates to the pairing page', () => {
+    renderBar()
+    fireEvent.click(screen.getByRole('button', { name: /account menu/i }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /^pair a phone$/i }))
+    expect(mockNavigate).toHaveBeenCalledWith('/pairing')
+  })
+
   it('uses the signed-in user’s initial for the avatar', () => {
     setMe([], 'alice')
     renderBar()
