@@ -71,6 +71,10 @@ const iosOperations = {
   '/library/albums': { get: 'listLibraryAlbums' },
   '/library/album/{id}': { get: 'getLibraryAlbum' },
   '/library/songs': { get: 'listLibraryTracks' },
+  '/library/catalog/tracks': { get: 'listCatalogTracks' },
+  // Search is SSE, so Swift consumes its bytes directly; keep its contract in
+  // the subset so drift in path, parameters, or envelopes is still checked.
+  '/search/everywhere': { get: 'searchEverywhere' },
   '/playlists': { get: 'listPlaylists', post: 'createPlaylist' },
   '/playlists/{id}': { get: 'getPlaylist', put: 'renamePlaylist', delete: 'deletePlaylist' },
   '/playlists/{id}/tracks': { post: 'addPlaylistTrack', delete: 'removePlaylistTrack' },

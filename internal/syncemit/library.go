@@ -6,6 +6,7 @@ import (
 
 	"github.com/uhhhm/reverb/internal/catalog"
 	"github.com/uhhhm/reverb/internal/core"
+	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
 
 const libraryPageSize = 500
@@ -48,9 +49,36 @@ func (s *Service) PublishLibrary(ctx context.Context, library LibraryBrowser, ca
 				continue
 			}
 			s.EnsureCatalogEntity(ctx, cid)
+			s.EnsureLibraryMembership(ctx, cid)
 		}
 		if len(tracks) < libraryPageSize {
 			return
 		}
+	}
+}
+
+// EnsureLibraryMembership marks a catalog track as in the owner's library
+// unless the log already says so. Catalog source describes how an identity was
+// first minted, not whether it later entered the library. Deleting the track
+// sets the marker false; the boot publish or a download linking the track
+// again sets it back.
+func (s *Service) EnsureLibraryMembership(ctx context.Context, catalogID string) {
+	if !s.ready() || catalogID == "" {
+		return
+	}
+	changes, err := s.log.ListLatestForEntity(ctx, reverbsync.EntityTrack, catalogID)
+	if err != nil {
+		return
+	}
+	for _, change := range changes {
+		if change.Field == reverbsync.FieldDeleted {
+			return
+		}
+		if present, _ := change.Value.(bool); change.Field == reverbsync.FieldLibraryPresent && present {
+			return
+		}
+	}
+	if device := s.device(ctx); device != "" {
+		s.append(ctx, device, reverbsync.EntityTrack, catalogID, reverbsync.FieldLibraryPresent, true)
 	}
 }

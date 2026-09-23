@@ -234,6 +234,7 @@ type Manager struct {
 	qualityFn       func(context.Context) core.AudioQuality     // optional; supplies the configured default tier
 	trackEnricher   TrackEnricher                               // optional; recovers a missing ISRC at enqueue
 	completionHook  func(context.Context, core.DownloadRequest) // optional; observes first successful completion
+	linkedHook      func(context.Context, string)               // optional; observes a job linked to its library track
 
 	queue chan string // job IDs to process
 
@@ -337,6 +338,13 @@ func (m *Manager) SetTrackEnricher(e TrackEnricher) {
 // manager restart. The hook must be quick and tolerate best-effort delivery.
 func (m *Manager) SetCompletionHook(fn func(context.Context, core.DownloadRequest)) {
 	m.completionHook = fn
+}
+
+// SetLinkedHook installs an observer called with the catalog id of each
+// completed job once the post-download scan links it to a library track, the
+// moment that track is known to be in the library.
+func (m *Manager) SetLinkedHook(fn func(context.Context, string)) {
+	m.linkedHook = fn
 }
 
 func (m *Manager) notifyCompletion(ctx context.Context, req core.DownloadRequest) {
@@ -513,7 +521,9 @@ func (m *Manager) BackfillUnlinked() {
 		}
 		// Task 3: mint canonical id at link time. Scoped to newly-linked jobs only —
 		// never bulk-backfill archived jobs, never mint on a browse.
-		_ = m.mintAndStoreCanonicalID(ctx, j)
+		if cid := m.mintAndStoreCanonicalID(ctx, j); cid != "" && m.linkedHook != nil {
+			m.linkedHook(ctx, cid)
+		}
 		m.publishComplete(j, res.LibraryTrackID)
 		if m.playlists != nil && j.AddToPlaylistID != "" {
 			if perr := m.playlists.AddTracksToPlaylist(ctx, j.AddToPlaylistID, []string{res.LibraryTrackID}); perr != nil {
@@ -1402,6 +1412,9 @@ func (m *Manager) runScan() {
 		// Task 4: collect non-empty ids for the RefreshLinked call below.
 		if cid := m.mintAndStoreCanonicalID(ctx, j); cid != "" {
 			linkedCanonicalIDs = append(linkedCanonicalIDs, cid)
+			if m.linkedHook != nil {
+				m.linkedHook(ctx, cid)
+			}
 		}
 		m.publishComplete(j, res.LibraryTrackID)
 

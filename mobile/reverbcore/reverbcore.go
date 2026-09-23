@@ -1,8 +1,6 @@
 // Package reverbcore is the Go core as a phone links it (ADR 0003). gomobile
-// binds it into the iOS app, and it covers lifecycle only: start the core with
-// a data directory, report its loopback port, stop it. Everything else goes
-// over the core's HTTP and WebSocket API on that port, through the client
-// generated from OpenAPI.
+// binds it into the iOS app. Lifecycle and paired secret transfer cross the
+// binding; ordinary operations use the core's loopback HTTP/WebSocket API.
 //
 // The core runs the phone profile: its library is the folder of offline files
 // under the data directory, and it pairs and syncs as a full Device.
@@ -10,6 +8,7 @@ package reverbcore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"net"
@@ -22,6 +21,7 @@ import (
 	"github.com/uhhhm/reverb/internal/api"
 	"github.com/uhhhm/reverb/internal/app"
 	"github.com/uhhhm/reverb/internal/config"
+	"github.com/uhhhm/reverb/internal/p2p"
 )
 
 // Version is the release, stamped at build time with
@@ -38,7 +38,49 @@ type instance struct {
 var (
 	mu      sync.Mutex
 	running *instance
+
+	credMu              sync.RWMutex
+	spotifyClientID     string
+	spotifyClientSecret string
 )
+
+// SetSpotifyCredentials supplies this app's Keychain values to the phone core
+// in memory. Empty values revoke them. They are never written to process-wide
+// environment, where child processes could inherit the secret. A running core
+// reloads its search sources in place, so playback and the port are untouched.
+func SetSpotifyCredentials(clientID, clientSecret string) {
+	credMu.Lock()
+	changed := spotifyClientID != clientID || spotifyClientSecret != clientSecret
+	spotifyClientID, spotifyClientSecret = clientID, clientSecret
+	credMu.Unlock()
+	mu.Lock()
+	inst := running
+	mu.Unlock()
+	if !changed || inst == nil || inst.rt.Reloader == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := inst.rt.Reloader.Reload(ctx); err != nil {
+		log.Printf("reverbcore: reload search sources: %v", err)
+	}
+}
+
+// getenv is the process environment with the Spotify credentials replaced by
+// the in-memory values, read per call so a reload sees the latest ones.
+func getenv(key string) string {
+	switch key {
+	case "REVERB_SPOTIFY_CLIENT_ID", "REVERB_SPOTIFY_CLIENT_SECRET":
+		credMu.RLock()
+		defer credMu.RUnlock()
+		if key == "REVERB_SPOTIFY_CLIENT_ID" {
+			return spotifyClientID
+		}
+		return spotifyClientSecret
+	default:
+		return os.Getenv(key)
+	}
+}
 
 // Start boots the core over dataDir, creating it if needed, and returns the
 // loopback port its API listens on. Starting a running core returns its port.
@@ -67,7 +109,7 @@ func Start(dataDir string) (int, error) {
 		Version: Version,
 		P2PPort: cfg.P2PPort,
 		Profile: app.ProfilePhone,
-		Getenv:  os.Getenv,
+		Getenv:  getenv,
 	})
 	if err != nil {
 		return 0, err
@@ -97,6 +139,35 @@ func Port() int {
 		return 0
 	}
 	return running.port
+}
+
+// CopySpotifyCredentials retrieves the paired desktop's Spotify credentials
+// over the trusted P2P transport. This intentionally bypasses the loopback
+// HTTP API, which other local apps could potentially call. The iOS layer must
+// save the result in its Keychain; the Go core never persists the secret.
+//
+// An empty string with no error means a paired device answered without any
+// credentials, so a previously copied secret should be forgotten.
+func CopySpotifyCredentials() (string, error) {
+	// The lookup dials peers, so it runs outside mu: Port and Stop stay
+	// responsive, and a Stop meanwhile only makes the request fail.
+	mu.Lock()
+	inst := running
+	mu.Unlock()
+	if inst == nil {
+		return "", errors.New("reverbcore: not running")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	credentials, err := inst.rt.CopySpotifyCredentials(ctx)
+	if errors.Is(err, p2p.ErrNoSearchCredentials) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	data, err := json.Marshal(credentials)
+	return string(data), err
 }
 
 // Stop shuts the core down and waits for it to release the database and the

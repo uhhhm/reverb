@@ -2,6 +2,7 @@ package syncemit_test
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -129,11 +130,85 @@ func TestLibraryMetadataPublishesWithoutAPlayOrPlaylist(t *testing.T) {
 	}
 
 	emit.PublishLibrary(ctx, library, cat)
-	if got := changeCount(t, st); got != 2 {
-		t.Fatalf("published %d changes, want one identity per library track", got)
+	if got := changeCount(t, st); got != 4 {
+		t.Fatalf("published %d changes, want identity and membership per library track", got)
 	}
 	emit.PublishLibrary(ctx, library, cat)
-	if got := changeCount(t, st); got != 2 {
+	if got := changeCount(t, st); got != 4 {
 		t.Fatalf("second publish appended duplicates: %d changes", got)
+	}
+}
+
+func TestLibraryBrowseIncludesExternallyMintedTrackAndExcludesDeletion(t *testing.T) {
+	st, err := store.Open(t.TempDir() + "/reverb.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.Migrate(); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := st.Q().CreateDevice(ctx, db.CreateDeviceParams{ID: "dev_local", Name: "local", TokenHash: "hash"}); err != nil {
+		t.Fatal(err)
+	}
+	cat := catalog.NewService(st.Q(), time.Now, func() string { return "external-first" })
+	log := reverbsync.NewSyncStore(st.Q())
+	emit := syncemit.New(log, cat, func(context.Context) string { return "dev_local" })
+	cat.WithEmitter(emit)
+	cid, err := cat.CanonicalFor(ctx, catalog.Identity{
+		Kind: "track", Title: "One", Artist: "Band", Album: "Record", DurationMs: 180000,
+		Source: "spotify", ExternalID: "spotify-one",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := func() []db.CatalogEntity {
+		rows, err := st.Q().ListBrowsableCatalogTracks(ctx, db.ListBrowsableCatalogTracksParams{Query: "", Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rows
+	}
+	if rows := list(); len(rows) != 0 {
+		t.Fatalf("external-only track appeared in library: %+v", rows)
+	}
+	emit.PublishLibrary(ctx, trackLibrary{{Title: "One", Artist: "Band", Album: "Record", DurationMs: 180000}}, cat)
+	if rows := list(); len(rows) != 1 || rows[0].ID != cid {
+		t.Fatalf("library track first minted externally was missing: %+v", rows)
+	}
+	if err := st.Q().UpsertTrackOverrideByCatalogID(ctx, db.UpsertTrackOverrideByCatalogIDParams{
+		TrackID: "backend-one", Artist: "Renamed_Band", UpdatedAt: 1, CatalogID: sql.NullString{String: cid, Valid: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{"renamed_", "BAND"} {
+		rows, err := st.Q().ListBrowsableCatalogTracks(ctx, db.ListBrowsableCatalogTracksParams{Query: q, Limit: 100})
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("query %q = %+v, %v", q, rows, err)
+		}
+	}
+	if rows, _ := st.Q().ListBrowsableCatalogTracks(ctx, db.ListBrowsableCatalogTracksParams{Query: "%", Limit: 100}); len(rows) != 0 {
+		t.Fatalf("a literal %% query matched as a wildcard: %+v", rows)
+	}
+	if _, err := log.AppendChange(ctx, "dev_local", reverbsync.SyncChange{
+		EntityType: reverbsync.EntityTrack, EntityID: cid, Field: reverbsync.FieldLibraryPresent, Value: false, UpdatedAt: time.Now().UnixMilli(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if rows := list(); len(rows) != 0 {
+		t.Fatalf("track removed from the library still appeared: %+v", rows)
+	}
+	emit.PublishLibrary(ctx, trackLibrary{{Title: "One", Artist: "Band", Album: "Record", DurationMs: 180000}}, cat)
+	if rows := list(); len(rows) != 1 {
+		t.Fatalf("track returned to the library was missing: %+v", rows)
+	}
+	if _, err := log.AppendChange(ctx, "dev_local", reverbsync.SyncChange{
+		EntityType: reverbsync.EntityTrack, EntityID: cid, Field: reverbsync.FieldDeleted, UpdatedAt: time.Now().UnixMilli(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if rows := list(); len(rows) != 0 {
+		t.Fatalf("deleted track still appeared in library: %+v", rows)
 	}
 }

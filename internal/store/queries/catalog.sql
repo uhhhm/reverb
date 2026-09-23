@@ -5,6 +5,35 @@ VALUES (?,?,?,?,?,?,?,?,?,?,?);
 -- name: GetCatalogEntity :one
 SELECT * FROM catalog_entity WHERE id = ?;
 
+-- name: ListBrowsableCatalogTracks :many
+SELECT * FROM catalog_entity
+WHERE kind = 'track'
+  -- The latest libraryPresent decides membership. Without one, a library-minted
+  -- identity (source '') counts as present and a search-minted one does not.
+  AND COALESCE((
+    SELECT m.value_json FROM sync_change m WHERE m.entity_type = 'track' AND m.entity_id = catalog_entity.id
+      AND m.field = 'libraryPresent' AND m.revision NOT IN (SELECT revision FROM sync_nonwinning)
+    ORDER BY m.revision DESC LIMIT 1
+  ), CASE WHEN source = '' THEN 'true' ELSE 'false' END) = 'true'
+  AND NOT EXISTS (
+    SELECT 1 FROM sync_change d WHERE d.entity_type = 'track' AND d.entity_id = catalog_entity.id
+      AND d.field = '__deleted' AND d.revision NOT IN (SELECT revision FROM sync_nonwinning)
+  )
+  -- instr matches @query literally (no LIKE wildcards). A rename matches too,
+  -- because the phone lists and filters by the renamed names.
+  AND (CAST(@query AS TEXT) = ''
+    OR instr(lower(title), lower(@query)) > 0
+    OR instr(lower(artist), lower(@query)) > 0
+    OR instr(lower(album), lower(@query)) > 0
+    OR EXISTS (
+      SELECT 1 FROM track_override o WHERE o.catalog_id = catalog_entity.id
+        AND (instr(lower(o.title), lower(@query)) > 0
+          OR instr(lower(o.artist), lower(@query)) > 0
+          OR instr(lower(o.album), lower(@query)) > 0)
+    ))
+ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, title COLLATE NOCASE, id
+LIMIT @limit OFFSET @offset;
+
 -- name: InsertCatalogAlias :exec
 INSERT INTO catalog_alias (alias_kind, alias_value, catalog_id, created_at)
 VALUES (?,?,?,?) ON CONFLICT(alias_kind, alias_value) DO NOTHING;

@@ -12,6 +12,8 @@ package app
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -143,8 +145,9 @@ type Runtime struct {
 	// P2PSyncer is the anti-entropy syncer, set once the host starts.
 	P2PSyncer *p2p.Syncer
 	// P2PPuller copies peers' files here, set once the host starts.
-	P2PPuller *p2p.Puller
-	Getenv    func(string) string
+	P2PPuller         *p2p.Puller
+	searchCredentials *p2p.Delegator
+	Getenv            func(string) string
 
 	// SyncEmit publishes locally-made changes; Playlists projects playlists in
 	// both directions. StartBackground uses them for the one-time publish of
@@ -367,6 +370,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		MusicDir:      musicDir,
 		Resolver:      resolverSvc,
 		Catalog:       st.Q(),
+		CatalogBrowse: st.Q(),
 		Deletion:      bundle.Deletion,
 		Overrides:     override.New(st.Q()),
 		Entities:      override.NewEntities(st.Q()),
@@ -453,6 +457,15 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	builder.SetDownloadCompletionHook(downloadCompletion)
 	if bundle.Manager != nil {
 		bundle.Manager.SetCompletionHook(downloadCompletion)
+	}
+	// A download linked to its library track enters household browsing at once,
+	// including a track deleted earlier and downloaded again. The phone's
+	// offline files are copies, not library membership.
+	if !phone {
+		builder.SetDownloadLinkedHook(emitter.EnsureLibraryMembership)
+		if bundle.Manager != nil {
+			bundle.Manager.SetLinkedHook(emitter.EnsureLibraryMembership)
+		}
 	}
 
 	// Not interested marks replicate through the change log; the projection
@@ -705,7 +718,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	rt.Deps.P2PGuard = func() *p2p.Guard { return rt.P2PGuard }
 	rt.Deps.P2PSyncer = func() *p2p.Syncer { return rt.P2PSyncer }
 	if phone {
-		rt.Deps.DelegatedStream = p2p.NewDelegator(
+		delegator := p2p.NewDelegator(
 			func() libp2phost.Host {
 				if rt.P2P == nil {
 					return nil
@@ -715,6 +728,8 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 			func() *p2p.Guard { return rt.P2PGuard },
 			st.Q(),
 		)
+		rt.Deps.DelegatedStream = delegator
+		rt.searchCredentials = delegator
 	}
 	return rt, nil
 }
@@ -751,7 +766,8 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 			if h.LibHost() != nil {
 				p2p.RegisterFileHandler(h.LibHost(), musicDir, guard)
 				p2p.RegisterCoverHandler(h.LibHost(), coverDir, guard)
-				p2p.RegisterDelegatedHandler(h.LibHost(), guard, r.openDelegatedStream)
+				p2p.RegisterDelegatedHandler(h.LibHost(), guard, r.openDelegatedStream, r.openDelegatedCover)
+				p2p.RegisterSearchCredentialsHandler(h.LibHost(), guard, r.spotifyCredentials)
 			}
 			localID, lerr := reverbsync.LocalDeviceID(ctx, r.Store.Q())
 			if lerr != nil || localID == "" {
@@ -835,14 +851,18 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 	// Replication only ever carried referenced catalog entities before, so a
 	// library built up over months would reach a newly paired device incomplete.
 	// Publish existing history once, then enumerate library metadata on every
-	// boot so files added outside Reverb also become visible to peers. Keep the
-	// passes serial: both can ensure catalog entities in the sync log.
+	// boot so files added outside Reverb also become visible to peers; downloads
+	// join through the manager's linked hook. Keep the passes serial: both can
+	// ensure catalog entities in the sync log. A bundled Navidrome is enumerated
+	// only once it is serving, or the boot pass would find nothing.
 	if r.SyncEmit != nil {
 		go func() {
 			r.SyncEmit.BackfillHistory(ctx, r.Store.Q(), r.Playlists)
-			if browser, ok := r.Bundle.Library.(syncemit.LibraryBrowser); ok {
-				r.SyncEmit.PublishLibrary(ctx, browser, r.catalog)
+			if sup := r.Bundle.Supervisor; sup != nil && sup.Health() != embedded.HealthExternal {
+				WaitReadyThenBackfill(ctx, sup.Ready, func() { r.publishLibrary(ctx) })
+				return
 			}
+			r.publishLibrary(ctx)
 		}()
 	}
 	if r.Bundle.Sync != nil {
@@ -870,6 +890,76 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 	if r.Recommend != nil {
 		go r.Recommend.RunSchedule(ctx)
 	}
+}
+
+// publishLibrary marks the live library's tracks as household catalogue
+// members. The phone's offline files are copies, not library membership.
+func (r *Runtime) publishLibrary(ctx context.Context) {
+	if r.profile == ProfilePhone {
+		return
+	}
+	library := r.Bundle.Library
+	if r.Reloader != nil {
+		if current := r.Reloader.Current().Library; current != nil {
+			library = current
+		}
+	}
+	if browser, ok := library.(syncemit.LibraryBrowser); ok {
+		r.SyncEmit.PublishLibrary(ctx, browser, r.catalog)
+	}
+}
+
+// CopySpotifyCredentials is called by the embedded iOS core after pairing.
+// The response never passes through HTTP, replication, or the SQLite store.
+func (r *Runtime) CopySpotifyCredentials(ctx context.Context) (p2p.SearchCredentials, error) {
+	if r == nil || r.profile != ProfilePhone || r.searchCredentials == nil {
+		return p2p.SearchCredentials{}, errors.New("search credential copy unavailable")
+	}
+	return r.searchCredentials.CopySearchCredentials(ctx)
+}
+
+func (r *Runtime) openDelegatedCover(ctx context.Context, catalogID string, size int) (core.CoverArt, error) {
+	if r.Deps.Resolver == nil || r.Bundle.Library == nil {
+		return core.CoverArt{}, core.ErrLibraryItemNotFound
+	}
+	addr, err := r.Deps.Resolver.Resolve(ctx, catalogID)
+	if err != nil {
+		return core.CoverArt{}, err
+	}
+	if !addr.Found || addr.CoverArtID == "" {
+		return core.CoverArt{}, core.ErrLibraryItemNotFound
+	}
+	return r.Bundle.Library.CoverArt(ctx, addr.CoverArtID, size)
+}
+
+func (r *Runtime) spotifyCredentials(ctx context.Context) (p2p.SearchCredentials, error) {
+	// A phone never re-serves a copied secret, but answers so another phone
+	// asking it counts as a definite "no" rather than an unreachable device.
+	if r.profile == ProfilePhone {
+		return p2p.SearchCredentials{}, p2p.ErrNoSearchCredentials
+	}
+	rows, err := r.Store.Q().ListAdapterInstances(ctx)
+	if err != nil {
+		return p2p.SearchCredentials{}, err
+	}
+	for _, row := range rows {
+		if row.Type != "search" || row.Name != "spotify" || row.Enabled != 1 {
+			continue
+		}
+		cfg := map[string]any{}
+		if row.ConfigJson != "" {
+			if err := json.Unmarshal([]byte(row.ConfigJson), &cfg); err != nil {
+				return p2p.SearchCredentials{}, errors.New("Spotify source configuration is invalid")
+			}
+		}
+		wiring.ApplySpotifyEnv(cfg, r.Getenv)
+		id, _ := cfg["client_id"].(string)
+		secret, _ := cfg["client_secret"].(string)
+		if id != "" && secret != "" {
+			return p2p.SearchCredentials{ClientID: id, ClientSecret: secret}, nil
+		}
+	}
+	return p2p.SearchCredentials{}, p2p.ErrNoSearchCredentials
 }
 
 func (r *Runtime) openDelegatedStream(ctx context.Context, catalogID string, opts core.StreamOpts, byteRange string) (core.StreamHandle, error) {

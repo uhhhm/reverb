@@ -16,6 +16,33 @@ final class SmokeTests: XCTestCase {
         continueAfterFailure = false
     }
 
+    func testDelegatedLibraryBrowseAndPlay() throws {
+        let pairing = try testPeerPairing()
+        let app = XCUIApplication()
+        app.launchArguments = ["--reset-data"]
+        app.launchEnvironment["REVERB_P2P_PORT"] = "0"
+        app.launch()
+
+        app.tabBars.buttons["Devices"].tap()
+        tapWhenReady(app.buttons["devices.pair"])
+        app.segmentedControls.buttons["Type a code"].tap()
+        type(pairing.code, into: app.textFields["pair.code"])
+        type(pairing.address, into: app.textFields["pair.address"])
+        app.buttons["pair.submit"].tap()
+        XCTAssertTrue(waitForDisappearance(app.navigationBars["Pair a device"], timeout: 60))
+
+        app.tabBars.buttons["Library"].tap()
+        app.segmentedControls.buttons["Tracks"].tap()
+        let remote = app.descendants(matching: .any)["catalog.track.\(pairing.track)"]
+        XCTAssertTrue(remote.waitForExistence(timeout: 60), "The synced desktop track did not appear in Library")
+        remote.tap()
+        let title = app.staticTexts["nowPlaying.title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 20))
+        XCTAssertEqual(title.label, pairing.track)
+        let elapsed = app.staticTexts["nowPlaying.elapsed"]
+        wait(for: [expectation(for: NSPredicate(format: "label IN {'0:01', '0:02', '0:03', '0:04', '0:05'}"), evaluatedWith: elapsed)], timeout: 12)
+    }
+
     func testPairKeepOfflineAndPlay() throws {
         let pairing = try testPeerPairing()
         let app = XCUIApplication()

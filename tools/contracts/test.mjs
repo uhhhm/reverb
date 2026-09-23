@@ -32,9 +32,9 @@ try {
   for (const event of samples.events) validate(doc.components.schemas.RealtimeEvent, event)
   const okSchema = (path, method = 'get') => doc.paths[path][method].responses['200'].content['application/json'].schema
   for (const [sample, path, method] of [
-    ['health', '/health'], ['devices', '/pairing/devices'], ['playlists', '/playlists'], ['playlist', '/playlists/{id}'],
+    ['health', '/health'], ['devices', '/pairing/devices'], ['catalog', '/library/catalog/tracks'], ['playlists', '/playlists'], ['playlist', '/playlists/{id}'],
     ['offlineList', '/offline-set'], ['offlineStatus', '/offline-set/status'],
     ['offlinePut', '/offline-set/{playlistId}', 'put'], ['offlineDelete', '/offline-set/{playlistId}', 'delete'],
   ]) validate(okSchema(path, method), mobile[sample])
-  console.log('Download, player, playlist and offline set HTTP and event contracts passed')
+  console.log('Download, catalog, player, playlist and offline set HTTP and event contracts passed')
 } finally { rmSync(dir, { recursive: true, force: true }) }

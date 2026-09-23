@@ -898,6 +898,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/library/catalog/tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Browse synced household tracks, including those not stored on this device */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Case-insensitive literal substring of the title, artist or album, including renames. */
+                    q?: string;
+                    limit?: number;
+                    offset?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description CatalogLibraryTrack list */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CatalogLibraryTrack"][];
+                    };
+                };
+                /** @description catalogue unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/library/track/{id}": {
         parameters: {
             query?: never;
@@ -6756,6 +6804,23 @@ export interface components {
             /** @description Where playback starts, when the track is cropped. */
             cropStartMs?: number;
             /** @description Where playback stops; zero plays to the end. */
+            cropEndMs?: number;
+        };
+        /** @description A synced household track identity, independent of whether this device stores its audio. */
+        CatalogLibraryTrack: {
+            /** @description Stable catalog track id. */
+            id: string;
+            title: string;
+            artist: string;
+            album: string;
+            durationMs: number;
+            /** @enum {string} */
+            playback: "local" | "delegated" | "unavailable";
+            /** @description Local backend id when playback is local. */
+            localTrackId?: string;
+            /** @description Pass to GET /cover/{id}. A backend cover id when playback is local, the catalog id when delegated; absent otherwise. */
+            coverArtId?: string;
+            cropStartMs?: number;
             cropEndMs?: number;
         };
         LibraryAlbum: {

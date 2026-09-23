@@ -47,6 +47,11 @@ func TestMobileHTTPContract(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.Q().InsertCatalogEntity(ctx, db.InsertCatalogEntityParams{
+		ID: "trk_remote", Kind: "track", Title: "Remote", Artist: "Band", Album: "Record", DurationMs: 180000,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	summary := core.SyncedPlaylist{ID: "pl1", Source: "local", ExternalID: "pl1", Name: "Commute", Mode: "once", TrackCount: 2}
 	sync := &fakeSync{
 		list: []core.SyncedPlaylist{summary},
@@ -70,11 +75,13 @@ func TestMobileHTTPContract(t *testing.T) {
 		Auth: authSvc, Sync: sync, PlaylistOwner: st.Q(), OfflineSet: st.Q(), OfflineKeeper: keeper, PairingStore: st.Q(),
 		Search: registry.NewRegistry("search"), Downloader: registry.NewRegistry("downloader"),
 		DelegatedStream: &fakeDelegatedStream{},
+		CatalogBrowse:   st.Q(),
 	})
 	samples := map[string]json.RawMessage{}
 	for _, c := range []struct{ key, method, path, body string }{
 		{"health", http.MethodGet, "/health", ""},
 		{"devices", http.MethodGet, "/pairing/devices", ""},
+		{"catalog", http.MethodGet, "/library/catalog/tracks", ""},
 		{"playlists", http.MethodGet, "/playlists", ""},
 		{"playlist", http.MethodGet, "/playlists/pl1", ""},
 		{"offlinePut", http.MethodPut, "/offline-set/pl1", `{"enabled":true}`},

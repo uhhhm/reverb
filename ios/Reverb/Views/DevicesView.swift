@@ -77,7 +77,8 @@ struct DevicesView: View {
 
     private func unpair(_ device: Device) async {
         guard let client = core.client else { return }
-        _ = try? await client.unpairDevice(path: .init(id: device.id)).ok
+        guard (try? await client.unpairDevice(path: .init(id: device.id)).ok) != nil else { return }
+        await core.refreshSearchCredentials()
         await load()
     }
 }

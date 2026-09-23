@@ -340,6 +340,68 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/LibraryTrack"
+  /library/catalog/tracks:
+    get:
+      operationId: listCatalogTracks
+      summary: Browse synced household tracks, including those not stored on this device
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Case-insensitive literal substring of the title, artist or album, including renames.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: CatalogLibraryTrack list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CatalogLibraryTrack"
+        "503":
+          description: catalogue unavailable
+  /search/everywhere:
+    get:
+      operationId: searchEverywhere
+      summary: |
+        Search-everywhere as Server-Sent Events. Streams one envelope per source (text/event-stream); each event data is a JSON SearchEnvelope with per-result library match status.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - track
+              - album
+              - artist
+      responses:
+        "200":
+          description: SSE stream of search envelopes
+          content:
+            text/event-stream:
+              schema:
+                type: string
   /playlists:
     get:
       operationId: listPlaylists
@@ -939,6 +1001,44 @@ components:
       required:
         - source
         - externalId
+    CatalogLibraryTrack:
+      type: object
+      description: A synced household track identity, independent of whether this device stores its audio.
+      required:
+        - id
+        - title
+        - artist
+        - album
+        - durationMs
+        - playback
+      properties:
+        id:
+          type: string
+          description: Stable catalog track id.
+        title:
+          type: string
+        artist:
+          type: string
+        album:
+          type: string
+        durationMs:
+          type: integer
+        playback:
+          type: string
+          enum:
+            - local
+            - delegated
+            - unavailable
+        localTrackId:
+          type: string
+          description: Local backend id when playback is local.
+        coverArtId:
+          type: string
+          description: Pass to GET /cover/{id}. A backend cover id when playback is local, the catalog id when delegated; absent otherwise.
+        cropStartMs:
+          type: integer
+        cropEndMs:
+          type: integer
     ExternalArtist:
       type: object
       required:

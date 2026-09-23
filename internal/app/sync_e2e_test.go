@@ -622,6 +622,35 @@ func TestPhoneConvergesWithDesktop(t *testing.T) {
 	converge(t, desktop, phone, "a play reaches the restarted phone", func() bool { return phone.hasPlayTitled("After Phone Restart") })
 }
 
+func TestPhoneCopiesSpotifyCredentialsAndKeepsSourceWithoutDesktop(t *testing.T) {
+	if testing.Short() {
+		t.Skip("boots two runtimes with real libp2p hosts")
+	}
+	desktop := newSyncDevice(t, "desktop")
+	phone := newPhoneDevice(t, "phone")
+	if err := desktop.rt.Store.Q().CreateAdapterInstance(context.Background(), db.CreateAdapterInstanceParams{
+		ID: uuid.NewString(), Type: "search", Name: "spotify", Enabled: 1,
+		ConfigJson: `{"client_id":"desktop-client","client_secret":"desktop-secret"}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pair(t, desktop, phone)
+	credentials, err := phone.rt.CopySpotifyCredentials(context.Background())
+	if err != nil || credentials.ClientID != "desktop-client" || credentials.ClientSecret != "desktop-secret" {
+		t.Fatal("paired phone did not copy desktop search credentials")
+	}
+	phone.env = map[string]string{
+		"REVERB_SPOTIFY_CLIENT_ID":     credentials.ClientID,
+		"REVERB_SPOTIFY_CLIENT_SECRET": credentials.ClientSecret,
+	}
+	phone.restart()
+	desktop.stop()
+	sources := phone.rt.Bundle.Aggregator.Sources()
+	if len(sources) != 2 || sources[0].Name() != "deezer" || sources[1].Name() != "spotify" {
+		t.Fatalf("phone sources without desktop = %+v", sources)
+	}
+}
+
 func TestPhoneDelegatesNonOfflineTrackAndMarksItUnavailableWhenPeerStops(t *testing.T) {
 	if testing.Short() {
 		t.Skip("boots two runtimes with real libp2p hosts")
@@ -646,6 +675,11 @@ func TestPhoneDelegatesNonOfflineTrackAndMarksItUnavailableWhenPeerStops(t *test
 	})
 
 	track := phoneDetail.Tracks[0]
+	var browse []core.CatalogLibraryTrack
+	phone.must(http.MethodGet, "/library/catalog/tracks?q=Desktop", nil, &browse, http.StatusOK)
+	if len(browse) != 1 || browse[0].ID != track.CanonicalID || browse[0].Playback != core.PlaybackDelegated {
+		t.Fatalf("phone household library browse = %+v", browse)
+	}
 	resp, err := phone.srv.Client().Get(phone.srv.URL + "/api/v1/stream/" + track.CanonicalID)
 	if err != nil {
 		t.Fatal(err)
@@ -677,6 +711,11 @@ func TestPhoneDelegatesNonOfflineTrackAndMarksItUnavailableWhenPeerStops(t *test
 	phone.must(http.MethodGet, "/playlists/"+created.ID, nil, &phoneDetail, http.StatusOK)
 	if got := phoneDetail.Tracks[0].Playback; got != core.PlaybackUnavailable {
 		t.Fatalf("playback after desktop stopped = %q, want unavailable", got)
+	}
+	browse = nil
+	phone.must(http.MethodGet, "/library/catalog/tracks?q=Desktop", nil, &browse, http.StatusOK)
+	if len(browse) != 1 || browse[0].Playback != core.PlaybackUnavailable {
+		t.Fatalf("offline household library browse = %+v", browse)
 	}
 }
 

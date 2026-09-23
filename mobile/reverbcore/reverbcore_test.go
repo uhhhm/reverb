@@ -79,3 +79,35 @@ func TestStartServesThePhoneCoreAndStopReleasesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSpotifyCredentialsStayInMemoryAndCanBeRevoked(t *testing.T) {
+	if testing.Short() {
+		t.Skip("boots a runtime with a real libp2p host")
+	}
+	t.Setenv("REVERB_P2P_PORT", "0")
+	t.Setenv("REVERB_SPOTIFY_CLIENT_SECRET", "environment-must-not-win")
+	dir := filepath.Join(t.TempDir(), "Reverb")
+	SetSpotifyCredentials("keychain-id", "keychain-secret")
+	defer func() { Stop(); SetSpotifyCredentials("", "") }()
+	port, err := Start(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := running.rt.Getenv("REVERB_SPOTIFY_CLIENT_SECRET"); got != "keychain-secret" {
+		t.Fatal("phone core did not use the in-memory credential")
+	}
+	if got := os.Getenv("REVERB_SPOTIFY_CLIENT_SECRET"); got != "environment-must-not-win" {
+		t.Fatal("phone core changed the process environment")
+	}
+	if sources := running.rt.Bundle.Aggregator.Sources(); len(sources) != 2 || sources[1].Name() != "spotify" {
+		t.Fatalf("provisioned sources = %+v", sources)
+	}
+	// Revoking reloads the running core's search sources in place.
+	SetSpotifyCredentials("", "")
+	if sources := running.rt.Reloader.SearchSourcesProvider()(); len(sources) != 1 || sources[0].Name() != "deezer" {
+		t.Fatalf("revoked sources = %+v", sources)
+	}
+	if Port() != port {
+		t.Fatal("revoking credentials restarted the core")
+	}
+}

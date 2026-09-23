@@ -4,8 +4,9 @@ import ReverbAPI
 import UIKit
 
 /// Runs the Go core inside the app (ADR 0003). The core is the phone's whole
-/// Device: its database, sync, pairing and offline files. gomobile exposes only
-/// start, port and stop; everything else goes through the API client.
+/// Device: its database, sync, pairing and offline files. gomobile exposes
+/// start, port and stop, plus the Spotify credential copy that must stay off
+/// loopback HTTP; everything else goes through the API client.
 @MainActor
 final class CoreHost: ObservableObject {
     enum State: Equatable {
@@ -22,6 +23,9 @@ final class CoreHost: ObservableObject {
     let dataDirectory: URL
 
     private var terminateObserver: NSObjectProtocol?
+    /// The latest credential refresh. Each waits for the one before it, so an
+    /// older refresh cannot overwrite what a newer one stored.
+    private var credentialRefresh: Task<Void, Never>?
 
     init() {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -29,6 +33,7 @@ final class CoreHost: ObservableObject {
         // UI tests start from nothing so each run pairs afresh.
         if ProcessInfo.processInfo.arguments.contains("--reset-data") {
             try? FileManager.default.removeItem(at: dataDirectory)
+            SearchCredentialStore.clear()
         }
         terminateObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.willTerminateNotification, object: nil, queue: .main
@@ -80,7 +85,46 @@ final class CoreHost: ObservableObject {
         }
     }
 
+    /// Copies Spotify credentials from a paired desktop after pairing, unpairing
+    /// and each foreground sync. The secret crosses the Go/Swift binding rather
+    /// than the loopback API and is kept in this device's Keychain. When a
+    /// paired device answers without credentials, or none is paired, the copy
+    /// is forgotten; when none is reachable, the current copy is kept. The core
+    /// reloads its search sources in place, so playback is not interrupted.
+    func refreshSearchCredentials() async {
+        guard core != nil else { return }
+        let previous = credentialRefresh
+        let refresh = Task {
+            await previous?.value
+            await Self.copySearchCredentials()
+        }
+        credentialRefresh = refresh
+        await refresh.value
+    }
+
+    nonisolated private static func copySearchCredentials() async {
+        await Task.detached(priority: .utility) {
+            var error: NSError?
+            let json = ReverbcoreCopySpotifyCredentials(&error)
+            guard error == nil else { return }
+            if json.isEmpty {
+                SearchCredentialStore.clear()
+                ReverbcoreSetSpotifyCredentials("", "")
+                return
+            }
+            guard let data = json.data(using: .utf8),
+                  let credentials = try? JSONDecoder().decode(SpotifyCredentials.self, from: data),
+                  (try? SearchCredentialStore.save(credentials)) == true else { return }
+            ReverbcoreSetSpotifyCredentials(credentials.clientId, credentials.clientSecret)
+        }.value
+    }
+
     nonisolated private static func startCore(dataDirectory: URL) -> Result<Int, Error> {
+        if let credentials = SearchCredentialStore.load() {
+            ReverbcoreSetSpotifyCredentials(credentials.clientId, credentials.clientSecret)
+        } else {
+            ReverbcoreSetSpotifyCredentials("", "")
+        }
         var port = 0
         var error: NSError?
         let started = ReverbcoreStart(dataDirectory.path, &port, &error)

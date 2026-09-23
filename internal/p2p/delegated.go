@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/host"
@@ -17,9 +18,9 @@ import (
 	"github.com/uhhhm/reverb/internal/store/db"
 )
 
-// delegatedProtocol carries requests one Device performs for another. Version
-// 1 has one request: stream a library track by the catalog id every Device
-// agrees on. Backend ids never cross this boundary.
+// delegatedProtocol carries audio and artwork requests one Device performs
+// for another by the catalog id every Device agrees on. Backend ids never
+// cross this boundary.
 const delegatedProtocol = "/reverb/delegated/1.0.0"
 
 const maxDelegatedHeaderBytes = 64 << 10
@@ -30,6 +31,7 @@ type delegatedRequest struct {
 	Opts      core.StreamOpts `json:"opts"`
 	Range     string          `json:"range,omitempty"`
 	Probe     bool            `json:"probe,omitempty"`
+	Size      int             `json:"size,omitempty"`
 }
 
 type delegatedResponse struct {
@@ -46,8 +48,12 @@ type delegatedResponse struct {
 // owns transport without owning library or resolver policy.
 type DelegatedStreamOpener func(context.Context, string, core.StreamOpts, string) (core.StreamHandle, error)
 
-// RegisterDelegatedHandler serves library audio to paired peers only.
-func RegisterDelegatedHandler(h host.Host, guard *Guard, open DelegatedStreamOpener) {
+// DelegatedCoverOpener resolves a catalog id to its library artwork at the
+// requested size. A nil opener makes the handler reject cover requests.
+type DelegatedCoverOpener func(context.Context, string, int) (core.CoverArt, error)
+
+// RegisterDelegatedHandler serves library audio and artwork to paired peers only.
+func RegisterDelegatedHandler(h host.Host, guard *Guard, open DelegatedStreamOpener, cover DelegatedCoverOpener) {
 	h.SetStreamHandler(delegatedProtocol, safeHandler("delegated", func(s network.Stream) {
 		defer s.Close()
 		_ = s.SetDeadline(time.Now().Add(30 * time.Second))
@@ -66,11 +72,23 @@ func RegisterDelegatedHandler(h host.Host, guard *Guard, open DelegatedStreamOpe
 			return
 		}
 		var req delegatedRequest
-		if err := decodeLimited(s, maxFileRequestBytes, &req); err != nil || req.Type != "stream" || req.CatalogID == "" {
+		if err := decodeLimited(s, maxFileRequestBytes, &req); err != nil || req.CatalogID == "" || (req.Type != "stream" && req.Type != "cover") {
 			_ = json.NewEncoder(s).Encode(delegatedResponse{StatusCode: 400, Error: "invalid delegated request"})
 			return
 		}
-		handle, err := open(ctx, req.CatalogID, req.Opts, req.Range)
+		var handle core.StreamHandle
+		var err error
+		if req.Type == "cover" {
+			if cover == nil || req.Size < 0 || req.Size > 2048 {
+				_ = json.NewEncoder(s).Encode(delegatedResponse{StatusCode: 400, Error: "invalid cover request"})
+				return
+			}
+			var art core.CoverArt
+			art, err = cover(ctx, req.CatalogID, req.Size)
+			handle = core.StreamHandle{Body: art.Body, ContentType: art.ContentType, StatusCode: 200}
+		} else {
+			handle, err = open(ctx, req.CatalogID, req.Opts, req.Range)
+		}
 		if err != nil {
 			status := 502
 			if errors.Is(err, core.ErrLibraryItemNotFound) {
@@ -108,7 +126,21 @@ func RegisterDelegatedHandler(h host.Host, guard *Guard, open DelegatedStreamOpe
 // RequestDelegatedStream opens one authenticated-by-pairing stream from pid.
 // The returned body owns the libp2p stream and must be closed by the caller.
 func RequestDelegatedStream(ctx context.Context, h host.Host, pid peer.ID, catalogID string, opts core.StreamOpts, byteRange string, probe bool) (core.StreamHandle, error) {
-	if h == nil || catalogID == "" {
+	return requestDelegated(ctx, h, pid, delegatedRequest{Type: "stream", CatalogID: catalogID, Opts: opts, Range: byteRange, Probe: probe})
+}
+
+// RequestDelegatedCover fetches catalog artwork from pid. The returned body owns
+// the libp2p stream and must be closed by the caller.
+func RequestDelegatedCover(ctx context.Context, h host.Host, pid peer.ID, catalogID string, size int) (core.CoverArt, error) {
+	handle, err := requestDelegated(ctx, h, pid, delegatedRequest{Type: "cover", CatalogID: catalogID, Size: size})
+	if err != nil {
+		return core.CoverArt{}, err
+	}
+	return core.CoverArt{Body: handle.Body, ContentType: handle.ContentType}, nil
+}
+
+func requestDelegated(ctx context.Context, h host.Host, pid peer.ID, req delegatedRequest) (core.StreamHandle, error) {
+	if h == nil || req.CatalogID == "" {
 		return core.StreamHandle{}, fmt.Errorf("delegated stream unavailable")
 	}
 	s, err := h.NewStream(ctx, pid, delegatedProtocol)
@@ -116,7 +148,7 @@ func RequestDelegatedStream(ctx context.Context, h host.Host, pid peer.ID, catal
 		return core.StreamHandle{}, err
 	}
 	_ = s.SetDeadline(time.Now().Add(30 * time.Second))
-	if err := json.NewEncoder(s).Encode(delegatedRequest{Type: "stream", CatalogID: catalogID, Opts: opts, Range: byteRange, Probe: probe}); err != nil {
+	if err := json.NewEncoder(s).Encode(req); err != nil {
 		_ = s.Reset()
 		return core.StreamHandle{}, err
 	}
@@ -150,7 +182,7 @@ func RequestDelegatedStream(ctx context.Context, h host.Host, pid peer.ID, catal
 		}
 		return core.StreamHandle{}, fmt.Errorf("%s (status %d)", resp.Error, resp.StatusCode)
 	}
-	if probe {
+	if req.Probe {
 		_ = s.Close()
 		return core.StreamHandle{StatusCode: resp.StatusCode, ContentType: resp.ContentType, ContentLength: resp.ContentLength, AcceptRanges: resp.AcceptRanges, ContentRange: resp.ContentRange}, nil
 	}
@@ -199,53 +231,170 @@ type Delegator struct {
 	host  func() host.Host
 	guard func() *Guard
 	store DelegatorStore
+	now   func() time.Time
+
+	mu sync.Mutex
+	// playable remembers recent probe answers per catalog id, and
+	// unreachableUntil short-circuits probes while no paired device answers,
+	// so browsing a large catalogue does not dial once per row per refresh.
+	playable         map[string]playableProbe
+	unreachableUntil time.Time
 }
 
+// playableProbe is a cached answer. A yes names the device that gave it and
+// holds only while that device stays connected.
+type playableProbe struct {
+	ok   bool
+	at   time.Time
+	peer peer.ID
+}
+
+const (
+	playableProbeTTL    = 5 * time.Minute
+	unplayableProbeTTL  = 30 * time.Second
+	unreachableProbeTTL = 30 * time.Second
+)
+
+// errNoReachablePeer means no paired device could be dialled; errNoPairedPeer,
+// which wraps it, means none is paired at all.
+var (
+	errNoReachablePeer = errors.New("no paired device is reachable")
+	errNoPairedPeer    = fmt.Errorf("no device is paired: %w", errNoReachablePeer)
+)
+
 func NewDelegator(hostProvider func() host.Host, guardProvider func() *Guard, store DelegatorStore) *Delegator {
-	return &Delegator{host: hostProvider, guard: guardProvider, store: store}
+	return &Delegator{host: hostProvider, guard: guardProvider, store: store, now: time.Now, playable: map[string]playableProbe{}}
+}
+
+// eachPeer calls try on each reachable paired device, Server first, until one
+// succeeds, and marks that device as reached. It returns errNoReachablePeer
+// when no device could be dialled, else the joined per-device failures, in
+// which an undialled device appears as errNoReachablePeer.
+func (d *Delegator) eachPeer(ctx context.Context, try func(host.Host, peer.ID) error) error {
+	if d == nil || d.host == nil || d.guard == nil || d.store == nil {
+		return errors.New("delegated transport unavailable")
+	}
+	h, guard := d.host(), d.guard()
+	if h == nil || guard == nil {
+		return errors.New("delegated transport unavailable")
+	}
+	candidates, err := d.candidates(ctx)
+	if err != nil {
+		return err
+	}
+	if len(candidates) == 0 {
+		return errNoPairedPeer
+	}
+	var failures []error
+	tried := false
+	for _, pid := range candidates {
+		if !EnsureConnected(ctx, h, guard, pid) {
+			failures = append(failures, fmt.Errorf("device %s: %w", pid, errNoReachablePeer))
+			continue
+		}
+		tried = true
+		err := try(h, pid)
+		if err == nil {
+			guard.Touch(ctx, pid)
+			return nil
+		}
+		failures = append(failures, fmt.Errorf("device %s: %w", pid, err))
+	}
+	if !tried {
+		return errNoReachablePeer
+	}
+	return errors.Join(failures...)
 }
 
 func (d *Delegator) Stream(ctx context.Context, catalogID string, opts core.StreamOpts, byteRange string) (core.StreamHandle, error) {
 	return d.request(ctx, catalogID, opts, byteRange, false)
 }
 
+// Playable reports whether some paired device can stream catalogID. Answers
+// are cached briefly, and a yes is dropped once its device disconnects;
+// Stream itself always asks the network.
 func (d *Delegator) Playable(ctx context.Context, catalogID string) bool {
-	handle, err := d.request(ctx, catalogID, core.StreamOpts{}, "", true)
-	if handle.Body != nil {
-		_ = handle.Body.Close()
+	if d == nil {
+		return false
 	}
+	now := d.now()
+	d.mu.Lock()
+	if now.Before(d.unreachableUntil) {
+		d.mu.Unlock()
+		return false
+	}
+	if probe, ok := d.playable[catalogID]; ok && probe.fresh(now) && (!probe.ok || d.connected(probe.peer)) {
+		d.mu.Unlock()
+		return probe.ok
+	}
+	d.mu.Unlock()
+
+	var answeredBy peer.ID
+	err := d.eachPeer(ctx, func(h host.Host, pid peer.ID) error {
+		handle, err := RequestDelegatedStream(ctx, h, pid, catalogID, core.StreamOpts{}, "", true)
+		if handle.Body != nil {
+			_ = handle.Body.Close()
+		}
+		if err == nil {
+			answeredBy = pid
+		}
+		return err
+	})
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	switch {
+	case err == nil:
+	case (err == errNoReachablePeer || err == errNoPairedPeer) && !errors.Is(ctx.Err(), context.Canceled):
+		// No device could be dialled (a joined error means some device was),
+		// including a dial that stalled into the caller's deadline, the usual
+		// sign of a sleeping or distant device.
+		d.unreachableUntil = now.Add(unreachableProbeTTL)
+		return false
+	case ctx.Err() != nil:
+		return false // cut short, which says nothing about this track
+	}
+	for id, probe := range d.playable {
+		if !probe.fresh(now) {
+			delete(d.playable, id)
+		}
+	}
+	d.playable[catalogID] = playableProbe{ok: err == nil, at: now, peer: answeredBy}
 	return err == nil
 }
 
+// fresh reports whether the answer may still be used; a no expires sooner, as
+// it is often a device still starting or a transient failure.
+func (p playableProbe) fresh(now time.Time) bool {
+	if p.ok {
+		return now.Sub(p.at) < playableProbeTTL
+	}
+	return now.Sub(p.at) < unplayableProbeTTL
+}
+
+func (d *Delegator) connected(pid peer.ID) bool {
+	h := d.host()
+	return h != nil && h.Network().Connectedness(pid) == network.Connected
+}
+
+// Cover fetches catalogID's artwork from the first paired device that has it.
+func (d *Delegator) Cover(ctx context.Context, catalogID string, size int) (core.CoverArt, error) {
+	var art core.CoverArt
+	err := d.eachPeer(ctx, func(h host.Host, pid peer.ID) error {
+		var err error
+		art, err = RequestDelegatedCover(ctx, h, pid, catalogID, size)
+		return err
+	})
+	return art, err
+}
+
 func (d *Delegator) request(ctx context.Context, catalogID string, opts core.StreamOpts, byteRange string, probe bool) (core.StreamHandle, error) {
-	if d == nil || d.host == nil || d.guard == nil || d.store == nil {
-		return core.StreamHandle{}, fmt.Errorf("delegated stream unavailable")
-	}
-	h, guard := d.host(), d.guard()
-	if h == nil || guard == nil {
-		return core.StreamHandle{}, fmt.Errorf("delegated stream unavailable")
-	}
-	candidates, err := d.candidates(ctx)
-	if err != nil {
-		return core.StreamHandle{}, err
-	}
-	var failures []error
-	for _, pid := range candidates {
-		if !EnsureConnected(ctx, h, guard, pid) {
-			failures = append(failures, fmt.Errorf("device %s is unreachable", pid))
-			continue
-		}
-		handle, err := RequestDelegatedStream(ctx, h, pid, catalogID, opts, byteRange, probe)
-		if err == nil {
-			guard.Touch(ctx, pid)
-			return handle, nil
-		}
-		failures = append(failures, fmt.Errorf("device %s: %w", pid, err))
-	}
-	if len(failures) == 0 {
-		return core.StreamHandle{}, fmt.Errorf("no paired device is reachable")
-	}
-	return core.StreamHandle{}, errors.Join(failures...)
+	var handle core.StreamHandle
+	err := d.eachPeer(ctx, func(h host.Host, pid peer.ID) error {
+		var err error
+		handle, err = RequestDelegatedStream(ctx, h, pid, catalogID, opts, byteRange, probe)
+		return err
+	})
+	return handle, err
 }
 
 func (d *Delegator) candidates(ctx context.Context) ([]peer.ID, error) {

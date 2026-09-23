@@ -113,11 +113,11 @@ func (s *Server) decorateAlbum(ctx context.Context, al *core.Album) {
 	*al = one[0]
 }
 
-// decorateDetailTracks handles album- and playlist-detail rows. Only the owned
-// rows carry a LibraryTrack, and only those get renames and uploaded art; a
-// missing row is described by a search source and has nothing local to override.
-// CoverURL is left alone for the same reason — it points at the search source's
-// image, not at the library.
+// decorateDetailTracks handles album- and playlist-detail rows. Owned rows
+// carry a LibraryTrack for local artwork and metadata. Delegated rows have no
+// local track but do have a catalog id, so their synced renames and crops still
+// apply. External-only rows have neither. CoverURL continues to point at the
+// search source's image rather than a local library cover.
 func (s *Server) decorateDetailTracks(ctx context.Context, rows []core.AlbumDetailTrack) {
 	if len(rows) == 0 {
 		return

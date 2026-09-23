@@ -107,7 +107,7 @@ struct PairingView: View {
         do {
             let output = try await client.redeemPairingQR(body: .json(.init(payload: payload, deviceName: deviceName)))
             switch output {
-            case .ok: await paired(client)
+            case .ok: await paired()
             case .badRequest: message = "That is not a Reverb pairing code, or it is from a newer version of Reverb."
             case .conflict: message = "That code was already used. Show a new one on the computer."
             case .gone: message = "That code has expired. Show a new one on the computer."
@@ -130,7 +130,7 @@ struct PairingView: View {
                 peerId: target.isEmpty ? nil : target, code: typed, deviceName: deviceName
             )))
             switch output {
-            case .ok: await paired(client)
+            case .ok: await paired()
             case .badRequest: message = "Enter the code the computer shows."
             default: message = "Pairing failed. Check the code, and that both devices are on the same network or VPN."
             }
@@ -139,9 +139,12 @@ struct PairingView: View {
         }
     }
 
-    private func paired(_ client: Client) async {
+    private func paired() async {
         message = nil
-        _ = try? await client.triggerSync()
         dismiss()
+        Task {
+            await core.refreshSearchCredentials()
+            if let current = core.client { _ = try? await current.triggerSync() }
+        }
     }
 }

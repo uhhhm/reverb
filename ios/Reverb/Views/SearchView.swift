@@ -30,6 +30,7 @@ struct SearchView: View {
     @EnvironmentObject private var player: Player
     @State private var query = ""
     @State private var local: Components.Schemas.LibrarySearchResults?
+    @State private var catalog: [CatalogTrack] = []
     @State private var sources: [SearchEnvelope] = []
 
     var body: some View {
@@ -41,6 +42,12 @@ struct SearchView: View {
                             .contentShape(Rectangle())
                             .onTapGesture { Task { await player.play(local.tracks, startAt: index) } }
                     }
+                }
+            }
+            let remote = catalog.filter { $0.playback != .local }
+            if !remote.isEmpty {
+                Section("Household library") {
+                    ForEach(remote, id: \.id) { track in CatalogTrackRow(track: track) }
                 }
             }
             ForEach(sources) { source in
@@ -65,22 +72,27 @@ struct SearchView: View {
             }
         }
         .task(id: query) {
-            guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { local = nil; sources = []; return }
+            guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { local = nil; catalog = []; sources = []; return }
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled, let client = core.client, let localCore = core.core else { return }
             async let localResult = try? client.searchLibrary(query: .init(q: query)).ok.body.json
+            async let catalogResult = CatalogLibrary.load(client: client, query: query)
             async let externalResult = LoopbackAPI.search(base: localCore.apiURL, query: query)
             local = await localResult
+            catalog = await catalogResult
             sources = await externalResult
         }
     }
 
     private func play(_ result: SearchResult, among rows: [SearchResult]) async {
         let playable = rows.compactMap { row -> PlayerTrack? in
-            guard let id = row.playableID else { return nil }
-            return PlayerTrack(id: id, title: row.title, artist: row.artist, album: row.album, durationMs: row.durationMs)
+            let id = row.playableID
+            guard let id else { return nil }
+            return PlayerTrack(id: id, title: row.title, artist: row.artist, album: row.album, durationMs: row.durationMs,
+                               cropStartMs: nil, cropEndMs: nil)
         }
-        guard let id = result.playableID, let index = playable.firstIndex(where: { $0.id == id }) else { return }
+        let id = result.playableID
+        guard let id, let index = playable.firstIndex(where: { $0.id == id }) else { return }
         await player.play(playable, startAt: index)
     }
 }
@@ -96,40 +108,31 @@ struct SearchResultRow: View {
                 Text("\(result.artist) · \(result.source.capitalized)").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if result.playableID == nil {
+            if !playable {
                 Image(systemName: "icloud.slash").foregroundStyle(.secondary)
                     .accessibilityLabel("Not yet playable")
             }
         }
-        .opacity(result.playableID == nil ? 0.55 : 1)
+        .opacity(playable ? 1 : 0.55)
         .contextMenu {
             Button("Not interested", role: .destructive) {
                 Task {
-                    guard let base = core.core?.apiURL else { return }
-                    await LoopbackAPI.notInterested(base: base, body: .init(
-                        kind: "track", source: result.source, externalId: result.externalId,
+                    guard let client = core.client else { return }
+                    _ = try? await client.markNotInterested(body: .json(.init(
+                        kind: .track, source: result.source, externalId: result.externalId,
                         title: result.title, artist: result.artist, album: result.album, durationMs: result.durationMs
-                    ))
+                    ))).ok
                 }
             }
         }
     }
+
+    private var playable: Bool {
+        result.playableID != nil
+    }
 }
 
 enum LoopbackAPI {
-    struct NotInterestedBody: Encodable {
-        let kind: String
-        let source: String
-        var externalId: String? = nil
-        var trackId: String? = nil
-        var title: String? = nil
-        var artist: String? = nil
-        var album: String? = nil
-        var durationMs: Int? = nil
-        var id: String? = nil
-        var name: String? = nil
-    }
-
     static func search(base: URL, query: String) async -> [SearchEnvelope] {
         var components = URLComponents(url: base.appendingPathComponent("search/everywhere"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "q", value: query), URLQueryItem(name: "type", value: "track")]
@@ -158,13 +161,4 @@ enum LoopbackAPI {
         return result.sorted { $0.source < $1.source }
     }
 
-    @discardableResult
-    static func notInterested(base: URL, body: NotInterestedBody) async -> Bool {
-        var request = URLRequest(url: base.appendingPathComponent("not-interested"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONEncoder().encode(body)
-        guard let (_, response) = try? await URLSession.shared.data(for: request) else { return false }
-        return (response as? HTTPURLResponse)?.statusCode == 200
-    }
 }

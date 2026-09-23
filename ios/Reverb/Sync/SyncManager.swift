@@ -31,6 +31,7 @@ final class SyncManager: ObservableObject {
         await core.ensureRunning()
         await waitForCore()
         await syncNow()
+        await core.refreshSearchCredentials()
         scheduleBackgroundRefresh()
     }
 
@@ -58,6 +59,8 @@ final class SyncManager: ObservableObject {
             }
             if let errors = round?.errors, !errors.isEmpty {
                 lastError = errors.joined(separator: "\n")
+            } else if round?.state == .failed {
+                lastError = "Sync failed. Try again from Devices."
             }
         } catch {
             lastError = error.localizedDescription
@@ -67,16 +70,26 @@ final class SyncManager: ObservableObject {
     func syncNow(timeout: Duration = .seconds(25)) async {
         guard let client = core.client else { return }
         do {
-            _ = try await client.triggerSync().accepted
+            let accepted = try await client.triggerSync().accepted.body.json
+            // The status endpoint can still return the previous completed
+            // round immediately after trigger. Track the accepted round's id
+            // so a stale success cannot be reported for the new request.
+            let roundID = accepted.round.id
+            status = accepted.round
             let clock = ContinuousClock()
             let deadline = clock.now.advanced(by: timeout)
             repeat {
                 await refreshStatus()
-                guard status?.state == .pending || status?.state == .running else { break }
+                if status?.id == roundID,
+                   status?.state != .pending && status?.state != .running { break }
                 try? await Task.sleep(for: .milliseconds(350))
             } while clock.now < deadline && !Task.isCancelled
-            if status?.state == .completed || status?.state == .no_peers {
+            if status?.id == roundID && (status?.state == .completed || status?.state == .no_peers) {
                 lastError = nil
+            } else if status?.id == roundID && status?.state == .failed {
+                lastError = status?.errors.isEmpty == false ? status?.errors.joined(separator: "\n") : "Sync failed. Try again from Devices."
+            } else if !Task.isCancelled && (status?.id != roundID || status?.state == .pending || status?.state == .running) {
+                lastError = "Sync did not finish in the available time."
             }
         } catch {
             lastError = error.localizedDescription

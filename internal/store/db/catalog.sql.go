@@ -203,6 +203,77 @@ func (q *Queries) ListAliasesForCatalog(ctx context.Context, catalogID string) (
 	return items, nil
 }
 
+const listBrowsableCatalogTracks = `-- name: ListBrowsableCatalogTracks :many
+SELECT id, kind, title, artist, album, duration_ms, isrc, mbid, source, external_id, created_at FROM catalog_entity
+WHERE kind = 'track'
+  -- The latest libraryPresent decides membership. Without one, a library-minted
+  -- identity (source '') counts as present and a search-minted one does not.
+  AND COALESCE((
+    SELECT m.value_json FROM sync_change m WHERE m.entity_type = 'track' AND m.entity_id = catalog_entity.id
+      AND m.field = 'libraryPresent' AND m.revision NOT IN (SELECT revision FROM sync_nonwinning)
+    ORDER BY m.revision DESC LIMIT 1
+  ), CASE WHEN source = '' THEN 'true' ELSE 'false' END) = 'true'
+  AND NOT EXISTS (
+    SELECT 1 FROM sync_change d WHERE d.entity_type = 'track' AND d.entity_id = catalog_entity.id
+      AND d.field = '__deleted' AND d.revision NOT IN (SELECT revision FROM sync_nonwinning)
+  )
+  -- instr matches @query literally (no LIKE wildcards). A rename matches too,
+  -- because the phone lists and filters by the renamed names.
+  AND (CAST(?1 AS TEXT) = ''
+    OR instr(lower(title), lower(?1)) > 0
+    OR instr(lower(artist), lower(?1)) > 0
+    OR instr(lower(album), lower(?1)) > 0
+    OR EXISTS (
+      SELECT 1 FROM track_override o WHERE o.catalog_id = catalog_entity.id
+        AND (instr(lower(o.title), lower(?1)) > 0
+          OR instr(lower(o.artist), lower(?1)) > 0
+          OR instr(lower(o.album), lower(?1)) > 0)
+    ))
+ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, title COLLATE NOCASE, id
+LIMIT ?3 OFFSET ?2
+`
+
+type ListBrowsableCatalogTracksParams struct {
+	Query  string `json:"query"`
+	Offset int64  `json:"offset"`
+	Limit  int64  `json:"limit"`
+}
+
+func (q *Queries) ListBrowsableCatalogTracks(ctx context.Context, arg ListBrowsableCatalogTracksParams) ([]CatalogEntity, error) {
+	rows, err := q.db.QueryContext(ctx, listBrowsableCatalogTracks, arg.Query, arg.Offset, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CatalogEntity
+	for rows.Next() {
+		var i CatalogEntity
+		if err := rows.Scan(
+			&i.ID,
+			&i.Kind,
+			&i.Title,
+			&i.Artist,
+			&i.Album,
+			&i.DurationMs,
+			&i.Isrc,
+			&i.Mbid,
+			&i.Source,
+			&i.ExternalID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCatalogIDsByBackendIDs = `-- name: ListCatalogIDsByBackendIDs :many
 SELECT backend_id, catalog_id FROM backend_binding WHERE backend_id IN (/*SLICE:backend_ids*/?)
 `

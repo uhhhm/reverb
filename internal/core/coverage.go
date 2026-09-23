@@ -98,6 +98,21 @@ const (
 	PlaybackUnavailable PlaybackAvailability = "unavailable"
 )
 
+// CatalogLibraryTrack is a household library identity carried by sync. Its id
+// is stable across devices, unlike a LibraryTrack's backend id.
+type CatalogLibraryTrack struct {
+	ID           string               `json:"id"`
+	Title        string               `json:"title"`
+	Artist       string               `json:"artist"`
+	Album        string               `json:"album"`
+	DurationMs   int                  `json:"durationMs"`
+	Playback     PlaybackAvailability `json:"playback"`
+	LocalTrackID string               `json:"localTrackId,omitempty"`
+	CoverArtID   string               `json:"coverArtId,omitempty"`
+	CropStartMs  int                  `json:"cropStartMs,omitempty"`
+	CropEndMs    int                  `json:"cropEndMs,omitempty"`
+}
+
 // AlbumDetail is the album-page response with per-track ownership.
 type AlbumDetail struct {
 	Source         string             `json:"source"`

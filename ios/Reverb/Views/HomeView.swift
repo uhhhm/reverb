@@ -60,9 +60,10 @@ struct HomeView: View {
     }
 
     private func markArtist(_ artist: Components.Schemas.ExternalArtist) async {
-        guard let base = core.core?.apiURL else { return }
-        await LoopbackAPI.notInterested(base: base, body: .init(kind: "artist", source: artist.source, id: artist.externalId, name: artist.name))
-        await load()
+        guard let client = core.client else { return }
+        if (try? await client.markNotInterested(body: .json(.init(
+            kind: .artist, source: artist.source, id: artist.externalId, name: artist.name
+        ))).ok) != nil { await load() }
     }
 }
 
@@ -124,7 +125,9 @@ struct RecommendedTrackRow: View {
     private var playableID: String? {
         if track.source == "library" { return track.externalId }
         if track.match?.status == .in_library { return track.match?.libraryTrackId }
-        return track.canonicalId
+        // An external result's catalog id is an identity, not proof that the
+        // phone has audio for it, so only library matches are playable here.
+        return nil
     }
 
     private func play() async {
@@ -138,12 +141,12 @@ struct RecommendedTrackRow: View {
     }
 
     private func mark() async {
-        guard let base = core.core?.apiURL else { return }
-        if await LoopbackAPI.notInterested(base: base, body: .init(
-            kind: "track", source: track.source, externalId: track.externalId,
+        guard let client = core.client else { return }
+        if (try? await client.markNotInterested(body: .json(.init(
+            kind: .track, source: track.source, externalId: track.externalId,
             trackId: track.source == "library" ? track.externalId : nil,
             title: track.title, artist: track.artist, album: track.album, durationMs: track.durationMs
-        )) {
+        ))).ok) != nil {
             await onMarked?()
         }
     }

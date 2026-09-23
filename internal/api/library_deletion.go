@@ -120,6 +120,16 @@ func (s *Server) handleRemoveLibraryTrack(w http.ResponseWriter, r *http.Request
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not persist track deletion"})
 			return
 		}
+		// Withdraw the track from household browsing; a later library publish
+		// sets it again if the track comes back.
+		if catalogID != "" {
+			if _, err := s.deps.SyncStore.AppendChange(r.Context(), deviceID, reverbsync.SyncChange{
+				EntityType: reverbsync.EntityTrack, EntityID: catalogID, Field: reverbsync.FieldLibraryPresent, Value: false, UpdatedAt: time.Now().UnixMilli(),
+			}); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not persist track deletion"})
+				return
+			}
+		}
 	}
 	if err := managed.Remove(rel); err != nil && !errors.Is(err, os.ErrNotExist) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not remove the track file"})

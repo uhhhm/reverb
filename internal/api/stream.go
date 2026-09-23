@@ -125,6 +125,15 @@ func (s *Server) handleCover(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !addr.Found || addr.CoverArtID == "" {
+			if s.deps.DelegatedStream != nil {
+				art, err := s.deps.DelegatedStream.Cover(r.Context(), id, size)
+				if err == nil && art.Body != nil {
+					defer art.Body.Close()
+					w.Header().Set("Content-Type", art.ContentType)
+					_, _ = io.Copy(w, art.Body)
+					return
+				}
+			}
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 			return
 		}

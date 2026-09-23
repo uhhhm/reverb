@@ -18,7 +18,10 @@ screen and remote controls, the camera, and backup exclusion.
 | `Frameworks/` | `Reverbcore.xcframework`, built by `make ios-core` (not checked in) |
 
 The Go side is `mobile/reverbcore`: `Start(dataDir)` returns the loopback port,
-`Port()`, and `Stop()`. Nothing else crosses gomobile.
+`Port()`, and `Stop()`. `CopySpotifyCredentials()` and
+`SetSpotifyCredentials(id, secret)` also cross gomobile so the Spotify secret is
+never exposed through loopback HTTP; other operations use the generated API
+client.
 
 ## Building
 
@@ -78,6 +81,15 @@ xcodebuild test -project ios/Reverb.xcodeproj -scheme Reverb \
 - The data directory is `Application Support/Reverb`. Its `music/` folder holds
   the offline set and is excluded from iCloud and device backups; the database
   is backed up.
+- After pairing, unpairing, and each foreground sync, the phone copies an enabled
+  Spotify source's credentials from a paired desktop over its trusted P2P
+  connection. They stay in this device's Keychain (not in sync or backups) and
+  reach the core in memory, so phone search can use Spotify without a connected
+  desktop. The copy is forgotten once a paired desktop answers without
+  credentials or no device is paired. Unpairing cannot recall a copy already
+  made; rotate the Spotify secret for that. The Keychain item belongs to the
+  signing team, so re-signing under another Apple ID drops it until the next
+  sync. Deezer requires no credentials.
 - Audio keeps playing locked and in the background (`UIBackgroundModes`
   `audio`). A call pauses playback and it resumes afterwards if it was playing
   and iOS says it should; unplugging headphones pauses.

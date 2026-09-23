@@ -441,6 +441,9 @@ func (f *fakeDelegatedStream) Stream(_ context.Context, catalogID string, opts c
 }
 
 func (*fakeDelegatedStream) Playable(context.Context, string) bool { return true }
+func (*fakeDelegatedStream) Cover(context.Context, string, int) (core.CoverArt, error) {
+	return core.CoverArt{Body: io.NopCloser(strings.NewReader("IMAGE")), ContentType: "image/jpeg"}, nil
+}
 
 func canonicalStreamServer(t *testing.T, cat CatalogLookup, ext ExternalStreamResolver) (*Server, *http.Cookie) {
 	t.Helper()
@@ -509,6 +512,15 @@ func TestStreamDelegatesCanonicalTrackBeforeExternalPlayback(t *testing.T) {
 	}
 	if delegated.catalogID != "trk_peer" || delegated.opts.TimeOffsetSec != 12 || delegated.byteRange != "" {
 		t.Fatalf("delegated request = id %q opts %+v range %q", delegated.catalogID, delegated.opts, delegated.byteRange)
+	}
+}
+
+func TestCoverDelegatesCanonicalTrackWhenOnlyPeerHasArtwork(t *testing.T) {
+	srv, cookie := canonicalStreamServer(t, nil, nil)
+	srv.deps.DelegatedStream = &fakeDelegatedStream{}
+	rec := doAuthed(t, srv, http.MethodGet, "/api/v1/cover/trk_peer?size=300", cookie)
+	if rec.Code != http.StatusOK || rec.Body.String() != "IMAGE" || rec.Header().Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("delegated cover: status=%d type=%q body=%q", rec.Code, rec.Header().Get("Content-Type"), rec.Body.String())
 	}
 }
 
