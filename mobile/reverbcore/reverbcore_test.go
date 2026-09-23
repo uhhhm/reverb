@@ -6,12 +6,29 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/libp2p/go-libp2p/core/crypto"
+	"github.com/libp2p/go-libp2p/core/peer"
+
+	"github.com/uhhhm/reverb/internal/p2p"
 )
+
+// get calls the running core's API as the app does, with the launch secret.
+func get(url string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(SecretHeader, Secret())
+	return http.DefaultClient.Do(req)
+}
 
 func health(t *testing.T, port int) error {
 	t.Helper()
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/api/v1/health", port))
+	resp, err := get(fmt.Sprintf("http://127.0.0.1:%d/api/v1/health", port))
 	if err != nil {
 		return err
 	}
@@ -49,7 +66,7 @@ func TestStartServesThePhoneCoreAndStopReleasesIt(t *testing.T) {
 	var status struct {
 		Mode string `json:"mode"`
 	}
-	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/api/v1/library/status", port))
+	resp, err := get(fmt.Sprintf("http://127.0.0.1:%d/api/v1/library/status", port))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,5 +126,116 @@ func TestSpotifyCredentialsStayInMemoryAndCanBeRevoked(t *testing.T) {
 	}
 	if Port() != port {
 		t.Fatal("revoking credentials restarted the core")
+	}
+}
+
+// The app shows where a pairing link points before it pairs, so a link from a
+// stranger cannot pair silently.
+func TestInspectPairPayloadDescribesTheTarget(t *testing.T) {
+	priv, _, err := crypto.GenerateEd25519Key(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, _ := peer.IDFromPrivateKey(priv)
+	link, err := p2p.EncodePairPayload(p2p.PairPayload{
+		Code: "AB12CD34", ExpiresAt: time.Now().Add(time.Minute).Unix(),
+		Addrs: []string{"/ip4/192.168.1.20/tcp/4331/p2p/" + pid.String(), "/ip4/203.0.113.9/tcp/4331/p2p/" + pid.String()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := InspectPairPayload(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		PeerID string `json:"peerId"`
+		Addrs  []struct {
+			Addr  string `json:"addr"`
+			Local bool   `json:"local"`
+		} `json:"addrs"`
+	}
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.PeerID != pid.String() || len(got.Addrs) != 2 ||
+		got.Addrs[0].Addr != "/ip4/192.168.1.20/tcp/4331" || !got.Addrs[0].Local ||
+		got.Addrs[1].Addr != "/ip4/203.0.113.9/tcp/4331" || got.Addrs[1].Local {
+		t.Fatalf("inspected %s", raw)
+	}
+	if strings.Contains(raw, "AB12CD34") {
+		t.Fatal("the description carries the pairing code")
+	}
+	if _, err := InspectPairPayload("reverb://pair?v=1"); err == nil {
+		t.Fatal("a malformed link was described")
+	}
+}
+
+// Loopback is not a trust boundary on a phone: another app can reach the
+// port. Only a caller holding this launch's secret, which crosses the binding
+// and never HTTP, is the owner.
+func TestLoopbackAPIRequiresTheLaunchSecret(t *testing.T) {
+	if testing.Short() {
+		t.Skip("boots a runtime with a real libp2p host")
+	}
+	t.Setenv("REVERB_P2P_PORT", "0")
+	dir := filepath.Join(t.TempDir(), "Reverb")
+	port, err := Start(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(Stop)
+	secret := Secret()
+	if len(secret) < 32 {
+		t.Fatalf("secret %q is too short", secret)
+	}
+	base := fmt.Sprintf("http://127.0.0.1:%d/api/v1", port)
+	send := func(method, path, secret string) int {
+		t.Helper()
+		req, _ := http.NewRequest(method, base+path, strings.NewReader(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		if secret != "" {
+			req.Header.Set(SecretHeader, secret)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	refused := []struct{ method, path string }{
+		{http.MethodGet, "/health"},
+		{http.MethodGet, "/library/status"},
+		{http.MethodGet, "/ws"},
+		{http.MethodPost, "/pairing/code"},
+		{http.MethodPost, "/pairing/redeem"},
+		{http.MethodPost, "/p2p/pair/redeem"},
+		{http.MethodPost, "/p2p/pair/redeem-qr"},
+		{http.MethodGet, "/no/such/route"},
+	}
+	for _, r := range refused {
+		for _, s := range []string{"", "wrong", secret[:len(secret)-1]} {
+			if got := send(r.method, r.path, s); got != http.StatusUnauthorized {
+				t.Errorf("%s %s with secret %q: %d, want %d", r.method, r.path, s, got, http.StatusUnauthorized)
+			}
+		}
+	}
+	if got := send(http.MethodGet, "/library/status", secret); got != http.StatusOK {
+		t.Fatalf("with the secret: %d", got)
+	}
+	if got := send(http.MethodPost, "/pairing/code", secret); got != http.StatusOK {
+		t.Fatalf("minting a code with the secret: %d", got)
+	}
+
+	Stop()
+	if Secret() != "" {
+		t.Fatal("a stopped core still has a secret")
+	}
+	if _, err := Start(dir); err != nil {
+		t.Fatal(err)
+	}
+	if again := Secret(); again == "" || again == secret {
+		t.Fatal("the secret did not change with the start")
 	}
 }

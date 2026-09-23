@@ -4,7 +4,7 @@ info:
   title: Reverb API (iOS subset)
   version: 0.1.0
   description: |
-    Reverb is a self-hosted music app unifying a Subsonic/Navidrome library, Spotify search, and spotDL one-click download. All paths are served under /api/v1. The local browser UI is implicitly authenticated as the single household owner ("local"); paired devices authenticate to /sync with Bearer sync tokens (issued from one-time pairing codes) and to P2P via libp2p peer IDs bound at pairing.
+    Reverb is a self-hosted music app unifying a Subsonic/Navidrome library, Spotify search, and spotDL one-click download. All paths are served under /api/v1. The local browser UI is implicitly authenticated as the single household owner ("local"); paired devices authenticate to /sync with Bearer sync tokens (issued from one-time pairing codes) and to P2P via libp2p peer IDs bound at pairing. On a phone, where other apps can reach loopback, the core also requires its per-launch secret in the X-Reverb-Secret header on every request and answers 401 to any path without it; desktop and server builds take no secret.
 servers:
   - url: /api/v1
 paths:

@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"net"
 	"net/http"
 	"net/url"
@@ -267,4 +269,27 @@ func (s *Server) hostAllowed(host string) bool {
 		}
 	}
 	return false
+}
+
+// LocalSecretHeader carries Deps.LocalSecret.
+const LocalSecretHeader = "X-Reverb-Secret"
+
+// localSecretGuard refuses every request without Deps.LocalSecret when one is
+// set. It runs before routing, so every path, existing or not, answers the
+// same 401, and a probing app learns nothing about the API. The comparison is
+// over digests, so its time depends on neither where a guess first differs
+// nor its length.
+func (s *Server) localSecretGuard(next http.Handler) http.Handler {
+	if s.deps.LocalSecret == "" {
+		return next
+	}
+	want := sha256.Sum256([]byte(s.deps.LocalSecret))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := sha256.Sum256([]byte(r.Header.Get(LocalSecretHeader)))
+		if subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

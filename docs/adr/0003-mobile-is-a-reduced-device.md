@@ -25,10 +25,11 @@ The UI is native SwiftUI, a mobile subset of the desktop (no adapter
 configuration, metadata editing, crop, portable-name migration, or Stats). It talks
 to the core over the core's loopback HTTP and WebSocket API through a Swift client
 generated from `internal/api/openapi.yaml`. gomobile starts and stops the core and
-passes it a data directory and a port; the one exception is the Spotify secret
-copied from a paired desktop, which crosses the binding into the Keychain so it
-is never served over loopback HTTP. A later Android app follows the same
-shape with a generated Kotlin client.
+passes it a data directory, and hands back a port and a per-launch secret the
+loopback API requires on every request, since other apps on the phone can reach
+a loopback port. The Spotify secret copied from a paired desktop also crosses
+the binding, into the Keychain, so it is never served over loopback HTTP. A
+later Android app follows the same shape with a generated Kotlin client.
 
 Queue and Radio policy move out of the web player into the Go core, so the desktop
 SPA and iOS are thin players over one implementation rather than two that drift

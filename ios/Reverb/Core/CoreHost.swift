@@ -5,8 +5,10 @@ import UIKit
 
 /// Runs the Go core inside the app (ADR 0003). The core is the phone's whole
 /// Device: its database, sync, pairing and offline files. gomobile exposes
-/// start, port and stop, plus the Spotify credential copy that must stay off
-/// loopback HTTP; everything else goes through the API client.
+/// start, port, the loopback API's launch secret and stop, plus the Spotify
+/// credential copy that stays off loopback HTTP (PairTarget also reads pairing
+/// links through it);
+/// everything else goes through the API client, which sends the secret.
 @MainActor
 final class CoreHost: ObservableObject {
     enum State: Equatable {
@@ -58,7 +60,7 @@ final class CoreHost: ObservableObject {
             let result = Self.startCore(dataDirectory: dir)
             await MainActor.run {
                 switch result {
-                case let .success(port): self.state = .running(LocalCore(port: port))
+                case let .success(core): self.state = .running(core)
                 case let .failure(error): self.state = .failed(error.localizedDescription)
                 }
             }
@@ -80,7 +82,7 @@ final class CoreHost: ObservableObject {
             return Self.startCore(dataDirectory: dir)
         }.value
         switch result {
-        case let .success(port): state = .running(LocalCore(port: port))
+        case let .success(core): state = .running(core)
         case let .failure(error): state = .failed(error.localizedDescription)
         }
     }
@@ -119,7 +121,7 @@ final class CoreHost: ObservableObject {
         }.value
     }
 
-    nonisolated private static func startCore(dataDirectory: URL) -> Result<Int, Error> {
+    nonisolated private static func startCore(dataDirectory: URL) -> Result<LocalCore, Error> {
         if let credentials = SearchCredentialStore.load() {
             ReverbcoreSetSpotifyCredentials(credentials.clientId, credentials.clientSecret)
         } else {
@@ -129,9 +131,10 @@ final class CoreHost: ObservableObject {
         var error: NSError?
         let started = ReverbcoreStart(dataDirectory.path, &port, &error)
         if let error { return .failure(error) }
-        if !started { return .failure(CoreError.notStarted) }
+        let secret = ReverbcoreSecret()
+        if !started || secret.isEmpty { return .failure(CoreError.notStarted) }
         excludeFromBackup(dataDirectory.appendingPathComponent("music", isDirectory: true))
-        return .success(port)
+        return .success(LocalCore(port: port, secret: secret))
     }
 
     /// Keeps offline files out of iCloud and device backups. Excluding the

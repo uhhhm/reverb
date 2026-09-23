@@ -3,12 +3,14 @@ package p2p
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multiaddr"
 
 	"github.com/uhhhm/reverb/internal/sync"
 )
@@ -17,6 +19,12 @@ import (
 // the only one it reads. A later format bumps it; an older build then says the
 // payload needs a newer Reverb rather than misreading it.
 const PairPayloadVersion = 1
+
+// MaxPairPayloadAddrs bounds the addresses a pairing link carries. A link can
+// come from anyone, so a reader refuses one that would have it dial more; a
+// writer keeps the first this many, which still covers a LAN and a VPN on
+// both transports and IPv6.
+const MaxPairPayloadAddrs = 16
 
 var (
 	// ErrPairPayloadMalformed is a payload that is not a Reverb pairing link,
@@ -56,7 +64,11 @@ func EncodePairPayload(p PairPayload) (string, error) {
 	v.Set("code", sync.NormalizePairingCode(p.Code))
 	v.Set("exp", strconv.FormatInt(p.ExpiresAt, 10))
 	var pid peer.ID
-	for _, a := range p.Addrs {
+	addrs := p.Addrs
+	if len(addrs) > MaxPairPayloadAddrs {
+		addrs = addrs[:MaxPairPayloadAddrs]
+	}
+	for _, a := range addrs {
 		target, err := ParsePeerTarget(a)
 		if err != nil || len(target.Addrs) != 1 {
 			return "", fmt.Errorf("pairing payload: address %q is not a dial string", a)
@@ -85,7 +97,7 @@ func ParsePairPayload(raw string, now time.Time) (PairPayload, peer.AddrInfo, er
 		return PairPayload{}, peer.AddrInfo{}, ErrPairPayloadVersion
 	}
 	p := PairPayload{Code: sync.NormalizePairingCode(q.Get("code")), Addrs: q["addr"]}
-	if p.Code == "" || len(p.Addrs) == 0 {
+	if p.Code == "" || len(p.Addrs) == 0 || len(p.Addrs) > MaxPairPayloadAddrs {
 		return PairPayload{}, peer.AddrInfo{}, ErrPairPayloadMalformed
 	}
 	if p.ExpiresAt, err = strconv.ParseInt(q.Get("exp"), 10, 64); err != nil {
@@ -114,4 +126,34 @@ func ParsePairPayload(raw string, now time.Time) (PairPayload, peer.AddrInfo, er
 		return PairPayload{}, peer.AddrInfo{}, ErrPairPayloadExpired
 	}
 	return p, pi, nil
+}
+
+// cgnat is 100.64.0.0/10, the shared address space Tailscale and other
+// overlay VPNs number their devices from.
+var cgnat = &net.IPNet{IP: net.IPv4(100, 64, 0, 0).To4(), Mask: net.CIDRMask(10, 32)}
+
+// PairAddrIsLocal reports whether a pairing address points into the owner's
+// own networks: loopback, private, link-local, or CGNAT (a LAN or a VPN).
+// Anything else, including a DNS name, could be anywhere on the internet, so
+// the phone warns before pairing with a device reachable only that way. Only
+// the leading host is judged, since that is what is dialled; a relayed
+// address counts as public whatever follows p2p-circuit, which the link's
+// author chooses and the dial only passes on as a hint.
+func PairAddrIsLocal(addr string) bool {
+	ma, err := multiaddr.NewMultiaddr(addr)
+	if err != nil || len(ma) == 0 {
+		return false
+	}
+	if _, err := ma.ValueForProtocol(multiaddr.P_CIRCUIT); err == nil {
+		return false
+	}
+	first := ma[0]
+	if code := first.Protocol().Code; code != multiaddr.P_IP4 && code != multiaddr.P_IP6 {
+		return false
+	}
+	ip := net.ParseIP(first.Value())
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || cgnat.Contains(ip)
 }

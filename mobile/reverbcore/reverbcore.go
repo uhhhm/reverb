@@ -1,6 +1,7 @@
 // Package reverbcore is the Go core as a phone links it (ADR 0003). gomobile
-// binds it into the iOS app. Lifecycle and paired secret transfer cross the
-// binding; ordinary operations use the core's loopback HTTP/WebSocket API.
+// binds it into the iOS app. Lifecycle, the loopback API's launch secret and
+// paired secret transfer cross the binding; ordinary operations use the core's
+// loopback HTTP/WebSocket API, which refuses any request without the secret.
 //
 // The core runs the phone profile: its library is the folder of offline files
 // under the data directory, and it pairs and syncs as a full Device.
@@ -8,6 +9,8 @@ package reverbcore
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log"
@@ -15,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -28,11 +32,15 @@ import (
 // -ldflags "-X github.com/uhhhm/reverb/mobile/reverbcore.Version=…".
 var Version = "dev"
 
+// SecretHeader is the request header that carries Secret.
+const SecretHeader = api.LocalSecretHeader
+
 type instance struct {
 	rt     *app.Runtime
 	srv    *http.Server
 	cancel context.CancelFunc
 	port   int
+	secret string
 }
 
 var (
@@ -114,6 +122,17 @@ func Start(dataDir string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// Other apps on the phone can reach a loopback port, so only a caller
+	// holding this launch's secret is the owner. It lives in memory alone and
+	// reaches the app through Secret, never over HTTP.
+	var key [32]byte
+	if _, err := rand.Read(key[:]); err != nil {
+		rt.Close()
+		return 0, err
+	}
+	secret := hex.EncodeToString(key[:])
+	deps := rt.Deps
+	deps.LocalSecret = secret
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		rt.Close()
@@ -121,14 +140,25 @@ func Start(dataDir string) (int, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	rt.StartBackground(ctx)
-	srv := &http.Server{Handler: api.NewServer(rt.Deps).Handler(), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: api.NewServer(deps).Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("reverbcore: serve: %v", err)
 		}
 	}()
-	running = &instance{rt: rt, srv: srv, cancel: cancel, port: ln.Addr().(*net.TCPAddr).Port}
+	running = &instance{rt: rt, srv: srv, cancel: cancel, port: ln.Addr().(*net.TCPAddr).Port, secret: secret}
 	return running.port, nil
+}
+
+// Secret is the running core's loopback API secret, to send in SecretHeader
+// on every request, or "" when it is stopped. Each Start makes a new one.
+func Secret() string {
+	mu.Lock()
+	defer mu.Unlock()
+	if running == nil {
+		return ""
+	}
+	return running.secret
 }
 
 // Port is the running core's loopback API port, or 0 when it is stopped.
@@ -167,6 +197,41 @@ func CopySpotifyCredentials() (string, error) {
 		return "", err
 	}
 	data, err := json.Marshal(credentials)
+	return string(data), err
+}
+
+// pairTarget is what a pairing link points at, for the app to confirm before
+// it pairs: the device and each address it would dial, with whether the
+// address is on a LAN or VPN rather than the open internet.
+type pairTarget struct {
+	PeerID    string     `json:"peerId"`
+	ExpiresAt int64      `json:"expiresAt"`
+	Addrs     []pairAddr `json:"addrs"`
+}
+
+type pairAddr struct {
+	Addr  string `json:"addr"`
+	Local bool   `json:"local"`
+}
+
+// InspectPairPayload reads a pairing link (a reverb://pair URL, from the
+// system Camera, another app, or the in-app scanner) without dialling or
+// redeeming anything, and returns its target as JSON for the confirmation the
+// owner answers before pairing. The code is left out. It runs without a
+// started core and refuses a link the redeem would refuse.
+func InspectPairPayload(link string) (string, error) {
+	payload, target, err := p2p.ParsePairPayload(link, time.Now())
+	if err != nil {
+		return "", err
+	}
+	out := pairTarget{PeerID: target.ID.String(), ExpiresAt: payload.ExpiresAt}
+	// ParsePairPayload returns each address ending in the peer ID, which the
+	// confirmation shows once rather than on every line.
+	suffix := "/p2p/" + target.ID.String()
+	for _, a := range payload.Addrs {
+		out.Addrs = append(out.Addrs, pairAddr{Addr: strings.TrimSuffix(a, suffix), Local: p2p.PairAddrIsLocal(a)})
+	}
+	data, err := json.Marshal(out)
 	return string(data), err
 }
 

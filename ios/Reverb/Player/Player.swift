@@ -26,8 +26,8 @@ final class Player: ObservableObject {
     private let avPlayer: AVPlayer
     private let streamURL: ((String) -> URL)?
     private var loadedPlayID: Int64?
-    /// The core port the current item streams from.
-    private var loadedPort: Int?
+    /// The core the current item streams from.
+    private var loadedCore: LocalCore?
     private var endObserver: NSObjectProtocol?
     private var timeObserver: Any?
     private var statusObservation: NSKeyValueObservation?
@@ -110,9 +110,9 @@ final class Player: ObservableObject {
     func resume() {
         guard let item = avPlayer.currentItem, queue?.finished != true else { return }
         resumeAfterInterruption = false
-        // A core started again while the app was away listens on a new port,
-        // so the loaded stream would no longer answer.
-        if let track = current, item.status == .failed || core.core?.port != loadedPort {
+        // A core started again while the app was away listens on a new port
+        // with a new secret, so the loaded stream would no longer answer.
+        if let track = current, item.status == .failed || core.core != loadedCore {
             load(track, at: elapsed, continuing: true)
             return
         }
@@ -223,8 +223,13 @@ final class Player: ObservableObject {
 
     private func load(_ track: PlayerTrack, at seconds: Double = 0, continuing: Bool = false, playing: Bool = true) {
         guard let id = track.id, let url = streamURL?(id) ?? core.core?.streamURL(trackID: id) else { return }
-        loadedPort = core.core?.port
-        let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+        loadedCore = core.core
+        var options: [String: Any] = [AVURLAssetPreferPreciseDurationAndTimingKey: true]
+        // AVFoundation has no public option for request headers; this key is
+        // the one it reads them from. The core refuses a stream without the
+        // launch secret.
+        if let headers = core.core?.streamHeaders { options["AVURLAssetHTTPHeaderFieldsKey"] = headers }
+        let asset = AVURLAsset(url: url, options: options)
         let item = AVPlayerItem(asset: asset)
         clearItemObservers()
         seekVersion += 1
@@ -528,9 +533,9 @@ final class Player: ObservableObject {
     private func loadArtwork(for track: PlayerTrack) {
         artwork = nil
         artworkTask?.cancel()
-        guard let id = Self.coverArtID(track), let url = core.core?.coverURL(id: id) else { return }
+        guard let id = Self.coverArtID(track), let local = core.core, let url = local.coverURL(id: id) else { return }
         artworkTask = Task {
-            guard let (data, _) = try? await URLSession.shared.data(from: url),
+            guard let (data, _) = try? await URLSession.shared.data(for: local.request(url)),
                   let image = UIImage(data: data), !Task.isCancelled else { return }
             artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
             updateNowPlaying()

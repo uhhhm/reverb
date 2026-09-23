@@ -47,8 +47,11 @@ func TestAppFlowAgainstTestPeer(t *testing.T) {
 	t.Cleanup(reverbcore.Stop)
 	phone := fmt.Sprintf("http://127.0.0.1:%d/api/v1", port)
 
-	var pairing struct{ Code, Address, Playlist, Track string }
+	var pairing struct{ Code, Address, Link, Playlist, Track string }
 	do(t, http.MethodPost, "http://"+peer+"/testpeer/pairing", nil, &pairing, http.StatusOK)
+	if _, err := reverbcore.InspectPairPayload(pairing.Link); err != nil {
+		t.Fatalf("the test peer's pairing link does not read: %v", err)
+	}
 	do(t, http.MethodPost, phone+"/p2p/pair/redeem", map[string]string{
 		"peerId": pairing.Address, "code": pairing.Code, "deviceName": "iPhone",
 	}, nil, http.StatusOK)
@@ -113,7 +116,7 @@ func TestAppFlowAgainstTestPeer(t *testing.T) {
 	if queue.Index != 0 || len(queue.Entries) != 1 || queue.Entries[0].Track.Title != pairing.Track {
 		t.Fatalf("queue = %+v", queue)
 	}
-	resp, err := http.Get(phone + "/stream/" + queue.Entries[0].Track.ID)
+	resp, err := stream(phone + "/stream/" + queue.Entries[0].Track.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +135,7 @@ func TestAppFlowAgainstTestPeer(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("the test peer did not stop")
 	}
-	resp, err = http.Get(phone + "/stream/" + queue.Entries[0].Track.ID)
+	resp, err = stream(phone + "/stream/" + queue.Entries[0].Track.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,6 +143,16 @@ func TestAppFlowAgainstTestPeer(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("stream with the peer gone: %d", resp.StatusCode)
 	}
+}
+
+// stream fetches a track's bytes as AVPlayer does, with the launch secret.
+func stream(url string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(reverbcore.SecretHeader, reverbcore.Secret())
+	return http.DefaultClient.Do(req)
 }
 
 func do(t *testing.T, method, url string, body, out any, want int) {
@@ -156,6 +169,9 @@ func do(t *testing.T, method, url string, body, out any, want int) {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	// The app sends the phone core's launch secret on every call; the test
+	// peer, a stand-in desktop, ignores it.
+	req.Header.Set(reverbcore.SecretHeader, reverbcore.Secret())
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, url, err)

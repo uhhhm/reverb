@@ -14,14 +14,19 @@ screen and remote controls, the camera, and backup exclusion.
 | `Reverb/` | The app: `Core/` starts and stops the Go core, `Player/` plays the core's queue, `Views/` |
 | `ReverbKit/` | Swift package with `ReverbAPI`, the client generated from OpenAPI |
 | `ReverbTests/` | Native AVPlayer regressions: decoded duration, variable-bitrate MP3, heard audio against the clock after seeks, queue races, failure recovery and skipping, interruptions and completion |
-| `ReverbUITests/` | XCUITest smoke test: launch, pair with a test runtime, play an offline track |
+| `ReverbUITests/` | XCUITest smoke test: launch, pair with a test runtime by typed code or a confirmed pairing link, play an offline track |
 | `Frameworks/` | `Reverbcore.xcframework`, built by `make ios-core` (not checked in) |
 
 The Go side is `mobile/reverbcore`: `Start(dataDir)` returns the loopback port,
-`Port()`, and `Stop()`. `CopySpotifyCredentials()` and
-`SetSpotifyCredentials(id, secret)` also cross gomobile so the Spotify secret is
-never exposed through loopback HTTP; other operations use the generated API
-client.
+`Port()`, `Secret()`, and `Stop()`. Other apps on the phone can reach a
+loopback port, so each start makes a random secret, kept in memory only, and
+the core refuses every request without it in `X-Reverb-Secret`. `LocalCore`
+sends it with generated operations, raw requests (`request(_:)`) and AVPlayer
+streams (`streamHeaders`); `AsyncImage` cannot, so covers load through
+`CoverImage`. `CopySpotifyCredentials()` and `SetSpotifyCredentials(id, secret)`
+also cross gomobile so the Spotify secret is never exposed through loopback
+HTTP, and `InspectPairPayload(link)` reads a pairing link without dialling it;
+other operations use the generated API client.
 
 ## Building
 
@@ -108,4 +113,8 @@ xcodebuild test -project ios/Reverb.xcodeproj -scheme Reverb \
   format Reverb indexes that iOS cannot play; the downloaders write MP3, M4A and
   Ogg Opus. Three failures in a row stop playback rather than walk the queue.
 - Scanning a pairing QR code with the system Camera opens the app through the
-  `reverb://` URL scheme and pairs.
+  `reverb://` URL scheme. Any app or web page can open such a link, so a link,
+  like a code scanned in the app, first shows the device's peer ID and
+  addresses, each marked LAN/VPN or public, with a warning when none is local.
+  Nothing is dialled or redeemed until Pair is tapped; Cancel or dismissing the
+  sheet discards it. A typed code pairs directly.

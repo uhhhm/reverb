@@ -24,9 +24,10 @@ struct ReverbApp: App {
                 .environmentObject(player)
                 .environmentObject(sync)
                 .environmentObject(pairing)
-                // The system Camera opens a scanned pairing QR code here.
+                // The system Camera, or any app or web page, opens a pairing
+                // link here. It waits for the owner to confirm its target.
                 .onOpenURL { url in
-                    pairing.scanned(url.absoluteString)
+                    pairing.opened(url)
                 }
                 .task { await sync.foregrounded() }
         }
@@ -100,7 +101,8 @@ struct MainView: View {
             .safeAreaInset(edge: .bottom) { NowPlayingBar() }
             .tabItem { Label("Devices", systemImage: "laptopcomputer.and.iphone") }
         }
-        .sheet(isPresented: $pairing.isPresented) {
+        // Dismissing the sheet drops an unconfirmed link without dialling it.
+        .sheet(isPresented: $pairing.isPresented, onDismiss: pairing.discard) {
             PairingView()
         }
     }

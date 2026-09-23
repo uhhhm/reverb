@@ -1,5 +1,6 @@
 import ReverbAPI
 import SwiftUI
+import UIKit
 
 typealias LibraryAlbum = Components.Schemas.LibraryAlbum
 typealias LibraryArtist = Components.Schemas.LibraryArtist
@@ -320,8 +321,8 @@ struct MediaRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Group {
-                if !coverArtID.isEmpty, let url = core.core?.coverURL(id: coverArtID) {
-                    AsyncImage(url: url) { image in image.resizable().scaledToFill() } placeholder: { Color.secondary.opacity(0.15) }
+                if let local = core.core, let url = local.coverURL(id: coverArtID) {
+                    CoverImage(request: local.request(url))
                 } else {
                     Color.secondary.opacity(0.15).overlay { Image(systemName: "music.note") }
                 }
@@ -331,6 +332,27 @@ struct MediaRow: View {
                 Text(title)
                 Text(subtitle).font(.caption).foregroundStyle(.secondary)
             }
+        }
+    }
+}
+
+/// Cover art from the core. AsyncImage cannot send the launch secret, so this
+/// loads the request itself.
+struct CoverImage: View {
+    let request: URLRequest
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                Color.secondary.opacity(0.15)
+            }
+        }
+        .task(id: request.url) {
+            guard let (data, _) = try? await URLSession.shared.data(for: request) else { return }
+            image = UIImage(data: data)
         }
     }
 }

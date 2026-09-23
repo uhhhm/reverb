@@ -8,7 +8,10 @@ info:
     /api/v1. The local browser UI is implicitly authenticated as the single
     household owner ("local"); paired devices authenticate to /sync with Bearer
     sync tokens (issued from one-time pairing codes) and to P2P via libp2p peer
-    IDs bound at pairing.
+    IDs bound at pairing. On a phone, where other apps can reach loopback, the
+    core also requires its per-launch secret in the X-Reverb-Secret header on
+    every request and answers 401 to any path without it; desktop and server
+    builds take no secret.
 servers:
   - url: /api/v1
 paths:

@@ -160,6 +160,11 @@ type Deps struct {
 	Reload        ServiceReloader
 	Dev           bool
 	Desktop       bool
+	// LocalSecret, when set, is required in LocalSecretHeader on every
+	// request. The phone profile sets a fresh one per launch: on iOS other
+	// apps can reach a loopback port, so loopback alone does not mean the
+	// owner. Desktop and server builds leave it empty.
+	LocalSecret string
 	// AllowedHosts are the extra Host values hostGuard accepts beyond loopback.
 	// A reverse proxy forwards its own public hostname, which is not loopback
 	// and cannot be inferred from the bind address, so it has to be named here.
@@ -415,6 +420,7 @@ func (s *Server) Handler() http.Handler { return s.router }
 func (s *Server) routes() {
 	s.router.Use(middleware.Recoverer)
 	s.router.Use(s.securityHeaders)
+	s.router.Use(s.localSecretGuard)
 	s.router.Use(s.hostGuard)
 
 	s.router.Route("/api/v1", func(r chi.Router) {

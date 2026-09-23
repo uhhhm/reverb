@@ -77,7 +77,7 @@ struct SearchView: View {
             guard !Task.isCancelled, let client = core.client, let localCore = core.core else { return }
             async let localResult = try? client.searchLibrary(query: .init(q: query)).ok.body.json
             async let catalogResult = CatalogLibrary.load(client: client, query: query)
-            async let externalResult = LoopbackAPI.search(base: localCore.apiURL, query: query)
+            async let externalResult = LoopbackAPI.search(core: localCore, query: query)
             local = await localResult
             catalog = await catalogResult
             sources = await externalResult
@@ -133,13 +133,13 @@ struct SearchResultRow: View {
 }
 
 enum LoopbackAPI {
-    static func search(base: URL, query: String) async -> [SearchEnvelope] {
-        var components = URLComponents(url: base.appendingPathComponent("search/everywhere"), resolvingAgainstBaseURL: false)!
+    static func search(core: LocalCore, query: String) async -> [SearchEnvelope] {
+        var components = URLComponents(url: core.apiURL.appendingPathComponent("search/everywhere"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "q", value: query), URLQueryItem(name: "type", value: "track")]
         guard let url = components.url else { return [] }
         let bytes: URLSession.AsyncBytes
         do {
-            let (stream, response) = try await URLSession.shared.bytes(from: url)
+            let (stream, response) = try await URLSession.shared.bytes(for: core.request(url))
             guard (response as? HTTPURLResponse)?.statusCode == 200 else {
                 return [.init(source: "Search", status: "error", results: [], error: "Search sources are unavailable on this iPhone.")]
             }

@@ -3,11 +3,13 @@ import XCTest
 /// The iOS smoke test: launch, pair with a test runtime, keep a playlist
 /// offline, and play its track. The test runtime runs on the Mac
 /// (`make ios-testpeer`), which the simulator reaches on 127.0.0.1; the
-/// simulator has no camera, so it pairs by typed code, the fallback path.
+/// simulator has no camera, so it pairs by typed code, the fallback path, or
+/// by opening the pairing link the camera would.
 final class SmokeTests: XCTestCase {
     private struct Pairing: Decodable {
         let code: String
         let address: String
+        let link: String
         let playlist: String
         let track: String
     }
@@ -41,6 +43,39 @@ final class SmokeTests: XCTestCase {
         XCTAssertEqual(title.label, pairing.track)
         let elapsed = app.staticTexts["nowPlaying.elapsed"]
         wait(for: [expectation(for: NSPredicate(format: "label IN {'0:01', '0:02', '0:03', '0:04', '0:05'}"), evaluatedWith: elapsed)], timeout: 12)
+    }
+
+    /// A pairing link can come from anyone, so opening one pairs nothing until
+    /// the owner has seen its target and tapped Pair.
+    func testPairingLinkWaitsForConfirmation() throws {
+        let pairing = try testPeerPairing()
+        let app = XCUIApplication()
+        app.launchArguments = ["--reset-data"]
+        app.launchEnvironment["REVERB_P2P_PORT"] = "0"
+        app.launch()
+        app.tabBars.buttons["Devices"].tap()
+        XCTAssertTrue(app.buttons["devices.pair"].waitForExistence(timeout: 20))
+        let paired = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'device.'"))
+
+        // Through the system, as the Camera or a message would, so the running
+        // app receives it; XCUIApplication.open relaunches the app instead.
+        XCUIDevice.shared.system.open(URL(string: pairing.link)!)
+        XCTAssertTrue(app.buttons["pair.confirm"].waitForExistence(timeout: 20), "opening a pairing link showed no confirmation")
+        XCTAssertTrue(app.staticTexts["pair.peer"].exists)
+        XCTAssertTrue(app.staticTexts["LAN/VPN"].exists, "the loopback address is not marked as local")
+        XCTAssertFalse(app.descendants(matching: .any)["pair.publicWarning"].exists)
+        app.buttons["pair.reject"].tap()
+        XCTAssertTrue(waitForDisappearance(app.navigationBars["Pair a device"], timeout: 10))
+        XCTAssertTrue(app.tabBars.buttons["Devices"].isSelected, "opening the link restarted the app")
+        // The list reloads when the sheet closes and every five seconds after.
+        sleep(6)
+        XCTAssertEqual(paired.count, 0, "cancelling a pairing link paired anyway")
+
+        XCUIDevice.shared.system.open(URL(string: pairing.link)!)
+        tapWhenReady(app.buttons["pair.confirm"])
+        XCTAssertTrue(waitForDisappearance(app.navigationBars["Pair a device"], timeout: 60), "pairing did not finish: \(app.staticTexts["pair.error"].label)")
+        XCTAssertTrue(app.tabBars.buttons["Devices"].isSelected, "opening the link restarted the app")
+        XCTAssertTrue(paired.firstMatch.waitForExistence(timeout: 20), "confirming the link did not pair")
     }
 
     func testPairKeepOfflineAndPlay() throws {

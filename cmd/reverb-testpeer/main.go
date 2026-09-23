@@ -27,6 +27,7 @@ import (
 
 	"github.com/uhhhm/reverb/internal/api"
 	"github.com/uhhhm/reverb/internal/app"
+	"github.com/uhhhm/reverb/internal/p2p"
 )
 
 const (
@@ -100,7 +101,8 @@ func run(ctx context.Context, addr string, p2pPort int, dir string, ready func(a
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /testpeer/pairing", func(w http.ResponseWriter, _ *http.Request) {
 		var code struct {
-			Code string `json:"code"`
+			Code      string `json:"code"`
+			ExpiresAt int64  `json:"expiresAt"`
 		}
 		if err := call(apiHandler, http.MethodPost, "/pairing/code", nil, &code); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -111,9 +113,16 @@ func run(ctx context.Context, addr string, p2pPort int, dir string, ready func(a
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
+		// The same code as a pairing link, dialled on loopback, for the test
+		// that opens one the way the system Camera would.
+		link, err := p2p.EncodePairPayload(p2p.PairPayload{Code: code.Code, ExpiresAt: code.ExpiresAt, Addrs: []string{dial}})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
-			"code": code.Code, "address": dial, "playlist": playlistName, "track": trackTitle,
+			"code": code.Code, "address": dial, "link": link, "playlist": playlistName, "track": trackTitle,
 		})
 	})
 	// Stopping the peer is how a test shows the phone plays with no device
