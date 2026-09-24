@@ -22,7 +22,6 @@ const Pairing = lazy(() => import('./routes/Pairing'))
 const OfflineSet = lazy(() => import('./routes/OfflineSet'))
 const AddFromLink = lazy(() => import('./routes/AddFromLink'))
 const ManageTracks = lazy(() => import('./routes/ManageTracks'))
-const P2P = lazy(() => import('./routes/P2P'))
 const SimilarTracks = lazy(() => import('./routes/SimilarTracks'))
 const Mix = lazy(() => import('./routes/Mix'))
 
@@ -91,7 +90,7 @@ function Routed() {
         <Route path="/manage-tracks" element={<ManageTracks />} />
         {/* The bulk quality page moved into Manage tracks; keep old links working. */}
         <Route path="/upgrade-quality" element={<Navigate to="/manage-tracks" replace />} />
-        <Route path="/p2p" element={<P2P />} />
+        <Route path="/p2p" element={<Navigate to="/pairing" replace />} />
         <Route path="/similar-tracks" element={<SimilarTracks />} />
         <Route path="/mix/:kind" element={<Mix />} />
         <Route path="*" element={<Navigate to="/" replace />} />

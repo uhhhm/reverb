@@ -2767,8 +2767,13 @@ func TestMintAtLink_BackfillMints(t *testing.T) {
 		wrapDownloaders(nil), store, nil, &fakeScanner{}, rematch, &fakeVersion{v: 1}, nil, nil, nil,
 	)
 	m.SetCanonicalMinter(minter)
+	var linked []string
+	m.SetLinkedHook(func(_ context.Context, cid string) { linked = append(linked, cid) })
 	// Run BackfillUnlinked directly (not via Start) to keep the test synchronous.
 	m.BackfillUnlinked()
+	if len(linked) != 1 || linked[0] != "trk_aaaa" {
+		t.Fatalf("linked hook saw %v, want the backfilled track", linked)
+	}
 
 	// The minter should have been called once for the linked job.
 	if minter.callCount() != 1 {
@@ -3173,6 +3178,8 @@ func TestRunScan_RefreshLinkedCalledWithLinkedCanonicalIDs(t *testing.T) {
 		func() BindingResolver { return res },
 	)
 	m.SetCanonicalMinter(minter)
+	var linked []string
+	m.SetLinkedHook(func(_ context.Context, cid string) { linked = append(linked, cid) })
 	ctx := context.Background()
 	for _, ext := range []string{"ext1", "ext2", "ext3"} {
 		job := core.DownloadJob{
@@ -3207,6 +3214,9 @@ func TestRunScan_RefreshLinkedCalledWithLinkedCanonicalIDs(t *testing.T) {
 	}
 	if len(want) > 0 {
 		t.Fatalf("RefreshLinked missing expected ids: %v", want)
+	}
+	if len(linked) != 2 {
+		t.Fatalf("linked hook saw %v; want the two minted ids", linked)
 	}
 }
 

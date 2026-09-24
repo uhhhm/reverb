@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/store/db"
@@ -111,11 +113,11 @@ func (s *Server) decorateAlbum(ctx context.Context, al *core.Album) {
 	*al = one[0]
 }
 
-// decorateDetailTracks handles album- and playlist-detail rows. Only the owned
-// rows carry a LibraryTrack, and only those get renames and uploaded art; a
-// missing row is described by a search source and has nothing local to override.
-// CoverURL is left alone for the same reason — it points at the search source's
-// image, not at the library.
+// decorateDetailTracks handles album- and playlist-detail rows. Owned rows
+// carry a LibraryTrack for local artwork and metadata. Delegated rows have no
+// local track but do have a catalog id, so their synced renames and crops still
+// apply. External-only rows have neither. CoverURL continues to point at the
+// search source's image rather than a local library cover.
 func (s *Server) decorateDetailTracks(ctx context.Context, rows []core.AlbumDetailTrack) {
 	if len(rows) == 0 {
 		return
@@ -124,9 +126,31 @@ func (s *Server) decorateDetailTracks(ctx context.Context, rows []core.AlbumDeta
 	at := make([]int, 0, len(rows))
 	for i := range rows {
 		if rows[i].LibraryTrack != nil {
+			rows[i].Playback = core.PlaybackLocal
 			owned = append(owned, *rows[i].LibraryTrack)
 			at = append(at, i)
+		} else {
+			rows[i].Playback = core.PlaybackUnavailable
 		}
+	}
+	if s.deps.DelegatedStream != nil {
+		var wg sync.WaitGroup
+		for i := range rows {
+			if rows[i].LibraryTrack != nil || rows[i].CanonicalID == "" {
+				continue
+			}
+			i := i
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+				defer cancel()
+				if s.deps.DelegatedStream.Playable(probeCtx, rows[i].CanonicalID) {
+					rows[i].Playback = core.PlaybackDelegated
+				}
+			}()
+		}
+		wg.Wait()
 	}
 	s.deps.Covers.ApplyTracks(ctx, owned)
 	s.deps.Entities.ApplyTracks(ctx, owned)

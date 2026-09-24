@@ -27,6 +27,7 @@ import (
 
 	"github.com/uhhhm/reverb/internal/api"
 	"github.com/uhhhm/reverb/internal/app"
+	"github.com/uhhhm/reverb/internal/p2p"
 )
 
 const (
@@ -34,6 +35,9 @@ const (
 	trackTitle   = "Smoke Tone"
 	trackArtist  = "Smoke"
 	trackAlbum   = "Tests"
+	// Long enough for the UI test to see progress, pause, seek and resume
+	// before it ends.
+	toneSeconds = 20
 )
 
 func main() {
@@ -72,7 +76,7 @@ func run(ctx context.Context, addr string, p2pPort int, dir string, ready func(a
 	if err := os.MkdirAll(music, 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(music, trackTitle+".wav"), tone(5), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(music, trackTitle+".wav"), tone(toneSeconds), 0o644); err != nil {
 		return err
 	}
 	rt, err := app.Build(context.Background(), app.Options{
@@ -97,7 +101,8 @@ func run(ctx context.Context, addr string, p2pPort int, dir string, ready func(a
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /testpeer/pairing", func(w http.ResponseWriter, _ *http.Request) {
 		var code struct {
-			Code string `json:"code"`
+			Code      string `json:"code"`
+			ExpiresAt int64  `json:"expiresAt"`
 		}
 		if err := call(apiHandler, http.MethodPost, "/pairing/code", nil, &code); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -108,9 +113,16 @@ func run(ctx context.Context, addr string, p2pPort int, dir string, ready func(a
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
+		// The same code as a pairing link, dialled on loopback, for the test
+		// that opens one the way the system Camera would.
+		link, err := p2p.EncodePairPayload(p2p.PairPayload{Code: code.Code, ExpiresAt: code.ExpiresAt, Addrs: []string{dial}})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
-			"code": code.Code, "address": dial, "playlist": playlistName, "track": trackTitle,
+			"code": code.Code, "address": dial, "link": link, "playlist": playlistName, "track": trackTitle,
 		})
 	})
 	// Stopping the peer is how a test shows the phone plays with no device
@@ -164,7 +176,7 @@ func seedPlaylist(h http.Handler) error {
 	}
 	return call(h, http.MethodPost, "/playlists/"+created.ID+"/tracks", map[string]any{
 		"source": "testpeer", "externalId": "smoke-tone", "title": trackTitle, "artist": trackArtist,
-		"album": trackAlbum, "durationMs": 5000, "download": false,
+		"album": trackAlbum, "durationMs": toneSeconds * 1000, "download": false,
 	}, nil)
 }
 

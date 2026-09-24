@@ -155,21 +155,6 @@ export function TopBar() {
           </Button>
         </div>
 
-        {/* P2P link */}
-        <div className="hidden md:block">
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label="P2P"
-            onClick={() => navigate('/p2p')}
-          >
-            <span className="flex items-center gap-1.5">
-              <Icon name="plus" className="w-4 h-4" />
-              <span>P2P</span>
-            </span>
-          </Button>
-        </div>
-
         {/* Downloads button with badge (desktop only; mobile uses the bottom nav) */}
         <div className="relative hidden md:block">
           <Button
@@ -270,14 +255,14 @@ export function TopBar() {
               <button
                 role="menuitem"
                 type="button"
-                onClick={() => { setMenuOpen(false); navigate('/p2p') }}
+                onClick={() => { setMenuOpen(false); navigate('/pairing') }}
                 className={[
                   'w-full text-left px-4 py-2 text-sm text-text-primary',
                   'hover:bg-raised-hover transition-colors',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset',
                 ].join(' ')}
               >
-                P2P
+                Devices &amp; sync
               </button>
             </div>
           )}

@@ -4,10 +4,10 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Artist, album, and track views with artwork
-- [ ] Create, rename, reorder, and delete playlists; add and remove tracks
-- [ ] E2E (core): concurrent edits to the same playlist on the phone and desktop runtimes both survive
-- [ ] Library and playlist views refresh after an incoming sync is applied
-- [ ] Desktop-only edits (renames, crops) show up on the phone
+- [x] Artist, album, and track views with artwork
+- [x] Create, rename, reorder, and delete playlists; add and remove tracks
+- [x] E2E (core): concurrent edits to the same playlist on the phone and desktop runtimes both survive
+- [x] Library and playlist views refresh after an incoming sync is applied
+- [x] Desktop-only edits (renames, crops) show up on the phone

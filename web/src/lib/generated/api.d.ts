@@ -680,7 +680,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["LibrarySearchResults"];
+                    };
                 };
             };
         };
@@ -714,7 +716,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["LibraryArtist"][];
+                    };
                 };
             };
         };
@@ -750,7 +754,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["LibraryArtist"];
+                    };
                 };
                 /** @description not found */
                 404: {
@@ -793,7 +799,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["LibraryAlbum"];
+                    };
                 };
                 /** @description not found */
                 404: {
@@ -836,7 +844,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["LibraryAlbum"][];
+                    };
                 };
             };
         };
@@ -871,6 +881,56 @@ export interface paths {
             responses: {
                 /** @description ok */
                 200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LibraryTrack"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/library/catalog/tracks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Browse synced household tracks, including those not stored on this device */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Case-insensitive literal substring of the title, artist or album, including renames. */
+                    q?: string;
+                    limit?: number;
+                    offset?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description CatalogLibraryTrack list */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CatalogLibraryTrack"][];
+                    };
+                };
+                /** @description catalogue unavailable */
+                503: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -2811,7 +2871,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["SyncedPlaylistDetail"];
+                    };
                 };
                 /** @description invalid body */
                 400: {
@@ -4675,7 +4737,47 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        /** Create a managed playlist */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description the new playlist */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SyncedPlaylistDetail"];
+                    };
+                };
+                /** @description name is required */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description playlist sync unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -4726,9 +4828,92 @@ export interface paths {
                 };
             };
         };
-        put?: never;
+        /** Rename a managed playlist */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description renamed playlist */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SyncedPlaylistDetail"];
+                    };
+                };
+                /** @description not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description playlist is not editable */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description playlist sync unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         post?: never;
-        delete?: never;
+        /** Delete a managed playlist */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description deleted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description playlist sync unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;
@@ -4764,7 +4949,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["SyncedPlaylistDetail"];
+                    };
                 };
                 /** @description source and externalId are required */
                 400: {
@@ -4809,7 +4996,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["SyncedPlaylistDetail"];
+                    };
                 };
                 /** @description playlist is not editable */
                 409: {
@@ -4827,6 +5016,64 @@ export interface paths {
                 };
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/playlists/{id}/tracks/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Reorder a managed playlist */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        tracks: components["schemas"]["TrackKey"][];
+                    };
+                };
+            };
+            responses: {
+                /** @description reordered playlist */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SyncedPlaylistDetail"];
+                    };
+                };
+                /** @description playlist is not editable */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description playlist sync unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -6559,6 +6806,46 @@ export interface components {
             /** @description Where playback stops; zero plays to the end. */
             cropEndMs?: number;
         };
+        /** @description A synced household track identity, independent of whether this device stores its audio. */
+        CatalogLibraryTrack: {
+            /** @description Stable catalog track id. */
+            id: string;
+            title: string;
+            artist: string;
+            album: string;
+            durationMs: number;
+            /** @enum {string} */
+            playback: "local" | "delegated" | "unavailable";
+            /** @description Local backend id when playback is local. */
+            localTrackId?: string;
+            /** @description Pass to GET /cover/{id}. A backend cover id when playback is local, the catalog id when delegated; absent otherwise. */
+            coverArtId?: string;
+            cropStartMs?: number;
+            cropEndMs?: number;
+        };
+        LibraryAlbum: {
+            id: string;
+            name: string;
+            artistId: string;
+            artist: string;
+            coverArtId: string;
+            year: number;
+            songCount: number;
+            durationMs: number;
+            tracks?: components["schemas"]["LibraryTrack"][];
+        };
+        LibraryArtist: {
+            id: string;
+            name: string;
+            coverArtId: string;
+            albumCount: number;
+            albums?: components["schemas"]["LibraryAlbum"][];
+        };
+        LibrarySearchResults: {
+            tracks: components["schemas"]["LibraryTrack"][];
+            albums: components["schemas"]["LibraryAlbum"][];
+            artists: components["schemas"]["LibraryArtist"][];
+        };
         TrackKey: {
             source: string;
             externalId: string;
@@ -6595,6 +6882,13 @@ export interface components {
              */
             state: "full" | "none" | "partial" | "pending";
             libraryTrack?: components["schemas"]["LibraryTrack"];
+            /** @description Stable track id used for Delegated playback; absent for external-only results. */
+            canonicalId?: string;
+            /**
+             * @description Where this Device can play the track right now.
+             * @enum {string}
+             */
+            playback: "local" | "delegated" | "unavailable";
             externalRef?: components["schemas"]["ExternalTrackRef"];
             key?: components["schemas"]["TrackKey"];
             title: string;
@@ -6603,6 +6897,10 @@ export interface components {
             trackNumber: number;
             durationMs: number;
             coverUrl?: string;
+            /** @description Where playback starts, including delegated tracks. */
+            cropStartMs?: number;
+            /** @description Where playback stops; zero plays to the end. */
+            cropEndMs?: number;
             artistExternalId?: string;
             albumExternalId?: string;
         };
@@ -6671,6 +6969,10 @@ export interface components {
             artist?: string;
             album?: string;
             durationMs?: number;
+            /** @description Start of the non-destructive playback window. */
+            cropStartMs?: number;
+            /** @description End of the playback window; zero plays to the end. */
+            cropEndMs?: number;
         } & {
             [key: string]: unknown;
         };

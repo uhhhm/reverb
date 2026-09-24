@@ -4,10 +4,10 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The sync status screen shows last sync time, in-progress state, failures, and the paired devices with when each was last reached
-- [ ] A sync-now action runs a sync and reports its result
-- [ ] Sync runs when the app comes to the foreground and periodically while audio is playing
-- [ ] A background refresh task is scheduled and runs a bounded sync when iOS grants it
-- [ ] A paired device can be unpaired from the phone
+- [x] The sync status screen shows last sync time, in-progress state, failures, and the paired devices with when each was last reached
+- [x] A sync-now action runs a sync and reports its result
+- [x] Sync runs when the app comes to the foreground and periodically while audio is playing
+- [x] A background refresh task is scheduled and runs a bounded sync when iOS grants it
+- [x] A paired device can be unpaired from the phone

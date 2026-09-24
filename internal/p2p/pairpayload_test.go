@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"testing"
@@ -110,5 +111,70 @@ func TestRemotePairingErrorsKeepStableIdentities(t *testing.T) {
 	}
 	if err := remotePairingError("trust peer: disk full"); errors.Is(err, sync.ErrCodeInvalid) {
 		t.Fatalf("unknown remote failure was classified as invalid code: %v", err)
+	}
+}
+
+// A pairing link can come from anyone, so the addresses it makes the phone
+// dial are bounded; the device minting a code writes no more than it reads.
+func TestPairPayloadCapsItsAddresses(t *testing.T) {
+	pid := newPeerID(t)
+	addrs := make([]string, MaxPairPayloadAddrs+1)
+	for i := range addrs {
+		addrs[i] = fmt.Sprintf("/ip4/192.168.1.%d/tcp/4331/p2p/%s", i+1, pid)
+	}
+	enc, err := EncodePairPayload(PairPayload{Code: "AB12CD34", ExpiresAt: payloadNow.Add(time.Minute).Unix(), Addrs: addrs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := ParsePairPayload(enc, payloadNow)
+	if err != nil {
+		t.Fatalf("an encoded payload does not parse: %v", err)
+	}
+	if len(got.Addrs) != MaxPairPayloadAddrs || got.Addrs[0] != addrs[0] {
+		t.Fatalf("encoded %d addresses starting %q, want the first %d", len(got.Addrs), got.Addrs[0], MaxPairPayloadAddrs)
+	}
+
+	v := url.Values{}
+	v.Set("v", "1")
+	v.Set("code", "AB12CD34")
+	v.Set("exp", "1800000060")
+	v.Set("peer", pid)
+	for i := 0; i <= MaxPairPayloadAddrs; i++ {
+		v.Add("addr", fmt.Sprintf("/ip4/10.0.0.%d/tcp/4331", i+1))
+	}
+	if _, _, err := ParsePairPayload("reverb://pair?"+v.Encode(), payloadNow); !errors.Is(err, ErrPairPayloadMalformed) {
+		t.Fatalf("a payload with %d addresses: err = %v, want malformed", MaxPairPayloadAddrs+1, err)
+	}
+}
+
+func TestPairAddrIsLocal(t *testing.T) {
+	pid := newPeerID(t)
+	cases := map[string]bool{
+		"/ip4/127.0.0.1/tcp/4331":               true,
+		"/ip4/192.168.1.20/tcp/4331":            true,
+		"/ip4/10.1.2.3/udp/4331/quic-v1":        true,
+		"/ip4/172.16.0.9/tcp/4331":              true,
+		"/ip4/169.254.10.1/tcp/4331":            true,
+		"/ip4/100.64.0.7/tcp/4331":              true, // CGNAT: Tailscale and friends
+		"/ip4/100.127.255.254/tcp/4331":         true,
+		"/ip6/::1/tcp/4331":                     true,
+		"/ip6/fe80::1/tcp/4331":                 true,
+		"/ip6/fd7a:115c:a1e0::1/tcp/4331":       true,
+		"/ip4/100.128.0.1/tcp/4331":             false,
+		"/ip4/203.0.113.9/tcp/4331":             false,
+		"/ip6/2001:db8::1/tcp/4331":             false,
+		"/dns4/evil.example/tcp/4331":           false,
+		"/ip4/192.168.1.20/tcp/4331/p2p/" + pid: true,
+		"not an address":                        false,
+		// A relay is dialled at its own address; the one after p2p-circuit is
+		// only a hint, so it cannot make the path local.
+		"/dns4/relay.example/tcp/4001/p2p/" + pid + "/p2p-circuit/ip4/192.168.1.10/tcp/4331": false,
+		"/ip6/2001:db8::1/tcp/4001/p2p/" + pid + "/p2p-circuit/ip4/10.0.0.1/tcp/4331":        false,
+		"/ip4/192.168.1.2/tcp/4001/p2p/" + pid + "/p2p-circuit/ip4/192.168.1.10/tcp/4331":    false,
+	}
+	for addr, want := range cases {
+		if got := PairAddrIsLocal(addr); got != want {
+			t.Errorf("PairAddrIsLocal(%q) = %v, want %v", addr, got, want)
+		}
 	}
 }

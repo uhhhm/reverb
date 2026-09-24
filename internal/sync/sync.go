@@ -133,7 +133,11 @@ const (
 	FieldRecord = "record"
 
 	// Per-track fields, on EntityTrack under a catalog id.
-	FieldTitle          = "title"
+	FieldTitle = "title"
+	// FieldLibraryPresent is true while a catalog track is in a desktop's
+	// library, even if the catalog entity was first minted by search, and
+	// false once it is deleted there.
+	FieldLibraryPresent = "libraryPresent"
 	FieldArtist         = "artist"
 	FieldCropStartMs    = "cropStartMs"
 	FieldCropEndMs      = "cropEndMs"

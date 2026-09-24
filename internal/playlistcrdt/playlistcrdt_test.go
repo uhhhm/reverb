@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/uhhhm/reverb/internal/catalog"
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/playlistcrdt"
 	"github.com/uhhhm/reverb/internal/playlistsync"
@@ -292,6 +293,32 @@ func TestCatalogIDsStayLocal(t *testing.T) {
 	}
 	if len(onA) != 1 || onA[0].CanonicalID != "trk_a" {
 		t.Fatalf("track on A = %+v, want its own catalog id kept", onA)
+	}
+}
+
+func TestReplicatedLibraryTrackAdoptsThisDevicesCatalogID(t *testing.T) {
+	a, b := newDevice(t, "dev_a", "dev_b"), newDevice(t, "dev_b", "dev_a")
+	b.crdt.WithCatalogLookup(func(_ context.Context, identity catalog.Identity) (string, bool, error) {
+		if identity.Title != "Song" || identity.Artist != "Band" {
+			t.Fatalf("identity = %+v", identity)
+		}
+		return "trk_b", true, nil
+	})
+	withID := libraryTrack("Song", "nav-a-1")
+	withID.CanonicalID = "trk_a"
+	a.save(t, "pl1", "Roadtrip", []core.ExternalResult{withID})
+	push(t, a, b)
+
+	row, err := b.store.Get(context.Background(), "pl1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []core.ExternalResult
+	if err := json.Unmarshal([]byte(row.TracksJSON), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].CanonicalID != "trk_b" {
+		t.Fatalf("track on B = %+v, want local catalog id trk_b", got)
 	}
 }
 

@@ -2,11 +2,14 @@ package app
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/uhhhm/reverb/internal/library/localfiles"
+	"github.com/uhhhm/reverb/internal/p2p"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 func buildForTest(t *testing.T, opts Options) *Runtime {
@@ -139,8 +142,11 @@ func TestPhoneProfileBuildsWithoutDesktopServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(instances) != 0 {
-		t.Errorf("a phone seeded adapter rows: %+v", instances)
+	if len(instances) != 1 || instances[0].Type != "search" || instances[0].Name != "deezer" || instances[0].Enabled != 1 {
+		t.Errorf("phone search defaults = %+v, want keyless Deezer", instances)
+	}
+	if rt.Deps.SearchAggregator == nil {
+		t.Error("a fresh phone cannot search Deezer without a peer")
 	}
 	if rt.Deps.ExternalStream == nil {
 		t.Error("external streaming is not wired; a phone resolves through its Python")
@@ -155,6 +161,84 @@ func TestPhoneProfileBuildsWithoutDesktopServices(t *testing.T) {
 	}
 	if rt.Deps.Pairing == nil || rt.Deps.SyncStore == nil || rt.Deps.SyncEmit == nil {
 		t.Error("replication is not wired")
+	}
+}
+
+func TestSeedPhoneSearchSourcesPreservesOwnerSettings(t *testing.T) {
+	rt := buildForTest(t, Options{Version: "test", Profile: ProfilePhone, Python: &recordingPython{}})
+	ctx := context.Background()
+	instances, err := rt.Store.Q().ListAdapterInstances(ctx)
+	if err != nil || len(instances) != 1 {
+		t.Fatalf("initial search sources = %+v, %v", instances, err)
+	}
+	if err := rt.Store.Q().SetAdapterInstanceEnabled(ctx, db.SetAdapterInstanceEnabledParams{ID: instances[0].ID, Enabled: 0}); err != nil {
+		t.Fatal(err)
+	}
+	SeedPhoneSearchSources(ctx, rt.Store.Q(), func(string) string { return "" })
+	instances, err = rt.Store.Q().ListAdapterInstances(ctx)
+	if err != nil || len(instances) != 1 || instances[0].Enabled != 0 {
+		t.Fatalf("disabled source was overwritten: %+v, %v", instances, err)
+	}
+}
+
+// A phone answers a credential request with a definite "no", so it never
+// re-serves a copied secret and never looks like an unreachable desktop.
+func TestPhoneNeverServesSearchCredentials(t *testing.T) {
+	rt := buildForTest(t, Options{Version: "test", Profile: ProfilePhone, Python: &recordingPython{},
+		Getenv: func(key string) string {
+			if strings.HasPrefix(key, "REVERB_SPOTIFY_CLIENT_") {
+				return "copied-value"
+			}
+			return ""
+		}})
+	if _, err := rt.spotifyCredentials(context.Background()); !errors.Is(err, p2p.ErrNoSearchCredentials) {
+		t.Fatalf("err = %v, want ErrNoSearchCredentials", err)
+	}
+}
+
+func TestPhoneSearchCanUseProvisionedSpotifyCredentialsWithoutPeer(t *testing.T) {
+	env := map[string]string{
+		"REVERB_SPOTIFY_CLIENT_ID":     "phone-client",
+		"REVERB_SPOTIFY_CLIENT_SECRET": "phone-secret",
+	}
+	rt := buildForTest(t, Options{Version: "test", Profile: ProfilePhone, Python: &recordingPython{},
+		Getenv: func(key string) string { return env[key] },
+	})
+	instances, err := rt.Store.Q().ListAdapterInstances(context.Background())
+	if err != nil || len(instances) != 2 || instances[0].Name != "deezer" || instances[1].Name != "spotify" {
+		t.Fatalf("phone search sources = %+v, %v", instances, err)
+	}
+	if rt.Deps.SearchAggregator == nil {
+		t.Fatal("provisioned phone search aggregator is nil")
+	}
+	sources := rt.Bundle.Aggregator.Sources()
+	if len(sources) != 2 || sources[0].Name() != "deezer" || sources[1].Name() != "spotify" {
+		t.Fatalf("active phone sources = %+v", sources)
+	}
+}
+
+func TestDesktopOnlySharesConfiguredSpotifyCredentials(t *testing.T) {
+	env := map[string]string{"REVERB_SPOTIFY_CLIENT_SECRET": "env-secret"}
+	rt := buildForTest(t, Options{Version: "test", Getenv: func(key string) string { return env[key] }})
+	ctx := context.Background()
+	if _, err := rt.spotifyCredentials(ctx); err == nil {
+		t.Fatal("unconfigured desktop shared a secret")
+	}
+	if err := rt.Store.Q().CreateAdapterInstance(ctx, db.CreateAdapterInstanceParams{
+		ID: "spotify", Type: "search", Name: "spotify", Enabled: 1,
+		ConfigJson: `{"client_id":"configured-id","client_secret":"old-secret"}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := rt.spotifyCredentials(ctx)
+	if err != nil || got.ClientID != "configured-id" || got.ClientSecret != "env-secret" {
+		t.Fatal("desktop did not use active Spotify credentials")
+	}
+	if err := rt.Store.Q().SetAdapterInstanceEnabled(ctx, db.SetAdapterInstanceEnabledParams{ID: "spotify", Enabled: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rt.spotifyCredentials(ctx); err == nil {
+		t.Fatal("disabled source shared a secret")
 	}
 }
 

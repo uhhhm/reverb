@@ -201,9 +201,8 @@ func (s *Service) ApplyTracks(ctx context.Context, tracks []core.Track) {
 	}
 }
 
-// ApplyDetailTracks stamps crop points onto the embedded library tracks of
-// album- and playlist-detail rows. Unowned rows have no library track and are
-// left alone.
+// ApplyDetailTracks stamps crop points onto detail rows, including delegated
+// rows which have a catalog id but no local library track.
 func (s *Service) ApplyDetailTracks(ctx context.Context, rows []core.AlbumDetailTrack) {
 	if s == nil || s.q == nil || len(rows) == 0 {
 		return
@@ -215,10 +214,15 @@ func (s *Service) ApplyDetailTracks(ctx context.Context, rows []core.AlbumDetail
 	byID := cropsByID(dbRows)
 	for i := range rows {
 		lt := rows[i].LibraryTrack
-		if lt == nil {
-			continue
+		p, ok := byID[rows[i].CanonicalID]
+		if !ok && lt != nil {
+			p, ok = byID[lt.ID]
 		}
-		if p, ok := byID[lt.ID]; ok {
+		if ok {
+			rows[i].CropStartMs = p.StartMs
+			rows[i].CropEndMs = p.EndMs
+		}
+		if lt != nil && ok {
 			lt.CropStartMs = p.StartMs
 			lt.CropEndMs = p.EndMs
 		}

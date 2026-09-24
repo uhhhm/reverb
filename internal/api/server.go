@@ -111,11 +111,25 @@ type Resolver interface {
 	Resolve(ctx context.Context, catalogID string) (resolver.Addressing, error)
 }
 
+// DelegatedStreamer asks a paired Device to serve a canonical library track
+// when this Device has no local copy. *p2p.Delegator satisfies it.
+type DelegatedStreamer interface {
+	Stream(ctx context.Context, catalogID string, opts core.StreamOpts, byteRange string) (core.StreamHandle, error)
+	Playable(ctx context.Context, catalogID string) bool
+	Cover(ctx context.Context, catalogID string, size int) (core.CoverArt, error)
+}
+
 // CatalogLookup reads catalog entities and their aliases, so a canonical id can
 // be traced back to the source it was played from. *db.Queries satisfies it.
 type CatalogLookup interface {
 	GetCatalogEntity(ctx context.Context, id string) (db.CatalogEntity, error)
 	ListAliasesForCatalog(ctx context.Context, catalogID string) ([]db.ListAliasesForCatalogRow, error)
+}
+
+// CatalogBrowser lists the replicated identities available for phone library
+// browsing, including tracks not stored in its local-files adapter.
+type CatalogBrowser interface {
+	ListBrowsableCatalogTracks(context.Context, db.ListBrowsableCatalogTracksParams) ([]db.CatalogEntity, error)
 }
 
 // LinkAddService is the add-from-link planner. *linkadd.Service satisfies it.
@@ -146,6 +160,11 @@ type Deps struct {
 	Reload        ServiceReloader
 	Dev           bool
 	Desktop       bool
+	// LocalSecret, when set, is required in LocalSecretHeader on every
+	// request. The phone profile sets a fresh one per launch: on iOS other
+	// apps can reach a loopback port, so loopback alone does not mean the
+	// owner. Desktop and server builds leave it empty.
+	LocalSecret string
 	// AllowedHosts are the extra Host values hostGuard accepts beyond loopback.
 	// A reverse proxy forwards its own public hostname, which is not loopback
 	// and cannot be inferred from the bind address, so it has to be named here.
@@ -174,11 +193,15 @@ type Deps struct {
 	// the LIVE matcher, so it survives adapter hot-reloads (the matcher is rebuilt
 	// on each reload). Nil in tests/legacy that don't use the addressing boundary.
 	Resolver Resolver
+	// DelegatedStream is present on the phone profile. It tries the always-on
+	// Server first, then the most recently reached paired Device.
+	DelegatedStream DelegatedStreamer
 
 	// Catalog traces a canonical id back to the search source it was played
 	// from, so history can play a track the library has no copy of. Nil disables
 	// that fallback (the stream endpoint then 404s, as before).
-	Catalog CatalogLookup
+	Catalog       CatalogLookup
+	CatalogBrowse CatalogBrowser
 	// Player owns each player session's play queue. Nil disables the
 	// /player endpoints (503).
 	Player *player.Service
@@ -397,6 +420,7 @@ func (s *Server) Handler() http.Handler { return s.router }
 func (s *Server) routes() {
 	s.router.Use(middleware.Recoverer)
 	s.router.Use(s.securityHeaders)
+	s.router.Use(s.localSecretGuard)
 	s.router.Use(s.hostGuard)
 
 	s.router.Route("/api/v1", func(r chi.Router) {
@@ -440,6 +464,7 @@ func (s *Server) routes() {
 			pr.Get("/library/album/{id}", s.handleLibraryAlbum)
 			pr.Get("/library/albums", s.handleLibraryAlbums)
 			pr.Get("/library/songs", s.handleLibrarySongs)
+			pr.Get("/library/catalog/tracks", s.handleCatalogTracks)
 			pr.Delete("/library/track/{id}", s.handleRemoveLibraryTrack)
 			pr.Put("/library/track/{id}/name", s.handleRenameTrack)
 			pr.Put("/library/album/{id}/name", s.handleRenameAlbum)

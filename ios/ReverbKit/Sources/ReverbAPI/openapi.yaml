@@ -4,7 +4,7 @@ info:
   title: Reverb API (iOS subset)
   version: 0.1.0
   description: |
-    Reverb is a self-hosted music app unifying a Subsonic/Navidrome library, Spotify search, and spotDL one-click download. All paths are served under /api/v1. The local browser UI is implicitly authenticated as the single household owner ("local"); paired devices authenticate to /sync with Bearer sync tokens (issued from one-time pairing codes) and to P2P via libp2p peer IDs bound at pairing.
+    Reverb is a self-hosted music app unifying a Subsonic/Navidrome library, Spotify search, and spotDL one-click download. All paths are served under /api/v1. The local browser UI is implicitly authenticated as the single household owner ("local"); paired devices authenticate to /sync with Bearer sync tokens (issued from one-time pairing codes) and to P2P via libp2p peer IDs bound at pairing. On a phone, where other apps can reach loopback, the core also requires its per-launch secret in the X-Reverb-Secret header on every request and answers 401 to any path without it; desktop and server builds take no secret.
 servers:
   - url: /api/v1
 paths:
@@ -158,6 +158,53 @@ paths:
                     - thisDevice
         "503":
           description: pairing unavailable
+  /pairing/devices/{id}:
+    delete:
+      operationId: unpairDevice
+      summary: Delete a paired device (cannot delete server device)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+        "400":
+          description: cannot delete server device
+        "404":
+          description: device not found
+        "503":
+          description: pairing unavailable
+  /sync/status:
+    get:
+      operationId: getSyncStatus
+      summary: Sync status (revision + device count) — requires auth either Bearer or local
+      responses:
+        "200":
+          description: status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revision:
+                    type: integer
+                    format: int64
+                  deviceCount:
+                    type: integer
+                  round:
+                    allOf:
+                      - $ref: "#/components/schemas/SyncRound"
+                    nullable: true
+                required:
+                  - revision
+                  - deviceCount
+        "401":
+          description: invalid sync token
+        "503":
+          description: sync unavailable
   /sync/trigger:
     post:
       operationId: triggerSync
@@ -181,6 +228,180 @@ paths:
           description: no valid pairing token and the request did not arrive over loopback
         "503":
           description: sync unavailable
+  /library/search:
+    get:
+      operationId: searchLibrary
+      summary: Fast REST search of the local library (tracks/albums/artists)
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: SearchResults
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibrarySearchResults"
+  /library/artists:
+    get:
+      operationId: listLibraryArtists
+      summary: List library artists
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LibraryArtist"
+  /library/artist/{id}:
+    get:
+      operationId: getLibraryArtist
+      summary: One artist with albums
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryArtist"
+        "404":
+          description: not found
+  /library/albums:
+    get:
+      operationId: listLibraryAlbums
+      summary: List albums
+      parameters:
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LibraryAlbum"
+  /library/album/{id}:
+    get:
+      operationId: getLibraryAlbum
+      summary: One album with tracks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryAlbum"
+        "404":
+          description: not found
+  /library/songs:
+    get:
+      operationId: listLibraryTracks
+      summary: List every song in the library
+      parameters:
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Maximum songs to return; omit for everything
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LibraryTrack"
+  /library/catalog/tracks:
+    get:
+      operationId: listCatalogTracks
+      summary: Browse synced household tracks, including those not stored on this device
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Case-insensitive literal substring of the title, artist or album, including renames.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        "200":
+          description: CatalogLibraryTrack list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CatalogLibraryTrack"
+        "503":
+          description: catalogue unavailable
+  /search/everywhere:
+    get:
+      operationId: searchEverywhere
+      summary: |
+        Search-everywhere as Server-Sent Events. Streams one envelope per source (text/event-stream); each event data is a JSON SearchEnvelope with per-result library match status.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - track
+              - album
+              - artist
+      responses:
+        "200":
+          description: SSE stream of search envelopes
+          content:
+            text/event-stream:
+              schema:
+                type: string
   /playlists:
     get:
       operationId: listPlaylists
@@ -194,6 +415,31 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SyncedPlaylist"
+        "503":
+          description: playlist sync unavailable
+    post:
+      operationId: createPlaylist
+      summary: Create a managed playlist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+      responses:
+        "201":
+          description: the new playlist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncedPlaylistDetail"
+        "400":
+          description: name is required
         "503":
           description: playlist sync unavailable
   /playlists/{id}:
@@ -215,6 +461,148 @@ paths:
                 $ref: "#/components/schemas/SyncedPlaylistDetail"
         "404":
           description: not found
+        "503":
+          description: playlist sync unavailable
+    put:
+      operationId: renamePlaylist
+      summary: Rename a managed playlist
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+      responses:
+        "200":
+          description: renamed playlist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncedPlaylistDetail"
+        "404":
+          description: not found
+        "409":
+          description: playlist is not editable
+        "503":
+          description: playlist sync unavailable
+    delete:
+      operationId: deletePlaylist
+      summary: Delete a managed playlist
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: deleted
+        "404":
+          description: not found
+        "503":
+          description: playlist sync unavailable
+  /playlists/{id}/tracks:
+    post:
+      operationId: addPlaylistTrack
+      summary: Add a track to a managed playlist
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddSyncedTrackRequest"
+      responses:
+        "200":
+          description: SyncedPlaylistDetail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncedPlaylistDetail"
+        "400":
+          description: source and externalId are required
+        "409":
+          description: playlist is not editable
+        "503":
+          description: playlist sync unavailable
+    delete:
+      operationId: removePlaylistTrack
+      summary: Remove a track from a managed playlist
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: source
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: externalId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: SyncedPlaylistDetail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncedPlaylistDetail"
+        "409":
+          description: playlist is not editable
+        "503":
+          description: playlist sync unavailable
+  /playlists/{id}/tracks/order:
+    put:
+      operationId: reorderPlaylistTracks
+      summary: Reorder a managed playlist
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - tracks
+              properties:
+                tracks:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/TrackKey"
+      responses:
+        "200":
+          description: reordered playlist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncedPlaylistDetail"
+        "409":
+          description: playlist is not editable
         "503":
           description: playlist sync unavailable
   /offline-set:
@@ -477,6 +865,103 @@ paths:
           description: invalid request
         "503":
           description: play service unavailable
+  /recommendations/shelves:
+    get:
+      operationId: getHomeShelves
+      summary: Home's "For you" shelves
+      description: Returns what this device last generated at once. When that is missing or more than six hours old a refresh starts in the background and refreshing is set; fetch again to receive it. Shelves are seeded from recent heavy plays, or from the library before anything is played. Not interested marks apply to cached shelves, and discovery shelves leave out owned and recently played tracks.
+      responses:
+        "200":
+          description: shelves
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HomeShelves"
+  /recommendations/mixes:
+    get:
+      operationId: listMixes
+      summary: Every Mix as last generated on this device
+      description: A Mix whose period has passed starts regenerating in the background and has refreshing set. An empty Mix is hidden by the client.
+      responses:
+        "200":
+          description: mixes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MixList"
+  /recommendations/mixes/{kind}:
+    get:
+      operationId: getMix
+      summary: One Mix
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/MixKind"
+      responses:
+        "200":
+          description: the Mix
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Mix"
+        "404":
+          description: no such Mix
+  /recommendations/mixes/{kind}/playlist:
+    post:
+      operationId: saveMixAsPlaylist
+      summary: Save a Mix as a managed playlist
+      description: Creates an ordinary managed playlist holding the Mix's tracks, search-source tracks included. The playlist replicates and can join an offline set; the Mix itself does not change.
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/MixKind"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveMixRequest"
+      responses:
+        "201":
+          description: SyncedPlaylistDetail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncedPlaylistDetail"
+        "400":
+          description: invalid body
+        "404":
+          description: no such Mix
+        "409":
+          description: the Mix is empty
+        "503":
+          description: playlist service unavailable
+  /not-interested:
+    post:
+      operationId: markNotInterested
+      summary: Mark a track or artist Not interested on every device
+      description: A library track is keyed on its catalog identity's original metadata and a search-source track on source + externalId, so the same recording marked on two devices is one mark. An artist is keyed on its library name (for source "library") or the given name.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotInterestedRequest"
+      responses:
+        "200":
+          description: the recorded mark
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotInterestedMark"
+        "400":
+          description: missing or unknown kind, source, id or name
+        "503":
+          description: marks unavailable
 components:
   parameters:
     PlayerSession:
@@ -488,6 +973,97 @@ components:
         type: string
         pattern: ^[A-Za-z0-9_-]{1,64}$
   schemas:
+    AddSyncedTrackRequest:
+      type: object
+      properties:
+        source:
+          type: string
+        externalId:
+          type: string
+        title:
+          type: string
+        artist:
+          type: string
+        album:
+          type: string
+        isrc:
+          type: string
+        durationMs:
+          type: integer
+        coverArtId:
+          type: string
+        recommendationOrigin:
+          $ref: "#/components/schemas/RecommendationOrigin"
+        download:
+          type: boolean
+          default: true
+          description: Queue a search-source track the library lacks for download. False adds it as a streamed track.
+      required:
+        - source
+        - externalId
+    CatalogLibraryTrack:
+      type: object
+      description: A synced household track identity, independent of whether this device stores its audio.
+      required:
+        - id
+        - title
+        - artist
+        - album
+        - durationMs
+        - playback
+      properties:
+        id:
+          type: string
+          description: Stable catalog track id.
+        title:
+          type: string
+        artist:
+          type: string
+        album:
+          type: string
+        durationMs:
+          type: integer
+        playback:
+          type: string
+          enum:
+            - local
+            - delegated
+            - unavailable
+        localTrackId:
+          type: string
+          description: Local backend id when playback is local.
+        coverArtId:
+          type: string
+          description: Pass to GET /cover/{id}. A backend cover id when playback is local, the catalog id when delegated; absent otherwise.
+        cropStartMs:
+          type: integer
+        cropEndMs:
+          type: integer
+    ExternalArtist:
+      type: object
+      required:
+        - source
+        - externalId
+        - name
+      properties:
+        source:
+          type: string
+        externalId:
+          type: string
+        name:
+          type: string
+        mbid:
+          type: string
+        recommendationSources:
+          type: array
+          items:
+            type: string
+        reason:
+          $ref: "#/components/schemas/RecommendationReason"
+        coverUrl:
+          type: string
+        coverArtId:
+          type: string
     ExternalTrackRef:
       type: object
       required:
@@ -510,6 +1086,94 @@ components:
           type: string
         durationMs:
           type: integer
+    HomeShelves:
+      type: object
+      required:
+        - shelves
+        - refreshing
+      properties:
+        shelves:
+          type: array
+          items:
+            $ref: "#/components/schemas/Shelf"
+        updatedAt:
+          type: integer
+          format: int64
+        offline:
+          type: boolean
+        refreshing:
+          type: boolean
+    LibraryAlbum:
+      type: object
+      required:
+        - id
+        - name
+        - artistId
+        - artist
+        - coverArtId
+        - year
+        - songCount
+        - durationMs
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        artistId:
+          type: string
+        artist:
+          type: string
+        coverArtId:
+          type: string
+        year:
+          type: integer
+        songCount:
+          type: integer
+        durationMs:
+          type: integer
+        tracks:
+          type: array
+          items:
+            $ref: "#/components/schemas/LibraryTrack"
+    LibraryArtist:
+      type: object
+      required:
+        - id
+        - name
+        - coverArtId
+        - albumCount
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        coverArtId:
+          type: string
+        albumCount:
+          type: integer
+        albums:
+          type: array
+          items:
+            $ref: "#/components/schemas/LibraryAlbum"
+    LibrarySearchResults:
+      type: object
+      required:
+        - tracks
+        - albums
+        - artists
+      properties:
+        tracks:
+          type: array
+          items:
+            $ref: "#/components/schemas/LibraryTrack"
+        albums:
+          type: array
+          items:
+            $ref: "#/components/schemas/LibraryAlbum"
+        artists:
+          type: array
+          items:
+            $ref: "#/components/schemas/LibraryArtist"
     LibraryTrack:
       type: object
       description: A track of this device's library. Its id is this device's own and means nothing on another.
@@ -566,6 +1230,104 @@ components:
         cropEndMs:
           type: integer
           description: Where playback stops; zero plays to the end.
+    Mix:
+      type: object
+      description: A generated, regularly refreshed list of recommendations. Not a playlist and never replicated. period is the local date its period began on; available is false when nothing could be looked up.
+      required:
+        - kind
+        - period
+        - tracks
+        - available
+        - refreshing
+      properties:
+        kind:
+          $ref: "#/components/schemas/MixKind"
+        period:
+          type: string
+        tracks:
+          type: array
+          items:
+            $ref: "#/components/schemas/RecommendedTrack"
+        updatedAt:
+          type: integer
+          format: int64
+        available:
+          type: boolean
+        offline:
+          type: boolean
+        refreshing:
+          type: boolean
+    MixKind:
+      type: string
+      enum:
+        - discoverWeekly
+        - releaseRadar
+    MixList:
+      type: object
+      required:
+        - mixes
+      properties:
+        mixes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Mix"
+    NotInterestedMark:
+      type: object
+      required:
+        - key
+        - kind
+        - artist
+        - markedAt
+      properties:
+        key:
+          type: string
+        kind:
+          type: string
+          enum:
+            - track
+            - artist
+        title:
+          type: string
+        artist:
+          type: string
+        source:
+          type: string
+        externalId:
+          type: string
+        markedAt:
+          type: integer
+          format: int64
+          description: Unix milliseconds
+    NotInterestedRequest:
+      type: object
+      description: 'kind "track": source plus externalId, or source "library" with trackId (the backend track id). kind "artist": source plus id, and name.'
+      required:
+        - kind
+        - source
+      properties:
+        kind:
+          type: string
+          enum:
+            - track
+            - artist
+        source:
+          type: string
+        externalId:
+          type: string
+        trackId:
+          type: string
+        id:
+          type: string
+        title:
+          type: string
+        artist:
+          type: string
+        album:
+          type: string
+        durationMs:
+          type: integer
+        name:
+          type: string
     OfflinePlaylistStatus:
       type: object
       required:
@@ -728,6 +1490,12 @@ components:
           type: string
         durationMs:
           type: integer
+        cropStartMs:
+          type: integer
+          description: Start of the non-destructive playback window.
+        cropEndMs:
+          type: integer
+          description: End of the playback window; zero plays to the end.
     PlayerTracksRequest:
       type: object
       required:
@@ -750,6 +1518,7 @@ components:
       type: object
       required:
         - state
+        - playback
         - title
         - artist
         - trackNumber
@@ -765,6 +1534,16 @@ components:
           description: full when this device's library holds the track, which libraryTrack then names.
         libraryTrack:
           $ref: "#/components/schemas/LibraryTrack"
+        canonicalId:
+          type: string
+          description: Stable track id used for Delegated playback; absent for external-only results.
+        playback:
+          type: string
+          enum:
+            - local
+            - delegated
+            - unavailable
+          description: Where this Device can play the track right now.
         externalRef:
           $ref: "#/components/schemas/ExternalTrackRef"
         key:
@@ -781,6 +1560,12 @@ components:
           type: integer
         coverUrl:
           type: string
+        cropStartMs:
+          type: integer
+          description: Where playback starts, including delegated tracks.
+        cropEndMs:
+          type: integer
+          description: Where playback stops; zero plays to the end.
         artistExternalId:
           type: string
         albumExternalId:
@@ -848,6 +1633,18 @@ components:
           type: integer
           format: int64
           description: Changes on every change to the queue.
+    RadioSeed:
+      type: object
+      description: A track, or an artist when title is omitted.
+      required:
+        - artist
+      properties:
+        artist:
+          type: string
+        title:
+          type: string
+        mbid:
+          type: string
     RecommendationOrigin:
       type: string
       enum:
@@ -856,6 +1653,133 @@ components:
         - shelf
         - similarTracks
         - similarArtists
+    RecommendationReason:
+      type: object
+      description: "Why something was recommended. artist and title name the seed. played: \"Because you played <title>\". similar: \"Similar to <title>\". fansAlsoLike: \"Fans of <artist> also like\". radioArtist: one of the seed artist's own tracks, leading a Radio started from that artist. moreFrom: \"More from <artist>\". newRelease: a Release Radar track, with title naming the release. personal: from the connected ListenBrainz account's own recommendations, with no seed; artist is empty."
+      required:
+        - kind
+        - artist
+      properties:
+        kind:
+          type: string
+          enum:
+            - played
+            - similar
+            - fansAlsoLike
+            - radioArtist
+            - moreFrom
+            - newRelease
+            - personal
+        artist:
+          type: string
+        title:
+          type: string
+    RecommendedTrack:
+      type: object
+      description: A playable recommendation. A library track has source "library", externalId set to the backend track id, canonicalId set to its catalog id, and match.status "in_library"; anything else is a search-source result that plays through external playback.
+      required:
+        - source
+        - externalId
+        - title
+        - artist
+        - album
+        - durationMs
+        - type
+      properties:
+        source:
+          type: string
+        externalId:
+          type: string
+        title:
+          type: string
+        artist:
+          type: string
+        album:
+          type: string
+        durationMs:
+          type: integer
+        isrc:
+          type: string
+        mbid:
+          type: string
+        recommendationSources:
+          type: array
+          items:
+            type: string
+        reason:
+          $ref: "#/components/schemas/RecommendationReason"
+        coverUrl:
+          type: string
+        coverArtId:
+          type: string
+        artistExternalId:
+          type: string
+        albumExternalId:
+          type: string
+        type:
+          type: string
+        canonicalId:
+          type: string
+        match:
+          type: object
+          required:
+            - status
+            - libraryTrackId
+            - method
+            - confidence
+          properties:
+            status:
+              type: string
+              enum:
+                - in_library
+                - not_in_library
+                - unknown
+            libraryTrackId:
+              type: string
+            method:
+              type: string
+            confidence:
+              type: number
+            artistId:
+              type: string
+            albumId:
+              type: string
+            coverArtId:
+              type: string
+    SaveMixRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: The playlist's name; defaults to the Mix's
+    Shelf:
+      type: object
+      description: One "For you" row. It holds tracks or artists.
+      required:
+        - kind
+        - tracks
+        - artists
+      properties:
+        kind:
+          $ref: "#/components/schemas/ShelfKind"
+        seed:
+          $ref: "#/components/schemas/RadioSeed"
+        tracks:
+          type: array
+          items:
+            $ref: "#/components/schemas/RecommendedTrack"
+        artists:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExternalArtist"
+    ShelfKind:
+      type: string
+      description: becauseYouPlayed and similarTo name their seed track (similarTo when seeded from the library before anything is played).
+      enum:
+        - becauseYouPlayed
+        - similarTo
+        - artistsYouMightLike
+        - moreFromArtistsYouLove
     SyncRound:
       type: object
       description: Metadata exchange status. Local projection and file transfers run independently in the background.

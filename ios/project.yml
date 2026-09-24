@@ -30,12 +30,24 @@ targets:
         product: ReverbAPI
       # Built by `make ios-core` (gomobile bind); not checked in.
       - framework: Frameworks/Reverbcore.xcframework
+      # Go's DNS resolver on Darwin calls res_9_* from libresolv.
+      - sdk: libresolv.tbd
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.uhhhm.reverb
         INFOPLIST_FILE: Reverb/Info.plist
         TARGETED_DEVICE_FAMILY: "1"
         ENABLE_BITCODE: NO
+  ReverbTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ReverbTests
+    dependencies:
+      - target: Reverb
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
   ReverbUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -53,7 +65,9 @@ schemes:
     build:
       targets:
         Reverb: all
+        ReverbTests: [test]
         ReverbUITests: [test]
     test:
       targets:
+        - ReverbTests
         - ReverbUITests

@@ -140,7 +140,7 @@ before it expires and shows new versions as updates.
   - the local-files library adapter instead of Navidrome/Subsonic;
   - in-process download tools instead of bundled executables;
   - no desktop-only services such as the background agent or desktop updater.
-- The core is packaged for iOS with gomobile. The gomobile surface covers lifecycle only: start with a data directory, report the loopback port, and stop. Everything else goes over the core's existing loopback HTTP and WebSocket API.
+- The core is packaged for iOS with gomobile. The gomobile surface covers lifecycle (start with a data directory, report the loopback port, stop) plus copying and supplying Spotify credentials, which must not be served over loopback HTTP. Everything else goes over the core's existing loopback HTTP and WebSocket API.
 - The UI is native SwiftUI. It uses a Swift client generated from the OpenAPI spec (swift-openapi-generator), regenerated and drift-checked by the existing contracts targets beside the TypeScript client.
 - The Swift layer owns only the platform:
   - AVPlayer playback of URLs the core provides;
@@ -157,7 +157,7 @@ before it expires and shows new versions as updates.
   - fetching and pruning files on the phone through the existing P2P file sync;
   - storage accounting, per playlist and in total;
   - a storage-full state that stops fetching and never evicts silently.
-- **Delegated request**: a new versioned libp2p protocol, authenticated by existing peer trust. v1 carries one request type: stream a library track by catalog id. The phone picks the target in this order: the always-on Server if reachable, otherwise the most recently reached paired device. Streams resolve through the peer's library adapter; the phone never needs backend ids.
+- **Delegated request**: a new versioned libp2p protocol, authenticated by existing peer trust. v1 carries two request types, both by catalog id: stream a library track, and fetch its cover art. A peer that predates cover requests answers 400 and the phone shows no artwork. The phone picks the target in this order: the always-on Server if reachable, otherwise the most recently reached paired device. Streams resolve through the peer's library adapter; the phone never needs backend ids.
 - **Pending upload**: a Download made on the phone is kept locally and flagged until a paired device confirms it holds the file (the confirmation comes through the existing file-manifest exchange). After that, it is removed unless it belongs to an offline playlist. Pending uploads are never pruned and are exposed through the API for the sync status screen.
 - **In-process download tools**:
   - yt-dlp and spotdl run in an embedded Python, with QuickJS as yt-dlp's JavaScript runtime and ffmpeg linked in;

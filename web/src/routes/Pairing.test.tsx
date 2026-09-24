@@ -29,6 +29,12 @@ vi.mock('../lib/pairingApi', () => ({
 vi.mock('../lib/p2pApi', () => ({
   getP2PStatus: (...args: unknown[]) => mockGetP2PStatus(...args),
   redeemViaPeer: (...args: unknown[]) => mockRedeemViaPeer(...args),
+  getP2PPeers: vi.fn().mockResolvedValue([]),
+  getFileManifests: vi.fn().mockResolvedValue([]),
+  getFileFetchFailures: vi.fn().mockResolvedValue([]),
+  getPortableNamesPending: vi.fn().mockResolvedValue({ pending: 0 }),
+  migratePortableNames: vi.fn(),
+  fetchFileFromPeer: vi.fn(),
 }))
 
 function wrap() {
@@ -69,11 +75,24 @@ describe('Pairing', () => {
 
   it('renders the Pairing heading and generate pairing code section', async () => {
     wrap()
-    expect(screen.getByRole('heading', { level: 1, name: 'Pairing' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'Devices & sync' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /generate pairing code/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /generate pairing code/i })).toBeInTheDocument()
     // wait for async device load to settle to avoid act warnings
     await screen.findByText('My Laptop')
+  })
+
+  it('keeps sync diagnostics collapsed until Advanced sync is opened', async () => {
+    wrap()
+    await screen.findByText('My Laptop')
+    expect(screen.queryByRole('heading', { name: 'Diagnostics' })).not.toBeInTheDocument()
+    const details = screen.getByText('Advanced sync').closest('details') as HTMLDetailsElement
+    act(() => {
+      details.open = true
+      details.dispatchEvent(new Event('toggle'))
+    })
+    expect(await screen.findByRole('heading', { name: 'Diagnostics' })).toBeInTheDocument()
+    expect(await screen.findByText('12D3KooWlocal')).toBeInTheDocument()
   })
 
   it('generates and displays a pairing code with expiry and copy button', async () => {

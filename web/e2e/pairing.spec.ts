@@ -82,7 +82,7 @@ test('pairing: generate a pairing code and redeem one against the issuing peer',
 
   await page.goto('/pairing')
   await expect(page.getByTestId('app-shell-root')).toBeVisible()
-  await expect(page.getByRole('heading', { level: 1, name: 'Pairing' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: 'Devices & sync' })).toBeVisible()
 
   // No devices yet
   await expect(page.getByText(/No devices paired yet/)).toBeVisible()

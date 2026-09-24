@@ -8,7 +8,10 @@ info:
     /api/v1. The local browser UI is implicitly authenticated as the single
     household owner ("local"); paired devices authenticate to /sync with Bearer
     sync tokens (issued from one-time pairing codes) and to P2P via libp2p peer
-    IDs bound at pairing.
+    IDs bound at pairing. On a phone, where other apps can reach loopback, the
+    core also requires its per-launch secret in the X-Reverb-Secret header on
+    every request and answers 401 to any path without it; desktop and server
+    builds take no secret.
 servers:
   - url: /api/v1
 paths:
@@ -149,33 +152,65 @@ paths:
     get:
       summary: Fast REST search of the local library (tracks/albums/artists)
       parameters: [{ name: q, in: query, required: true, schema: { type: string } }]
-      responses: { "200": { description: SearchResults } }
+      responses:
+        "200":
+          description: SearchResults
+          content: { application/json: { schema: { $ref: '#/components/schemas/LibrarySearchResults' } } }
   /library/artists:
     get:
       summary: List library artists
-      responses: { "200": { description: ok } }
+      responses:
+        "200":
+          description: ok
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/LibraryArtist' } } } }
   /library/artist/{id}:
     get:
       summary: One artist with albums
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { "200": { description: ok }, "404": { description: not found } }
+      responses:
+        "200":
+          description: ok
+          content: { application/json: { schema: { $ref: '#/components/schemas/LibraryArtist' } } }
+        "404": { description: not found }
   /library/album/{id}:
     get:
       summary: One album with tracks
       parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
-      responses: { "200": { description: ok }, "404": { description: not found } }
+      responses:
+        "200":
+          description: ok
+          content: { application/json: { schema: { $ref: '#/components/schemas/LibraryAlbum' } } }
+        "404": { description: not found }
   /library/albums:
     get:
       summary: List albums
       parameters: [{ name: type, in: query, required: false, schema: { type: string } }]
-      responses: { "200": { description: ok } }
+      responses:
+        "200":
+          description: ok
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/LibraryAlbum' } } } }
   /library/songs:
     get:
       summary: List every song in the library
       parameters:
         - { name: size, in: query, required: false, schema: { type: integer }, description: Maximum songs to return; omit for everything }
         - { name: offset, in: query, required: false, schema: { type: integer } }
-      responses: { "200": { description: ok } }
+      responses:
+        "200":
+          description: ok
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/LibraryTrack' } } } }
+  /library/catalog/tracks:
+    get:
+      summary: Browse synced household tracks, including those not stored on this device
+      parameters:
+        - { name: q, in: query, required: false, description: "Case-insensitive literal substring of the title, artist or album, including renames.", schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: CatalogLibraryTrack list
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CatalogLibraryTrack' } } } }
+        "503": { description: catalogue unavailable }
   /library/track/{id}:
     delete:
       summary: Remove a track from the built-in library and delete its managed audio file
@@ -798,7 +833,9 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/SaveMixRequest" }
       responses:
-        "201": { description: SyncedPlaylistDetail }
+        "201":
+          description: SyncedPlaylistDetail
+          content: { application/json: { schema: { $ref: '#/components/schemas/SyncedPlaylistDetail' } } }
         "400": { description: invalid body }
         "404": { description: no such Mix }
         "409": { description: the Mix is empty }
@@ -1207,6 +1244,22 @@ paths:
           description: every managed playlist in the household library
           content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/SyncedPlaylist' } } } }
         "503": { description: playlist sync unavailable }
+    post:
+      summary: Create a managed playlist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties: { name: { type: string } }
+      responses:
+        "201":
+          description: the new playlist
+          content: { application/json: { schema: { $ref: '#/components/schemas/SyncedPlaylistDetail' } } }
+        "400": { description: name is required }
+        "503": { description: playlist sync unavailable }
   /playlists/{id}:
     get:
       summary: A managed playlist with each track resolved against this device's library
@@ -1215,6 +1268,31 @@ paths:
         "200":
           description: playlist detail
           content: { application/json: { schema: { $ref: '#/components/schemas/SyncedPlaylistDetail' } } }
+        "404": { description: not found }
+        "503": { description: playlist sync unavailable }
+    put:
+      summary: Rename a managed playlist
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties: { name: { type: string } }
+      responses:
+        "200":
+          description: renamed playlist
+          content: { application/json: { schema: { $ref: '#/components/schemas/SyncedPlaylistDetail' } } }
+        "404": { description: not found }
+        "409": { description: playlist is not editable }
+        "503": { description: playlist sync unavailable }
+    delete:
+      summary: Delete a managed playlist
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: deleted }
         "404": { description: not found }
         "503": { description: playlist sync unavailable }
   /playlists/{id}/tracks:
@@ -1227,7 +1305,9 @@ paths:
           application/json:
             schema: { $ref: '#/components/schemas/AddSyncedTrackRequest' }
       responses:
-        "200": { description: SyncedPlaylistDetail }
+        "200":
+          description: SyncedPlaylistDetail
+          content: { application/json: { schema: { $ref: '#/components/schemas/SyncedPlaylistDetail' } } }
         "400": { description: source and externalId are required }
         "409": { description: playlist is not editable }
         "503": { description: playlist sync unavailable }
@@ -1238,7 +1318,30 @@ paths:
         - { name: source, in: query, required: true, schema: { type: string } }
         - { name: externalId, in: query, required: true, schema: { type: string } }
       responses:
-        "200": { description: SyncedPlaylistDetail }
+        "200":
+          description: SyncedPlaylistDetail
+          content: { application/json: { schema: { $ref: '#/components/schemas/SyncedPlaylistDetail' } } }
+        "409": { description: playlist is not editable }
+        "503": { description: playlist sync unavailable }
+  /playlists/{id}/tracks/order:
+    put:
+      summary: Reorder a managed playlist
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tracks]
+              properties:
+                tracks:
+                  type: array
+                  items: { $ref: '#/components/schemas/TrackKey' }
+      responses:
+        "200":
+          description: reordered playlist
+          content: { application/json: { schema: { $ref: '#/components/schemas/SyncedPlaylistDetail' } } }
         "409": { description: playlist is not editable }
         "503": { description: playlist sync unavailable }
   /synced-playlists/{id}/settings:
@@ -1961,6 +2064,50 @@ components:
         mbid: { type: string }
         cropStartMs: { type: integer, description: "Where playback starts, when the track is cropped." }
         cropEndMs: { type: integer, description: "Where playback stops; zero plays to the end." }
+    CatalogLibraryTrack:
+      type: object
+      description: A synced household track identity, independent of whether this device stores its audio.
+      required: [id, title, artist, album, durationMs, playback]
+      properties:
+        id: { type: string, description: Stable catalog track id. }
+        title: { type: string }
+        artist: { type: string }
+        album: { type: string }
+        durationMs: { type: integer }
+        playback: { type: string, enum: [local, delegated, unavailable] }
+        localTrackId: { type: string, description: Local backend id when playback is local. }
+        coverArtId: { type: string, description: "Pass to GET /cover/{id}. A backend cover id when playback is local, the catalog id when delegated; absent otherwise." }
+        cropStartMs: { type: integer }
+        cropEndMs: { type: integer }
+    LibraryAlbum:
+      type: object
+      required: [id, name, artistId, artist, coverArtId, year, songCount, durationMs]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        artistId: { type: string }
+        artist: { type: string }
+        coverArtId: { type: string }
+        year: { type: integer }
+        songCount: { type: integer }
+        durationMs: { type: integer }
+        tracks: { type: array, items: { $ref: '#/components/schemas/LibraryTrack' } }
+    LibraryArtist:
+      type: object
+      required: [id, name, coverArtId, albumCount]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        coverArtId: { type: string }
+        albumCount: { type: integer }
+        albums: { type: array, items: { $ref: '#/components/schemas/LibraryAlbum' } }
+    LibrarySearchResults:
+      type: object
+      required: [tracks, albums, artists]
+      properties:
+        tracks: { type: array, items: { $ref: '#/components/schemas/LibraryTrack' } }
+        albums: { type: array, items: { $ref: '#/components/schemas/LibraryAlbum' } }
+        artists: { type: array, items: { $ref: '#/components/schemas/LibraryArtist' } }
     TrackKey:
       type: object
       required: [source, externalId]
@@ -1995,13 +2142,15 @@ components:
         trackCount: { type: integer }
     PlaylistTrack:
       type: object
-      required: [state, title, artist, trackNumber, durationMs]
+      required: [state, playback, title, artist, trackNumber, durationMs]
       properties:
         state:
           type: string
           enum: [full, none, partial, pending]
           description: full when this device's library holds the track, which libraryTrack then names.
         libraryTrack: { $ref: '#/components/schemas/LibraryTrack' }
+        canonicalId: { type: string, description: "Stable track id used for Delegated playback; absent for external-only results." }
+        playback: { type: string, enum: [local, delegated, unavailable], description: "Where this Device can play the track right now." }
         externalRef: { $ref: '#/components/schemas/ExternalTrackRef' }
         key: { $ref: '#/components/schemas/TrackKey' }
         title: { type: string }
@@ -2010,6 +2159,8 @@ components:
         trackNumber: { type: integer }
         durationMs: { type: integer }
         coverUrl: { type: string }
+        cropStartMs: { type: integer, description: "Where playback starts, including delegated tracks." }
+        cropEndMs: { type: integer, description: "Where playback stops; zero plays to the end." }
         artistExternalId: { type: string }
         albumExternalId: { type: string }
     SyncedPlaylistDetail:
@@ -2077,6 +2228,8 @@ components:
         artist: { type: string }
         album: { type: string }
         durationMs: { type: integer }
+        cropStartMs: { type: integer, description: "Start of the non-destructive playback window." }
+        cropEndMs: { type: integer, description: "End of the playback window; zero plays to the end." }
     QueueEntry:
       type: object
       required: [id, origin, track]

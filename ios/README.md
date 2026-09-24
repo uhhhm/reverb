@@ -13,11 +13,20 @@ screen and remote controls, the camera, and backup exclusion.
 | `project.yml` | XcodeGen spec; `make ios-project` writes `Reverb.xcodeproj` from it |
 | `Reverb/` | The app: `Core/` starts and stops the Go core, `Player/` plays the core's queue, `Views/` |
 | `ReverbKit/` | Swift package with `ReverbAPI`, the client generated from OpenAPI |
-| `ReverbUITests/` | XCUITest smoke test: launch, pair with a test runtime, play an offline track |
+| `ReverbTests/` | Native AVPlayer regressions: decoded duration, variable-bitrate MP3, heard audio against the clock after seeks, queue races, failure recovery and skipping, interruptions and completion |
+| `ReverbUITests/` | XCUITest smoke test: launch, pair with a test runtime by typed code or a confirmed pairing link, play an offline track |
 | `Frameworks/` | `Reverbcore.xcframework`, built by `make ios-core` (not checked in) |
 
 The Go side is `mobile/reverbcore`: `Start(dataDir)` returns the loopback port,
-`Port()`, and `Stop()`. Nothing else crosses gomobile.
+`Port()`, `Secret()`, and `Stop()`. Other apps on the phone can reach a
+loopback port, so each start makes a random secret, kept in memory only, and
+the core refuses every request without it in `X-Reverb-Secret`. `LocalCore`
+sends it with generated operations, raw requests (`request(_:)`) and AVPlayer
+streams (`streamHeaders`); `AsyncImage` cannot, so covers load through
+`CoverImage`. `CopySpotifyCredentials()` and `SetSpotifyCredentials(id, secret)`
+also cross gomobile so the Spotify secret is never exposed through loopback
+HTTP, and `InspectPairPayload(link)` reads a pairing link without dialling it;
+other operations use the generated API client.
 
 ## Building
 
@@ -51,7 +60,7 @@ operation, add it to `iosOperations` in `tools/contracts/generate.mjs` and run
 
 Everything in the core is tested on Linux with `make check`. That includes
 `cmd/reverb-testpeer`'s `TestAppFlowAgainstTestPeer`, which drives the linked
-core through the same calls the app makes. On a Mac, the UI smoke test runs on
+core through the same calls the app makes. On a Mac, native playback regressions and the UI smoke test run on
 a simulator against the test peer:
 
 ```bash
@@ -60,19 +69,52 @@ make ios-test
 
 `make ios-test` builds the core and the project, starts `reverb-testpeer` on
 127.0.0.1:47300 (the simulator shares the Mac's loopback), and runs the
-XCUITest. Set `IOS_DESTINATION` for another simulator. To run the test from
+native tests and XCUITest. The smoke test checks clock progress, duration,
+pause, seek, resume and completion while the paired device is stopped. Set `IOS_DESTINATION` for another simulator. To run the test from
 Xcode instead, start `make ios-testpeer` first.
+
+For a faster playback-only loop after building the core and generating the project:
+
+```bash
+xcodebuild test -project ios/Reverb.xcodeproj -scheme Reverb \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -skipPackagePluginValidation -only-testing:ReverbTests
+```
 
 ## Behaviour worth knowing
 
 - The data directory is `Application Support/Reverb`. Its `music/` folder holds
   the offline set and is excluded from iCloud and device backups; the database
   is backed up.
+- After pairing, unpairing, and each foreground sync, the phone copies an enabled
+  Spotify source's credentials from a paired desktop over its trusted P2P
+  connection. They stay in this device's Keychain (not in sync or backups) and
+  reach the core in memory, so phone search can use Spotify without a connected
+  desktop. The copy is forgotten once a paired desktop answers without
+  credentials or no device is paired. Unpairing cannot recall a copy already
+  made; rotate the Spotify secret for that. The Keychain item belongs to the
+  signing team, so re-signing under another Apple ID drops it until the next
+  sync. Deezer requires no credentials.
 - Audio keeps playing locked and in the background (`UIBackgroundModes`
-  `audio`). A call pauses playback and it resumes afterwards if it was playing;
-  unplugging headphones pauses.
+  `audio`). A call pauses playback and it resumes afterwards if it was playing
+  and iOS says it should; unplugging headphones pauses.
+- Home, Library, Search, Playlists, and Devices are native views over the
+  phone's loopback API. Library tracks play locally or through a reachable
+  paired device; outside-library search results stay visibly unavailable until
+  external playback is installed in the phone profile.
+- The app syncs when it enters the foreground and every five minutes while
+  audio is playing. It also schedules a bounded `BGAppRefreshTask`; iOS decides
+  whether and when that task runs, and Reverb uses no keep-alive workaround.
 - iOS may reclaim the core's listening socket while the app is suspended. When
   the app comes back to the foreground it checks the core answers and starts it
-  again if not.
+  again if not. A track that fails to load, such as one played from the lock
+  screen after that, is loaded once more after the same check.
+- A track AVPlayer cannot open is skipped with a message: WebM is the one
+  format Reverb indexes that iOS cannot play; the downloaders write MP3, M4A and
+  Ogg Opus. Three failures in a row stop playback rather than walk the queue.
 - Scanning a pairing QR code with the system Camera opens the app through the
-  `reverb://` URL scheme and pairs.
+  `reverb://` URL scheme. Any app or web page can open such a link, so a link,
+  like a code scanned in the app, first shows the device's peer ID and
+  addresses, each marked LAN/VPN or public, with a warning when none is local.
+  Nothing is dialled or redeemed until Pair is tapped; Cancel or dismissing the
+  sheet discards it. A typed code pairs directly.

@@ -4,10 +4,10 @@
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Search runs on the phone profile's search sources and shows per-source results and errors
-- [ ] Home shelves and Mixes render, including the offline note when refresh fails
-- [ ] Not interested from the phone syncs and filters recommendations on every device
-- [ ] Save a Mix as playlist creates an ordinary playlist that syncs
-- [ ] Library results play (offline, or through a Delegated request once 06 has landed); results outside the library show as not yet playable until 10 lands
+- [x] Search runs on the phone profile's search sources and shows per-source results and errors
+- [x] Home shelves and Mixes render, including the offline note when refresh fails
+- [x] Not interested from the phone syncs and filters recommendations on every device
+- [x] Save a Mix as playlist creates an ordinary playlist that syncs
+- [x] Library results play (offline, or through a Delegated request once 06 has landed); results outside the library show as not yet playable until 10 lands

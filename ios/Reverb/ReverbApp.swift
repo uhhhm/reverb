@@ -4,13 +4,16 @@ import SwiftUI
 struct ReverbApp: App {
     @StateObject private var core: CoreHost
     @StateObject private var player: Player
+    @StateObject private var sync: SyncManager
     @StateObject private var pairing = PairingModel()
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let core = CoreHost()
         _core = StateObject(wrappedValue: core)
-        _player = StateObject(wrappedValue: Player(core: core))
+        let player = Player(core: core)
+        _player = StateObject(wrappedValue: player)
+        _sync = StateObject(wrappedValue: SyncManager(core: core))
         core.start()
     }
 
@@ -19,16 +22,24 @@ struct ReverbApp: App {
             RootView()
                 .environmentObject(core)
                 .environmentObject(player)
+                .environmentObject(sync)
                 .environmentObject(pairing)
-                // The system Camera opens a scanned pairing QR code here.
+                // The system Camera, or any app or web page, opens a pairing
+                // link here. It waits for the owner to confirm its target.
                 .onOpenURL { url in
-                    pairing.scanned(url.absoluteString)
+                    pairing.opened(url)
                 }
+                .task { await sync.foregrounded() }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                Task { await core.ensureRunning() }
+                Task { await sync.foregrounded() }
+            } else if phase == .background {
+                sync.scheduleBackgroundRefresh()
             }
+        }
+        .onChange(of: player.isPlaying) { _, playing in
+            sync.setPlaybackActive(playing)
         }
     }
 }
@@ -59,19 +70,39 @@ struct MainView: View {
 
     var body: some View {
         TabView {
+            // The bar sits on the stack, not its root, so pushed screens show it too.
+            NavigationStack {
+                HomeView()
+            }
+            .safeAreaInset(edge: .bottom) { NowPlayingBar() }
+            .tabItem { Label("Home", systemImage: "house") }
+
             NavigationStack {
                 PlaylistsView()
-                    .safeAreaInset(edge: .bottom) { NowPlayingBar() }
             }
+            .safeAreaInset(edge: .bottom) { NowPlayingBar() }
             .tabItem { Label("Playlists", systemImage: "music.note.list") }
 
             NavigationStack {
-                DevicesView()
-                    .safeAreaInset(edge: .bottom) { NowPlayingBar() }
+                LibraryView()
             }
+            .safeAreaInset(edge: .bottom) { NowPlayingBar() }
+            .tabItem { Label("Library", systemImage: "music.note") }
+
+            NavigationStack {
+                SearchView()
+            }
+            .safeAreaInset(edge: .bottom) { NowPlayingBar() }
+            .tabItem { Label("Search", systemImage: "magnifyingglass") }
+
+            NavigationStack {
+                DevicesView()
+            }
+            .safeAreaInset(edge: .bottom) { NowPlayingBar() }
             .tabItem { Label("Devices", systemImage: "laptopcomputer.and.iphone") }
         }
-        .sheet(isPresented: $pairing.isPresented) {
+        // Dismissing the sheet drops an unconfirmed link without dialling it.
+        .sheet(isPresented: $pairing.isPresented, onDismiss: pairing.discard) {
             PairingView()
         }
     }

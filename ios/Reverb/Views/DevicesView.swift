@@ -4,16 +4,34 @@ import SwiftUI
 struct DevicesView: View {
     @EnvironmentObject private var core: CoreHost
     @EnvironmentObject private var pairing: PairingModel
+    @EnvironmentObject private var sync: SyncManager
     @State private var devices: [Device] = []
 
     struct Device: Identifiable {
         let id: String
         let name: String
         let lastSeen: Date?
+        let isServer: Bool
     }
 
     var body: some View {
         List {
+            Section("Sync") {
+                LabeledContent("Status", value: sync.statusText)
+                if let lastSync = sync.lastSync {
+                    LabeledContent("Last sync", value: lastSync.formatted(.relative(presentation: .named)))
+                }
+                if let error = sync.lastError {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                }
+                Button {
+                    Task { await sync.syncNow() }
+                } label: {
+                    if sync.isRunning { ProgressView() } else { Label("Sync now", systemImage: "arrow.triangle.2.circlepath") }
+                }
+                .disabled(sync.isRunning)
+                .accessibilityIdentifier("sync.now")
+            }
             Section {
                 ForEach(devices) { device in
                     VStack(alignment: .leading) {
@@ -23,6 +41,11 @@ struct DevicesView: View {
                             .foregroundStyle(.secondary)
                     }
                     .accessibilityIdentifier("device.\(device.name)")
+                    .swipeActions {
+                        if !device.isServer {
+                            Button("Unpair", role: .destructive) { Task { await unpair(device) } }
+                        }
+                    }
                 }
             } header: {
                 Text("Paired devices")
@@ -38,6 +61,7 @@ struct DevicesView: View {
         .task(id: pairing.isPresented) {
             while !Task.isCancelled {
                 await load()
+                await sync.refreshStatus()
                 try? await Task.sleep(for: .seconds(5))
             }
         }
@@ -47,7 +71,28 @@ struct DevicesView: View {
         guard let client = core.client,
               let rows = try? await client.listPairedDevices().ok.body.json else { return }
         devices = rows.filter { !$0.thisDevice }.map {
-            Device(id: $0.id, name: $0.name, lastSeen: $0.lastSeen > 0 ? Date(timeIntervalSince1970: TimeInterval($0.lastSeen)) : nil)
+            Device(id: $0.id, name: $0.name, lastSeen: $0.lastSeen > 0 ? Date(timeIntervalSince1970: TimeInterval($0.lastSeen)) : nil, isServer: $0.isServer)
+        }
+    }
+
+    private func unpair(_ device: Device) async {
+        guard let client = core.client else { return }
+        guard (try? await client.unpairDevice(path: .init(id: device.id)).ok) != nil else { return }
+        await core.refreshSearchCredentials()
+        await load()
+    }
+}
+
+extension SyncManager {
+    var isRunning: Bool { status?.state == .pending || status?.state == .running }
+    var statusText: String {
+        switch status?.state {
+        case .pending: "Waiting"
+        case .running: "Syncing"
+        case .completed: "Current"
+        case .failed: "Failed"
+        case .no_peers: "No device reached"
+        default: "Not synced yet"
         }
     }
 }

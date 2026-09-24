@@ -63,6 +63,9 @@ func fakeSubsonic(t *testing.T) *httptest.Server {
 		switch filepath.Base(r.URL.Path) {
 		case "search3":
 			_, _ = io.WriteString(w, `{"subsonic-response":{"status":"ok","version":"1.16.1","searchResult3":{"song":[{"id":"desktop-only","title":"Desktop Only","artist":"Band","album":"Record","duration":180}]}}}`)
+		case "stream":
+			w.Header().Set("Content-Type", "audio/mpeg")
+			_, _ = io.WriteString(w, "DESKTOP AUDIO")
 		case "getPlaylists":
 			_, _ = io.WriteString(w, `{"subsonic-response":{"status":"ok","version":"1.16.1","playlists":{"playlist":[]}}}`)
 		case "getArtists":
@@ -584,6 +587,9 @@ func TestPhoneConvergesWithDesktop(t *testing.T) {
 		return phone.hasPlayTitled("Desk Song") && phone.markKeys()[deskMark.Key] && adv == 30
 	})
 
+	// The two edits originate on different runtimes before either asks for a
+	// sync round; neither may overwrite the other at convergence.
+	desktop.must(http.MethodPut, "/playlists/"+pl, map[string]string{"name": "Commute together"}, nil, http.StatusOK)
 	phone.must(http.MethodPost, "/playlists/"+pl+"/tracks", trackBody(2), nil, http.StatusOK)
 	phone.must(http.MethodPost, "/plays", map[string]any{
 		"title": "Pocket Song", "artist": "Band", "album": "Record", "durationMs": 200000, "msPlayed": 190000, "completed": true,
@@ -598,7 +604,7 @@ func TestPhoneConvergesWithDesktop(t *testing.T) {
 
 	converge(t, desktop, phone, "the phone's track, play, mark and settings reach the desktop", func() bool {
 		det, ok := desktop.playlist(pl)
-		if !ok || len(det.Tracks) != 2 {
+		if !ok || det.Name != "Commute together" || len(det.Tracks) != 2 {
 			return false
 		}
 		_, online := desktop.settings()
@@ -614,6 +620,103 @@ func TestPhoneConvergesWithDesktop(t *testing.T) {
 		"title": "After Phone Restart", "artist": "Band", "album": "Record", "durationMs": 100000, "msPlayed": 100000, "completed": true,
 	}, nil, http.StatusNoContent)
 	converge(t, desktop, phone, "a play reaches the restarted phone", func() bool { return phone.hasPlayTitled("After Phone Restart") })
+}
+
+func TestPhoneCopiesSpotifyCredentialsAndKeepsSourceWithoutDesktop(t *testing.T) {
+	if testing.Short() {
+		t.Skip("boots two runtimes with real libp2p hosts")
+	}
+	desktop := newSyncDevice(t, "desktop")
+	phone := newPhoneDevice(t, "phone")
+	if err := desktop.rt.Store.Q().CreateAdapterInstance(context.Background(), db.CreateAdapterInstanceParams{
+		ID: uuid.NewString(), Type: "search", Name: "spotify", Enabled: 1,
+		ConfigJson: `{"client_id":"desktop-client","client_secret":"desktop-secret"}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	pair(t, desktop, phone)
+	credentials, err := phone.rt.CopySpotifyCredentials(context.Background())
+	if err != nil || credentials.ClientID != "desktop-client" || credentials.ClientSecret != "desktop-secret" {
+		t.Fatal("paired phone did not copy desktop search credentials")
+	}
+	phone.env = map[string]string{
+		"REVERB_SPOTIFY_CLIENT_ID":     credentials.ClientID,
+		"REVERB_SPOTIFY_CLIENT_SECRET": credentials.ClientSecret,
+	}
+	phone.restart()
+	desktop.stop()
+	sources := phone.rt.Bundle.Aggregator.Sources()
+	if len(sources) != 2 || sources[0].Name() != "deezer" || sources[1].Name() != "spotify" {
+		t.Fatalf("phone sources without desktop = %+v", sources)
+	}
+}
+
+func TestPhoneDelegatesNonOfflineTrackAndMarksItUnavailableWhenPeerStops(t *testing.T) {
+	if testing.Short() {
+		t.Skip("boots two runtimes with real libp2p hosts")
+	}
+	desktop := newSyncDevice(t, "desktop")
+	phone := newPhoneDevice(t, "phone")
+	pair(t, desktop, phone)
+
+	var created core.SyncedPlaylistDetail
+	desktop.must(http.MethodPost, "/playlists", map[string]string{"name": "Stream me"}, &created, http.StatusCreated)
+	desktop.must(http.MethodPost, "/playlists/"+created.ID+"/tracks", map[string]any{
+		"source": "library", "externalId": "desktop-only", "title": "Desktop Only", "artist": "Band", "album": "Record",
+		"durationMs": 180000, "download": false,
+	}, nil, http.StatusOK)
+
+	var phoneDetail core.SyncedPlaylistDetail
+	converge(t, desktop, phone, "the phone receives a delegatable library track", func() bool {
+		if phone.call(http.MethodGet, "/playlists/"+created.ID, nil, &phoneDetail) != http.StatusOK || len(phoneDetail.Tracks) != 1 {
+			return false
+		}
+		return phoneDetail.Tracks[0].CanonicalID != "" && phoneDetail.Tracks[0].Playback == core.PlaybackDelegated
+	})
+
+	track := phoneDetail.Tracks[0]
+	var browse []core.CatalogLibraryTrack
+	phone.must(http.MethodGet, "/library/catalog/tracks?q=Desktop", nil, &browse, http.StatusOK)
+	if len(browse) != 1 || browse[0].ID != track.CanonicalID || browse[0].Playback != core.PlaybackDelegated {
+		t.Fatalf("phone household library browse = %+v", browse)
+	}
+	resp, err := phone.srv.Client().Get(phone.srv.URL + "/api/v1/stream/" + track.CanonicalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(body) != "DESKTOP AUDIO" {
+		t.Fatalf("delegated stream: status=%d body=%q", resp.StatusCode, body)
+	}
+	// Metadata edits on the desktop travel under the stable catalog identity,
+	// even though this phone has no local libraryTrack for the delegated row.
+	desktop.must(http.MethodPut, "/library/track/desktop-only/name", map[string]string{
+		"title": "Renamed on Desktop", "artist": "New Artist",
+	}, nil, http.StatusOK)
+	desktop.must(http.MethodPut, "/library/track/desktop-only/crop", map[string]int{
+		"startMs": 3000, "endMs": 9000,
+	}, nil, http.StatusOK)
+	converge(t, desktop, phone, "desktop track edits appear on the phone", func() bool {
+		var detail core.SyncedPlaylistDetail
+		if phone.call(http.MethodGet, "/playlists/"+created.ID, nil, &detail) != http.StatusOK || len(detail.Tracks) != 1 {
+			return false
+		}
+		row := detail.Tracks[0]
+		return row.Title == "Renamed on Desktop" && row.Artist == "New Artist" && row.CropStartMs == 3000 && row.CropEndMs == 9000
+	})
+
+	desktop.stop()
+	phoneDetail = core.SyncedPlaylistDetail{}
+	phone.must(http.MethodGet, "/playlists/"+created.ID, nil, &phoneDetail, http.StatusOK)
+	if got := phoneDetail.Tracks[0].Playback; got != core.PlaybackUnavailable {
+		t.Fatalf("playback after desktop stopped = %q, want unavailable", got)
+	}
+	browse = nil
+	phone.must(http.MethodGet, "/library/catalog/tracks?q=Desktop", nil, &browse, http.StatusOK)
+	if len(browse) != 1 || browse[0].Playback != core.PlaybackUnavailable {
+		t.Fatalf("offline household library browse = %+v", browse)
+	}
 }
 
 // Scanning the desktop's pairing QR code pairs a phone with no discovery at

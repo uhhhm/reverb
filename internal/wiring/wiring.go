@@ -124,8 +124,8 @@ func BuildLibraryAdapter(
 }
 
 // BuildSearchSources instantiates every ENABLED adapter_instance of type
-// "search" from the registry, applying REVERB_SPOTIFY_CLIENT_SECRET onto the
-// spotify config_json just before Init (env wins; never sent to the browser).
+// "search" from the registry, applying Spotify environment credentials onto
+// config_json just before Init (env wins; never sent to the browser).
 // instances are already ordered by (type, priority) from ListAdapterInstances.
 func BuildSearchSources(reg *registry.Registry, instances []db.AdapterInstance, getenv func(string) string) []search.SearchSource {
 	out := []search.SearchSource{}
@@ -152,11 +152,8 @@ func BuildSearchSources(reg *registry.Registry, instances []db.AdapterInstance, 
 				continue
 			}
 		}
-		// Env secret override (Spotify) — env wins for client_secret before Init.
 		if inst.Name == "spotify" {
-			if sec := getenv("REVERB_SPOTIFY_CLIENT_SECRET"); sec != "" {
-				cfg["client_secret"] = sec
-			}
+			ApplySpotifyEnv(cfg, getenv)
 		}
 
 		if err := src.Init(cfg); err != nil {
@@ -166,6 +163,17 @@ func BuildSearchSources(reg *registry.Registry, instances []db.AdapterInstance, 
 		out = append(out, src)
 	}
 	return out
+}
+
+// ApplySpotifyEnv overrides a Spotify source's persisted client_id and
+// client_secret with REVERB_SPOTIFY_CLIENT_ID/SECRET when those are set.
+func ApplySpotifyEnv(cfg map[string]any, getenv func(string) string) {
+	if id := getenv("REVERB_SPOTIFY_CLIENT_ID"); id != "" {
+		cfg["client_id"] = id
+	}
+	if sec := getenv("REVERB_SPOTIFY_CLIENT_SECRET"); sec != "" {
+		cfg["client_secret"] = sec
+	}
 }
 
 // BuildDownloaders instantiates every ENABLED adapter_instance of type
@@ -572,6 +580,9 @@ type Builder struct {
 	// downloadCompletion is applied to every manager Build creates, including
 	// replacement managers produced by live adapter reloads.
 	downloadCompletion func(context.Context, core.DownloadRequest)
+	// downloadLinked is applied to every manager Build creates, like
+	// downloadCompletion.
+	downloadLinked func(context.Context, string)
 	// localLibraryDir, when set, makes the library a plain folder read by the
 	// localfiles adapter; see SetLocalLibrary.
 	localLibraryDir string
@@ -610,6 +621,12 @@ func (b *Builder) SetCanonicalMinter(m playlistsync.CanonicalMinter) {
 // the composition root attaches the same hook to that first manager directly.
 func (b *Builder) SetDownloadCompletionHook(fn func(context.Context, core.DownloadRequest)) {
 	b.downloadCompletion = fn
+}
+
+// SetDownloadLinkedHook installs the linked-track observer copied into every
+// download manager constructed from this builder, as SetDownloadCompletionHook.
+func (b *Builder) SetDownloadLinkedHook(fn func(context.Context, string)) {
+	b.downloadLinked = fn
 }
 
 // NewBuilder constructs a Builder. clock may be nil (download.NewManager applies
@@ -861,6 +878,7 @@ func (b *Builder) buildServices(
 			dlResolve,  // optional resolver provider; Tasks 3-5 add call sites
 		)
 		bundle.Manager.SetCompletionHook(b.downloadCompletion)
+		bundle.Manager.SetLinkedHook(b.downloadLinked)
 		// The configured default quality tier, read per-request so a settings
 		// change takes effect without a rebuild. Applied to every enqueue path
 		// (search, coverage, playlist sync, add-from-link), not just the API.

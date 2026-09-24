@@ -80,3 +80,41 @@ func TestSecurityHeadersPresent(t *testing.T) {
 		t.Error("missing Content-Security-Policy header")
 	}
 }
+
+// The phone profile serves the owner API on a loopback port other apps on the
+// phone can reach, so it takes a per-launch secret. Every path answers the
+// same way without it, so a probe learns nothing about which routes exist.
+func TestLocalSecretGuardsEveryPath(t *testing.T) {
+	srv := NewServer(Deps{LocalSecret: "launch-secret"})
+	get := func(path, secret string) int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Host = "127.0.0.1:4533"
+		if secret != "" {
+			req.Header.Set(LocalSecretHeader, secret)
+		}
+		srv.Handler().ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for _, path := range []string{"/api/v1/version", "/api/v1/pairing/devices", "/api/v1/no-such-route", "/", "/index.html"} {
+		for _, secret := range []string{"", "launch-secre", "launch-secret!", "wrong-secret!"} {
+			if got := get(path, secret); got != http.StatusUnauthorized {
+				t.Errorf("GET %s with %q = %d, want 401", path, secret, got)
+			}
+		}
+	}
+	if got := get("/api/v1/version", "launch-secret"); got != http.StatusOK {
+		t.Fatalf("with the secret = %d, want 200", got)
+	}
+}
+
+// Desktop and server builds take no secret: the SPA calls the API as it is.
+func TestNoLocalSecretLeavesTheAPIAsItWas(t *testing.T) {
+	srv := newTestServer(t)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/version", nil)
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /version without a secret = %d, want 200", rec.Code)
+	}
+}
