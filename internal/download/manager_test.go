@@ -354,8 +354,12 @@ func TestCompletionHookReceivesSuccessfulRequest(t *testing.T) {
 	store := newMemStore()
 	m := NewManager(Config{Workers: 1, DebounceWindow: time.Hour}, wrapDownloaders([]Downloader{dl}), store,
 		events.New(), &fakeScanner{}, &fakeRematcher{trackID: "t1"}, &fakeVersion{v: 1}, RealClock{}, nil, nil)
-	completed := make(chan core.DownloadRequest, 1)
-	m.SetCompletionHook(func(_ context.Context, req core.DownloadRequest) { completed <- req })
+	type completion struct {
+		req  core.DownloadRequest
+		path string
+	}
+	completed := make(chan completion, 1)
+	m.SetCompletionHook(func(_ context.Context, req core.DownloadRequest, path string) { completed <- completion{req, path} })
 	m.Start()
 	t.Cleanup(m.Stop)
 
@@ -368,8 +372,11 @@ func TestCompletionHookReceivesSuccessfulRequest(t *testing.T) {
 	}
 	select {
 	case got := <-completed:
-		if got.RecommendationOrigin != "radio" || got.InitiatedBy != "local" {
-			t.Fatalf("completed request = %+v", got)
+		if got.req.RecommendationOrigin != "radio" || got.req.InitiatedBy != "local" {
+			t.Fatalf("completed request = %+v", got.req)
+		}
+		if got.path != "/out/e1.mp3" {
+			t.Fatalf("completed at %q, want the downloader's output", got.path)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("completion hook was not called")

@@ -93,3 +93,24 @@ func TestInProcessKeepsSourceNativeQuality(t *testing.T) {
 		t.Fatalf("progress = %v", progress)
 	}
 }
+
+// A phone plays what it downloads with AVPlayer, which cannot open WebM or
+// Ogg, so it asks for the source's M4A when there is one. The desktop keeps
+// taking the best audio, whatever its container.
+func TestInProcessPrefersAudioThePhoneCanPlay(t *testing.T) {
+	a, calls := inProcess(t)
+	if _, err := a.Start(context.Background(), core.DownloadRequest{Artist: "Band", Title: "Song"}, func(int) {}); err != nil {
+		t.Fatal(err)
+	}
+	if args := strings.Join(calls()[0], " "); !strings.Contains(args, "-f bestaudio[ext=m4a]/bestaudio") {
+		t.Fatalf("args %s do not prefer M4A", args)
+	}
+
+	r := &fakeRunner{lines: []string{"[download] 100.0% of 4.00MiB"}}
+	if _, err := newAdapter(t, r, nil).Start(context.Background(), core.DownloadRequest{Artist: "A", Title: "T"}, func(int) {}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(r.argString(), "bestaudio[ext=m4a]") {
+		t.Fatalf("the desktop narrowed its format: %s", r.argString())
+	}
+}

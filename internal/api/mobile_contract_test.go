@@ -20,11 +20,15 @@ import (
 
 type fakeKeeper struct {
 	status  offlineset.Status
+	pending []offlineset.PendingUpload
 	changed int
 }
 
 func (f *fakeKeeper) Status(context.Context) (offlineset.Status, error) { return f.status, nil }
 func (f *fakeKeeper) Changed()                                          { f.changed++ }
+func (f *fakeKeeper) PendingUploads(context.Context) ([]offlineset.PendingUpload, error) {
+	return f.pending, nil
+}
 
 // The phone app decodes these responses with a client generated from OpenAPI,
 // so the contract runner validates the real handlers' output against it.
@@ -70,7 +74,10 @@ func TestMobileHTTPContract(t *testing.T) {
 			{Title: "Two", Artist: "Band", State: offlineset.StateFetching, SizeBytes: 8192, FetchedBytes: 100},
 			{Title: "Three", Artist: "Band", State: offlineset.StateNoSpace, SizeBytes: 1 << 40},
 		},
-	}}}}
+	}}}, pending: []offlineset.PendingUpload{
+		{RelPath: "Band - Song.m4a", Title: "Song", Artist: "Band", SizeBytes: 4096, DownloadedAt: 1790000000000},
+		{RelPath: "Untagged.m4a", Title: "Untagged", SizeBytes: 2048, DownloadedAt: 1790000001000},
+	}}
 	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth: authSvc, Sync: sync, PlaylistOwner: st.Q(), OfflineSet: st.Q(), OfflineKeeper: keeper, PairingStore: st.Q(),
 		Search: registry.NewRegistry("search"), Downloader: registry.NewRegistry("downloader"),
@@ -88,6 +95,7 @@ func TestMobileHTTPContract(t *testing.T) {
 		{"offlineList", http.MethodGet, "/offline-set", ""},
 		{"offlineStatus", http.MethodGet, "/offline-set/status", ""},
 		{"offlineDelete", http.MethodDelete, "/offline-set/pl1", ""},
+		{"pendingUploads", http.MethodGet, "/pending-uploads", ""},
 	} {
 		req := httptest.NewRequest(c.method, "/api/v1"+c.path, strings.NewReader(c.body))
 		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: tok})
@@ -112,6 +120,13 @@ func TestMobileHTTPContract(t *testing.T) {
 	}
 	if keeper.changed != 2 {
 		t.Fatalf("the keeper heard of %d offline set changes, want 2", keeper.changed)
+	}
+	var pending struct {
+		Files      []offlineset.PendingUpload `json:"files"`
+		TotalBytes int64                      `json:"totalBytes"`
+	}
+	if err := json.Unmarshal(samples["pendingUploads"], &pending); err != nil || len(pending.Files) != 2 || pending.TotalBytes != 6144 {
+		t.Fatalf("pending uploads = %s", samples["pendingUploads"])
 	}
 	var playlist core.SyncedPlaylistDetail
 	if err := json.Unmarshal(samples["playlist"], &playlist); err != nil {

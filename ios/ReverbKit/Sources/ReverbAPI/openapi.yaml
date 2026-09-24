@@ -702,6 +702,122 @@ paths:
                   - ok
         "404":
           description: not found
+  /pending-uploads:
+    get:
+      operationId: listPendingUploads
+      summary: A phone's Downloads that no paired device holds yet
+      description: |
+        A Download made on a phone stays there until a paired device's file manifest shows it holds the same bytes; it is never pruned before that, whatever the offline set or the free space. Then it is removed unless an offline playlist names it. A desktop keeps every file and answers 503.
+      responses:
+        "200":
+          description: pending uploads, oldest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PendingUploads"
+        "503":
+          description: not a phone
+  /downloads:
+    post:
+      operationId: enqueueDownload
+      summary: Enqueue a one-click download (deduped)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDownloadRequest"
+      responses:
+        "200":
+          description: DownloadJob
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DownloadJob"
+        "400":
+          description: invalid
+  /links/resolve:
+    post:
+      operationId: resolveLink
+      summary: Resolve a Spotify or YouTube URL to track/album/playlist metadata
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+              required:
+                - url
+      responses:
+        "200":
+          description: |
+            What the link names. A phone names an album or playlist after itself, since it adds their tracks one by one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkResolveResult"
+        "400":
+          description: url is required
+        "422":
+          description: unsupported URL
+  /links/add:
+    post:
+      operationId: addFromLink
+      summary: Add a resolved track to the library and optionally enqueue a source-native download
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                playlistId:
+                  type: string
+                download:
+                  type: boolean
+                quality:
+                  type: string
+                  enum:
+                    - low
+                    - medium
+                    - high
+                    - best
+                  description: Overrides the configured default quality for this download.
+                startTime:
+                  type: string
+                  description: YouTube only. Trim start as seconds, M:SS or H:MM:SS. Blank means from the beginning.
+                endTime:
+                  type: string
+                  description: YouTube only. Trim end, same formats. Blank means to the end.
+                splitChapters:
+                  type: boolean
+                  description: |
+                    YouTube only. Enqueue one download per internal chapter instead of one for the whole video, each trimmed to its chapter and sharing the video title as album. Mutually exclusive with startTime/endTime.
+              required:
+                - url
+      responses:
+        "200":
+          description: |
+            What was added. jobs is present when one link became several downloads: a chapter split, or on a phone an album or playlist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkAddResult"
+        "400":
+          description: url is required
+        "404":
+          description: playlist not found
+        "422":
+          description: unsupported URL, bad time range, or chapter split not possible
+        "502":
+          description: "on a phone, which adds an album or playlist as its tracks and downloads by artist and title: the collection could not be listed, or a Spotify track could not be named"
+        "503":
+          description: no downloader configured
   /player/{session}:
     get:
       operationId: getQueue
@@ -1039,6 +1155,208 @@ components:
           type: integer
         cropEndMs:
           type: integer
+    CreateDownloadRequest:
+      type: object
+      x-go-generate: true
+      properties:
+        source:
+          type: string
+          x-go-name: Source
+          x-go-type: string
+          x-go-omitempty: false
+        externalId:
+          type: string
+          x-go-name: ExternalID
+          x-go-type: string
+          x-go-omitempty: false
+        artist:
+          type: string
+          x-go-name: Artist
+          x-go-type: string
+          x-go-omitempty: false
+        title:
+          type: string
+          x-go-name: Title
+          x-go-type: string
+          x-go-omitempty: false
+        album:
+          type: string
+          x-go-name: Album
+          x-go-type: string
+          x-go-omitempty: false
+        isrc:
+          type: string
+          x-go-name: ISRC
+          x-go-type: string
+          x-go-omitempty: false
+        durationMs:
+          type: integer
+          x-go-name: DurationMs
+          x-go-type: int
+          x-go-omitempty: false
+        playWhenReady:
+          type: boolean
+          x-go-name: PlayWhenReady
+          x-go-type: bool
+          x-go-omitempty: false
+        addToPlaylistId:
+          type: string
+          x-go-name: AddToPlaylistID
+          x-go-type: string
+          x-go-omitempty: true
+        quality:
+          type: string
+          x-go-name: Quality
+          x-go-type: string
+          x-go-omitempty: true
+        downloader:
+          type: string
+          x-go-ignore: true
+          description: Accepted for compatibility; this endpoint chooses through the configured fallback chain.
+        recommendationOrigin:
+          type: string
+          x-go-name: RecommendationOrigin
+          x-go-type: string
+          x-go-omitempty: true
+          enum:
+            - radio
+            - mix
+            - shelf
+            - similarTracks
+            - similarArtists
+      required:
+        - externalId
+    DownloadJob:
+      type: object
+      x-go-generate: true
+      properties:
+        id:
+          type: string
+          x-go-name: ID
+          x-go-type: string
+        dedupKey:
+          type: string
+          x-go-name: DedupKey
+          x-go-type: string
+        status:
+          type: string
+          x-go-name: Status
+          x-go-type: DownloadStatus
+          enum:
+            - queued
+            - running
+            - completed
+            - failed
+            - canceled
+        progress:
+          type: integer
+          x-go-name: Progress
+          x-go-type: int
+        error:
+          type: string
+          x-go-name: Error
+          x-go-type: string
+        outputPath:
+          type: string
+          x-go-name: OutputPath
+          x-go-type: string
+        libraryTrackId:
+          type: string
+          x-go-name: LibraryTrackID
+          x-go-type: string
+        coverArtId:
+          type: string
+          x-go-name: CoverArtID
+          x-go-type: string
+        canonicalId:
+          type: string
+          x-go-name: CanonicalID
+          x-go-type: string
+        downloaderName:
+          type: string
+          x-go-name: DownloaderName
+          x-go-type: string
+        priority:
+          type: integer
+          x-go-name: Priority
+          x-go-type: int
+        attempts:
+          type: integer
+          x-go-name: Attempts
+          x-go-type: int
+        source:
+          type: string
+          x-go-name: Source
+          x-go-type: string
+        externalId:
+          type: string
+          x-go-name: ExternalID
+          x-go-type: string
+        artist:
+          type: string
+          x-go-name: Artist
+          x-go-type: string
+        title:
+          type: string
+          x-go-name: Title
+          x-go-type: string
+        album:
+          type: string
+          x-go-name: Album
+          x-go-type: string
+        isrc:
+          type: string
+          x-go-name: ISRC
+          x-go-type: string
+        durationMs:
+          type: integer
+          x-go-name: DurationMs
+          x-go-type: int
+        playWhenReady:
+          type: boolean
+          x-go-name: PlayWhenReady
+          x-go-type: bool
+        addToPlaylistId:
+          type: string
+          x-go-name: AddToPlaylistID
+          x-go-type: string
+        quality:
+          type: string
+          x-go-name: Quality
+          x-go-type: AudioQuality
+        downloaderRef:
+          type: string
+          x-go-name: DownloaderRef
+          x-go-type: string
+        createdAt:
+          type: integer
+          x-go-name: CreatedAt
+          x-go-type: int64
+          format: int64
+        startedAt:
+          type: integer
+          x-go-name: StartedAt
+          x-go-type: int64
+          format: int64
+        finishedAt:
+          type: integer
+          x-go-name: FinishedAt
+          x-go-type: int64
+          format: int64
+      required:
+        - id
+        - dedupKey
+        - status
+        - progress
+        - downloaderName
+        - priority
+        - attempts
+        - source
+        - externalId
+        - playWhenReady
+        - createdAt
+        - startedAt
+        - finishedAt
     ExternalArtist:
       type: object
       required:
@@ -1230,6 +1548,58 @@ components:
         cropEndMs:
           type: integer
           description: Where playback stops; zero plays to the end.
+    LinkAddResult:
+      type: object
+      required:
+        - resolve
+        - catalogId
+      properties:
+        resolve:
+          $ref: "#/components/schemas/LinkResolveResult"
+        catalogId:
+          type: string
+        playlistId:
+          type: string
+        job:
+          $ref: "#/components/schemas/DownloadJob"
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DownloadJob"
+    LinkResolveResult:
+      type: object
+      required:
+        - kind
+        - source
+        - externalId
+        - title
+        - artist
+        - album
+        - url
+      properties:
+        kind:
+          type: string
+          enum:
+            - track
+            - album
+            - playlist
+        source:
+          type: string
+          enum:
+            - spotify
+            - youtube
+        externalId:
+          type: string
+        title:
+          type: string
+        artist:
+          type: string
+        album:
+          type: string
+        coverUrl:
+          type: string
+        url:
+          type: string
     Mix:
       type: object
       description: A generated, regularly refreshed list of recommendations. Not a playlist and never replicated. period is the local date its period began on; available is false when nothing could be looked up.
@@ -1428,6 +1798,45 @@ components:
           format: int64
           description: The file's size, once a file is known.
         fetchedBytes:
+          type: integer
+          format: int64
+    PendingUpload:
+      type: object
+      required:
+        - relPath
+        - title
+        - artist
+        - sizeBytes
+        - downloadedAt
+      properties:
+        relPath:
+          type: string
+          description: Where it is in the phone's music folder.
+        title:
+          type: string
+          description: From its tags, or its file name before file sync has read them.
+        artist:
+          type: string
+        album:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+        downloadedAt:
+          type: integer
+          format: int64
+          description: Unix milliseconds.
+    PendingUploads:
+      type: object
+      required:
+        - files
+        - totalBytes
+      properties:
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/PendingUpload"
+        totalBytes:
           type: integer
           format: int64
     PlayRequest:

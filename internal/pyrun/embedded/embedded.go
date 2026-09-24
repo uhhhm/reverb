@@ -179,6 +179,13 @@ func (r *Runner) RunModule(ctx context.Context, module string, args []string, on
 	return scanErr
 }
 
+// HasModule reports whether module is installed, without importing it.
+func (r *Runner) HasModule(module string) bool {
+	cmod := C.CString(module)
+	defer C.free(unsafe.Pointer(cmod))
+	return C.reverb_py_has_module(cmod) != 0
+}
+
 func run(module string, args []string, fd uintptr, token int64) (int, error) {
 	cmod := C.CString(module)
 	defer C.free(unsafe.Pointer(cmod))

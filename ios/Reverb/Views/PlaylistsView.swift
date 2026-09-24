@@ -6,6 +6,7 @@ typealias OfflineStatus = Components.Schemas.OfflineStatus
 struct PlaylistsView: View {
     @EnvironmentObject private var core: CoreHost
     @EnvironmentObject private var pairing: PairingModel
+    @EnvironmentObject private var links: LinkModel
     @State private var playlists: [Components.Schemas.SyncedPlaylist] = []
     @State private var offline: Set<String> = []
     @State private var storage: OfflineStatus?
@@ -63,6 +64,8 @@ struct PlaylistsView: View {
         }
         .navigationTitle("Playlists")
         .toolbar {
+            Button { links.isPresented = true } label: { Image(systemName: "link.badge.plus") }
+                .accessibilityLabel("Add from link")
             Button { draftName = ""; creating = true } label: { Image(systemName: "plus") }
                 .accessibilityLabel("New playlist")
         }

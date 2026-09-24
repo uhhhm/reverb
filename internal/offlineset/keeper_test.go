@@ -146,3 +146,106 @@ func TestUnknownFreeSpaceFetchesNothing(t *testing.T) {
 		t.Fatalf("status = %+v", status)
 	}
 }
+
+// pendingKeeper is a phone keeper over a folder holding one Download.
+func pendingKeeper(t *testing.T) (k *offlineset.Keeper, q *db.Queries, dir string, files *p2p.FileSyncer) {
+	t.Helper()
+	st := newTestStoreOff(t)
+	q = st.Q()
+	createDeviceOff(t, st, "phone", 1)
+	dir = t.TempDir()
+	p := filepath.Join(dir, "Band", "Downloaded.m4a")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("downloaded"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files = p2p.NewFileSyncer(q, "phone", dir)
+	if err := files.ScanAndSync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	k = offlineset.NewKeeper(offlineset.KeeperConfig{
+		Store:        q,
+		DeviceID:     func(context.Context) (string, error) { return "phone", nil },
+		FileDeviceID: "phone",
+		MusicDir:     dir,
+		FreeSpace:    func(string) (int64, error) { return 1 << 40, nil },
+		Rescan:       files.ScanAndSync,
+	})
+	if err := k.AddPending(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	return k, q, dir, files
+}
+
+// A Download made on the phone stays until a paired device's manifest shows
+// it holds the same bytes, and is then removed, since no offline playlist
+// names it.
+func TestPendingUploadLeavesOnceAPeerHoldsIt(t *testing.T) {
+	ctx := context.Background()
+	k, q, dir, _ := pendingKeeper(t)
+	downloaded := filepath.Join(dir, "Band", "Downloaded.m4a")
+
+	pending, err := k.PendingUploads(ctx)
+	if err != nil || len(pending) != 1 || pending[0].RelPath != "Band/Downloaded.m4a" || pending[0].SizeBytes != int64(len("downloaded")) {
+		t.Fatalf("pending = %+v, %v", pending, err)
+	}
+	// A peer that holds other files confirms nothing.
+	other := p2p.FileManifest{RelPath: "Band/Other.m4a", ContentHash: hashOf("other"), Size: 5}
+	k.Select(ctx, "desktop", []p2p.FileManifest{other}, nil)
+	if err := k.Prune(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(downloaded); err != nil {
+		t.Fatal("a Download no peer holds was pruned")
+	}
+
+	held := p2p.FileManifest{RelPath: "Band/Downloaded.m4a", ContentHash: hashOf("downloaded"), Size: 10}
+	k.Select(ctx, "desktop", []p2p.FileManifest{other, held}, nil)
+	if err := k.Prune(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(downloaded); !os.IsNotExist(err) {
+		t.Fatal("the Download stayed after a peer confirmed it holds it")
+	}
+	if left, _ := q.ListPendingUploads(ctx); len(left) != 0 {
+		t.Fatalf("still pending: %+v", left)
+	}
+}
+
+// The offline set never prunes a Download a peer has not confirmed, even when
+// it recorded a file at the same path with the same bytes.
+func TestOfflineSetDoesNotPruneAPendingUpload(t *testing.T) {
+	ctx := context.Background()
+	k, q, dir, _ := pendingKeeper(t)
+	if err := q.UpsertOfflineFile(ctx, db.UpsertOfflineFileParams{
+		RelPath: "Band/Downloaded.m4a", ContentHash: hashOf("downloaded"), FetchedAt: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.Prune(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "Band", "Downloaded.m4a")); err != nil {
+		t.Fatal("the offline set pruned a pending upload")
+	}
+}
+
+// A Download removed from the folder by other means is no longer pending.
+func TestPendingUploadThatIsGoneIsForgotten(t *testing.T) {
+	ctx := context.Background()
+	k, q, dir, files := pendingKeeper(t)
+	if err := os.Remove(filepath.Join(dir, "Band", "Downloaded.m4a")); err != nil {
+		t.Fatal(err)
+	}
+	if err := files.ScanAndSync(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.Prune(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if left, _ := q.ListPendingUploads(ctx); len(left) != 0 {
+		t.Fatalf("a missing file is still pending: %+v", left)
+	}
+}

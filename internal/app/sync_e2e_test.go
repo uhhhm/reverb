@@ -20,6 +20,7 @@ import (
 	"github.com/uhhhm/reverb/internal/catalog"
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/library/localfiles"
+	"github.com/uhhhm/reverb/internal/pyrun"
 	"github.com/uhhhm/reverb/internal/store"
 	"github.com/uhhhm/reverb/internal/store/db"
 )
@@ -43,6 +44,8 @@ type syncDevice struct {
 	noDiscovery bool
 	// freeSpace stands in for the phone's disk.
 	freeSpace func(dir string) (int64, error)
+	// python runs a phone's yt-dlp; nil is the host's.
+	python pyrun.Runner
 	// builtIn gives a desktop the built-in library, whose music folder file
 	// sync serves from; env points it at the fake backend instead of a
 	// bundled Navidrome, which never starts.
@@ -165,6 +168,7 @@ func (d *syncDevice) boot() {
 		Profile:        d.profile,
 		P2PNoDiscovery: d.noDiscovery,
 		FreeSpace:      d.freeSpace,
+		Python:         d.python,
 		Getenv:         func(k string) string { return env[k] },
 	})
 	if err != nil {

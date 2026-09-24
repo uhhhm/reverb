@@ -52,7 +52,7 @@ Acquiring a track or album from an external source (Spotify, YouTube) at the
 source's best available quality. Runs on whichever device is chosen, but the
 result always syncs to the canonical library. A Download made on a phone is
 *pending upload* until a peer confirms it holds the file; until then it is kept
-on the phone.
+on the phone, and afterwards it stays only if an offline playlist names it.
 _Avoid_: Import, fetch
 
 **Add from link**:

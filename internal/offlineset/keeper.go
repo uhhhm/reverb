@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"log"
 	"os"
-	"path"
 	"path/filepath"
 	"sync"
 	"time"
@@ -49,6 +48,9 @@ type KeeperStore interface {
 	UpsertOfflineFile(ctx context.Context, arg db.UpsertOfflineFileParams) error
 	ListOfflineFiles(ctx context.Context) ([]db.OfflineFile, error)
 	DeleteOfflineFile(ctx context.Context, relPath string) error
+	UpsertPendingUpload(ctx context.Context, arg db.UpsertPendingUploadParams) error
+	ListPendingUploads(ctx context.Context) ([]db.PendingUpload, error)
+	DeletePendingUpload(ctx context.Context, relPath string) error
 }
 
 // KeeperConfig wires a Keeper.
@@ -73,7 +75,8 @@ type KeeperConfig struct {
 
 // Keeper keeps a phone's offline set on the phone (ADR 0003). A desktop
 // replicates every file; a phone holds only the tracks of the playlists it
-// marked offline. The keeper narrows each peer's file manifest to those
+// marked offline, and the Downloads made on it until a paired device holds
+// them (see AddPending). The keeper narrows each peer's file manifest to those
 // tracks, records what it fetched, prunes what no offline playlist names any
 // more, and reports storage and per-track progress.
 //
@@ -414,10 +417,16 @@ func (k *Keeper) Fetched(_ context.Context, f p2p.FileManifest, _ error) {
 }
 
 // Prune removes the files the keeper fetched that no offline playlist names
-// any more. Anything else in the folder is left alone.
+// any more, and the Downloads made here that a paired device now holds and no
+// offline playlist names. A Download no peer has confirmed is never removed.
+// Anything else in the folder is left alone.
 func (k *Keeper) Prune(ctx context.Context) error {
 	owned, err := k.cfg.Store.ListOfflineFiles(ctx)
-	if err != nil || len(owned) == 0 {
+	if err != nil {
+		return err
+	}
+	pending, err := k.cfg.Store.ListPendingUploads(ctx)
+	if err != nil || (len(owned) == 0 && len(pending) == 0) {
 		return err
 	}
 	plans, err := k.plan(ctx, nil)
@@ -441,9 +450,12 @@ func (k *Keeper) Prune(ctx context.Context) error {
 		return err
 	}
 	defer root.Close()
-	removed := false
+	protect, removed, err := k.settlePending(ctx, root, keep)
+	if err != nil {
+		return err
+	}
 	for _, o := range owned {
-		if keep[o.RelPath] {
+		if keep[o.RelPath] || protect[o.RelPath] {
 			continue
 		}
 		// Only the bytes that were fetched are removed. A file replaced at
@@ -456,11 +468,7 @@ func (k *Keeper) Prune(ctx context.Context) error {
 				continue
 			}
 			removed = true
-			for dir := path.Dir(o.RelPath); dir != "." && dir != "/"; dir = path.Dir(dir) {
-				if root.Remove(filepath.FromSlash(dir)) != nil {
-					break
-				}
-			}
+			removeEmptyParents(root, o.RelPath)
 		case !scanned:
 			if _, err := root.Stat(filepath.FromSlash(o.RelPath)); err == nil {
 				continue
@@ -472,6 +480,14 @@ func (k *Keeper) Prune(ctx context.Context) error {
 		return k.cfg.Rescan(ctx)
 	}
 	return nil
+}
+
+func dbPending(rel string, at int64) db.UpsertPendingUploadParams {
+	return db.UpsertPendingUploadParams{RelPath: rel, DownloadedAt: at}
+}
+
+func dbOffline(rel, hash string, at int64) db.UpsertOfflineFileParams {
+	return db.UpsertOfflineFileParams{RelPath: rel, ContentHash: hash, FetchedAt: at}
 }
 
 // Status is the offline set's storage and progress.

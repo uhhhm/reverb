@@ -260,7 +260,10 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 			python = pyrun.HostFromEnv(opts.Getenv)
 		}
 		libraryReg.Register(localfiles.Name, func() registry.Plugin { return localfiles.New() })
-		downloaderReg.Register("spotdl", func() registry.Plugin { return spotdl.NewInProcess(python) })
+		// The iPhone bundles yt-dlp but not spotDL (ADR 0003).
+		if pyrun.Has(python, pyrun.SpotDL) {
+			downloaderReg.Register("spotdl", func() registry.Plugin { return spotdl.NewInProcess(python) })
+		}
 		downloaderReg.Register("ytdlp", func() registry.Plugin { return ytdlp.NewInProcess(python) })
 	} else {
 		libraryReg.Register("subsonic", func() registry.Plugin { return subsonic.New() })
@@ -338,12 +341,18 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	if syncStoreForLink == nil {
 		syncStoreForLink = reverbsync.NewSyncStore(st.Q())
 	}
-	linkAddSvc := linkadd.New(st.Q(), syncStoreForLink, bundle.Manager,
+	linkOpts := []linkadd.Option{
 		linkadd.WithTrackLookup(ProviderLookup{Get: reloader.TrackLookupProvider()}),
 		linkadd.WithDeviceID(func(ctx context.Context) (string, error) {
 			return reverbsync.AuthorDeviceID(ctx, st.Q())
 		}),
-	)
+	}
+	// A phone's yt-dlp downloads one track at a time, so an album or playlist
+	// link is added as its tracks.
+	if phone {
+		linkOpts = append(linkOpts, linkadd.WithCollections(ProviderCollections{Get: reloader.TrackLookupProvider()}))
+	}
+	linkAddSvc := linkadd.New(st.Q(), syncStoreForLink, bundle.Manager, linkOpts...)
 
 	// Uploaded album and track art lives beside the database rather than in the
 	// music library, which Reverb never writes to. Blobs are addressed by content
@@ -448,7 +457,13 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	playSvc.WithEmitter(emitter)
 	deps.SyncEmit = emitter
 	deps.RecommendationEvents = recommendationevent.New(st.Q(), emitter, time.Now, uuid.NewString)
-	downloadCompletion := func(ctx context.Context, req core.DownloadRequest) {
+	// onDownloaded observes where a completed download landed; a phone keeps
+	// it pending upload (set once its keeper exists, below).
+	var onDownloaded func(ctx context.Context, path string)
+	downloadCompletion := func(ctx context.Context, req core.DownloadRequest, path string) {
+		if onDownloaded != nil && path != "" {
+			onDownloaded(ctx, path)
+		}
 		if req.RecommendationOrigin == "" {
 			return
 		}
@@ -461,13 +476,12 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		bundle.Manager.SetCompletionHook(downloadCompletion)
 	}
 	// A download linked to its library track enters household browsing at once,
-	// including a track deleted earlier and downloaded again. The phone's
-	// offline files are copies, not library membership.
-	if !phone {
-		builder.SetDownloadLinkedHook(emitter.EnsureLibraryMembership)
-		if bundle.Manager != nil {
-			bundle.Manager.SetLinkedHook(emitter.EnsureLibraryMembership)
-		}
+	// including a track deleted earlier and downloaded again. That holds on a
+	// phone too: its Downloads are library, though its offline files are
+	// copies, which never pass through the download manager.
+	builder.SetDownloadLinkedHook(emitter.EnsureLibraryMembership)
+	if bundle.Manager != nil {
+		bundle.Manager.SetLinkedHook(emitter.EnsureLibraryMembership)
 	}
 
 	// Not interested marks replicate through the change log; the projection
@@ -603,6 +617,12 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		})
 		files.WithProgress(offline.Progress)
 		deps.OfflineKeeper = offline
+		// A Download made here stays until a paired device holds it.
+		onDownloaded = func(ctx context.Context, path string) {
+			if err := offline.AddPending(ctx, path); err != nil {
+				log.Printf("pending upload %s: %v", path, err)
+			}
+		}
 	}
 	// Renaming the library's existing files is what lets a Windows device pair
 	// with a library built on Linux or macOS. It is exposed as a deliberate

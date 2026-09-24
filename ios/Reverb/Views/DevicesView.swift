@@ -6,6 +6,7 @@ struct DevicesView: View {
     @EnvironmentObject private var pairing: PairingModel
     @EnvironmentObject private var sync: SyncManager
     @State private var devices: [Device] = []
+    @State private var pending: Components.Schemas.PendingUploads?
 
     struct Device: Identifiable {
         let id: String
@@ -31,6 +32,9 @@ struct DevicesView: View {
                 }
                 .disabled(sync.isRunning)
                 .accessibilityIdentifier("sync.now")
+            }
+            if let pending, !pending.files.isEmpty {
+                PendingUploadsSection(pending: pending)
             }
             Section {
                 ForEach(devices) { device in
@@ -68,8 +72,9 @@ struct DevicesView: View {
     }
 
     private func load() async {
-        guard let client = core.client,
-              let rows = try? await client.listPairedDevices().ok.body.json else { return }
+        guard let client = core.client else { return }
+        pending = try? await client.listPendingUploads().ok.body.json
+        guard let rows = try? await client.listPairedDevices().ok.body.json else { return }
         devices = rows.filter { !$0.thisDevice }.map {
             Device(id: $0.id, name: $0.name, lastSeen: $0.lastSeen > 0 ? Date(timeIntervalSince1970: TimeInterval($0.lastSeen)) : nil, isServer: $0.isServer)
         }

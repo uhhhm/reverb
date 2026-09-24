@@ -13,9 +13,11 @@ import (
 )
 
 // fakeRunner replays canned lines and returns a canned error, recording the args.
+// When wrote is set it reports that file the way yt-dlp's --print-to-file does.
 type fakeRunner struct {
 	lines []string
 	err   error
+	wrote string
 
 	gotName string
 	gotArgs []string
@@ -28,6 +30,13 @@ func (f *fakeRunner) Run(ctx context.Context, name string, args []string, onLine
 	}
 	for _, l := range f.lines {
 		onLine(l)
+	}
+	for i := 0; f.wrote != "" && i+2 < len(args); i++ {
+		if args[i] == "--print-to-file" && args[i+1] == "after_move:filepath" {
+			if err := os.WriteFile(args[i+2], []byte(f.wrote+"\n"), 0o600); err != nil {
+				return err
+			}
+		}
 	}
 	return f.err
 }
@@ -177,7 +186,7 @@ func TestStartArgStructure(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	if out != "/music/" {
-		t.Errorf("output path = %q, want the configured output_dir", out)
+		t.Errorf("output path = %q, want the configured output_dir when yt-dlp names no file", out)
 	}
 	if r.gotName != "yt-dlp" {
 		t.Errorf("binary = %q", r.gotName)
@@ -207,7 +216,9 @@ func TestStartForcesKnownMetadataTags(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	args := r.argString()
-	for _, want := range []string{"A:%(meta_artist)s", "T:%(meta_title)s", "Al:%(meta_album)s"} {
+	// A bare word is a field name to yt-dlp, so a one-word tag carries an
+	// empty field that makes it a template, and so a literal.
+	for _, want := range []string{"A%(reverb_literal|)s:%(meta_artist)s", "T%(reverb_literal|)s:%(meta_title)s", "Al%(reverb_literal|)s:%(meta_album)s"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("args missing --parse-metadata %q\ngot: %s", want, args)
 		}
@@ -283,6 +294,32 @@ func TestStartProgressScalingAndStages(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("progress = %v, want %v", got, want)
 		}
+	}
+}
+
+// The path yt-dlp reports after moving the finished file is the download's
+// output, so a caller knows exactly which file arrived.
+func TestStartReturnsTheFileWritten(t *testing.T) {
+	r := &fakeRunner{lines: []string{"[download] 100.0% of 4.00MiB"}, wrote: "/music/A - T.m4a"}
+	a := newAdapter(t, r, nil)
+	out, err := a.Start(context.Background(), core.DownloadRequest{Artist: "A", Title: "T"}, func(int) {})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if out != "/music/A - T.m4a" {
+		t.Fatalf("output path = %q, want the file yt-dlp wrote", out)
+	}
+	var printTo string
+	for i, arg := range r.gotArgs {
+		if arg == "--print-to-file" && i+2 < len(r.gotArgs) {
+			printTo = r.gotArgs[i+2]
+		}
+	}
+	if printTo == "" {
+		t.Fatalf("args %q do not ask yt-dlp for the file it writes", r.gotArgs)
+	}
+	if _, err := os.Stat(printTo); !os.IsNotExist(err) {
+		t.Errorf("the report file %s was left behind", printTo)
 	}
 }
 
@@ -438,6 +475,20 @@ func TestOutputTemplateIsPortableOnEveryPlatform(t *testing.T) {
 // The artist and title also feed --parse-metadata, where they become the tags
 // written into the file rather than part of a path. Sanitising a path is no
 // reason to strip a colon out of the track's own title.
+// yt-dlp reads a FROM made only of letters and underscores as a field name,
+// which a one-word title like "Aerodynamic" is not, and would tag it NA.
+func TestMetadataLiteralIsNeverAFieldName(t *testing.T) {
+	for in, want := range map[string]string{
+		"Aerodynamic": "Aerodynamic%(reverb_literal|)s",
+		"Daft Punk":   "Daft Punk",
+		"Etc.":        "Etc.",
+	} {
+		if got := metadataLiteral(in); got != want {
+			t.Errorf("metadataLiteral(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestMetadataLiteralKeepsPunctuationThePathCannot(t *testing.T) {
 	got := metadataLiteral("Lullaby of the New Moon (I) : Somnias a Luna")
 	if !strings.Contains(got, `\:`) {

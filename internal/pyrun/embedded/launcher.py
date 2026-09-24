@@ -527,6 +527,16 @@ def _run_in_context(r, module):
         return 1
 
 
+def has_module(name):
+    """Whether a top-level module is installed, without importing it."""
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):
+        return False
+
+
 def cancel(token):
     """Stops a run's native tools and returns the thread to interrupt, or 0."""
     with _runs_lock:

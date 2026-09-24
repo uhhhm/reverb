@@ -1384,6 +1384,19 @@ paths:
           description: offline set status
           content: { application/json: { schema: { $ref: '#/components/schemas/OfflineStatus' } } }
         "503": { description: not a phone }
+  /pending-uploads:
+    get:
+      summary: A phone's Downloads that no paired device holds yet
+      description: >
+        A Download made on a phone stays there until a paired device's file
+        manifest shows it holds the same bytes; it is never pruned before that,
+        whatever the offline set or the free space. Then it is removed unless an
+        offline playlist names it. A desktop keeps every file and answers 503.
+      responses:
+        "200":
+          description: pending uploads, oldest first
+          content: { application/json: { schema: { $ref: '#/components/schemas/PendingUploads' } } }
+        "503": { description: not a phone }
   /offline-set/{playlistId}:
     put:
       summary: Set offline enabled for a playlist (local-only, never syncs)
@@ -1484,7 +1497,11 @@ paths:
               properties: { url: { type: string } }
               required: [url]
       responses:
-        "200": { description: ResolveResult }
+        "200":
+          description: >
+            What the link names. A phone names an album or playlist after
+            itself, since it adds their tracks one by one.
+          content: { application/json: { schema: { $ref: '#/components/schemas/LinkResolveResult' } } }
         "400": { description: url is required }
         "422": { description: unsupported URL }
   /links/chapters:
@@ -1529,10 +1546,15 @@ paths:
                     Mutually exclusive with startTime/endTime.
               required: [url]
       responses:
-        "200": { description: "{ resolve, job?, jobs?, playlistId?, catalogId } — jobs is present only for a chapter split" }
+        "200":
+          description: >
+            What was added. jobs is present when one link became several
+            downloads: a chapter split, or on a phone an album or playlist.
+          content: { application/json: { schema: { $ref: '#/components/schemas/LinkAddResult' } } }
         "400": { description: url is required }
         "404": { description: playlist not found }
         "422": { description: "unsupported URL, bad time range, or chapter split not possible" }
+        "502": { description: "on a phone, which adds an album or playlist as its tracks and downloads by artist and title: the collection could not be listed, or a Spotify track could not be named" }
         "503": { description: no downloader configured }
   /links/add-batch:
     post:
@@ -2189,6 +2211,43 @@ components:
         full: { type: boolean, description: "A track a paired device offers does not fit. Fetching has stopped; nothing was removed." }
         spaceUnknown: { type: boolean, description: "The phone's free space cannot be read; nothing is fetched until it can." }
         playlists: { type: array, items: { $ref: '#/components/schemas/OfflinePlaylistStatus' } }
+    LinkResolveResult:
+      type: object
+      required: [kind, source, externalId, title, artist, album, url]
+      properties:
+        kind: { type: string, enum: [track, album, playlist] }
+        source: { type: string, enum: [spotify, youtube] }
+        externalId: { type: string }
+        title: { type: string }
+        artist: { type: string }
+        album: { type: string }
+        coverUrl: { type: string }
+        url: { type: string }
+    LinkAddResult:
+      type: object
+      required: [resolve, catalogId]
+      properties:
+        resolve: { $ref: '#/components/schemas/LinkResolveResult' }
+        catalogId: { type: string }
+        playlistId: { type: string }
+        job: { $ref: '#/components/schemas/DownloadJob' }
+        jobs: { type: array, items: { $ref: '#/components/schemas/DownloadJob' } }
+    PendingUploads:
+      type: object
+      required: [files, totalBytes]
+      properties:
+        files: { type: array, items: { $ref: '#/components/schemas/PendingUpload' } }
+        totalBytes: { type: integer, format: int64 }
+    PendingUpload:
+      type: object
+      required: [relPath, title, artist, sizeBytes, downloadedAt]
+      properties:
+        relPath: { type: string, description: "Where it is in the phone's music folder." }
+        title: { type: string, description: "From its tags, or its file name before file sync has read them." }
+        artist: { type: string }
+        album: { type: string }
+        sizeBytes: { type: integer, format: int64 }
+        downloadedAt: { type: integer, format: int64, description: Unix milliseconds. }
     OfflinePlaylistStatus:
       type: object
       required: [playlistId, playlistName, bytes, trackCount, readyCount, tracks]

@@ -21,3 +21,12 @@ SELECT * FROM offline_file ORDER BY rel_path;
 
 -- name: DeleteOfflineFile :exec
 DELETE FROM offline_file WHERE rel_path = ?;
+
+-- name: UpsertPendingUpload :exec
+INSERT INTO pending_upload (rel_path, downloaded_at) VALUES (?, ?) ON CONFLICT(rel_path) DO UPDATE SET downloaded_at = excluded.downloaded_at;
+
+-- name: ListPendingUploads :many
+SELECT * FROM pending_upload ORDER BY downloaded_at, rel_path;
+
+-- name: DeletePendingUpload :exec
+DELETE FROM pending_upload WHERE rel_path = ?;

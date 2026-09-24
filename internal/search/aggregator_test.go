@@ -158,3 +158,21 @@ func TestAggregatorChannelClosesWithNoSources(t *testing.T) {
 		t.Fatal("expected no envelopes")
 	}
 }
+
+// playlistSource is a source that can list a playlist.
+type playlistSource struct{ scriptedSource }
+
+func (p *playlistSource) GetPlaylist(_ context.Context, id string) (core.ExternalPlaylist, error) {
+	return core.ExternalPlaylist{Source: p.name, ExternalID: id, Name: "Hits"}, nil
+}
+
+func TestGetPlaylistAsksTheNamedSource(t *testing.T) {
+	agg := NewAggregator([]SearchSource{&scriptedSource{name: "deezer"}, &playlistSource{scriptedSource{name: "spotify"}}}, fakeMatcher{}, time.Second)
+	pl, err := agg.GetPlaylist(context.Background(), "spotify", "p1")
+	if err != nil || pl.Name != "Hits" || pl.ExternalID != "p1" {
+		t.Fatalf("playlist = %+v, %v", pl, err)
+	}
+	if _, err := agg.GetPlaylist(context.Background(), "deezer", "p1"); err == nil {
+		t.Fatal("a source without playlists listed one")
+	}
+}

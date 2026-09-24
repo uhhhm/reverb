@@ -5226,6 +5226,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/pending-uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A phone's Downloads that no paired device holds yet
+         * @description A Download made on a phone stays there until a paired device's file manifest shows it holds the same bytes; it is never pruned before that, whatever the offline set or the free space. Then it is removed unless an offline playlist names it. A desktop keeps every file and answers 503.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description pending uploads, oldest first */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PendingUploads"];
+                    };
+                };
+                /** @description not a phone */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/offline-set/{playlistId}": {
         parameters: {
             query?: never;
@@ -5457,12 +5503,14 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description ResolveResult */
+                /** @description What the link names. A phone names an album or playlist after itself, since it adds their tracks one by one. */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["LinkResolveResult"];
+                    };
                 };
                 /** @description url is required */
                 400: {
@@ -5571,12 +5619,14 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description { resolve, job?, jobs?, playlistId?, catalogId } — jobs is present only for a chapter split */
+                /** @description What was added. jobs is present when one link became several downloads: a chapter split, or on a phone an album or playlist. */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["LinkAddResult"];
+                    };
                 };
                 /** @description url is required */
                 400: {
@@ -5594,6 +5644,13 @@ export interface paths {
                 };
                 /** @description unsupported URL, bad time range, or chapter split not possible */
                 422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description on a phone, which adds an album or playlist as its tracks and downloads by artist and title: the collection could not be listed, or a Spotify track could not be named */
+                502: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -6932,6 +6989,45 @@ export interface components {
             /** @description The phone's free space cannot be read; nothing is fetched until it can. */
             spaceUnknown: boolean;
             playlists: components["schemas"]["OfflinePlaylistStatus"][];
+        };
+        LinkResolveResult: {
+            /** @enum {string} */
+            kind: "track" | "album" | "playlist";
+            /** @enum {string} */
+            source: "spotify" | "youtube";
+            externalId: string;
+            title: string;
+            artist: string;
+            album: string;
+            coverUrl?: string;
+            url: string;
+        };
+        LinkAddResult: {
+            resolve: components["schemas"]["LinkResolveResult"];
+            catalogId: string;
+            playlistId?: string;
+            job?: components["schemas"]["DownloadJob"];
+            jobs?: components["schemas"]["DownloadJob"][];
+        };
+        PendingUploads: {
+            files: components["schemas"]["PendingUpload"][];
+            /** Format: int64 */
+            totalBytes: number;
+        };
+        PendingUpload: {
+            /** @description Where it is in the phone's music folder. */
+            relPath: string;
+            /** @description From its tags, or its file name before file sync has read them. */
+            title: string;
+            artist: string;
+            album?: string;
+            /** Format: int64 */
+            sizeBytes: number;
+            /**
+             * Format: int64
+             * @description Unix milliseconds.
+             */
+            downloadedAt: number;
         };
         OfflinePlaylistStatus: {
             playlistId: string;

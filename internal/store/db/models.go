@@ -233,6 +233,11 @@ type PairingCode struct {
 	CreatedAt      int64          `json:"created_at"`
 }
 
+type PendingUpload struct {
+	RelPath      string `json:"rel_path"`
+	DownloadedAt int64  `json:"downloaded_at"`
+}
+
 type Play struct {
 	ID        string `json:"id"`
 	UserID    string `json:"user_id"`

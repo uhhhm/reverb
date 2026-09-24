@@ -62,6 +62,9 @@ type Adapter struct {
 	inProcess bool
 }
 
+// phoneFormat prefers the source's M4A audio, falling back to its best.
+const phoneFormat = "bestaudio[ext=m4a]/bestaudio"
+
 func New() *Adapter {
 	return &Adapter{runner: ExecRunner{}, binary: defaultBinary}
 }
@@ -70,7 +73,8 @@ func New() *Adapter {
 // phone profile): it runs the yt_dlp module through py. It never transcodes —
 // every download keeps the stream the source served, whatever its quality
 // tier — since a phone has no reason to spend battery re-encoding and its
-// embedded ffmpeg need not carry encoders.
+// embedded ffmpeg need not carry encoders. It prefers the source's M4A, which
+// AVPlayer opens.
 func NewInProcess(py pyrun.Runner) *Adapter {
 	return &Adapter{runner: pyrun.Module(py, pyrun.YtDlp), binary: defaultBinary, inProcess: true}
 }
@@ -261,10 +265,19 @@ func (a *Adapter) resolveAudioArgs(ctx context.Context, req core.DownloadRequest
 // metadataLiteral prepares a known tag value for the FROM side of --parse-metadata.
 // yt-dlp splits "FROM:TO" at the first UNESCAPED colon, so a colon inside the value
 // (e.g. "Lullaby of the New Moon (I) : Somnias a Luna") would otherwise truncate the
-// tag and shift the rest into the field name.
+// tag and shift the rest into the field name. A FROM of letters and underscores
+// alone is read as a field name, so a one-word value ("Aerodynamic") gets an
+// empty field appended, which makes it a template that yields the word itself.
 func metadataLiteral(s string) string {
-	return strings.ReplaceAll(sanitizeSegment(s), ":", "\\:")
+	s = strings.ReplaceAll(sanitizeSegment(s), ":", "\\:")
+	if bareFieldName.MatchString(s) {
+		s += "%(reverb_literal|)s"
+	}
+	return s
 }
+
+// bareFieldName is what yt-dlp's MetadataParserPP takes for a field name.
+var bareFieldName = regexp.MustCompile(`^[a-zA-Z_]+$`)
 
 // outputTemplate builds the -o value. When artist and title are known they are
 // used literally, so the file lands with a sane name instead of a YouTube title
@@ -399,6 +412,10 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 		"--no-warnings",
 		"--extract-audio",
 	}
+	if a.inProcess {
+		// A phone plays with AVPlayer, which opens neither WebM nor Ogg.
+		args = append(args, "-f", phoneFormat)
+	}
 	// Trim to a time range when asked. Rejected up front so a typo surfaces as a
 	// clear message instead of a late, cryptic yt-dlp failure.
 	section, serr := sectionArg(req)
@@ -433,6 +450,15 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 	}
 	if s := metadataLiteral(req.Album); s != "" {
 		args = append(args, "--parse-metadata", s+":%(meta_album)s")
+	}
+	// yt-dlp names the finished file in a report of its own, since progress
+	// output shows only intermediate names. Without one (an old yt-dlp), the
+	// output directory stands in.
+	report, reportErr := os.CreateTemp("", "ytdlp-file-*")
+	if reportErr == nil {
+		_ = report.Close()
+		defer os.Remove(report.Name())
+		args = append(args, "--print-to-file", "after_move:filepath", report.Name())
 	}
 	args = append(args, "--output", a.outputTemplate(req), "--", query)
 
@@ -482,6 +508,22 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 		onProgress(-1) // indeterminate: yt-dlp gave no parseable progress
 	}
 	sweep()
+	if reportErr == nil {
+		if file := lastLine(report.Name()); file != "" {
+			log.Printf("ytdlp: %q finished: %s", query, file)
+			return file, nil
+		}
+	}
 	log.Printf("ytdlp: %q finished (output_dir=%s)", query, a.outputDir)
 	return a.outputDir, nil
+}
+
+// lastLine is the last non-empty line of the file at path, or "".
+func lastLine(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
 }

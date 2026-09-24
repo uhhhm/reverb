@@ -12,6 +12,7 @@ screen and remote controls, the camera, and backup exclusion.
 | --- | --- |
 | `project.yml` | XcodeGen spec; `make ios-project` writes `Reverb.xcodeproj` from it |
 | `Reverb/` | The app: `Core/` starts and stops the Go core, `Player/` plays the core's queue, `Views/` |
+| `ReverbShare/` | The share extension: a link shared from another app opens Add from link as `reverb://add?url=…` |
 | `ReverbKit/` | Swift package with `ReverbAPI`, the client generated from OpenAPI |
 | `ReverbTests/` | Native AVPlayer regressions: decoded duration, variable-bitrate MP3, heard audio against the clock after seeks, queue races, failure recovery and skipping, interruptions and completion |
 | `ReverbUITests/` | XCUITest smoke test: launch, pair with a test runtime by typed code or a confirmed pairing link, play an offline track |
@@ -124,6 +125,16 @@ xcodebuild test -project ios/Reverb.xcodeproj -scheme Reverb \
   asking for M4A since AVPlayer cannot open WebM, and proxies the audio. The top
   search results and the next two tracks in the queue are resolved ahead of
   time, so they start at once.
+- Search results and recommendations can be downloaded from their context
+  menu, and Add from link (Playlists, the share sheet, or `reverb://add?url=`)
+  adds a Spotify or YouTube link to a playlist and/or downloads it; an album or
+  playlist link is added track by track. A Download lands in the phone's
+  library folder as M4A where the source has it, and plays at once. It stays
+  on the phone, listed under Devices as waiting to upload, until a paired
+  device's manifest shows it holds the file; then it is removed unless an
+  offline playlist names it. Nothing removes a Download before that.
+- The share extension cannot open the app from every host app; when it cannot,
+  it copies the link and says to paste it in Add from link.
 - yt-dlp, the standard library and FFmpeg add about 28 MB to the IPA and 81 MB
   installed. yt-dlp and its JavaScript challenge solver run in the app's own
   Python; ffmpeg, ffprobe and QuickJS, which yt-dlp would start as processes,

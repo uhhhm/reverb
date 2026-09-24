@@ -119,6 +119,14 @@ struct SearchResultRow: View {
             Spacer()
         }
         .contextMenu {
+            if result.match?.status != "in_library" {
+                Button("Download", systemImage: "arrow.down.circle") {
+                    Task {
+                        await Downloads.enqueue(core: core, source: result.source, externalId: result.externalId,
+                                                title: result.title, artist: result.artist, album: result.album)
+                    }
+                }
+            }
             Button("Not interested", role: .destructive) {
                 Task {
                     guard let client = core.client else { return }

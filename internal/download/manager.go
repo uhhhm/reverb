@@ -228,13 +228,13 @@ type Manager struct {
 	rematcher       Rematcher
 	version         VersionBumper
 	clock           Clock
-	playlists       PlaylistAdder                               // optional; non-nil only when a library is configured
-	resolve         func() BindingResolver                      // optional provider; Tasks 3-5 add call sites
-	canonicalMinter CanonicalMinter                             // optional; mints catalog IDs at link time (Task 3)
-	qualityFn       func(context.Context) core.AudioQuality     // optional; supplies the configured default tier
-	trackEnricher   TrackEnricher                               // optional; recovers a missing ISRC at enqueue
-	completionHook  func(context.Context, core.DownloadRequest) // optional; observes first successful completion
-	linkedHook      func(context.Context, string)               // optional; observes a job linked to its library track
+	playlists       PlaylistAdder                                       // optional; non-nil only when a library is configured
+	resolve         func() BindingResolver                              // optional provider; Tasks 3-5 add call sites
+	canonicalMinter CanonicalMinter                                     // optional; mints catalog IDs at link time (Task 3)
+	qualityFn       func(context.Context) core.AudioQuality             // optional; supplies the configured default tier
+	trackEnricher   TrackEnricher                                       // optional; recovers a missing ISRC at enqueue
+	completionHook  func(context.Context, core.DownloadRequest, string) // optional; observes first successful completion
+	linkedHook      func(context.Context, string)                       // optional; observes a job linked to its library track
 
 	queue chan string // job IDs to process
 
@@ -335,8 +335,10 @@ func (m *Manager) SetTrackEnricher(e TrackEnricher) {
 
 // SetCompletionHook installs an observer for the first successful completion
 // of a request. The persisted request is supplied so attribution survives a
-// manager restart. The hook must be quick and tolerate best-effort delivery.
-func (m *Manager) SetCompletionHook(fn func(context.Context, core.DownloadRequest)) {
+// manager restart, with the downloader's output: the file it wrote, or the
+// directory when it names none, or "" from an async downloader. The hook must
+// be quick and tolerate best-effort delivery.
+func (m *Manager) SetCompletionHook(fn func(context.Context, core.DownloadRequest, string)) {
 	m.completionHook = fn
 }
 
@@ -347,9 +349,9 @@ func (m *Manager) SetLinkedHook(fn func(context.Context, string)) {
 	m.linkedHook = fn
 }
 
-func (m *Manager) notifyCompletion(ctx context.Context, req core.DownloadRequest) {
+func (m *Manager) notifyCompletion(ctx context.Context, req core.DownloadRequest, outputPath string) {
 	if m.completionHook != nil {
-		m.completionHook(ctx, req)
+		m.completionHook(ctx, req, outputPath)
 	}
 }
 
@@ -524,12 +526,14 @@ func (m *Manager) BackfillUnlinked() {
 		if cid := m.mintAndStoreCanonicalID(ctx, j); cid != "" && m.linkedHook != nil {
 			m.linkedHook(ctx, cid)
 		}
-		m.publishComplete(j, res.LibraryTrackID)
+		// The playlist add comes first, so whoever hears the completion finds
+		// the track already in its playlist.
 		if m.playlists != nil && j.AddToPlaylistID != "" {
 			if perr := m.playlists.AddTracksToPlaylist(ctx, j.AddToPlaylistID, []string{res.LibraryTrackID}); perr != nil {
 				log.Printf("download backfill: add to playlist %s failed for job %s: %v", j.AddToPlaylistID, shortID(j.ID), perr)
 			}
 		}
+		m.publishComplete(j, res.LibraryTrackID)
 		matched++
 		log.Printf("download backfill: re-linked job %s -> library track %s", shortID(j.ID), res.LibraryTrackID)
 	}
@@ -736,7 +740,8 @@ func (m *Manager) reconcileOnce(ctx context.Context) {
 			j.FinishedAt = now
 			_ = m.store.Update(ctx, j)
 			m.publishEvent(TopicComplete, j, "")
-			m.notifyCompletion(ctx, req)
+			// An async downloader places files itself and names none.
+			m.notifyCompletion(ctx, req, "")
 			m.mu.Lock()
 			delete(m.reqs, j.ID)
 			m.mu.Unlock()
@@ -1317,7 +1322,7 @@ func (m *Manager) process(id string) {
 	cur.FinishedAt = m.clock.Now().Unix()
 	_ = m.store.Update(ctx, cur)
 	m.publishEvent(TopicComplete, cur, "")
-	m.notifyCompletion(ctx, req)
+	m.notifyCompletion(ctx, req, outPath)
 	log.Printf("download completed: %q (job %s) -> %s", cur.Title, shortID(id), outPath)
 
 	// Clear the rehydrated request now the download is done.

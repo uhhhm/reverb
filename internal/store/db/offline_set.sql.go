@@ -41,6 +41,15 @@ func (q *Queries) DeleteOfflineSetForPlaylist(ctx context.Context, playlistID st
 	return err
 }
 
+const deletePendingUpload = `-- name: DeletePendingUpload :exec
+DELETE FROM pending_upload WHERE rel_path = ?
+`
+
+func (q *Queries) DeletePendingUpload(ctx context.Context, relPath string) error {
+	_, err := q.db.ExecContext(ctx, deletePendingUpload, relPath)
+	return err
+}
+
 const getOfflineSetEntry = `-- name: GetOfflineSetEntry :one
 SELECT device_id, playlist_id, enabled, updated_at FROM offline_set WHERE device_id = ? AND playlist_id = ?
 `
@@ -121,6 +130,33 @@ func (q *Queries) ListOfflineSetForDevice(ctx context.Context, deviceID string) 
 	return items, nil
 }
 
+const listPendingUploads = `-- name: ListPendingUploads :many
+SELECT rel_path, downloaded_at FROM pending_upload ORDER BY downloaded_at, rel_path
+`
+
+func (q *Queries) ListPendingUploads(ctx context.Context) ([]PendingUpload, error) {
+	rows, err := q.db.QueryContext(ctx, listPendingUploads)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PendingUpload
+	for rows.Next() {
+		var i PendingUpload
+		if err := rows.Scan(&i.RelPath, &i.DownloadedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertOfflineFile = `-- name: UpsertOfflineFile :exec
 INSERT INTO offline_file (rel_path, content_hash, fetched_at) VALUES (?, ?, ?) ON CONFLICT(rel_path) DO UPDATE SET content_hash = excluded.content_hash, fetched_at = excluded.fetched_at
 `
@@ -154,5 +190,19 @@ func (q *Queries) UpsertOfflineSet(ctx context.Context, arg UpsertOfflineSetPara
 		arg.Enabled,
 		arg.UpdatedAt,
 	)
+	return err
+}
+
+const upsertPendingUpload = `-- name: UpsertPendingUpload :exec
+INSERT INTO pending_upload (rel_path, downloaded_at) VALUES (?, ?) ON CONFLICT(rel_path) DO UPDATE SET downloaded_at = excluded.downloaded_at
+`
+
+type UpsertPendingUploadParams struct {
+	RelPath      string `json:"rel_path"`
+	DownloadedAt int64  `json:"downloaded_at"`
+}
+
+func (q *Queries) UpsertPendingUpload(ctx context.Context, arg UpsertPendingUploadParams) error {
+	_, err := q.db.ExecContext(ctx, upsertPendingUpload, arg.RelPath, arg.DownloadedAt)
 	return err
 }

@@ -32,6 +32,8 @@ type OfflineKeeper interface {
 	Status(ctx context.Context) (offlineset.Status, error)
 	// Changed starts fetching and pruning for a changed offline set.
 	Changed()
+	// PendingUploads is the Downloads made here that no paired device holds yet.
+	PendingUploads(ctx context.Context) ([]offlineset.PendingUpload, error)
 }
 
 // offlineSetChanged has the keeper act on a changed offline set now.
@@ -52,6 +54,34 @@ func (s *Server) handleOfflineSetStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, st)
+}
+
+// pendingUploadsResponse is GET /pending-uploads.
+type pendingUploadsResponse struct {
+	Files      []offlineset.PendingUpload `json:"files"`
+	TotalBytes int64                      `json:"totalBytes"`
+}
+
+// handlePendingUploads lists a phone's Downloads that are still waiting for a
+// paired device to hold them. They stay on the phone until then.
+func (s *Server) handlePendingUploads(w http.ResponseWriter, r *http.Request) {
+	if s.deps.OfflineKeeper == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "pending uploads are only kept on a phone; a desktop keeps every file"})
+		return
+	}
+	files, err := s.deps.OfflineKeeper.PendingUploads(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read pending uploads"})
+		return
+	}
+	out := pendingUploadsResponse{Files: files}
+	if out.Files == nil {
+		out.Files = []offlineset.PendingUpload{}
+	}
+	for _, f := range out.Files {
+		out.TotalBytes += f.SizeBytes
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // serverDeviceID returns the server device id (is_server=1) via the single

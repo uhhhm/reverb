@@ -28,6 +28,8 @@ targets:
     dependencies:
       - package: ReverbKit
         product: ReverbAPI
+      # The share sheet's "Reverb": hands a link to Add from link.
+      - target: ReverbShare
       # Built by `make ios-core` (gomobile bind); not checked in.
       - framework: Frameworks/Reverbcore.xcframework
       # The embedded download tools, from `make ios-native`; not checked in.
@@ -55,6 +57,17 @@ targets:
         ARCHS: arm64
         # The Python install phase reads the bundled packages under build/.
         ENABLE_USER_SCRIPT_SANDBOXING: NO
+  ReverbShare:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ReverbShare
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.uhhhm.reverb.share
+        INFOPLIST_FILE: ReverbShare/Info.plist
+        TARGETED_DEVICE_FAMILY: "1"
+        APPLICATION_EXTENSION_API_ONLY: YES
   ReverbTests:
     type: bundle.unit-test
     platform: iOS

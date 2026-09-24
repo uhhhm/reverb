@@ -92,6 +92,15 @@ func (a *Aggregator) GetAlbum(ctx context.Context, source, id string) (core.Exte
 	return src.GetAlbum(ctx, id)
 }
 
+// GetPlaylist lists a playlist at a source that can.
+func (a *Aggregator) GetPlaylist(ctx context.Context, source, id string) (core.ExternalPlaylist, error) {
+	p, ok := a.source(source).(PlaylistProvider)
+	if !ok {
+		return core.ExternalPlaylist{}, fmt.Errorf("search source %q does not support playlist lookup", source)
+	}
+	return p.GetPlaylist(ctx, id)
+}
+
 // Stream runs each source in its own goroutine with an individual
 // context.WithTimeout, pre-matches each result, and emits one Envelope per
 // source. The channel is closed once every source completes (so an SSE handler

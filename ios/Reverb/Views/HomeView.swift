@@ -123,6 +123,16 @@ struct RecommendedTrackRow: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { Task { await play() } }
+        .contextMenu {
+            if track.source != "library" && track.match?.status != .in_library {
+                Button("Download", systemImage: "arrow.down.circle") {
+                    Task {
+                        await Downloads.enqueue(core: core, source: track.source, externalId: track.externalId,
+                                                title: track.title, artist: track.artist, album: track.album, isrc: track.isrc)
+                    }
+                }
+            }
+        }
     }
 
     private func play() async {

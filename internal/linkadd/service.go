@@ -48,6 +48,13 @@ type TrackLookup interface {
 	GetTrack(ctx context.Context, source, externalID string) (core.ExternalResult, error)
 }
 
+// Collections lists what an album or playlist link holds. *search.Aggregator,
+// through the composition root, fits.
+type Collections interface {
+	GetAlbum(ctx context.Context, source, id string) (core.ExternalAlbum, error)
+	GetPlaylist(ctx context.Context, source, id string) (core.ExternalPlaylist, error)
+}
+
 // AddOptions is one link's user intent.
 type AddOptions struct {
 	URL           string
@@ -88,6 +95,7 @@ type Service struct {
 	downloader    Downloader
 	chapterLister ChapterLister
 	lookup        TrackLookup
+	collections   Collections
 	deviceID      func(context.Context) (string, error)
 	now           func() time.Time
 	mu            sync.RWMutex
@@ -98,6 +106,13 @@ type Option func(*Service)
 
 func WithTrackLookup(l TrackLookup) Option { return func(s *Service) { s.lookup = l } }
 func WithNow(fn func() time.Time) Option   { return func(s *Service) { s.now = fn } }
+
+// WithCollections expands album and playlist links into their tracks: each
+// track is catalogued, joins the playlist, and is downloaded on its own. A
+// device whose downloader fetches one track at a time (a phone's yt-dlp)
+// needs it; without it the link is one entry and one download, as spotDL
+// takes it.
+func WithCollections(c Collections) Option { return func(s *Service) { s.collections = c } }
 func WithDeviceID(fn func(context.Context) (string, error)) Option {
 	return func(s *Service) { s.deviceID = fn }
 }
@@ -171,12 +186,28 @@ func CatalogID(source, kind, externalID string) string {
 // track metadata with the live source instead of the synthetic placeholder
 // ("Spotify track <id>") that linkresolve currently fabricates.
 func (s *Service) Resolve(ctx context.Context, rawURL string) (*linkresolve.ResolveResult, error) {
-	res, err := linkresolve.ResolveURL(ctx, rawURL)
+	res, _, err := s.resolve(ctx, rawURL)
 	if err != nil {
 		return nil, err
 	}
+	// Named after the collection itself, where the service lists collections.
+	if res.Kind == "album" || res.Kind == "playlist" {
+		_, _ = s.expand(ctx, res, res.Kind)
+	}
+	return res, nil
+}
+
+// resolve is Resolve without listing a collection, which Add does itself. It
+// also reports whether a Spotify track was named by the source.
+func (s *Service) resolve(ctx context.Context, rawURL string) (*linkresolve.ResolveResult, bool, error) {
+	res, err := linkresolve.ResolveURL(ctx, rawURL)
+	if err != nil {
+		return nil, false, err
+	}
+	named := false
 	if s.lookup != nil && res.Source == "spotify" && res.Kind == "track" {
 		if tr, lerr := s.lookup.GetTrack(ctx, res.Source, res.ExternalID); lerr == nil {
+			named = tr.Title != ""
 			if tr.Title != "" {
 				res.Title = tr.Title
 			}
@@ -191,7 +222,7 @@ func (s *Service) Resolve(ctx context.Context, rawURL string) (*linkresolve.Reso
 			}
 		}
 	}
-	return res, nil
+	return res, named, nil
 }
 
 // ErrNoDownloader is returned when a download is requested but no downloader is configured.
@@ -212,6 +243,7 @@ var (
 	ErrCatalogCreate        = errors.New("could not create catalog entry")
 	ErrPlaylistValidate     = errors.New("could not validate playlist")
 	ErrChaptersRead         = errors.New("could not read chapters")
+	ErrSourceLookup         = errors.New("the link could not be looked up at its source")
 )
 
 // Add handles one link end-to-end: resolve, catalog, playlist, download planning.
@@ -220,75 +252,38 @@ func (s *Service) Add(ctx context.Context, opts AddOptions) (*AddResult, error) 
 	if rawURL == "" {
 		return nil, errors.New("url is required")
 	}
-	res, err := s.Resolve(ctx, rawURL)
+	res, named, err := s.resolve(ctx, rawURL)
 	if err != nil {
 		return nil, err
 	}
 
-	// Catalog entity handling.
 	kind := res.Kind
 	if kind == "" {
 		kind = "track"
 	}
-	catalogID := CatalogID(res.Source, kind, res.ExternalID)
-	createdNew := false
-	if s.store != nil {
-		_, gerr := s.store.GetCatalogEntity(ctx, catalogID)
-		if errors.Is(gerr, sql.ErrNoRows) {
-			now := s.now().Unix()
-			ierr := s.store.InsertCatalogEntity(ctx, db.InsertCatalogEntityParams{
-				ID:         catalogID,
-				Kind:       kind,
-				Title:      res.Title,
-				Artist:     res.Artist,
-				Album:      res.Album,
-				DurationMs: 0,
-				Isrc:       "",
-				Mbid:       "",
-				Source:     res.Source,
-				ExternalID: res.ExternalID,
-				CreatedAt:  now,
-			})
-			if ierr != nil {
-				if strings.Contains(ierr.Error(), "UNIQUE") || strings.Contains(ierr.Error(), "constraint") || strings.Contains(strings.ToLower(ierr.Error()), "primary") {
-					createdNew = false
-				} else {
-					if _, check := s.store.GetCatalogEntity(ctx, catalogID); check == nil {
-						createdNew = false
-					} else {
-						return nil, fmt.Errorf("%w: %v", ErrCatalogCreate, ierr)
-					}
-				}
-			} else {
-				createdNew = true
+	// A device that expands links downloads by artist and title, so a Spotify
+	// track the source could not name has nothing to download by.
+	if s.collections != nil && res.Source == "spotify" && kind == "track" && !named {
+		return nil, fmt.Errorf("%w: Spotify did not name track %s", ErrSourceLookup, res.ExternalID)
+	}
+	// An album or playlist link can stand for its tracks.
+	tracks, err := s.expand(ctx, res, kind)
+	if err != nil {
+		return nil, err
+	}
+	catalogID, err := s.ensureCatalog(ctx, kind, res.Source, res.ExternalID, res.Title, res.Artist, res.Album)
+	if err != nil {
+		return nil, err
+	}
+	trackIDs := []string{catalogID}
+	if tracks != nil {
+		trackIDs = trackIDs[:0]
+		for _, t := range tracks {
+			id, err := s.ensureCatalog(ctx, "track", t.Source, t.ExternalID, t.Title, t.Artist, t.Album)
+			if err != nil {
+				return nil, err
 			}
-		} else if gerr == nil {
-			createdNew = false
-		} else {
-			return nil, fmt.Errorf("%w: %v", ErrCatalogRead, gerr)
-		}
-
-		if createdNew && s.syncStore != nil && s.deviceID != nil {
-			if deviceID, derr := s.deviceID(ctx); derr == nil && deviceID != "" {
-				ch := reverbsync.SyncChange{
-					EntityType: kind,
-					EntityID:   catalogID,
-					Field:      "title",
-					Value:      res.Title,
-					UpdatedAt:  s.now().UnixMilli(),
-					DeviceID:   deviceID,
-				}
-				_, _ = s.syncStore.AppendChange(ctx, deviceID, ch)
-				ch2 := reverbsync.SyncChange{
-					EntityType: kind,
-					EntityID:   catalogID,
-					Field:      "artist",
-					Value:      res.Artist,
-					UpdatedAt:  s.now().UnixMilli(),
-					DeviceID:   deviceID,
-				}
-				_, _ = s.syncStore.AppendChange(ctx, deviceID, ch2)
-			}
+			trackIDs = append(trackIDs, id)
 		}
 	}
 
@@ -308,27 +303,8 @@ func (s *Service) Add(ctx context.Context, opts AddOptions) (*AddResult, error) 
 		}
 		// Ownership check is performed by the HTTP layer (playlistAccessAllowed);
 		// the service only validates existence. Emit sync for membership.
-		if s.syncStore != nil && s.deviceID != nil && s.store != nil {
-			if deviceID, derr := s.deviceID(ctx); derr == nil && deviceID != "" {
-				ch := reverbsync.SyncChange{
-					EntityType: "playlist",
-					EntityID:   playlistID,
-					Field:      "track:" + catalogID,
-					Value:      catalogID,
-					UpdatedAt:  s.now().UnixMilli(),
-					DeviceID:   deviceID,
-				}
-				_, _ = s.syncStore.AppendChange(ctx, deviceID, ch)
-				ch2 := reverbsync.SyncChange{
-					EntityType: "playlist",
-					EntityID:   playlistID,
-					Field:      "tracks",
-					Value:      catalogID,
-					UpdatedAt:  s.now().UnixMilli(),
-					DeviceID:   deviceID,
-				}
-				_, _ = s.syncStore.AppendChange(ctx, deviceID, ch2)
-			}
+		for _, id := range trackIDs {
+			s.emitPlaylistTrack(ctx, playlistID, id)
 		}
 	}
 
@@ -362,9 +338,20 @@ func (s *Service) Add(ctx context.Context, opts AddOptions) (*AddResult, error) 
 		if opts.InitiatedBy != "" {
 			base.InitiatedBy = opts.InitiatedBy
 		}
-		reqs, derr := s.planDownloadRequests(ctx, base, res, opts)
-		if derr != nil {
-			return nil, derr
+		var reqs []core.DownloadRequest
+		if tracks != nil {
+			for _, t := range tracks {
+				req := base
+				req.Source, req.ExternalID = t.Source, t.ExternalID
+				req.Title, req.Artist, req.Album, req.ISRC = t.Title, t.Artist, t.Album, t.ISRC
+				req.DurationMs = t.DurationMs
+				reqs = append(reqs, req)
+			}
+		} else {
+			var derr error
+			if reqs, derr = s.planDownloadRequests(ctx, base, res, opts); derr != nil {
+				return nil, derr
+			}
 		}
 		for _, req := range reqs {
 			j, err := dl.Enqueue(ctx, req)
@@ -393,6 +380,113 @@ func (s *Service) Add(ctx context.Context, opts AddOptions) (*AddResult, error) 
 		result.Jobs = jobs
 	}
 	return result, nil
+}
+
+// expand lists the tracks an album or playlist link holds, when the service
+// expands them, naming the result after the collection itself. It returns nil
+// for anything else.
+func (s *Service) expand(ctx context.Context, res *linkresolve.ResolveResult, kind string) ([]core.ExternalResult, error) {
+	if s.collections == nil {
+		return nil, nil
+	}
+	var tracks []core.ExternalResult
+	switch kind {
+	case "album":
+		album, err := s.collections.GetAlbum(ctx, res.Source, res.ExternalID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrSourceLookup, err)
+		}
+		res.Title, res.Artist, res.CoverUrl = album.Name, album.Artist, album.CoverURL
+		for _, t := range album.Tracks {
+			if t.Album == "" {
+				t.Album = album.Name
+			}
+			if t.Artist == "" {
+				t.Artist = album.Artist
+			}
+			tracks = append(tracks, t)
+		}
+	case "playlist":
+		pl, err := s.collections.GetPlaylist(ctx, res.Source, res.ExternalID)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrSourceLookup, err)
+		}
+		res.Title, res.CoverUrl = pl.Name, pl.CoverURL
+		tracks = pl.Tracks
+	default:
+		return nil, nil
+	}
+	if tracks == nil {
+		tracks = []core.ExternalResult{}
+	}
+	for i := range tracks {
+		if tracks[i].Source == "" {
+			tracks[i].Source = res.Source
+		}
+	}
+	return tracks, nil
+}
+
+// ensureCatalog records a catalog entity for the entry, once, and publishes
+// its title and artist when it is new. It returns the entity's id.
+func (s *Service) ensureCatalog(ctx context.Context, kind, source, externalID, title, artist, album string) (string, error) {
+	catalogID := CatalogID(source, kind, externalID)
+	if s.store == nil {
+		return catalogID, nil
+	}
+	_, gerr := s.store.GetCatalogEntity(ctx, catalogID)
+	if gerr == nil {
+		return catalogID, nil
+	}
+	if !errors.Is(gerr, sql.ErrNoRows) {
+		return "", fmt.Errorf("%w: %v", ErrCatalogRead, gerr)
+	}
+	ierr := s.store.InsertCatalogEntity(ctx, db.InsertCatalogEntityParams{
+		ID:         catalogID,
+		Kind:       kind,
+		Title:      title,
+		Artist:     artist,
+		Album:      album,
+		Source:     source,
+		ExternalID: externalID,
+		CreatedAt:  s.now().Unix(),
+	})
+	if ierr != nil {
+		// Lost a race with another add of the same entry.
+		if _, check := s.store.GetCatalogEntity(ctx, catalogID); check == nil {
+			return catalogID, nil
+		}
+		return "", fmt.Errorf("%w: %v", ErrCatalogCreate, ierr)
+	}
+	if s.syncStore != nil && s.deviceID != nil {
+		if deviceID, derr := s.deviceID(ctx); derr == nil && deviceID != "" {
+			for field, value := range map[string]string{"title": title, "artist": artist} {
+				_, _ = s.syncStore.AppendChange(ctx, deviceID, reverbsync.SyncChange{
+					EntityType: kind, EntityID: catalogID, Field: field, Value: value,
+					UpdatedAt: s.now().UnixMilli(), DeviceID: deviceID,
+				})
+			}
+		}
+	}
+	return catalogID, nil
+}
+
+// emitPlaylistTrack publishes catalogID's membership of playlistID.
+func (s *Service) emitPlaylistTrack(ctx context.Context, playlistID, catalogID string) {
+	if s.syncStore == nil || s.deviceID == nil || s.store == nil {
+		return
+	}
+	deviceID, derr := s.deviceID(ctx)
+	if derr != nil || deviceID == "" {
+		return
+	}
+	for _, ch := range []reverbsync.SyncChange{
+		{EntityType: "playlist", EntityID: playlistID, Field: "track:" + catalogID, Value: catalogID},
+		{EntityType: "playlist", EntityID: playlistID, Field: "tracks", Value: catalogID},
+	} {
+		ch.UpdatedAt, ch.DeviceID = s.now().UnixMilli(), deviceID
+		_, _ = s.syncStore.AppendChange(ctx, deviceID, ch)
+	}
 }
 
 // AddBatch processes many links, never aborting the batch on a per-link failure.

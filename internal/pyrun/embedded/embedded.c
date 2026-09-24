@@ -139,6 +139,17 @@ int reverb_py_run(const char *module, const char **args, int nargs, int fd, long
     return rc;
 }
 
+int reverb_py_has_module(const char *module)
+{
+    PyGILState_STATE g = PyGILState_Ensure();
+    PyObject *res = PyObject_CallMethod(launcher, "has_module", "s", module);
+    int has = res && PyObject_IsTrue(res) == 1;
+    Py_XDECREF(res);
+    PyErr_Clear();
+    PyGILState_Release(g);
+    return has;
+}
+
 void reverb_py_cancel(long long token)
 {
     PyGILState_STATE g = PyGILState_Ensure();

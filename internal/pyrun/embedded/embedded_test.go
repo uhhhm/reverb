@@ -358,3 +358,14 @@ func TestYtDlpResolvesAndSolvesChallengesWithQuickJS(t *testing.T) {
 		}
 	}
 }
+
+// The runner says which modules are installed without importing them, so the
+// phone offers only the downloaders it can run.
+func TestHasModule(t *testing.T) {
+	if !testRunner.HasModule("echoer") {
+		t.Error("an installed module is reported missing")
+	}
+	if testRunner.HasModule("no_such_module_here") {
+		t.Error("a missing module is reported installed")
+	}
+}

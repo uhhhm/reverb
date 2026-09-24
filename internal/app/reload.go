@@ -9,6 +9,7 @@ import (
 	"github.com/uhhhm/reverb/internal/api"
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/extstream"
+	"github.com/uhhhm/reverb/internal/linkadd"
 	"github.com/uhhhm/reverb/internal/resolver"
 	"github.com/uhhhm/reverb/internal/search"
 	"github.com/uhhhm/reverb/internal/wiring"
@@ -161,6 +162,34 @@ func (r *ServiceReloader) Close() {
 	if n := r.live.Load(); n != nil && n.manager != nil {
 		n.manager.Stop()
 	}
+}
+
+// ProviderCollections lists albums and playlists through the live lookup, when
+// it can: the search aggregator can.
+type ProviderCollections struct{ Get func() extstream.TrackLookup }
+
+func (p ProviderCollections) collections() (linkadd.Collections, error) {
+	c, ok := p.Get().(linkadd.Collections)
+	if !ok {
+		return nil, fmt.Errorf("no search source configured")
+	}
+	return c, nil
+}
+
+func (p ProviderCollections) GetAlbum(ctx context.Context, source, id string) (core.ExternalAlbum, error) {
+	c, err := p.collections()
+	if err != nil {
+		return core.ExternalAlbum{}, err
+	}
+	return c.GetAlbum(ctx, source, id)
+}
+
+func (p ProviderCollections) GetPlaylist(ctx context.Context, source, id string) (core.ExternalPlaylist, error) {
+	c, err := p.collections()
+	if err != nil {
+		return core.ExternalPlaylist{}, err
+	}
+	return c.GetPlaylist(ctx, source, id)
 }
 
 // ProviderLookup adapts a live-lookup provider to extstream.TrackLookup, so the

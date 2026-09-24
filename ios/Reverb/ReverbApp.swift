@@ -6,6 +6,7 @@ struct ReverbApp: App {
     @StateObject private var player: Player
     @StateObject private var sync: SyncManager
     @StateObject private var pairing = PairingModel()
+    @StateObject private var links = LinkModel()
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -24,10 +25,13 @@ struct ReverbApp: App {
                 .environmentObject(player)
                 .environmentObject(sync)
                 .environmentObject(pairing)
+                .environmentObject(links)
                 // The system Camera, or any app or web page, opens a pairing
-                // link here. It waits for the owner to confirm its target.
+                // link here, and the share extension a link to add. Each waits
+                // for the owner to confirm it.
                 .onOpenURL { url in
                     pairing.opened(url)
+                    links.opened(url)
                 }
                 .task { await sync.foregrounded() }
         }
@@ -67,6 +71,7 @@ struct RootView: View {
 
 struct MainView: View {
     @EnvironmentObject private var pairing: PairingModel
+    @EnvironmentObject private var links: LinkModel
 
     var body: some View {
         TabView {
@@ -104,6 +109,9 @@ struct MainView: View {
         // Dismissing the sheet drops an unconfirmed link without dialling it.
         .sheet(isPresented: $pairing.isPresented, onDismiss: pairing.discard) {
             PairingView()
+        }
+        .sheet(isPresented: $links.isPresented) {
+            AddFromLinkView()
         }
     }
 }

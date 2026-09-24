@@ -34,6 +34,18 @@ type Runner interface {
 	RunModule(ctx context.Context, module string, args []string, onLine func(string)) error
 }
 
+// ModuleFinder is a Runner that can say whether a module is installed without
+// running it. A runner that cannot say is taken to have every module.
+type ModuleFinder interface {
+	HasModule(module string) bool
+}
+
+// Has reports whether r can run module, as far as r can tell.
+func Has(r Runner, module string) bool {
+	f, ok := r.(ModuleFinder)
+	return !ok || f.HasModule(module)
+}
+
 // Host runs modules with an interpreter installed on this machine.
 type Host struct {
 	// Python is the interpreter to run.

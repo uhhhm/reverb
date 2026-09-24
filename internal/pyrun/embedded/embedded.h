@@ -15,6 +15,9 @@ int reverb_py_start(const char *home, const char **paths, int npaths, const char
 int reverb_py_run(const char *module, const char **args, int nargs, int fd, long long token,
                   char **err);
 
+// Whether a top-level module is installed.
+int reverb_py_has_module(const char *module);
+
 // Cancels the run with token, if it is running.
 void reverb_py_cancel(long long token);
 

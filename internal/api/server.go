@@ -539,6 +539,7 @@ func (s *Server) routes() {
 			pr.Group(func(or chi.Router) {
 				or.Get("/offline-set", s.handleListOfflineSet)
 				or.Get("/offline-set/status", s.handleOfflineSetStatus)
+				or.Get("/pending-uploads", s.handlePendingUploads)
 				or.Put("/offline-set/{playlistId}", s.handleSetOfflineSet)
 				or.Delete("/offline-set/{playlistId}", s.handleDeleteOfflineSet)
 			})

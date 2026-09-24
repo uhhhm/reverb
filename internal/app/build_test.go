@@ -295,3 +295,18 @@ func TestPhoneResolvesExternalStreamsAVPlayerCanOpen(t *testing.T) {
 		t.Fatalf("the phone resolved with %q", last)
 	}
 }
+
+// ytdlpOnlyPython is an interpreter that has yt-dlp but not spotDL, as the
+// iPhone's does.
+type ytdlpOnlyPython struct{ recordingPython }
+
+func (*ytdlpOnlyPython) HasModule(module string) bool { return module == "yt_dlp" }
+
+// A phone offers only the downloaders its Python can run, so a download never
+// waits on a spotDL that is not there before falling back to yt-dlp.
+func TestPhoneRegistersOnlyTheDownloadersItsPythonHas(t *testing.T) {
+	rt := buildForTest(t, Options{Version: "test", Profile: ProfilePhone, Python: &ytdlpOnlyPython{}})
+	if names := rt.Deps.Downloader.Names(); strings.Join(names, ",") != "ytdlp" {
+		t.Fatalf("phone downloaders = %v, want only ytdlp", names)
+	}
+}
