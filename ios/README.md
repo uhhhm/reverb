@@ -15,10 +15,12 @@ screen and remote controls, the camera, and backup exclusion.
 | `ReverbKit/` | Swift package with `ReverbAPI`, the client generated from OpenAPI |
 | `ReverbTests/` | Native AVPlayer regressions: decoded duration, variable-bitrate MP3, heard audio against the clock after seeks, queue races, failure recovery and skipping, interruptions and completion |
 | `ReverbUITests/` | XCUITest smoke test: launch, pair with a test runtime by typed code or a confirmed pairing link, play an offline track |
-| `Frameworks/` | `Reverbcore.xcframework`, built by `make ios-core` (not checked in) |
+| `native/` | The embedded download tools: `fetch.sh` fetches CPython for iOS, FFmpeg and QuickJS-ng at pinned checksums, `build.sh` builds them into `libreverbnative` and installs the hash-pinned `requirements.txt` (yt-dlp), and `install-python.sh` is the build phase that puts Python into the app |
+| `Frameworks/` | `Reverbcore.xcframework` from `make ios-core`, and `Python.xcframework` and `ReverbNative.xcframework` from `make ios-native` (not checked in) |
 
 The Go side is `mobile/reverbcore`: `Start(dataDir)` returns the loopback port,
-`Port()`, `Secret()`, and `Stop()`. Other apps on the phone can reach a
+`Port()`, `Secret()`, and `Stop()`. `ConfigurePython(home, packages)` names the
+bundle's Python before `Start`. Other apps on the phone can reach a
 loopback port, so each start makes a random secret, kept in memory only, and
 the core refuses every request without it in `X-Reverb-Secret`. `LocalCore`
 sends it with generated operations, raw requests (`request(_:)`) and AVPlayer
@@ -30,8 +32,17 @@ other operations use the generated API client.
 
 ## Building
 
-Needs macOS with Xcode 16 or later, the Go version in `go.mod`, and XcodeGen
-(`brew install xcodegen`). From the repository root:
+Needs macOS with Xcode 16 or later, the Go version in `go.mod`, XcodeGen
+(`brew install xcodegen`), and Python 3.14 (`brew install python@3.14`), which
+installs the bundled packages and compiles them. From the repository root,
+first the embedded download tools (several minutes the first time; later runs
+reuse the build):
+
+```bash
+make ios-native
+```
+
+Then the core, which links them:
 
 ```bash
 make ios-core
@@ -58,7 +69,15 @@ operation, add it to `iosOperations` in `tools/contracts/generate.mjs` and run
 
 ## Testing
 
-Everything in the core is tested on Linux with `make check`. That includes
+Everything in the core is tested on Linux with `make check`. The embedded
+Python runner, with in-process ffmpeg, ffprobe and QuickJS, is tested on a Mac
+against its Python 3.14 and the bundled yt-dlp; `REVERB_TEST_NETWORK=1` adds a
+real YouTube resolve that solves the JavaScript challenge with QuickJS:
+
+```bash
+make test-pyembed
+```
+ That includes
 `cmd/reverb-testpeer`'s `TestAppFlowAgainstTestPeer`, which drives the linked
 core through the same calls the app makes. On a Mac, native playback regressions and the UI smoke test run on
 a simulator against the test peer:
@@ -100,8 +119,15 @@ xcodebuild test -project ios/Reverb.xcodeproj -scheme Reverb \
   and iOS says it should; unplugging headphones pauses.
 - Home, Library, Search, Playlists, and Devices are native views over the
   phone's loopback API. Library tracks play locally or through a reachable
-  paired device; outside-library search results stay visibly unavailable until
-  external playback is installed in the phone profile.
+  paired device. Search results and recommendations outside the library
+  stream from their source: the core resolves them with the bundled yt-dlp,
+  asking for M4A since AVPlayer cannot open WebM, and proxies the audio. The top
+  search results and the next two tracks in the queue are resolved ahead of
+  time, so they start at once.
+- yt-dlp, the standard library and FFmpeg add about 28 MB to the IPA and 81 MB
+  installed. yt-dlp and its JavaScript challenge solver run in the app's own
+  Python; ffmpeg, ffprobe and QuickJS, which yt-dlp would start as processes,
+  run in-process. spotDL is not bundled (see ADR 0003).
 - The app syncs when it enters the foreground and every five minutes while
   audio is playing. It also schedules a bounded `BGAppRefreshTask`; iOS decides
   whether and when that task runs, and Reverb uses no keep-alive workaround.

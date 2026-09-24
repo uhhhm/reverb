@@ -259,3 +259,24 @@ func TestResolveHintedSkipsLookup(t *testing.T) {
 		t.Fatalf("query = %q, want %q", got, want)
 	}
 }
+
+// A player that cannot open every container YouTube serves asks for the one
+// it can, falling back to the best audio when that is all there is.
+func TestFormatNarrowsWhatIsResolved(t *testing.T) {
+	l := &fakeLookup{track: core.ExternalResult{Artist: "Air", Title: "Alone in Kyoto"}}
+	r := &fakeRunner{lines: []string{"https://rr1.googlevideo.com/a"}}
+	if _, err := newService(t, l, r).Resolve(context.Background(), "deezer", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(r.gotArgs, " "); !strings.Contains(got, "-f bestaudio ") {
+		t.Errorf("default args %q must ask for bestaudio", got)
+	}
+
+	r = &fakeRunner{lines: []string{"https://rr1.googlevideo.com/a"}}
+	if _, err := newService(t, l, r, WithFormat(AppleFormat)).Resolve(context.Background(), "deezer", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(r.gotArgs, " "); !strings.Contains(got, "-f bestaudio[ext=m4a]/bestaudio ") {
+		t.Errorf("args %q must prefer m4a", got)
+	}
+}

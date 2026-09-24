@@ -50,7 +50,20 @@ var (
 	credMu              sync.RWMutex
 	spotifyClientID     string
 	spotifyClientSecret string
+
+	pythonMu       sync.Mutex
+	pythonHome     string
+	pythonPackages string
 )
+
+// ConfigurePython names the app bundle's Python: home holds the standard
+// library under lib/python3.14, and packages the bundled yt-dlp. Call it
+// before Start. A build without the embedded interpreter ignores it.
+func ConfigurePython(home, packages string) {
+	pythonMu.Lock()
+	defer pythonMu.Unlock()
+	pythonHome, pythonPackages = home, packages
+}
 
 // SetSpotifyCredentials supplies this app's Keychain values to the phone core
 // in memory. Empty values revoke them. They are never written to process-wide
@@ -112,12 +125,17 @@ func Start(dataDir string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	python, err := phonePython()
+	if err != nil {
+		return 0, err
+	}
 	rt, err := app.Build(context.Background(), app.Options{
 		DBPath:  filepath.Join(dataDir, "reverb.db"),
 		Version: Version,
 		P2PPort: cfg.P2PPort,
 		Profile: app.ProfilePhone,
 		Getenv:  getenv,
+		Python:  python,
 	})
 	if err != nil {
 		return 0, err

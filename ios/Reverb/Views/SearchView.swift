@@ -22,7 +22,22 @@ struct SearchResult: Decodable, Identifiable {
     let coverArtId: String?
     let match: Match?
     var id: String { source + ":" + externalId }
-    var playableID: String? { match?.status == "in_library" ? match?.libraryTrackId : nil }
+
+    /// A library match plays from the library; anything else streams from
+    /// its source through the core's yt-dlp.
+    var playerTrack: PlayerTrack {
+        guard let match, match.status == "in_library" else {
+            return Player.externalTrack(
+                source: source, externalId: externalId, title: title, artist: artist, album: album,
+                durationMs: durationMs, coverUrl: coverUrl
+            )
+        }
+        let extra: [String: (any Sendable)?] = ["coverArtId": match.coverArtId ?? coverArtId]
+        return PlayerTrack(
+            id: match.libraryTrackId, title: title, artist: artist, album: album, durationMs: durationMs,
+            additionalProperties: (try? OpenAPIObjectContainer(unvalidatedValue: extra)) ?? .init()
+        )
+    }
 }
 
 struct SearchView: View {
@@ -81,19 +96,13 @@ struct SearchView: View {
             local = await localResult
             catalog = await catalogResult
             sources = await externalResult
+            ExternalPrewarm.shared.prewarm(results: sources.flatMap(\.results).map(\.playerTrack), core: localCore)
         }
     }
 
     private func play(_ result: SearchResult, among rows: [SearchResult]) async {
-        let playable = rows.compactMap { row -> PlayerTrack? in
-            let id = row.playableID
-            guard let id else { return nil }
-            return PlayerTrack(id: id, title: row.title, artist: row.artist, album: row.album, durationMs: row.durationMs,
-                               cropStartMs: nil, cropEndMs: nil)
-        }
-        let id = result.playableID
-        guard let id, let index = playable.firstIndex(where: { $0.id == id }) else { return }
-        await player.play(playable, startAt: index)
+        guard let index = rows.firstIndex(where: { $0.id == result.id }) else { return }
+        await player.play(rows.map(\.playerTrack), startAt: index)
     }
 }
 
@@ -108,12 +117,7 @@ struct SearchResultRow: View {
                 Text("\(result.artist) · \(result.source.capitalized)").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if !playable {
-                Image(systemName: "icloud.slash").foregroundStyle(.secondary)
-                    .accessibilityLabel("Not yet playable")
-            }
         }
-        .opacity(playable ? 1 : 0.55)
         .contextMenu {
             Button("Not interested", role: .destructive) {
                 Task {
@@ -125,10 +129,6 @@ struct SearchResultRow: View {
                 }
             }
         }
-    }
-
-    private var playable: Bool {
-        result.playableID != nil
     }
 }
 

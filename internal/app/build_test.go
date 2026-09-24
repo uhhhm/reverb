@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -265,4 +266,32 @@ func (r *recordingPython) RunModule(_ context.Context, module string, _ []string
 	r.modules = append(r.modules, module)
 	onLine("1.0")
 	return nil
+}
+
+// resolvingPython answers yt-dlp the way a resolve needs: a video id for the
+// search, a media URL for the format extraction. It records each argv.
+type resolvingPython struct{ args [][]string }
+
+func (r *resolvingPython) RunModule(_ context.Context, _ string, args []string, onLine func(string)) error {
+	r.args = append(r.args, args)
+	if slices.Contains(args, "--flat-playlist") {
+		onLine("vid123")
+	} else {
+		onLine("https://media.example/vid123?expire=4102444800")
+	}
+	return nil
+}
+
+// A phone plays external tracks through AVPlayer, which cannot open WebM, so
+// its resolves ask yt-dlp for M4A first.
+func TestPhoneResolvesExternalStreamsAVPlayerCanOpen(t *testing.T) {
+	py := &resolvingPython{}
+	rt := buildForTest(t, Options{Version: "test", Profile: ProfilePhone, Python: py})
+	if _, err := rt.Deps.ExternalStream.ResolveHinted(context.Background(), "deezer", "1", "Air", "Kelly Watch the Stars"); err != nil {
+		t.Fatal(err)
+	}
+	last := py.args[len(py.args)-1]
+	if i := slices.Index(last, "-f"); i < 0 || last[i+1] != "bestaudio[ext=m4a]/bestaudio" {
+		t.Fatalf("the phone resolved with %q", last)
+	}
 }

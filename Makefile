@@ -1,4 +1,4 @@
-.PHONY: gen gen-check test test-go test-web test-race fmt-check vet vet-windows vet-darwin vet-ios ios-core ios-project ios-testpeer ios-test check check-web check-full vulncheck recommend-quality setup-web setup-contracts contracts contracts-check contracts-test build web dev clean desktop desktop-windows desktop-dev desktop-deps package-mac package-linux package-windows
+.PHONY: gen gen-check test test-go test-web test-race fmt-check vet vet-windows vet-darwin vet-ios ios-native test-pyembed ios-core ios-project ios-testpeer ios-test check check-web check-full vulncheck recommend-quality setup-web setup-contracts contracts contracts-check contracts-test build web dev clean desktop desktop-windows desktop-dev desktop-deps package-mac package-linux package-windows
 
 VERSION ?= dev
 GO_PACKAGES := ./cmd/... ./internal/... ./desktop/... ./mobile/...
@@ -55,11 +55,38 @@ vet-ios:
 IOS_BIN := $(CURDIR)/ios/build/bin
 IOS_DESTINATION ?= platform=iOS Simulator,name=iPhone 17
 
+# The core links the embedded Python runner (internal/pyrun/embedded), so it
+# needs ios-native's Python headers; the app links Python and libreverbnative.
+# Both are arm64 only, so the simulator slice is too.
+IOS_PYTHON_HEADERS := $(CURDIR)/ios/build/native/python/Python.xcframework/ios-arm64/Python.framework/Headers
+
 ios-core:
+	@test -d "$(IOS_PYTHON_HEADERS)" || { echo "run make ios-native first" >&2; exit 1; }
 	GOBIN=$(IOS_BIN) go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
-	PATH="$(IOS_BIN):$$PATH" gomobile bind -target=ios,iossimulator \
+	PATH="$(IOS_BIN):$$PATH" CGO_CPPFLAGS="-I$(IOS_PYTHON_HEADERS)" gomobile bind \
+		-target=ios/arm64,iossimulator/arm64 -tags pyembed \
 		-ldflags "-X github.com/uhhhm/reverb/mobile/reverbcore.Version=$(VERSION)" \
 		-o ios/Frameworks/Reverbcore.xcframework ./mobile/reverbcore
+
+# The embedded download tools (ios/native): CPython for iOS, FFmpeg and
+# QuickJS-ng as in-process libraries, and the bundled yt-dlp, all fetched at
+# pinned checksums. The first build takes several minutes.
+ios-native:
+	ios/native/fetch.sh
+	ios/native/build.sh iphoneos iphonesimulator
+
+# The embedded Python runner's tests, against this Mac's Python 3.14 and the
+# macOS slice of libreverbnative. REVERB_TEST_NETWORK=1 adds a real YouTube
+# resolve.
+PYEMBED_NATIVE := $(CURDIR)/ios/build/native/macos
+test-pyembed:
+	@test -f ios/build/native/ffmpeg.version || ios/native/fetch.sh
+	ios/native/build.sh macos
+	CGO_CFLAGS="$$(python3.14-config --includes)" \
+	CGO_LDFLAGS="$$(python3.14-config --embed --ldflags) -L$(PYEMBED_NATIVE) -lreverbnative -lz" \
+	REVERB_PYEMBED_HOME="$$(python3.14 -c 'import sys; print(sys.base_prefix)')" \
+	REVERB_TEST_SITE_PACKAGES=$(CURDIR)/ios/build/native/app_packages \
+		go test -tags pyembed -count=1 ./internal/pyrun/embedded/
 
 ios-project:
 	cd ios && xcodegen generate
@@ -68,7 +95,7 @@ ios-project:
 ios-testpeer:
 	go run ./cmd/reverb-testpeer
 
-ios-test: ios-core ios-project
+ios-test: ios-native ios-core ios-project
 	go build -o $(IOS_BIN)/reverb-testpeer ./cmd/reverb-testpeer
 	$(IOS_BIN)/reverb-testpeer & peer=$$!; trap 'kill $$peer 2>/dev/null || true' EXIT; \
 	cd ios && xcodebuild test -project Reverb.xcodeproj -scheme Reverb \

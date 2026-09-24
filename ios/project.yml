@@ -30,14 +30,31 @@ targets:
         product: ReverbAPI
       # Built by `make ios-core` (gomobile bind); not checked in.
       - framework: Frameworks/Reverbcore.xcframework
+      # The embedded download tools, from `make ios-native`; not checked in.
+      # Python is a dynamic framework; ReverbNative (FFmpeg, QuickJS and the
+      # _reverb_native module) is static.
+      - framework: Frameworks/Python.xcframework
+        embed: true
+      - framework: Frameworks/ReverbNative.xcframework
+        embed: false
       # Go's DNS resolver on Darwin calls res_9_* from libresolv.
       - sdk: libresolv.tbd
+      # FFmpeg's PNG support.
+      - sdk: libz.tbd
+    postBuildScripts:
+      - name: Install Python
+        script: exec "$PROJECT_DIR/native/install-python.sh"
+        basedOnDependencyAnalysis: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.uhhhm.reverb
         INFOPLIST_FILE: Reverb/Info.plist
         TARGETED_DEVICE_FAMILY: "1"
         ENABLE_BITCODE: NO
+        # The Go core, Python and ReverbNative are arm64 only.
+        ARCHS: arm64
+        # The Python install phase reads the bundled packages under build/.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
   ReverbTests:
     type: bundle.unit-test
     platform: iOS

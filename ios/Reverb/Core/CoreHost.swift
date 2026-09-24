@@ -127,6 +127,12 @@ final class CoreHost: ObservableObject {
         } else {
             ReverbcoreSetSpotifyCredentials("", "")
         }
+        // The install phase puts the standard library and yt-dlp in the bundle.
+        let bundle = Bundle.main.bundleURL
+        ReverbcoreConfigurePython(
+            bundle.appendingPathComponent("python").path,
+            bundle.appendingPathComponent("app_packages").path
+        )
         var port = 0
         var error: NSError?
         let started = ReverbcoreStart(dataDirectory.path, &port, &error)

@@ -36,6 +36,14 @@ const DefaultTTL = 30 * time.Minute
 // DefaultBinary is the yt-dlp executable name when REVERB_YTDLP_PATH is unset.
 const DefaultBinary = "yt-dlp"
 
+// DefaultFormat is the yt-dlp format a resolve asks for: the best audio,
+// whatever its container, which a browser plays.
+const DefaultFormat = "bestaudio"
+
+// AppleFormat prefers M4A for AVPlayer, which cannot open the WebM that is
+// often YouTube's best audio, and falls back to the best when there is no M4A.
+const AppleFormat = "bestaudio[ext=m4a]/bestaudio"
+
 // resolveTimeout bounds one yt-dlp resolve. It runs on the request path, ahead
 // of the first audio byte, so a wedged process must not hang the player.
 const resolveTimeout = 45 * time.Second
@@ -81,6 +89,7 @@ type Service struct {
 	binary      string
 	cookiesFile string
 	jsRuntime   string
+	format      string
 	ttl         time.Duration
 	now         func() time.Time
 	store       Store
@@ -104,6 +113,10 @@ func WithBinary(path string) Option {
 		}
 	}
 }
+
+// WithFormat sets the yt-dlp format a resolve asks for (DefaultFormat
+// otherwise), for a player that cannot open every container.
+func WithFormat(selector string) Option { return func(s *Service) { s.format = selector } }
 
 // WithStore persists resolves across restarts.
 func WithStore(st Store) Option { return func(s *Service) { s.store = st } }
@@ -170,6 +183,7 @@ func New(lookup TrackLookup, opts ...Option) *Service {
 		lookup: lookup,
 		runner: ExecRunner{},
 		binary: DefaultBinary,
+		format: DefaultFormat,
 		ttl:    DefaultTTL,
 		now:    time.Now,
 		cache:  map[string]entry{},
@@ -347,9 +361,10 @@ func (s *Service) searchVideoID(ctx context.Context, query string) (string, erro
 }
 
 // mediaURL extracts a direct audio URL for one known upstream track. -g prints
-// it instead of downloading; bestaudio keeps the proxy off video bytes.
+// it instead of downloading; an audio-only format keeps the proxy off video
+// bytes.
 func (s *Service) mediaURL(ctx context.Context, videoID string) (string, error) {
-	args := append(s.baseArgs(), "-f", "bestaudio", "--no-playlist", "-g", watchURL(videoID))
+	args := append(s.baseArgs(), "-f", s.format, "--no-playlist", "-g", watchURL(videoID))
 	lines, lastLine, err := s.run(ctx, args)
 	if err != nil {
 		return "", fmt.Errorf("extstream: yt-dlp resolve for %s failed: %w (%s)", videoID, err, lastLine)

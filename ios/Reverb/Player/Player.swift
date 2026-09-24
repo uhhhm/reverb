@@ -219,10 +219,24 @@ final class Player: ObservableObject {
             loadedPlayID = state.playId
             load(entry.track)
         }
+        let upcoming = state.entries.dropFirst(state.index + 1).prefix(ExternalPrewarm.queueLookahead)
+        for next in upcoming { ExternalPrewarm.shared.prewarm(next.track, core: core.core) }
+    }
+
+    /// Where AVPlayer reads a track: the core's stream of a library track, or
+    /// of a track outside the library that the core resolves from its source.
+    private func url(for track: PlayerTrack) -> URL? {
+        if let external = Self.externalStream(track) {
+            return core.core?.externalStreamURL(
+                source: external.source, externalId: external.externalId, artist: track.artist, title: track.title
+            )
+        }
+        guard let id = track.id else { return nil }
+        return streamURL?(id) ?? core.core?.streamURL(trackID: id)
     }
 
     private func load(_ track: PlayerTrack, at seconds: Double = 0, continuing: Bool = false, playing: Bool = true) {
-        guard let id = track.id, let url = streamURL?(id) ?? core.core?.streamURL(trackID: id) else { return }
+        guard let url = url(for: track) else { return }
         loadedCore = core.core
         var options: [String: Any] = [AVURLAssetPreferPreciseDurationAndTimingKey: true]
         // AVFoundation has no public option for request headers; this key is
@@ -533,9 +547,17 @@ final class Player: ObservableObject {
     private func loadArtwork(for track: PlayerTrack) {
         artwork = nil
         artworkTask?.cancel()
-        guard let id = Self.coverArtID(track), let local = core.core, let url = local.coverURL(id: id) else { return }
+        let request: URLRequest
+        if let id = Self.coverArtID(track), let local = core.core, let url = local.coverURL(id: id) {
+            request = local.request(url)
+        } else if let url = Self.coverURL(track) {
+            // A source's own artwork, for a track outside the library.
+            request = URLRequest(url: url)
+        } else {
+            return
+        }
         artworkTask = Task {
-            guard let (data, _) = try? await URLSession.shared.data(for: local.request(url)),
+            guard let (data, _) = try? await URLSession.shared.data(for: request),
                   let image = UIImage(data: data), !Task.isCancelled else { return }
             artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
             updateNowPlaying()
@@ -558,5 +580,33 @@ final class Player: ObservableObject {
 
     static func coverArtID(_ t: PlayerTrack) -> String? {
         ((t.additionalProperties.value["coverArtId"] ?? nil) as? String).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    nonisolated static func coverURL(_ t: PlayerTrack) -> URL? {
+        ((t.additionalProperties.value["coverUrl"] ?? nil) as? String).flatMap { $0.hasPrefix("https://") ? URL(string: $0) : nil }
+    }
+
+    /// A search result or recommendation outside the library, shaped as the
+    /// desktop queues one: its id is source:externalId, and externalStream
+    /// says where its audio comes from.
+    nonisolated static func externalTrack(
+        source: String, externalId: String, title: String, artist: String, album: String,
+        durationMs: Int, coverUrl: String? = nil
+    ) -> PlayerTrack {
+        var extra: [String: (any Sendable)?] = [
+            "externalStream": ["source": source, "externalId": externalId] as [String: (any Sendable)?],
+        ]
+        if let coverUrl { extra["coverUrl"] = coverUrl }
+        return PlayerTrack(
+            id: source + ":" + externalId, title: title, artist: artist, album: album, durationMs: durationMs,
+            additionalProperties: (try? OpenAPIObjectContainer(unvalidatedValue: extra)) ?? .init()
+        )
+    }
+
+    nonisolated static func externalStream(_ t: PlayerTrack) -> (source: String, externalId: String)? {
+        guard let ref = (t.additionalProperties.value["externalStream"] ?? nil) as? [String: (any Sendable)?],
+              let source = (ref["source"] ?? nil) as? String, !source.isEmpty,
+              let externalId = (ref["externalId"] ?? nil) as? String, !externalId.isEmpty else { return nil }
+        return (source, externalId)
     }
 }

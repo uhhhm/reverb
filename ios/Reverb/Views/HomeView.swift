@@ -27,7 +27,7 @@ struct HomeView: View {
             ForEach(Array((shelves?.shelves ?? []).enumerated()), id: \.offset) { _, shelf in
                 Section(shelf.title) {
                     ForEach(shelf.tracks, id: \.externalId) { track in
-                        RecommendedTrackRow(track: track) { await load() }
+                        RecommendedTrackRow(track: track, queue: shelf.tracks) { await load() }
                     }
                     ForEach(shelf.artists, id: \.externalId) { artist in
                         HStack {
@@ -78,7 +78,9 @@ struct MixView: View {
             if mix?.offline == true {
                 Label("Offline — showing the last saved Mix.", systemImage: "wifi.slash").foregroundStyle(.secondary)
             }
-            ForEach(mix?.tracks ?? [], id: \.externalId) { track in RecommendedTrackRow(track: track) { await load() } }
+            ForEach(mix?.tracks ?? [], id: \.externalId) { track in
+                RecommendedTrackRow(track: track, queue: mix?.tracks ?? []) { await load() }
+            }
         }
         .navigationTitle(kind.title)
         .toolbar {
@@ -102,6 +104,9 @@ struct MixView: View {
 
 struct RecommendedTrackRow: View {
     let track: RecommendedTrack
+    /// The shelf or Mix the track belongs to; playing a track plays on
+    /// through the rest of it.
+    var queue: [RecommendedTrack] = []
     var onMarked: (() async -> Void)? = nil
     @EnvironmentObject private var core: CoreHost
     @EnvironmentObject private var player: Player
@@ -113,31 +118,17 @@ struct RecommendedTrackRow: View {
                 Text(track.artist).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
-            if playableID == nil { Image(systemName: "icloud.slash").foregroundStyle(.secondary) }
             Button { Task { await mark() } } label: { Image(systemName: "hand.thumbsdown") }
                 .buttonStyle(.borderless).accessibilityLabel("Not interested")
         }
         .contentShape(Rectangle())
         .onTapGesture { Task { await play() } }
-        .opacity(playableID == nil ? 0.55 : 1)
-    }
-
-    private var playableID: String? {
-        if track.source == "library" { return track.externalId }
-        if track.match?.status == .in_library { return track.match?.libraryTrackId }
-        // An external result's catalog id is an identity, not proof that the
-        // phone has audio for it, so only library matches are playable here.
-        return nil
     }
 
     private func play() async {
-        guard let id = playableID else { return }
-        let extra: [String: (any Sendable)?] = ["coverArtId": track.coverArtId]
-        let item = PlayerTrack(
-            id: id, title: track.title, artist: track.artist, album: track.album, durationMs: track.durationMs,
-            additionalProperties: (try? OpenAPIObjectContainer(unvalidatedValue: extra)) ?? .init()
-        )
-        await player.play([item], startAt: 0)
+        let tracks = queue.isEmpty ? [track] : queue
+        let start = tracks.firstIndex { $0.source == track.source && $0.externalId == track.externalId } ?? 0
+        await player.play(tracks.map(\.playerTrack), startAt: start)
     }
 
     private func mark() async {
@@ -149,6 +140,27 @@ struct RecommendedTrackRow: View {
         ))).ok) != nil {
             await onMarked?()
         }
+    }
+}
+
+extension RecommendedTrack {
+    /// A library track plays from the library; anything else streams from its
+    /// source through the core's yt-dlp.
+    var playerTrack: PlayerTrack {
+        var libraryID: String?
+        if source == "library" { libraryID = externalId }
+        else if match?.status == .in_library { libraryID = match?.libraryTrackId }
+        guard let libraryID else {
+            return Player.externalTrack(
+                source: source, externalId: externalId, title: title, artist: artist, album: album,
+                durationMs: durationMs, coverUrl: coverUrl
+            )
+        }
+        let extra: [String: (any Sendable)?] = ["coverArtId": coverArtId]
+        return PlayerTrack(
+            id: libraryID, title: title, artist: artist, album: album, durationMs: durationMs,
+            additionalProperties: (try? OpenAPIObjectContainer(unvalidatedValue: extra)) ?? .init()
+        )
     }
 }
 

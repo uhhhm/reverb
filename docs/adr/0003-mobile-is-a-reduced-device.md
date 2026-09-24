@@ -12,9 +12,10 @@ It is reduced because iOS cannot run the desktop's bundled tools as subprocesses
 - **Library backend**: a pure-Go local-files library adapter, registered at the
   composition root and held to the `library` conformance suite, serves the offline
   set. There is no Navidrome on the phone.
-- **Downloads and external playback**: yt-dlp and spotdl run in-process in an
-  embedded Python, with QuickJS as yt-dlp's JavaScript runtime and ffmpeg linked
-  in. The phone downloads new yt-dlp packages itself and uses one only after
+- **Downloads and external playback**: yt-dlp runs in-process in an embedded
+  Python, with QuickJS as its JavaScript runtime and ffmpeg linked in. spotDL
+  stays on the desktop: its Spotify and SoundCloud clients need native Python
+  packages (curl_cffi, Pillow) that have no iOS build. The phone downloads new yt-dlp packages itself and uses one only after
   verifying a signature from the release pipeline, since YouTube breaks yt-dlp
   more often than the app is re-signed.
 - **Library tracks outside the offline set** are streamed from a peer through a

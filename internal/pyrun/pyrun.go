@@ -68,18 +68,24 @@ func (h Host) RunModule(ctx context.Context, module string, args []string, onLin
 		_ = pw.CloseWithError(err)
 		waitErr <- err
 	}()
-	sc := bufio.NewScanner(pr)
+	scanErr := ScanLines(pr, onLine)
+	if err := <-waitErr; err != nil {
+		return err
+	}
+	return scanErr
+}
+
+// ScanLines calls onLine for each line r yields, ending a line at '\n' or
+// '\r', until r is exhausted. A line past the scanner's buffer stops the
+// calls, but r is still drained, so a writer blocked on it can finish.
+func ScanLines(r io.Reader, onLine func(string)) error {
+	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	sc.Split(scanLinesCR)
 	for sc.Scan() {
 		onLine(sc.Text())
 	}
-	// A scan that stopped early (a line past the buffer) leaves the module
-	// blocked writing to the pipe; drain it so the module can exit.
-	_, _ = io.Copy(io.Discard, pr)
-	if err := <-waitErr; err != nil {
-		return err
-	}
+	_, _ = io.Copy(io.Discard, r)
 	return sc.Err()
 }
 

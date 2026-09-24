@@ -410,11 +410,13 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	// source instead of downloading it. Reads the LIVE aggregator so it survives
 	// adapter hot-reloads. Resolves persist: the signed URL stays good for hours,
 	// and which upstream track this is never changes at all. The desktop runs
-	// its bundled yt-dlp; a phone runs the module through its Python.
+	// its bundled yt-dlp; a phone runs the module through its Python, and asks
+	// for audio AVPlayer can open.
 	if phone {
 		deps.ExternalStream = extstream.New(
 			ProviderLookup{Get: reloader.TrackLookupProvider()},
 			extstream.WithRunner(pyrun.Module(python, pyrun.YtDlp)),
+			extstream.WithFormat(extstream.AppleFormat),
 			extstream.WithStore(st.Q()),
 		)
 	} else {

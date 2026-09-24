@@ -45,6 +45,31 @@ public struct LocalCore: Sendable, Equatable {
         apiURL.appendingPathComponent("stream").appendingPathComponent(trackID)
     }
 
+    /// A search result or recommendation outside the library, streamed from
+    /// its source through the core's yt-dlp, for AVPlayer with
+    /// `streamHeaders`. The artist and title help the core find it.
+    public func externalStreamURL(source: String, externalId: String, artist: String?, title: String?) -> URL {
+        external(source: source, externalId: externalId, suffix: nil, artist: artist, title: title)
+    }
+
+    /// Asks the core to resolve an external track ahead of playing it; POST
+    /// it with `request`.
+    public func externalPrewarmURL(source: String, externalId: String, artist: String?, title: String?) -> URL {
+        external(source: source, externalId: externalId, suffix: "prewarm", artist: artist, title: title)
+    }
+
+    private func external(source: String, externalId: String, suffix: String?, artist: String?, title: String?) -> URL {
+        var url = apiURL.appendingPathComponent("external/stream")
+            .appendingPathComponent(source).appendingPathComponent(externalId)
+        if let suffix { url.appendPathComponent(suffix) }
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        let hints = [("artist", artist), ("title", title)].compactMap { name, value in
+            value.flatMap { $0.isEmpty ? nil : URLQueryItem(name: name, value: $0) }
+        }
+        if !hints.isEmpty { components.queryItems = hints }
+        return components.url ?? url
+    }
+
     /// Cover art by id, or nil when a track has none. Fetch it with `request`.
     public func coverURL(id: String) -> URL? {
         id.isEmpty ? nil : apiURL.appendingPathComponent("cover").appendingPathComponent(id)
