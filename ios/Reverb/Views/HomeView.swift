@@ -157,19 +157,10 @@ extension RecommendedTrack {
     /// A library track plays from the library; anything else streams from its
     /// source through the core's yt-dlp.
     var playerTrack: PlayerTrack {
-        var libraryID: String?
-        if source == "library" { libraryID = externalId }
-        else if match?.status == .in_library { libraryID = match?.libraryTrackId }
-        guard let libraryID else {
-            return Player.externalTrack(
-                source: source, externalId: externalId, title: title, artist: artist, album: album,
-                durationMs: durationMs, coverUrl: coverUrl
-            )
-        }
-        let extra: [String: (any Sendable)?] = ["coverArtId": coverArtId]
-        return PlayerTrack(
-            id: libraryID, title: title, artist: artist, album: album, durationMs: durationMs,
-            additionalProperties: (try? OpenAPIObjectContainer(unvalidatedValue: extra)) ?? .init()
+        let libraryId = source == "library" ? externalId : (match?.status == .in_library ? match?.libraryTrackId : nil)
+        return Player.resolvedTrack(
+            source: source, externalId: externalId, title: title, artist: artist, album: album,
+            durationMs: durationMs, libraryId: libraryId, coverArtId: coverArtId, coverUrl: coverUrl
         )
     }
 }

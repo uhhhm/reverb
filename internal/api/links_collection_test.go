@@ -91,6 +91,30 @@ func TestLinkAddExpandsAnAlbumIntoItsTracks(t *testing.T) {
 	}
 }
 
+func TestLinkAddReportsPartialDownloadAfterPlaylistWasAdded(t *testing.T) {
+	srv, cookie, fake, _ := collectionLinkServer(t)
+	fake.enqueueErrAt = 2
+	rec := doLink(t, srv, cookie, http.MethodPost, "/api/v1/links/add",
+		`{"url":"https://open.spotify.com/album/4aawyAB9vmqN3uQ7FjRGTy","playlistId":"pl-phone","download":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		PlaylistID    string            `json:"playlistId"`
+		Job           *core.DownloadJob `json:"job"`
+		DownloadError string            `json:"downloadError"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.PlaylistID != "pl-phone" || out.Job == nil || out.Job.ExternalID != "trk1" {
+		t.Fatalf("partial result = %+v, want the playlist and first queued job", out)
+	}
+	if out.DownloadError != "queue database unavailable" {
+		t.Fatalf("downloadError = %q", out.DownloadError)
+	}
+}
+
 // A playlist link adds its tracks without downloading them when asked.
 func TestLinkAddExpandsAPlaylistWithoutDownloading(t *testing.T) {
 	srv, cookie, fake, hasCatalog := collectionLinkServer(t)

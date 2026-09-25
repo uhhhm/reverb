@@ -149,6 +149,15 @@ struct AddFromLinkView: View {
             case let .ok(ok):
                 let added = try ok.body.json
                 let downloads = added.jobs?.count ?? (added.job == nil ? 0 : 1)
+                if let error = added.downloadError, !error.isEmpty {
+                    if playlistID.isEmpty {
+                        done = downloads == 1 ? "Started 1 download" : "Started \(downloads) downloads"
+                    } else {
+                        done = "Added to playlist"
+                    }
+                    problem = "Some downloads could not be started: \(error)"
+                    return
+                }
                 if downloads > 0 {
                     done = downloads == 1 ? "Downloading" : "Downloading \(downloads) tracks"
                 } else {

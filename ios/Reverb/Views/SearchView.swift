@@ -26,16 +26,11 @@ struct SearchResult: Decodable, Identifiable {
     /// A library match plays from the library; anything else streams from
     /// its source through the core's yt-dlp.
     var playerTrack: PlayerTrack {
-        guard let match, match.status == "in_library" else {
-            return Player.externalTrack(
-                source: source, externalId: externalId, title: title, artist: artist, album: album,
-                durationMs: durationMs, coverUrl: coverUrl
-            )
-        }
-        let extra: [String: (any Sendable)?] = ["coverArtId": match.coverArtId ?? coverArtId]
-        return PlayerTrack(
-            id: match.libraryTrackId, title: title, artist: artist, album: album, durationMs: durationMs,
-            additionalProperties: (try? OpenAPIObjectContainer(unvalidatedValue: extra)) ?? .init()
+        let libraryId = match?.status == "in_library" ? match?.libraryTrackId : nil
+        return Player.resolvedTrack(
+            source: source, externalId: externalId, title: title, artist: artist, album: album,
+            durationMs: durationMs, libraryId: libraryId,
+            coverArtId: match?.coverArtId ?? coverArtId, coverUrl: coverUrl
         )
     }
 }

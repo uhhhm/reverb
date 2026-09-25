@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -118,6 +119,7 @@ func (s *Server) handleP2PRedeem(w http.ResponseWriter, r *http.Request) {
 		deviceID, token, err = p2p.RedeemViaPeer(r.Context(), h.LibHost(), guard, s.deps.DeviceKeys, body.PeerID, body.Code, body.DeviceName, localID)
 	}
 	if err != nil {
+		log.Printf("p2p pair redeem: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}

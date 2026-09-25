@@ -42,6 +42,13 @@ Reverb is a Go modular monolith with an embedded React/TypeScript SPA. **Desktop
 - Write current truth in documentation and comments. Replace stale claims rather than appending corrections or completed-task history.
 - Secrets belong in environment variables or ignored `.env` files. Keep `.env.example` free of credentials.
 
+## Testing
+- Use TDD when appropriate
+- NEVER write unit tests after you write code. 
+- Highly prefer E2E tests afterwards. Use them to verify complex features work. At the end of E2E tests, produce a verifiable and repeatable artifact. 
+- If you must test a system in isolation, FIRST write all the ways it could fail, THEN write the code.
+- Additionally when writing e2e test don't pick the simplest possible scenario to prove it works, pick a medium to hard scenario when verifying the work with e2e test (make the e2e robust).
+
 ## Agent skills
 
 ### Issue tracker

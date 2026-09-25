@@ -68,11 +68,17 @@ struct LibraryView: View {
             }
         }
         .navigationTitle("Library")
-        .refreshable { await load() }
+        .refreshable {
+            _ = try? await core.client?.triggerSync()
+            await load()
+        }
+        // Incoming syncs change household catalog membership. Keep this in
+        // step with Playlists so a view opened immediately after pairing does
+        // not remain stale for a full minute.
         .task {
             while !Task.isCancelled {
                 await load()
-                try? await Task.sleep(for: .seconds(60))
+                try? await Task.sleep(for: .seconds(5))
             }
         }
     }

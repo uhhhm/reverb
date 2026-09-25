@@ -15,9 +15,9 @@ It is reduced because iOS cannot run the desktop's bundled tools as subprocesses
 - **Downloads and external playback**: yt-dlp runs in-process in an embedded
   Python, with QuickJS as its JavaScript runtime and ffmpeg linked in. spotDL
   stays on the desktop: its Spotify and SoundCloud clients need native Python
-  packages (curl_cffi, Pillow) that have no iOS build. The phone downloads new yt-dlp packages itself and uses one only after
-  verifying a signature from the release pipeline, since YouTube breaks yt-dlp
-  more often than the app is re-signed.
+  packages (curl_cffi, Pillow) that have no iOS build. A signed yt-dlp
+  self-update remains planned work; the current phone uses the version bundled
+  into the app at build time.
 - **Library tracks outside the offline set** are streamed from a peer through a
   Delegated request, since the files live on another device. Search,
   recommendations, and Mixes use HTTP sources and run on the phone.

@@ -1566,6 +1566,9 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/DownloadJob"
+        downloadError:
+          type: string
+          description: Why some requested downloads could not be queued after another requested action succeeded.
     LinkResolveResult:
       type: object
       required:

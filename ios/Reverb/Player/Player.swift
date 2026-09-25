@@ -25,6 +25,7 @@ final class Player: ObservableObject {
     private let core: CoreHost
     private let avPlayer: AVPlayer
     private let streamURL: ((String) -> URL)?
+    private let prewarm: (PlayerTrack, LocalCore?) -> Void
     private var loadedPlayID: Int64?
     /// The core the current item streams from.
     private var loadedCore: LocalCore?
@@ -55,10 +56,18 @@ final class Player: ObservableObject {
     private var tracker = PlayTracker()
     private var artworkTask: Task<Void, Never>?
 
-    init(core: CoreHost, avPlayer: AVPlayer = AVPlayer(), streamURL: ((String) -> URL)? = nil) {
+    init(
+        core: CoreHost,
+        avPlayer: AVPlayer = AVPlayer(),
+        streamURL: ((String) -> URL)? = nil,
+        prewarm: ((PlayerTrack, LocalCore?) -> Void)? = nil
+    ) {
         self.core = core
         self.avPlayer = avPlayer
         self.streamURL = streamURL
+        self.prewarm = prewarm ?? { track, core in
+            ExternalPrewarm.shared.prewarm(track, core: core)
+        }
         avPlayer.automaticallyWaitsToMinimizeStalling = true
         configureAudioSession()
         observePlayback()
@@ -220,7 +229,7 @@ final class Player: ObservableObject {
             load(entry.track)
         }
         let upcoming = state.entries.dropFirst(state.index + 1).prefix(ExternalPrewarm.queueLookahead)
-        for next in upcoming { ExternalPrewarm.shared.prewarm(next.track, core: core.core) }
+        for next in upcoming { prewarm(next.track, core.core) }
     }
 
     /// Where AVPlayer reads a track: the core's stream of a library track, or
@@ -599,6 +608,27 @@ final class Player: ObservableObject {
         if let coverUrl { extra["coverUrl"] = coverUrl }
         return PlayerTrack(
             id: source + ":" + externalId, title: title, artist: artist, album: album, durationMs: durationMs,
+            additionalProperties: (try? OpenAPIObjectContainer(unvalidatedValue: extra)) ?? .init()
+        )
+    }
+
+    /// Projects either a library match or an external result into the one
+    /// queue shape Player understands. Search and recommendations share this
+    /// seam so their playback metadata cannot drift.
+    nonisolated static func resolvedTrack(
+        source: String, externalId: String, title: String, artist: String, album: String,
+        durationMs: Int, libraryId: String?, coverArtId: String?, coverUrl: String?
+    ) -> PlayerTrack {
+        guard let libraryId else {
+            return externalTrack(
+                source: source, externalId: externalId, title: title, artist: artist,
+                album: album, durationMs: durationMs, coverUrl: coverUrl
+            )
+        }
+        var extra: [String: (any Sendable)?] = [:]
+        if let coverArtId { extra["coverArtId"] = coverArtId }
+        return PlayerTrack(
+            id: libraryId, title: title, artist: artist, album: album, durationMs: durationMs,
             additionalProperties: (try? OpenAPIObjectContainer(unvalidatedValue: extra)) ?? .init()
         )
     }

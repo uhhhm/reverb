@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -164,6 +165,18 @@ type memStore struct {
 	mu   sync.Mutex
 	jobs map[string]core.DownloadJob
 	reqs map[string]core.DownloadRequest // mirrors request_json for FIX 2 tests
+}
+
+type completionWriteStore struct {
+	*memStore
+	failUpdate atomic.Bool
+}
+
+func (s *completionWriteStore) Update(ctx context.Context, job core.DownloadJob) error {
+	if s.failUpdate.Load() {
+		return errors.New("job database unavailable")
+	}
+	return s.memStore.Update(ctx, job)
 }
 
 func newMemStore() *memStore {
@@ -359,7 +372,10 @@ func TestCompletionHookReceivesSuccessfulRequest(t *testing.T) {
 		path string
 	}
 	completed := make(chan completion, 1)
-	m.SetCompletionHook(func(_ context.Context, req core.DownloadRequest, path string) { completed <- completion{req, path} })
+	m.SetCompletionHook(func(_ context.Context, req core.DownloadRequest, path string) error {
+		completed <- completion{req, path}
+		return nil
+	})
 	m.Start()
 	t.Cleanup(m.Stop)
 
@@ -381,6 +397,154 @@ func TestCompletionHookReceivesSuccessfulRequest(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("completion hook was not called")
 	}
+}
+
+func TestCompletionHookFailureRetriesExistingOutputOnAdd(t *testing.T) {
+	dl := &fakeDL{name: "dl", canDownload: true}
+	store := newMemStore()
+	m := NewManager(Config{Workers: 1, DebounceWindow: time.Hour, ReconcileEvery: time.Hour}, wrapDownloaders([]Downloader{dl}), store,
+		events.New(), &fakeScanner{}, &fakeRematcher{trackID: "t1"}, &fakeVersion{v: 1}, RealClock{}, nil, nil)
+	var fail atomic.Bool
+	fail.Store(true)
+	m.SetCompletionHook(func(context.Context, core.DownloadRequest, string) error {
+		if fail.Load() {
+			return errors.New("pending upload database unavailable")
+		}
+		return nil
+	})
+	m.Start()
+	t.Cleanup(m.Stop)
+
+	req := core.DownloadRequest{
+		Source: "spotify", ExternalID: "e1", Artist: "A", Title: "T",
+	}
+	job, err := m.Enqueue(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForCompletionError(t, store, job.ID)
+	got, _, err := store.Get(context.Background(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != core.DownloadRunning || !strings.Contains(got.Error, "pending upload database unavailable") {
+		t.Fatalf("job = %+v, want active with the recording error", got)
+	}
+	if got.OutputPath != "/out/e1.mp3" {
+		t.Fatalf("output path = %q, want the downloaded file retained for retry", got.OutputPath)
+	}
+	if err := m.Cancel(context.Background(), job.ID); err == nil {
+		t.Fatal("Cancel discarded an output awaiting its pending-upload record")
+	}
+	if ids, err := m.ClearFinished(context.Background()); err != nil || len(ids) != 0 {
+		t.Fatalf("ClearFinished removed pending output: ids=%v err=%v", ids, err)
+	}
+	fail.Store(false)
+	joined, err := m.Enqueue(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if joined.ID != job.ID || joined.Status != core.DownloadCompleted || dl.starts() != 1 {
+		t.Fatalf("re-Add = %+v, downloader starts = %d; want same completed job and one download", joined, dl.starts())
+	}
+}
+
+func TestCompletionHookFailureRecoversAfterRestartWithoutRedownload(t *testing.T) {
+	store := newMemStore()
+	dl := &fakeDL{name: "dl", canDownload: true}
+	newManager := func() *Manager {
+		return NewManager(Config{Workers: 1, DebounceWindow: time.Hour, ReconcileEvery: time.Hour},
+			wrapDownloaders([]Downloader{dl}), store, events.New(), &fakeScanner{},
+			&fakeRematcher{trackID: "t1"}, &fakeVersion{v: 1}, RealClock{}, nil, nil)
+	}
+	m := newManager()
+	m.SetCompletionHook(func(context.Context, core.DownloadRequest, string) error {
+		return errors.New("pending upload database unavailable")
+	})
+	m.Start()
+	job, err := m.Enqueue(context.Background(), core.DownloadRequest{Source: "spotify", ExternalID: "e1", Artist: "A", Title: "T"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForCompletionError(t, store, job.ID)
+	m.Stop()
+
+	restarted := newManager()
+	restarted.SetCompletionHook(func(_ context.Context, _ core.DownloadRequest, path string) error {
+		if path != "/out/e1.mp3" {
+			t.Errorf("recovered output path = %q", path)
+		}
+		return nil
+	})
+	restarted.Start()
+	t.Cleanup(restarted.Stop)
+	waitForStatus(t, store, job.ID, core.DownloadCompleted)
+	if dl.starts() != 1 {
+		t.Fatalf("downloader started %d times, want once", dl.starts())
+	}
+}
+
+func TestCompletionHookFailureRetainsOutputWhenJobUpdateAlsoFails(t *testing.T) {
+	store := &completionWriteStore{memStore: newMemStore()}
+	dl := &fakeDL{name: "dl", canDownload: true}
+	m := NewManager(Config{Workers: 1, DebounceWindow: time.Hour, ReconcileEvery: 10 * time.Millisecond},
+		wrapDownloaders([]Downloader{dl}), store, events.New(), &fakeScanner{},
+		&fakeRematcher{trackID: "t1"}, &fakeVersion{v: 1}, RealClock{}, nil, nil)
+	var failHook atomic.Bool
+	failHook.Store(true)
+	m.SetCompletionHook(func(context.Context, core.DownloadRequest, string) error {
+		if failHook.Load() {
+			store.failUpdate.Store(true)
+			return errors.New("pending upload database unavailable")
+		}
+		return nil
+	})
+	m.Start()
+	t.Cleanup(m.Stop)
+	job, err := m.Enqueue(context.Background(), core.DownloadRequest{Source: "spotify", ExternalID: "e1", Artist: "A", Title: "T"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	pending := false
+	for time.Now().Before(deadline) {
+		m.mu.Lock()
+		_, pending = m.unrecorded[job.ID]
+		m.mu.Unlock()
+		if pending {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !pending {
+		t.Fatal("download output was not retained in memory during the store outage")
+	}
+	stored, _, err := store.Get(context.Background(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.OutputPath != "" {
+		t.Fatalf("output path unexpectedly persisted during outage: %q", stored.OutputPath)
+	}
+	store.failUpdate.Store(false)
+	failHook.Store(false)
+	waitForStatus(t, store, job.ID, core.DownloadCompleted)
+	if dl.starts() != 1 {
+		t.Fatalf("downloader started %d times, want once", dl.starts())
+	}
+}
+
+func waitForCompletionError(t *testing.T, store JobStore, id string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		job, ok, err := store.Get(context.Background(), id)
+		if err == nil && ok && strings.HasPrefix(job.Error, completionErrorPrefix) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("job %s did not retain its completion error", id)
 }
 
 func TestEnqueueNoDownloaderAccepts(t *testing.T) {

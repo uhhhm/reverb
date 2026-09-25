@@ -274,12 +274,32 @@ type localFile struct {
 	title, artist, album, isrc string
 }
 
-// localFiles is this device's own audio files, keyed on their path.
-func (k *Keeper) localFiles(ctx context.Context) (map[string]localFile, error) {
+// localManifestFiles is every file this device's manifest lists, keyed on its
+// path, whether or not it has readable audio tags yet.
+func (k *Keeper) localManifestFiles(ctx context.Context) (map[string]file, error) {
 	rows, err := k.cfg.Store.ListFileManifests(ctx)
 	if err != nil {
 		return nil, err
 	}
+	out := map[string]file{}
+	for _, r := range rows {
+		if r.DeviceID == k.cfg.FileDeviceID {
+			out[r.RelPath] = file{rel: r.RelPath, hash: r.ContentHash, size: r.Size}
+		}
+	}
+	return out, nil
+}
+
+// localFiles is this device's own tagged audio files, keyed on their path.
+func (k *Keeper) localFiles(ctx context.Context) (map[string]localFile, error) {
+	files, err := k.localManifestFiles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return k.taggedLocalFiles(ctx, files)
+}
+
+func (k *Keeper) taggedLocalFiles(ctx context.Context, files map[string]file) (map[string]localFile, error) {
 	tagRows, err := k.cfg.Store.ListFileTags(ctx)
 	if err != nil {
 		return nil, err
@@ -289,16 +309,16 @@ func (k *Keeper) localFiles(ctx context.Context) (map[string]localFile, error) {
 		tags[t.ContentHash] = t
 	}
 	out := map[string]localFile{}
-	for _, r := range rows {
-		if r.DeviceID != k.cfg.FileDeviceID || !audiotag.IsAudio(r.RelPath) {
+	for rel, f := range files {
+		if !audiotag.IsAudio(rel) {
 			continue
 		}
-		t, ok := tags[r.ContentHash]
+		t, ok := tags[f.hash]
 		if !ok {
 			continue
 		}
-		out[r.RelPath] = localFile{
-			file:  file{rel: r.RelPath, hash: r.ContentHash, size: r.Size},
+		out[rel] = localFile{
+			file:  f,
 			title: t.Title, artist: t.Artist, album: t.Album, isrc: t.Isrc,
 		}
 	}

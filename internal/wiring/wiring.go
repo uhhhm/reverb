@@ -579,7 +579,7 @@ type Builder struct {
 	canonicalMinter playlistsync.CanonicalMinter
 	// downloadCompletion is applied to every manager Build creates, including
 	// replacement managers produced by live adapter reloads.
-	downloadCompletion func(context.Context, core.DownloadRequest, string)
+	downloadCompletion func(context.Context, core.DownloadRequest, string) error
 	// downloadLinked is applied to every manager Build creates, like
 	// downloadCompletion.
 	downloadLinked func(context.Context, string)
@@ -616,10 +616,11 @@ func (b *Builder) SetCanonicalMinter(m playlistsync.CanonicalMinter) {
 	b.canonicalMinter = m
 }
 
-// SetDownloadCompletionHook installs the observer copied into every download
-// manager constructed from this builder. It may be set after the initial Build;
-// the composition root attaches the same hook to that first manager directly.
-func (b *Builder) SetDownloadCompletionHook(fn func(context.Context, core.DownloadRequest, string)) {
+// SetDownloadCompletionHook installs the completion gate copied into every
+// download manager constructed from this builder. It may be set after the
+// initial Build; the composition root attaches the same hook to that first
+// manager directly.
+func (b *Builder) SetDownloadCompletionHook(fn func(context.Context, core.DownloadRequest, string) error) {
 	b.downloadCompletion = fn
 }
 

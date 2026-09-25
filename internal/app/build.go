@@ -187,6 +187,18 @@ func (r *Runtime) goLoop(ctx context.Context, name string, fn func()) {
 	}()
 }
 
+// goTask starts one background task and enrols it in r.bg. Unlike goLoop it
+// runs fn once, with no restart after a panic. Every task StartBackground
+// spawns uses the store; one left out of r.bg would outlive Close and write to
+// a store that is closed, or whose directory a test has already removed.
+func (r *Runtime) goTask(fn func()) {
+	r.bg.Add(1)
+	go func() {
+		defer r.bg.Done()
+		fn()
+	}()
+}
+
 // Build opens the store, runs migrations, constructs every service, and returns
 // them wired into an api.Deps. It starts nothing — see StartBackground — so that
 // constructing the root has no side effects, which is what lets a test build it
@@ -457,19 +469,25 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	playSvc.WithEmitter(emitter)
 	deps.SyncEmit = emitter
 	deps.RecommendationEvents = recommendationevent.New(st.Q(), emitter, time.Now, uuid.NewString)
-	// onDownloaded observes where a completed download landed; a phone keeps
-	// it pending upload (set once its keeper exists, below).
-	var onDownloaded func(ctx context.Context, path string)
-	downloadCompletion := func(ctx context.Context, req core.DownloadRequest, path string) {
-		if onDownloaded != nil && path != "" {
-			onDownloaded(ctx, path)
+	// onDownloaded durably records where a completed download landed; a phone
+	// keeps it pending upload (set once its keeper exists, below).
+	var onDownloaded func(ctx context.Context, path string) error
+	downloadCompletion := func(ctx context.Context, req core.DownloadRequest, path string) error {
+		if onDownloaded != nil {
+			if path == "" {
+				return fmt.Errorf("download did not report a file for pending upload")
+			}
+			if err := onDownloaded(ctx, path); err != nil {
+				return err
+			}
 		}
 		if req.RecommendationOrigin == "" {
-			return
+			return nil
 		}
 		if err := deps.RecommendationEvents.Record(ctx, req.InitiatedBy, string(req.RecommendationOrigin), recommendationevent.ActionLibrary); err != nil {
 			log.Printf("recommendation library attribution: %v", err)
 		}
+		return nil
 	}
 	builder.SetDownloadCompletionHook(downloadCompletion)
 	if bundle.Manager != nil {
@@ -618,10 +636,11 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		files.WithProgress(offline.Progress)
 		deps.OfflineKeeper = offline
 		// A Download made here stays until a paired device holds it.
-		onDownloaded = func(ctx context.Context, path string) {
+		onDownloaded = func(ctx context.Context, path string) error {
 			if err := offline.AddPending(ctx, path); err != nil {
-				log.Printf("pending upload %s: %v", path, err)
+				return fmt.Errorf("record pending upload %s: %w", path, err)
 			}
+			return nil
 		}
 	}
 	// Renaming the library's existing files is what lets a Windows device pair
@@ -868,7 +887,7 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 	// backfill then heals the boot race, where the backfill at Start() fired
 	// before Navidrome was up.
 	if r.Bundle.Supervisor != nil && r.Bundle.Manager != nil {
-		go WaitReadyThenBackfill(ctx, r.Bundle.Supervisor.Ready, r.Bundle.Manager.BackfillUnlinked)
+		r.goTask(func() { WaitReadyThenBackfill(ctx, r.Bundle.Supervisor.Ready, r.Bundle.Manager.BackfillUnlinked) })
 	}
 	// Replication only ever carried referenced catalog entities before, so a
 	// library built up over months would reach a newly paired device incomplete.
@@ -878,39 +897,40 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 	// ensure catalog entities in the sync log. A bundled Navidrome is enumerated
 	// only once it is serving, or the boot pass would find nothing.
 	if r.SyncEmit != nil {
-		go func() {
+		r.goTask(func() {
 			r.SyncEmit.BackfillHistory(ctx, r.Store.Q(), r.Playlists)
 			if sup := r.Bundle.Supervisor; sup != nil && sup.Health() != embedded.HealthExternal {
 				WaitReadyThenBackfill(ctx, sup.Ready, func() { r.publishLibrary(ctx) })
 				return
 			}
 			r.publishLibrary(ctx)
-		}()
+		})
 	}
 	if r.Bundle.Sync != nil {
-		go playlistsync.NewScheduler(r.Bundle.Sync, syncInterval).Run(ctx)
+		scheduler := playlistsync.NewScheduler(r.Bundle.Sync, syncInterval)
+		r.goTask(func() { scheduler.Run(ctx) })
 		// Background so startup is not blocked; guarded by a settings flag. A
 		// phone skips it: playlist files that reached its folder from a peer
 		// are that peer's, and adopting them would replicate duplicates.
-		go func() {
+		r.goTask(func() {
 			if r.profile == ProfilePhone {
 				return
 			}
 			if err := r.Bundle.Sync.MigrateLibraryPlaylists(ctx); err != nil {
 				logf("WARNING: library playlist migration: %v", err)
 			}
-		}()
+		})
 	}
 	if r.Scrobble != nil {
-		go r.Scrobble.RunWorker(ctx, 30*time.Second)
+		r.goTask(func() { r.Scrobble.RunWorker(ctx, 30*time.Second) })
 	}
 	if r.TasteHistory != nil {
-		go r.TasteHistory.Run(ctx, time.Hour)
+		r.goTask(func() { r.TasteHistory.Run(ctx, time.Hour) })
 	}
 	// Mixes refresh at local midnight on their weekday; a device that was
 	// asleep then catches up here on launch.
 	if r.Recommend != nil {
-		go r.Recommend.RunSchedule(ctx)
+		r.goTask(func() { r.Recommend.RunSchedule(ctx) })
 	}
 }
 

@@ -24,6 +24,7 @@ type fakeManager struct {
 	chapters      []core.Chapter         // returned by ListChapters
 	chaptersErr   error
 	enqueueCalls  int // incremented on every Enqueue call
+	enqueueErrAt  int // one-based call that fails; zero never fails
 	canceled      []string
 	retried       []string
 	lastRetryURL  string // manualURL from the most recent Retry call
@@ -36,6 +37,9 @@ func newFakeManager() *fakeManager { return &fakeManager{jobs: map[string]core.D
 
 func (m *fakeManager) Enqueue(_ context.Context, req core.DownloadRequest) (core.DownloadJob, error) {
 	m.enqueueCalls++
+	if m.enqueueErrAt == m.enqueueCalls {
+		return core.DownloadJob{}, errors.New("queue database unavailable")
+	}
 	m.lastReq = req
 	m.allReqs = append(m.allReqs, req)
 	j := core.DownloadJob{ID: "job-" + req.ExternalID, DedupKey: "dk", Status: core.DownloadQueued, Source: req.Source, ExternalID: req.ExternalID, PlayWhenReady: req.PlayWhenReady}

@@ -17,7 +17,7 @@ final class ShareViewController: UIViewController {
             return
         }
         components.queryItems = [URLQueryItem(name: "url", value: link)]
-        if let url = components.url, openContainingApp(url) {
+        if let url = components.url, await openContainingApp(url) {
             extensionContext?.completeRequest(returningItems: nil)
             return
         }
@@ -51,19 +51,23 @@ final class ShareViewController: UIViewController {
 
     /// An extension cannot call UIApplication.open, but the application is on
     /// its responder chain; its open method is reached through the runtime.
-    private func openContainingApp(_ url: URL) -> Bool {
-        typealias Open = @convention(c) (AnyObject, Selector, URL, NSDictionary, (@convention(block) (Bool) -> Void)?) -> Void
-        let selector = NSSelectorFromString("openURL:options:completionHandler:")
-        var responder: UIResponder? = self
-        while let current = responder {
-            if current is UIApplication, current.responds(to: selector) {
-                let open = unsafeBitCast(current.method(for: selector), to: Open.self)
-                open(current, selector, url, NSDictionary(), nil)
-                return true
+    private func openContainingApp(_ url: URL) async -> Bool {
+        await withCheckedContinuation { continuation in
+            typealias Open = @convention(c) (AnyObject, Selector, URL, NSDictionary, @convention(block) (Bool) -> Void) -> Void
+            let selector = NSSelectorFromString("openURL:options:completionHandler:")
+            var responder: UIResponder? = self
+            while let current = responder {
+                if current is UIApplication, current.responds(to: selector) {
+                    let open = unsafeBitCast(current.method(for: selector), to: Open.self)
+                    open(current, selector, url, NSDictionary()) { opened in
+                        continuation.resume(returning: opened)
+                    }
+                    return
+                }
+                responder = current.next
             }
-            responder = current.next
+            continuation.resume(returning: false)
         }
-        return false
     }
 
     private func finish(message: String) {

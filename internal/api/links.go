@@ -205,6 +205,9 @@ func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
 		if len(result.Jobs) > 1 {
 			resp["jobs"] = result.Jobs
 		}
+		if result.DownloadError != "" {
+			resp["downloadError"] = result.DownloadError
+		}
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}

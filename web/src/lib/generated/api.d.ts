@@ -5705,7 +5705,7 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description { results: [{ url, resolve?, catalogId?, playlistId?, job?, jobs?, error? }] } */
+                /** @description { results: [{ url, resolve?, catalogId?, playlistId?, job?, jobs?, downloadError?, error? }] } */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -7008,6 +7008,8 @@ export interface components {
             playlistId?: string;
             job?: components["schemas"]["DownloadJob"];
             jobs?: components["schemas"]["DownloadJob"][];
+            /** @description Why some requested downloads could not be queued after another requested action succeeded. */
+            downloadError?: string;
         };
         PendingUploads: {
             files: components["schemas"]["PendingUpload"][];

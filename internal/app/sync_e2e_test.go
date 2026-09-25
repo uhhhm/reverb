@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -39,9 +40,9 @@ type syncDevice struct {
 	dbPath   string
 	musicDir string
 	profile  Profile
-	// noDiscovery boots the device without mDNS or the DHT, the way it is
-	// across a VPN.
-	noDiscovery bool
+	// p2pPort is the device's fixed libp2p port, as a real install has, so a
+	// restarted device is back at the addresses its peers stored.
+	p2pPort int
 	// freeSpace stands in for the phone's disk.
 	freeSpace func(dir string) (int64, error)
 	// python runs a phone's yt-dlp; nil is the host's.
@@ -88,8 +89,6 @@ func fakeSubsonic(t *testing.T) *httptest.Server {
 // deviceOption adjusts a device before it first boots.
 type deviceOption func(*syncDevice)
 
-func withoutDiscovery(d *syncDevice) { d.noDiscovery = true }
-
 // withBuiltInLibrary boots a desktop whose library is its own music folder,
 // which is what a desktop that holds files and replicates them is.
 func withBuiltInLibrary(d *syncDevice) { d.builtIn = true }
@@ -100,7 +99,7 @@ func newSyncDevice(t *testing.T, name string, opts ...deviceOption) *syncDevice 
 	dbPath := filepath.Join(tmp, "reverb.db")
 	lib := fakeSubsonic(t)
 
-	d := &syncDevice{t: t, name: name, dbPath: dbPath, musicDir: filepath.Join(tmp, "music")}
+	d := &syncDevice{t: t, name: name, dbPath: dbPath, musicDir: filepath.Join(tmp, "music"), p2pPort: freeP2PPort(t)}
 	for _, o := range opts {
 		o(d)
 	}
@@ -141,7 +140,7 @@ func newSyncDevice(t *testing.T, name string, opts ...deviceOption) *syncDevice 
 func newPhoneDevice(t *testing.T, name string, opts ...deviceOption) *syncDevice {
 	t.Helper()
 	tmp := t.TempDir()
-	d := &syncDevice{t: t, name: name, dbPath: filepath.Join(tmp, "reverb.db"), musicDir: filepath.Join(tmp, "music"), profile: ProfilePhone}
+	d := &syncDevice{t: t, name: name, dbPath: filepath.Join(tmp, "reverb.db"), musicDir: filepath.Join(tmp, "music"), profile: ProfilePhone, p2pPort: freeP2PPort(t)}
 	for _, o := range opts {
 		o(d)
 	}
@@ -150,9 +149,43 @@ func newPhoneDevice(t *testing.T, name string, opts ...deviceOption) *syncDevice
 	return d
 }
 
+// freeP2PPort returns a port that is free for every listener a libp2p host
+// opens: TCP on IPv4 and IPv6, and UDP for QUIC. With a random port, TCP and
+// QUIC would each get their own and both would change on restart; a peer
+// redialling the stale QUIC address waits out the handshake timeout. The probe
+// sockets do not set SO_REUSEPORT, so a port another host already shares is
+// refused here rather than shared. Should the port be taken before the host
+// binds it, NewHost falls back to a random one: slower, never wrong.
+func freeP2PPort(t *testing.T) int {
+	t.Helper()
+	for range 20 {
+		l, err := net.Listen("tcp", ":0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := l.Addr().(*net.TCPAddr).Port
+		pc, err := net.ListenPacket("udp4", fmt.Sprintf("0.0.0.0:%d", port))
+		_ = l.Close()
+		if err != nil {
+			continue
+		}
+		_ = pc.Close()
+		return port
+	}
+	t.Fatal("no port free for both TCP and UDP")
+	return 0
+}
+
 // boot builds and starts the runtime from the device's database. The phone
 // profile derives its music folder from the data directory, so it is given no
 // download directory.
+//
+// No device starts mDNS or the DHT. Discovery would reach the real network:
+// every runtime in the process would find the others and dial them over each
+// of their interfaces while a test dials them itself, and a duplicate
+// connection whose dialer abandoned it can carry the test's stream until the
+// far side answers with a stateless reset. Devices meet only where a test
+// connects them, which is also the VPN case: the address is all there is.
 func (d *syncDevice) boot() {
 	d.t.Helper()
 	env := map[string]string{}
@@ -166,7 +199,8 @@ func (d *syncDevice) boot() {
 		DBPath:         d.dbPath,
 		Version:        "test",
 		Profile:        d.profile,
-		P2PNoDiscovery: d.noDiscovery,
+		P2PPort:        d.p2pPort,
+		P2PNoDiscovery: true,
 		FreeSpace:      d.freeSpace,
 		Python:         d.python,
 		Getenv:         func(k string) string { return env[k] },
@@ -198,6 +232,14 @@ func (d *syncDevice) boot() {
 // call issues one API request and decodes the JSON reply into out (when non-nil).
 func (d *syncDevice) call(method, path string, body any, out any) int {
 	d.t.Helper()
+	status, _ := d.do(method, path, body, out)
+	return status
+}
+
+// do is call that also returns the raw reply, so a failed assertion can show
+// the server's error.
+func (d *syncDevice) do(method, path string, body any, out any) (int, []byte) {
+	d.t.Helper()
 	var payload io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -224,14 +266,14 @@ func (d *syncDevice) call(method, path string, body any, out any) int {
 			d.t.Fatalf("%s %s %s: decode %q: %v", d.name, method, path, raw, err)
 		}
 	}
-	return resp.StatusCode
+	return resp.StatusCode, raw
 }
 
 // must is call with the status asserted.
 func (d *syncDevice) must(method, path string, body any, out any, want int) {
 	d.t.Helper()
-	if got := d.call(method, path, body, out); got != want {
-		d.t.Fatalf("%s %s %s: status %d, want %d", d.name, method, path, got, want)
+	if got, raw := d.do(method, path, body, out); got != want {
+		d.t.Fatalf("%s %s %s: status %d, want %d: %s", d.name, method, path, got, want, raw)
 	}
 }
 
@@ -730,8 +772,8 @@ func TestPhonePairsFromQRPayloadWithoutDiscovery(t *testing.T) {
 	if testing.Short() {
 		t.Skip("boots two runtimes with real libp2p hosts")
 	}
-	desktop := newSyncDevice(t, "desktop", withoutDiscovery)
-	phone := newPhoneDevice(t, "phone", withoutDiscovery)
+	desktop := newSyncDevice(t, "desktop")
+	phone := newPhoneDevice(t, "phone")
 
 	var code struct {
 		Code      string `json:"code"`

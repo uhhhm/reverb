@@ -25,7 +25,8 @@ type PendingUpload struct {
 
 // AddPending records a Download that landed at file, an absolute path in the
 // music folder or one relative to it. A path outside the folder, or a
-// directory (a downloader that names no file), is not recorded.
+// directory (a downloader that names no file), is rejected so the download
+// cannot be reported complete without a durable pending-upload row.
 func (k *Keeper) AddPending(ctx context.Context, file string) error {
 	rel := file
 	if filepath.IsAbs(file) {
@@ -36,7 +37,10 @@ func (k *Keeper) AddPending(ctx context.Context, file string) error {
 		rel = r
 	}
 	rel = filepath.ToSlash(filepath.Clean(rel))
-	if rel == "." || rel == ".." || strings.HasPrefix(rel, "../") || path.IsAbs(rel) {
+	if rel == "." {
+		return fmt.Errorf("offline set: download output %s is a directory, not a file", file)
+	}
+	if rel == ".." || strings.HasPrefix(rel, "../") || path.IsAbs(rel) {
 		return fmt.Errorf("offline set: %s is not in the music folder", file)
 	}
 	info, err := os.Stat(filepath.Join(k.cfg.MusicDir, filepath.FromSlash(rel)))
@@ -44,7 +48,7 @@ func (k *Keeper) AddPending(ctx context.Context, file string) error {
 		return err
 	}
 	if info.IsDir() {
-		return nil
+		return fmt.Errorf("offline set: download output %s is a directory, not a file", file)
 	}
 	return k.cfg.Store.UpsertPendingUpload(ctx, dbPending(rel, k.cfg.Now().UnixMilli()))
 }
@@ -56,11 +60,11 @@ func (k *Keeper) PendingUploads(ctx context.Context) ([]PendingUpload, error) {
 	if err != nil {
 		return nil, err
 	}
-	locals, err := k.localFiles(ctx)
+	sizes, err := k.localManifestFiles(ctx)
 	if err != nil {
 		return nil, err
 	}
-	sizes, err := k.localHashes(ctx)
+	locals, err := k.taggedLocalFiles(ctx, sizes)
 	if err != nil {
 		return nil, err
 	}
@@ -78,22 +82,6 @@ func (k *Keeper) PendingUploads(ctx context.Context) ([]PendingUpload, error) {
 			p.Title = strings.TrimSuffix(path.Base(r.RelPath), path.Ext(r.RelPath))
 		}
 		out = append(out, p)
-	}
-	return out, nil
-}
-
-// localHashes is every file this device's manifest lists, keyed on its path,
-// tags or not.
-func (k *Keeper) localHashes(ctx context.Context) (map[string]file, error) {
-	rows, err := k.cfg.Store.ListFileManifests(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]file{}
-	for _, r := range rows {
-		if r.DeviceID == k.cfg.FileDeviceID {
-			out[r.RelPath] = file{rel: r.RelPath, hash: r.ContentHash, size: r.Size}
-		}
 	}
 	return out, nil
 }
@@ -120,7 +108,7 @@ func (k *Keeper) settlePending(ctx context.Context, root *os.Root, keep map[stri
 	if err != nil || len(rows) == 0 {
 		return nil, false, err
 	}
-	local, err := k.localHashes(ctx)
+	local, err := k.localManifestFiles(ctx)
 	if err != nil {
 		return nil, false, err
 	}

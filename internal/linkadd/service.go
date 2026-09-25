@@ -69,23 +69,25 @@ type AddOptions struct {
 
 // AddResult is the outcome for one link.
 type AddResult struct {
-	URL        string                     `json:"url"`
-	Resolve    *linkresolve.ResolveResult `json:"resolve"`
-	CatalogID  string                     `json:"catalogId"`
-	PlaylistID string                     `json:"playlistId,omitempty"`
-	Job        *core.DownloadJob          `json:"job,omitempty"`
-	Jobs       []core.DownloadJob         `json:"jobs,omitempty"`
+	URL           string                     `json:"url"`
+	Resolve       *linkresolve.ResolveResult `json:"resolve"`
+	CatalogID     string                     `json:"catalogId"`
+	PlaylistID    string                     `json:"playlistId,omitempty"`
+	Job           *core.DownloadJob          `json:"job,omitempty"`
+	Jobs          []core.DownloadJob         `json:"jobs,omitempty"`
+	DownloadError string                     `json:"downloadError,omitempty"`
 }
 
 // BatchItemResult is the per-link outcome for the batch endpoint, including errors.
 type BatchItemResult struct {
-	URL        string                     `json:"url"`
-	Resolve    *linkresolve.ResolveResult `json:"resolve,omitempty"`
-	CatalogID  string                     `json:"catalogId,omitempty"`
-	PlaylistID string                     `json:"playlistId,omitempty"`
-	Job        *core.DownloadJob          `json:"job,omitempty"`
-	Jobs       []core.DownloadJob         `json:"jobs,omitempty"`
-	Error      string                     `json:"error,omitempty"`
+	URL           string                     `json:"url"`
+	Resolve       *linkresolve.ResolveResult `json:"resolve,omitempty"`
+	CatalogID     string                     `json:"catalogId,omitempty"`
+	PlaylistID    string                     `json:"playlistId,omitempty"`
+	Job           *core.DownloadJob          `json:"job,omitempty"`
+	Jobs          []core.DownloadJob         `json:"jobs,omitempty"`
+	DownloadError string                     `json:"downloadError,omitempty"`
+	Error         string                     `json:"error,omitempty"`
 }
 
 // Service owns the planning.
@@ -271,23 +273,9 @@ func (s *Service) Add(ctx context.Context, opts AddOptions) (*AddResult, error) 
 	if err != nil {
 		return nil, err
 	}
-	catalogID, err := s.ensureCatalog(ctx, kind, res.Source, res.ExternalID, res.Title, res.Artist, res.Album)
-	if err != nil {
-		return nil, err
-	}
-	trackIDs := []string{catalogID}
-	if tracks != nil {
-		trackIDs = trackIDs[:0]
-		for _, t := range tracks {
-			id, err := s.ensureCatalog(ctx, "track", t.Source, t.ExternalID, t.Title, t.Artist, t.Album)
-			if err != nil {
-				return nil, err
-			}
-			trackIDs = append(trackIDs, id)
-		}
-	}
-
-	// Playlist handling.
+	// Validate the requested playlist and plan every download before writing
+	// catalog or playlist state. Predictable request failures must not leave a
+	// combined Add operation half-applied.
 	var playlistID string
 	if opts.PlaylistID != nil {
 		playlistID = strings.TrimSpace(*opts.PlaylistID)
@@ -301,11 +289,6 @@ func (s *Service) Add(ctx context.Context, opts AddOptions) (*AddResult, error) 
 				return nil, fmt.Errorf("%w: %v", ErrPlaylistValidate, err)
 			}
 		}
-		// Ownership check is performed by the HTTP layer (playlistAccessAllowed);
-		// the service only validates existence. Emit sync for membership.
-		for _, id := range trackIDs {
-			s.emitPlaylistTrack(ctx, playlistID, id)
-		}
 	}
 
 	shouldDownload := true
@@ -313,10 +296,10 @@ func (s *Service) Add(ctx context.Context, opts AddOptions) (*AddResult, error) 
 		shouldDownload = *opts.Download
 	}
 
-	var job *core.DownloadJob
-	var jobs []core.DownloadJob
+	var dl Downloader
+	var reqs []core.DownloadRequest
 	if shouldDownload {
-		dl, _ := s.getDownloader()
+		dl, _ = s.getDownloader()
 		if dl == nil {
 			return nil, ErrNoDownloader
 		}
@@ -338,7 +321,6 @@ func (s *Service) Add(ctx context.Context, opts AddOptions) (*AddResult, error) 
 		if opts.InitiatedBy != "" {
 			base.InitiatedBy = opts.InitiatedBy
 		}
-		var reqs []core.DownloadRequest
 		if tracks != nil {
 			for _, t := range tracks {
 				req := base
@@ -353,22 +335,57 @@ func (s *Service) Add(ctx context.Context, opts AddOptions) (*AddResult, error) 
 				return nil, derr
 			}
 		}
-		for _, req := range reqs {
-			j, err := dl.Enqueue(ctx, req)
+	}
+
+	catalogID, err := s.ensureCatalog(ctx, kind, res.Source, res.ExternalID, res.Title, res.Artist, res.Album)
+	if err != nil {
+		return nil, err
+	}
+	trackIDs := []string{catalogID}
+	if tracks != nil {
+		trackIDs = trackIDs[:0]
+		for _, t := range tracks {
+			id, err := s.ensureCatalog(ctx, "track", t.Source, t.ExternalID, t.Title, t.Artist, t.Album)
 			if err != nil {
 				return nil, err
 			}
-			jobs = append(jobs, j)
+			trackIDs = append(trackIDs, id)
 		}
-		if len(jobs) > 0 {
-			job = &jobs[0]
+	}
+	if playlistID != "" {
+		// Ownership was checked by the HTTP layer; emit durable membership only
+		// after every predictable download validation succeeded.
+		for _, id := range trackIDs {
+			s.emitPlaylistTrack(ctx, playlistID, id)
 		}
 	}
 
+	var job *core.DownloadJob
+	var jobs []core.DownloadJob
+	var downloadError string
+	for _, req := range reqs {
+		j, err := dl.Enqueue(ctx, req)
+		if err != nil {
+			// Enqueue can still fail on persistence after validation. Preserve and
+			// report any successful playlist mutation or earlier jobs instead of
+			// claiming the whole operation failed without their identities.
+			if playlistID == "" && len(jobs) == 0 {
+				return nil, err
+			}
+			downloadError = err.Error()
+			break
+		}
+		jobs = append(jobs, j)
+	}
+	if len(jobs) > 0 {
+		job = &jobs[0]
+	}
+
 	result := &AddResult{
-		URL:       rawURL,
-		Resolve:   res,
-		CatalogID: catalogID,
+		URL:           rawURL,
+		Resolve:       res,
+		CatalogID:     catalogID,
+		DownloadError: downloadError,
 	}
 	if playlistID != "" {
 		result.PlaylistID = playlistID
@@ -509,12 +526,13 @@ func (s *Service) AddBatch(ctx context.Context, optsList []AddOptions) []BatchIt
 				return nil
 			}
 			out[i] = BatchItemResult{
-				URL:        opts.URL,
-				Resolve:    res.Resolve,
-				CatalogID:  res.CatalogID,
-				PlaylistID: res.PlaylistID,
-				Job:        res.Job,
-				Jobs:       res.Jobs,
+				URL:           opts.URL,
+				Resolve:       res.Resolve,
+				CatalogID:     res.CatalogID,
+				PlaylistID:    res.PlaylistID,
+				Job:           res.Job,
+				Jobs:          res.Jobs,
+				DownloadError: res.DownloadError,
 			}
 			return nil
 		})

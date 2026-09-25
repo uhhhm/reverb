@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -177,6 +178,14 @@ func pendingKeeper(t *testing.T) (k *offlineset.Keeper, q *db.Queries, dir strin
 		t.Fatal(err)
 	}
 	return k, q, dir, files
+}
+
+func TestAddPendingRejectsDownloaderDirectoryFallback(t *testing.T) {
+	k, _, dir, _ := pendingKeeper(t)
+	err := k.AddPending(context.Background(), dir)
+	if err == nil || !strings.Contains(err.Error(), "is a directory") {
+		t.Fatalf("AddPending(directory) error = %v, want a directory error", err)
+	}
 }
 
 // A Download made on the phone stays until a paired device's manifest shows

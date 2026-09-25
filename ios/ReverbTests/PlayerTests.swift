@@ -71,6 +71,52 @@ final class PlayerTests: XCTestCase {
         player.pause()
     }
 
+    func testExternalTrackMetadataBuildsAuthenticatedStreamRequest() throws {
+        let track = Player.resolvedTrack(
+            source: "youtube", externalId: "video/id", title: "A title", artist: "An artist",
+            album: "", durationMs: 1234, libraryId: nil, coverArtId: nil,
+            coverUrl: "https://example.com/cover.jpg"
+        )
+        let external = try XCTUnwrap(Player.externalStream(track))
+        XCTAssertEqual(external.source, "youtube")
+        XCTAssertEqual(external.externalId, "video/id")
+
+        let core = LocalCore(port: 4321, secret: "launch-secret")
+        let url = core.externalStreamURL(
+            source: external.source, externalId: external.externalId,
+            artist: track.artist, title: track.title
+        )
+        XCTAssertEqual(url.path, "/api/v1/external/stream/youtube/video/id")
+        XCTAssertEqual(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+                       [URLQueryItem(name: "artist", value: "An artist"), URLQueryItem(name: "title", value: "A title")])
+        XCTAssertEqual(core.request(url).value(forHTTPHeaderField: LocalCore.secretHeader), "launch-secret")
+    }
+
+    func testApplyingQueuePrewarmsUpcomingExternalTrack() throws {
+        let url = try fixture()
+        var prewarmed: [PlayerTrack] = []
+        let player = Player(core: CoreHost(), streamURL: { _ in url }) { track, _ in
+            prewarmed.append(track)
+        }
+        let external = Player.externalTrack(
+            source: "deezer", externalId: "next", title: "Next", artist: "Artist",
+            album: "Album", durationMs: 1000
+        )
+        let state = QueueState(
+            entries: [
+                .init(id: "one", origin: .listener, track: .init(id: "local", title: "Local", durationMs: 1000)),
+                .init(id: "two", origin: .listener, track: external),
+            ],
+            index: 0, shuffle: false, _repeat: .off, upNext: [], playId: 1, finished: false, revision: 1
+        )
+
+        player.apply(state)
+
+        XCTAssertEqual(prewarmed.count, 1)
+        XCTAssertEqual(Player.externalStream(prewarmed[0])?.externalId, "next")
+        player.pause()
+    }
+
     func testFinishedQueueReleasesMedia() throws {
         let url = try fixture()
         let av = AVPlayer()
