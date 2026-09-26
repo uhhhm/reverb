@@ -138,7 +138,6 @@ type LinkAddService interface {
 	Resolve(ctx context.Context, rawURL string) (*linkresolve.ResolveResult, error)
 	Add(ctx context.Context, opts linkadd.AddOptions) (*linkadd.AddResult, error)
 	AddBatch(ctx context.Context, optsList []linkadd.AddOptions) []linkadd.BatchItemResult
-	SetDownloader(dl linkadd.Downloader)
 }
 
 type Deps struct {

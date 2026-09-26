@@ -151,7 +151,6 @@ func (s *Server) handleLinkAdd(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		s.deps.LinkAdd.SetDownloader(s.downloads())
 		opts := linkadd.AddOptions{
 			URL:           body.URL,
 			PlaylistID:    body.PlaylistID,
@@ -505,7 +504,6 @@ func (s *Server) handleLinkAddBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cu, _ := currentUser(r)
-	s.deps.LinkAdd.SetDownloader(s.downloads())
 	results := make([]linkadd.BatchItemResult, len(body.Items))
 	var validOpts []linkadd.AddOptions
 	var validIdx []int

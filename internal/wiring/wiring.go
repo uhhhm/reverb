@@ -27,7 +27,6 @@ import (
 	"github.com/uhhhm/reverb/internal/resolver"
 	"github.com/uhhhm/reverb/internal/search"
 	"github.com/uhhhm/reverb/internal/store/db"
-	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
 
 const (
@@ -374,13 +373,6 @@ type ServiceBundle struct {
 	// so the long-lived resolver singleton can re-match against the CURRENT adapter
 	// after a hot-reload rebuilds the bundle. Nil when no library is configured.
 	Matcher resolver.Rematcher
-	// T8 multi-device: stateless sync services.reconstructed on every
-	// Build (and thus on every live Reload). ServerDeviceID is the ensured
-	// server device id (is_server=1) for logging.
-	Pairing        *reverbsync.PairingService  // never nil after Build
-	SyncStore      *reverbsync.SyncStore       // never nil after Build
-	Deletion       *reverbsync.DeletionService // never nil after Build
-	ServerDeviceID string
 }
 
 // VersionStore is the library_version reader/writer the Manager + matcher need.
@@ -572,9 +564,9 @@ type Builder struct {
 	// reads it lazily — it is never called during Build itself, only stored so
 	// Manager/Sync can call it at runtime. Nil is safe (Manager/Sync nil-guard it).
 	resolverProvider func() BindingResolver
-	// canonicalMinter is set by SetCanonicalMinter (Task 5) so BuildSyncService can
-	// forward it to playlistsync.Service via WithCanonicalMinter. Nil-safe.
+	// canonicalMinter is shared by downloads and managed playlists. Nil-safe.
 	canonicalMinter playlistsync.CanonicalMinter
+	playlistEmitter playlistsync.Emitter
 	// downloadCompletion is applied to every manager Build creates, including
 	// replacement managers produced by live adapter reloads.
 	downloadCompletion func(context.Context, core.DownloadRequest, string) error
@@ -584,6 +576,8 @@ type Builder struct {
 	// localLibraryDir, when set, makes the library a plain folder read by the
 	// localfiles adapter; see SetLocalLibrary.
 	localLibraryDir string
+	supervisorOnce  sync.Once
+	supervisor      *embedded.Supervisor
 }
 
 // SetLocalLibrary builds the library from a plain folder of files rather than
@@ -606,18 +600,19 @@ func (b *Builder) SetResolverProvider(p func() BindingResolver) {
 	b.resolverProvider = p
 }
 
-// SetCanonicalMinter injects the catalog minter into the Builder so that
-// BuildSyncService can wire it into playlistsync.Service.WithCanonicalMinter.
-// Call this BEFORE Build (same pattern as SetResolverProvider). Nil-safe: if
-// never called, minting is silently skipped in the sync service.
+// SetCanonicalMinter supplies catalog identity to every download and playlist
+// service. Configure the Builder before the first Build.
 func (b *Builder) SetCanonicalMinter(m playlistsync.CanonicalMinter) {
 	b.canonicalMinter = m
 }
 
-// SetDownloadCompletionHook installs the completion gate copied into every
-// download manager constructed from this builder. It may be set after the
-// initial Build; the composition root attaches the same hook to that first
-// manager directly.
+// SetPlaylistEmitter supplies replication to every managed-playlist service.
+func (b *Builder) SetPlaylistEmitter(e playlistsync.Emitter) {
+	b.playlistEmitter = e
+}
+
+// SetDownloadCompletionHook installs the completion gate on every manager.
+// Configure it before the first Build, like the other bundle dependencies.
 func (b *Builder) SetDownloadCompletionHook(fn func(context.Context, core.DownloadRequest, string) error) {
 	b.downloadCompletion = fn
 }
@@ -679,17 +674,13 @@ func (b *Builder) nowMilli() int64 {
 // build downloaders into a Manager (only when downloaders AND a library are
 // present). It does NOT start the Manager — the caller controls its lifecycle.
 func (b *Builder) Build(ctx context.Context) (ServiceBundle, error) {
-	serverDeviceID, err := reverbsync.EnsureServerDevice(ctx, b.queries)
-	if err != nil {
-		log.Printf("WARNING: ensure server device: %v", err)
-	}
 	instances, err := b.queries.ListAdapterInstances(ctx)
 	if err != nil {
 		return ServiceBundle{}, err
 	}
 
 	if b.localLibraryDir != "" {
-		return b.buildLocal(ctx, serverDeviceID, instances)
+		return b.buildLocal(ctx, instances)
 	}
 
 	var bundle ServiceBundle
@@ -738,28 +729,24 @@ func (b *Builder) Build(ctx context.Context) (ServiceBundle, error) {
 	}
 	bundle.Library = libAdapter
 
-	// Bundled-Navidrome supervisor (no-op when not built-in).
-	var naviEnv []string
-	if mode == embedded.ModeBuiltIn {
-		opts := embedded.DefaultNaviOptions(b.dataDir, embedded.MusicDir(b.getenv), creds.Password)
-		opts.Address = embedded.ListenAddress(b.getenv)
-		opts.Port = embedded.Port(b.getenv)
-		naviEnv = embedded.BuildNavidromeEnv(opts)
-	}
-	// RELOAD-PATH CONTRACT: Build is called both at boot (main.go) AND on every live
-	// adapter create/update/delete (via serviceReloader.Reload). The Supervisor
-	// constructed here is only Started/Shutdown by main.go at boot; on the live-reload
-	// path the returned bundle's Supervisor is intentionally NOT started or swapped into
-	// the running process — backend-mode changes are restart-only (matching the
-	// "takes effect after a restart" UI copy). Do NOT start this supervisor on the reload
-	// path: doing so would exec a SECOND Navidrome on the same port, causing a port
-	// conflict and a broken resource invariant.
-	bundle.Supervisor = embedded.New(embedded.Options{
-		Mode:   mode,
-		Env:    naviEnv,
-		Runner: embedded.ExecRunner(b.naviBin(), filepath.Join(b.dataDir, "navidrome", "navidrome.pid")),
-		Probe:  embedded.PingProbe(embedded.BaseURL(b.getenv), nil),
+	// Backend mode changes require a restart. Construct one supervisor for the
+	// runtime; reload neither creates nor starts another Navidrome process.
+	b.supervisorOnce.Do(func() {
+		var naviEnv []string
+		if mode == embedded.ModeBuiltIn {
+			opts := embedded.DefaultNaviOptions(b.dataDir, embedded.MusicDir(b.getenv), creds.Password)
+			opts.Address = embedded.ListenAddress(b.getenv)
+			opts.Port = embedded.Port(b.getenv)
+			naviEnv = embedded.BuildNavidromeEnv(opts)
+		}
+		b.supervisor = embedded.New(embedded.Options{
+			Mode:   mode,
+			Env:    naviEnv,
+			Runner: embedded.ExecRunner(b.naviBin(), filepath.Join(b.dataDir, "navidrome", "navidrome.pid")),
+			Probe:  embedded.PingProbe(embedded.BaseURL(b.getenv), nil),
+		})
 	})
+	bundle.Supervisor = b.supervisor
 
 	// One matcher per library adapter, shared by the aggregator, the download
 	// Rematcher, AND the resolver singleton (via bundle.Matcher). A single instance
@@ -773,12 +760,11 @@ func (b *Builder) Build(ctx context.Context) (ServiceBundle, error) {
 
 	downloaders := BuildDownloaders(b.downloaderReg, instances, b.getenv)
 	b.buildServices(ctx, &bundle, libAdapter, matcher, instances, downloaders, false)
-	bundle.ServerDeviceID = serverDeviceID
 	return bundle, nil
 }
 
 // buildLocal is Build for a folder library (SetLocalLibrary).
-func (b *Builder) buildLocal(ctx context.Context, serverDeviceID string, instances []db.AdapterInstance) (ServiceBundle, error) {
+func (b *Builder) buildLocal(ctx context.Context, instances []db.AdapterInstance) (ServiceBundle, error) {
 	var bundle ServiceBundle
 	identity := localfiles.Name + ":" + b.localLibraryDir
 	if err := b.reconcileLibraryIdentity(ctx, identity); err != nil {
@@ -806,12 +792,11 @@ func (b *Builder) buildLocal(ctx context.Context, serverDeviceID string, instanc
 	// in the library as soon as it lands.
 	downloaders := buildDownloaders(b.downloaderReg, instances, b.getenv, b.localLibraryDir)
 	b.buildServices(ctx, &bundle, lib, matcher, instances, downloaders, true)
-	bundle.ServerDeviceID = serverDeviceID
 	return bundle, nil
 }
 
 // buildServices builds everything that hangs off the library: search, coverage,
-// the download manager, the playlist service and the stateless sync services.
+// the download manager and the playlist service.
 // managerWithoutDownloaders builds the manager even when no downloader is
 // configured, so the playlist service that needs it still comes up.
 func (b *Builder) buildServices(
@@ -876,6 +861,7 @@ func (b *Builder) buildServices(
 			libAdapter, // PlaylistAdder (AddTracksToPlaylist) — subsonic adapter satisfies it
 			dlResolve,  // optional resolver provider; Tasks 3-5 add call sites
 		)
+		bundle.Manager.SetCanonicalMinter(b.canonicalMinter)
 		bundle.Manager.SetCompletionHook(b.downloadCompletion)
 		bundle.Manager.SetLinkedHook(b.downloadLinked)
 		// The configured default quality tier, read per-request so a settings
@@ -912,10 +898,4 @@ func (b *Builder) buildServices(
 	if bundle.Sync != nil {
 		log.Printf("playlist sync service active")
 	}
-
-	// T8 multi-device: stateless sync services. Reconstructed on every
-	// Build so live Reload picks up the current DB state without restart.
-	bundle.Pairing = reverbsync.NewPairingService(b.queries)
-	bundle.SyncStore = reverbsync.NewSyncStore(b.queries)
-	bundle.Deletion = reverbsync.NewDeletionService(bundle.SyncStore, b.queries)
 }

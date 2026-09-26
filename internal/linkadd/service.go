@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/uhhhm/reverb/internal/core"
@@ -92,19 +91,23 @@ type BatchItemResult struct {
 
 // Service owns the planning.
 type Service struct {
-	store         LinkStore
-	syncStore     SyncStore
-	downloader    Downloader
-	chapterLister ChapterLister
-	lookup        TrackLookup
-	collections   Collections
-	deviceID      func(context.Context) (string, error)
-	now           func() time.Time
-	mu            sync.RWMutex
+	store       LinkStore
+	syncStore   SyncStore
+	downloader  func() Downloader
+	lookup      TrackLookup
+	collections Collections
+	deviceID    func(context.Context) (string, error)
+	now         func() time.Time
 }
 
 // Option configures the Service.
 type Option func(*Service)
+
+// WithDownloaderProvider reads the live manager once per Add or Plan. Configure
+// it at construction; a nil result means downloads are currently unavailable.
+func WithDownloaderProvider(get func() Downloader) Option {
+	return func(s *Service) { s.downloader = get }
+}
 
 func WithTrackLookup(l TrackLookup) Option { return func(s *Service) { s.lookup = l } }
 func WithNow(fn func() time.Time) Option   { return func(s *Service) { s.now = fn } }
@@ -125,13 +128,8 @@ func New(store LinkStore, syncStore SyncStore, dl Downloader, opts ...Option) *S
 	s := &Service{
 		store:      store,
 		syncStore:  syncStore,
-		downloader: dl,
+		downloader: func() Downloader { return dl },
 		now:        time.Now,
-	}
-	if dl != nil {
-		if cl, ok := dl.(ChapterLister); ok {
-			s.chapterLister = cl
-		}
 	}
 	for _, o := range opts {
 		o(s)
@@ -142,28 +140,13 @@ func New(store LinkStore, syncStore SyncStore, dl Downloader, opts ...Option) *S
 	return s
 }
 
-// SetDownloader updates the downloader to the live instance. Called by the API
-// layer before each Add so the planner follows hot-reloads (the Manager is swapped
-// on adapter reconfiguration without recreating the planner).
-func (s *Service) SetDownloader(dl Downloader) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.downloader = dl
-	if dl != nil {
-		if cl, ok := dl.(ChapterLister); ok {
-			s.chapterLister = cl
-		} else {
-			s.chapterLister = nil
-		}
-	} else {
-		s.chapterLister = nil
-	}
-}
-
 func (s *Service) getDownloader() (Downloader, ChapterLister) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.downloader, s.chapterLister
+	if s.downloader == nil {
+		return nil, nil
+	}
+	dl := s.downloader()
+	cl, _ := dl.(ChapterLister)
+	return dl, cl
 }
 
 // CatalogID returns the stable catalog ID for a resolved link. Shared with the
@@ -299,7 +282,8 @@ func (s *Service) Add(ctx context.Context, opts AddOptions) (*AddResult, error) 
 	var dl Downloader
 	var reqs []core.DownloadRequest
 	if shouldDownload {
-		dl, _ = s.getDownloader()
+		var cl ChapterLister
+		dl, cl = s.getDownloader()
 		if dl == nil {
 			return nil, ErrNoDownloader
 		}
@@ -331,7 +315,7 @@ func (s *Service) Add(ctx context.Context, opts AddOptions) (*AddResult, error) 
 			}
 		} else {
 			var derr error
-			if reqs, derr = s.planDownloadRequests(ctx, base, res, opts); derr != nil {
+			if reqs, derr = planDownloadRequests(ctx, base, res, opts, cl); derr != nil {
 				return nil, derr
 			}
 		}
@@ -542,7 +526,7 @@ func (s *Service) AddBatch(ctx context.Context, optsList []AddOptions) []BatchIt
 }
 
 // planDownloadRequests expands one link's request into the jobs it implies.
-func (s *Service) planDownloadRequests(ctx context.Context, base core.DownloadRequest, res *linkresolve.ResolveResult, opts AddOptions) ([]core.DownloadRequest, error) {
+func planDownloadRequests(ctx context.Context, base core.DownloadRequest, res *linkresolve.ResolveResult, opts AddOptions, cl ChapterLister) ([]core.DownloadRequest, error) {
 	start, end := strings.TrimSpace(opts.StartTime), strings.TrimSpace(opts.EndTime)
 	trimmed := start != "" || end != ""
 	if opts.SplitChapters && trimmed {
@@ -555,7 +539,6 @@ func (s *Service) planDownloadRequests(ctx context.Context, base core.DownloadRe
 		base.SectionStart, base.SectionEnd = start, end
 		return []core.DownloadRequest{base}, nil
 	}
-	_, cl := s.getDownloader()
 	if cl == nil {
 		return nil, ErrNoChapterSupport
 	}
@@ -583,5 +566,6 @@ func (s *Service) planDownloadRequests(ctx context.Context, base core.DownloadRe
 // Plan is exported for tests that want to verify request building without
 // DB/sync overhead. It is the same logic as planDownloadRequests.
 func (s *Service) Plan(ctx context.Context, base core.DownloadRequest, res *linkresolve.ResolveResult, opts AddOptions) ([]core.DownloadRequest, error) {
-	return s.planDownloadRequests(ctx, base, res, opts)
+	_, cl := s.getDownloader()
+	return planDownloadRequests(ctx, base, res, opts, cl)
 }

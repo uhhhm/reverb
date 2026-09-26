@@ -319,11 +319,55 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	resolverSvc := resolver.NewService(st.Q(), reloader.MatcherProvider(), time.Now)
 	builder.SetResolverProvider(func() wiring.BindingResolver { return resolverSvc })
 
-	// catalogSvc is backend-independent (store + time + uuid), so it is built
-	// before Build and injected into the Manager after. SetCanonicalMinter must
-	// precede Build so BuildSyncService picks it up.
+	// Catalog identity and replication outlive adapter bundles. Supply every
+	// attachment before Build so boot and reload assemble identical services.
 	catalogSvc := catalog.NewService(st.Q(), time.Now, uuid.NewString)
 	builder.SetCanonicalMinter(catalogSvc)
+
+	syncStore := reverbsync.NewSyncStore(st.Q())
+	// Everything replicated is keyed on an identity peers can agree on, and the
+	// device that authors a change has to be named. Both are resolved here, once,
+	// against the store, and handed to the emitters and the projection.
+	authorDevice := func(ctx context.Context) string {
+		id, err := reverbsync.AuthorDeviceID(ctx, st.Q())
+		if err != nil {
+			return ""
+		}
+		return id
+	}
+	emitter := syncemit.New(syncStore, catalogSvc, authorDevice)
+	catalogSvc.WithEmitter(emitter)
+	recommendationEvents := recommendationevent.New(st.Q(), emitter, time.Now, uuid.NewString)
+	// onDownloaded durably records where a completed download landed; a phone
+	// keeps it pending upload (set once its keeper exists, below).
+	var onDownloaded func(ctx context.Context, path string) error
+	downloadCompletion := func(ctx context.Context, req core.DownloadRequest, path string) error {
+		if onDownloaded != nil {
+			if path == "" {
+				return fmt.Errorf("download did not report a file for pending upload")
+			}
+			if err := onDownloaded(ctx, path); err != nil {
+				return err
+			}
+		}
+		if req.RecommendationOrigin == "" {
+			return nil
+		}
+		if err := recommendationEvents.Record(ctx, req.InitiatedBy, string(req.RecommendationOrigin), recommendationevent.ActionLibrary); err != nil {
+			log.Printf("recommendation library attribution: %v", err)
+		}
+		return nil
+	}
+	builder.SetDownloadCompletionHook(downloadCompletion)
+	// A download linked to its library track enters household browsing at once,
+	// including a track deleted earlier and downloaded again. That holds on a
+	// phone too: its Downloads are library, though its offline files are
+	// copies, which never pass through the download manager.
+	builder.SetDownloadLinkedHook(emitter.EnsureLibraryMembership)
+
+	playlistProjection := playlistcrdt.New(syncStore, wiring.NewSyncStore(st.Q()), authorDevice).
+		WithCatalogLookup(catalogSvc.Lookup)
+	builder.SetPlaylistEmitter(playlistProjection)
 
 	bundle, err := builder.Build(ctx)
 	if err != nil {
@@ -332,11 +376,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 
 	reloader.Initialize(bundle)
 
-	if bundle.Manager != nil {
-		bundle.Manager.SetCanonicalMinter(catalogSvc)
-	}
-
-	playSvc := play.NewService(st.Q(), catalogSvc, time.Now, uuid.NewString)
+	playSvc := play.NewService(st.Q(), catalogSvc, time.Now, uuid.NewString).WithEmitter(emitter)
 	statsSvc := play.NewStats(st.Q())
 
 	// cfg() reads the app key/secret from settings on every call, so an admin
@@ -354,11 +394,8 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 
 	// LinkAdd planner owns the add-from-link flow (resolve, catalog, sync,
 	// chapter planning). It reads the LIVE aggregator for Spotify enrichment.
-	syncStoreForLink := bundle.SyncStore
-	if syncStoreForLink == nil {
-		syncStoreForLink = reverbsync.NewSyncStore(st.Q())
-	}
 	linkOpts := []linkadd.Option{
+		linkadd.WithDownloaderProvider(func() linkadd.Downloader { return reloader.Current().Downloads }),
 		linkadd.WithTrackLookup(ProviderLookup{Get: reloader.TrackLookupProvider()}),
 		linkadd.WithDeviceID(func(ctx context.Context) (string, error) {
 			return reverbsync.AuthorDeviceID(ctx, st.Q())
@@ -369,7 +406,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	if phone {
 		linkOpts = append(linkOpts, linkadd.WithCollections(ProviderCollections{Get: reloader.TrackLookupProvider()}))
 	}
-	linkAddSvc := linkadd.New(st.Q(), syncStoreForLink, bundle.Manager, linkOpts...)
+	linkAddSvc := linkadd.New(st.Q(), syncStore, nil, linkOpts...)
 
 	// Uploaded album and track art lives beside the database rather than in the
 	// music library, which Reverb never writes to. Blobs are addressed by content
@@ -398,7 +435,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		Resolver:      resolverSvc,
 		Catalog:       st.Q(),
 		CatalogBrowse: st.Q(),
-		Deletion:      bundle.Deletion,
+		Deletion:      reverbsync.NewDeletionService(syncStore, st.Q()),
 		Overrides:     override.New(st.Q()),
 		Entities:      override.NewEntities(st.Q()),
 		Covers:        coverSvc,
@@ -415,15 +452,17 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 				UserAgent: "Reverb/" + opts.Version + " (https://github.com/uhhhm/reverb)",
 			},
 		},
-		Pairing:      bundle.Pairing,
-		SyncStore:    bundle.SyncStore,
-		PairingStore: st.Q(),
-		DeviceKeys:   st.Q(),
-		PairingDB:    st.DB(),
-		OfflineSet:   st.Q(),
-		LinkStore:    st.Q(),
-		LinkAdd:      linkAddSvc,
-		FileStore:    st.Q(),
+		Pairing:              reverbsync.NewPairingService(st.Q()),
+		SyncStore:            syncStore,
+		PairingStore:         st.Q(),
+		DeviceKeys:           st.Q(),
+		PairingDB:            st.DB(),
+		OfflineSet:           st.Q(),
+		LinkStore:            st.Q(),
+		LinkAdd:              linkAddSvc,
+		FileStore:            st.Q(),
+		SyncEmit:             emitter,
+		RecommendationEvents: recommendationEvents,
 	}
 	// Every player plays the core's queue. Each change is also announced on the
 	// event bus (session and revision only), for a client that did not make it.
@@ -463,60 +502,6 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 			opts.Getenv,
 			extstream.WithStore(st.Q()),
 		)
-	}
-
-	if deps.Pairing == nil {
-		deps.Pairing = reverbsync.NewPairingService(st.Q())
-	}
-	if deps.SyncStore == nil {
-		deps.SyncStore = reverbsync.NewSyncStore(st.Q())
-	}
-	// Everything replicated is keyed on an identity peers can agree on, and the
-	// device that authors a change has to be named. Both are resolved here, once,
-	// against the store, and handed to the emitters and the projection.
-	authorDevice := func(ctx context.Context) string {
-		id, err := reverbsync.AuthorDeviceID(ctx, st.Q())
-		if err != nil {
-			return ""
-		}
-		return id
-	}
-	emitter := syncemit.New(deps.SyncStore, catalogSvc, authorDevice)
-	catalogSvc.WithEmitter(emitter)
-	playSvc.WithEmitter(emitter)
-	deps.SyncEmit = emitter
-	deps.RecommendationEvents = recommendationevent.New(st.Q(), emitter, time.Now, uuid.NewString)
-	// onDownloaded durably records where a completed download landed; a phone
-	// keeps it pending upload (set once its keeper exists, below).
-	var onDownloaded func(ctx context.Context, path string) error
-	downloadCompletion := func(ctx context.Context, req core.DownloadRequest, path string) error {
-		if onDownloaded != nil {
-			if path == "" {
-				return fmt.Errorf("download did not report a file for pending upload")
-			}
-			if err := onDownloaded(ctx, path); err != nil {
-				return err
-			}
-		}
-		if req.RecommendationOrigin == "" {
-			return nil
-		}
-		if err := deps.RecommendationEvents.Record(ctx, req.InitiatedBy, string(req.RecommendationOrigin), recommendationevent.ActionLibrary); err != nil {
-			log.Printf("recommendation library attribution: %v", err)
-		}
-		return nil
-	}
-	builder.SetDownloadCompletionHook(downloadCompletion)
-	if bundle.Manager != nil {
-		bundle.Manager.SetCompletionHook(downloadCompletion)
-	}
-	// A download linked to its library track enters household browsing at once,
-	// including a track deleted earlier and downloaded again. That holds on a
-	// phone too: its Downloads are library, though its offline files are
-	// copies, which never pass through the download manager.
-	builder.SetDownloadLinkedHook(emitter.EnsureLibraryMembership)
-	if bundle.Manager != nil {
-		bundle.Manager.SetLinkedHook(emitter.EnsureLibraryMembership)
 	}
 
 	// Not interested marks replicate through the change log; the projection
@@ -604,12 +589,6 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		}
 	})
 
-	playlistProjection := playlistcrdt.New(deps.SyncStore, wiring.NewSyncStore(st.Q()), authorDevice).
-		WithCatalogLookup(catalogSvc.Lookup)
-	if bundle.Sync != nil {
-		bundle.Sync.WithEmitter(playlistProjection)
-	}
-
 	// Without a materializer, everything replicated would land in the change log
 	// and stay invisible: nothing would write a peer's rename, playlist or play
 	// into the tables the app reads.
@@ -683,18 +662,15 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		deps.PortableMigration = portableMigration
 	}
 
-	newMaterializer := func() *materialize.Service {
-		return materialize.New(deps.Overrides, deps.Crop).
-			WithFiles(files).
-			WithCatalog(catalogSvc).
-			WithPlaylists(playlistProjection).
-			WithTrackStore(st.Q()).
-			WithEntities(deps.Entities).
-			WithCovers(coverSvc).
-			WithNotInterested(marks).
-			WithTasteSettings(tasteSettings)
-	}
-	projector := newMaterializer()
+	projector := materialize.New(deps.Overrides, deps.Crop).
+		WithFiles(files).
+		WithCatalog(catalogSvc).
+		WithPlaylists(playlistProjection).
+		WithTrackStore(st.Q()).
+		WithEntities(deps.Entities).
+		WithCovers(coverSvc).
+		WithNotInterested(marks).
+		WithTasteSettings(tasteSettings)
 	deps.SyncStore.SetMaterializer(projector)
 	notifyProjection := func() {
 		bus.Publish(events.Event{Topic: "library.updated", Payload: core.LibraryUpdatedEvent{}})
@@ -705,10 +681,6 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		}
 	}
 	deps.SyncStore.SetAfterProjection(notifyProjection)
-	if syncStoreForLink != deps.SyncStore {
-		syncStoreForLink.SetMaterializer(newMaterializer())
-		syncStoreForLink.SetAfterProjection(notifyProjection)
-	}
 	// Only set an interface field when the concrete service is present, or it
 	// becomes a non-nil interface wrapping a nil pointer.
 	if bundle.Aggregator != nil {
@@ -731,12 +703,12 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	}
 	if bundle.Supervisor != nil {
 		sup := bundle.Supervisor
-		// Boot-bound: backend-mode changes are restart-only, so the bundle is
-		// immutable after wiring and the unsynchronised bundle.Library read is safe.
+		// Backend-mode changes are restart-only, so the supervisor keeps
+		// its boot mode; adapter availability is read live.
 		deps.LibraryStatus = func() (string, string) {
 			h := sup.Health()
 			if h == embedded.HealthExternal {
-				if bundle.Library != nil {
+				if reloader.Current().Library != nil {
 					return "external", "ready"
 				}
 				return "external", "unconfigured"
@@ -973,12 +945,7 @@ func (r *Runtime) publishLibrary(ctx context.Context) {
 	if r.profile == ProfilePhone {
 		return
 	}
-	library := r.Bundle.Library
-	if r.Reloader != nil {
-		if current := r.Reloader.Current().Library; current != nil {
-			library = current
-		}
-	}
+	library := r.Reloader.Current().Library
 	if browser, ok := library.(syncemit.LibraryBrowser); ok {
 		r.SyncEmit.PublishLibrary(ctx, browser, r.catalog)
 	}
@@ -994,7 +961,8 @@ func (r *Runtime) CopySpotifyCredentials(ctx context.Context) (p2p.SearchCredent
 }
 
 func (r *Runtime) openDelegatedCover(ctx context.Context, catalogID string, size int) (core.CoverArt, error) {
-	if r.Deps.Resolver == nil || r.Bundle.Library == nil {
+	library := r.Reloader.Current().Library
+	if r.Deps.Resolver == nil || library == nil {
 		return core.CoverArt{}, core.ErrLibraryItemNotFound
 	}
 	addr, err := r.Deps.Resolver.Resolve(ctx, catalogID)
@@ -1004,7 +972,7 @@ func (r *Runtime) openDelegatedCover(ctx context.Context, catalogID string, size
 	if !addr.Found || addr.CoverArtID == "" {
 		return core.CoverArt{}, core.ErrLibraryItemNotFound
 	}
-	return r.Bundle.Library.CoverArt(ctx, addr.CoverArtID, size)
+	return library.CoverArt(ctx, addr.CoverArtID, size)
 }
 
 func (r *Runtime) spotifyCredentials(ctx context.Context) (p2p.SearchCredentials, error) {

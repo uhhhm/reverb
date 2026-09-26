@@ -223,6 +223,7 @@ func (b *Builder) BuildSyncService(
 		}
 	}
 	svc := playlistsync.NewService(src, matcher, mgr, store, lib, nowUnix, uuid.NewString, syncResolve)
+	svc.WithEmitter(b.playlistEmitter)
 	svc.WithLibraryReader(lib)
 	svc.WithSettingsStore(settings)
 	// Task 5: wire the canonical minter so AddTracks mints stable catalog ids for
