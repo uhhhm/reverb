@@ -32,7 +32,7 @@ type manifestResponse struct {
 // guard is required for the same reason as the file handler: the manifest is a
 // listing of the whole music library and must not go to strangers on the LAN.
 func RegisterManifestHandler(h host.Host, store FileStore, localDeviceID string, guard *Guard) {
-	h.SetStreamHandler(manifestProtocol, safeHandler("manifest", func(s network.Stream) {
+	registerCompatible(h, manifestProtocol, safeHandler("manifest", func(s network.Stream) {
 		defer s.Close()
 		_ = s.SetDeadline(time.Now().Add(30 * time.Second))
 		if store == nil || guard == nil || localDeviceID == "" {
@@ -91,7 +91,7 @@ func RequestManifest(ctx context.Context, h host.Host, pid peer.ID) (manifestRes
 	var resp manifestResponse
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	s, err := h.NewStream(ctx, pid, manifestProtocol)
+	s, err := h.NewStream(ctx, pid, SupportedProtocols(manifestProtocol)...)
 	if err != nil {
 		return resp, err
 	}

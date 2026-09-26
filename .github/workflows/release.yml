@@ -18,6 +18,9 @@ permissions:
 jobs:
   verify-release:
     name: Verify release source
+    # ios-source and ytdlp-* are channel releases whose assets other jobs
+    # publish; they are never builds of their own.
+    if: github.event.release.tag_name != 'ios-source' && !startsWith(github.event.release.tag_name, 'ytdlp-')
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.source.outputs.sha }}
@@ -154,3 +157,68 @@ jobs:
         with:
           tag_name: ${{ github.event.release.tag_name }}
           generate_release_notes: true
+
+  # The iPhone app (ADR 0004): an unsigned IPA that SideStore or AltStore signs
+  # with the owner's Apple ID, or the owner signs with a paid account. Stable
+  # releases also refresh the source at the stable URL
+  # https://github.com/<repo>/releases/download/ios-source/source.json, which the
+  # phone's update banner and the owner's SideStore read.
+  build-ios:
+    name: Build unsigned IPA
+    needs: verify-release
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify-release.outputs.sha }}
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build the embedded tools and the core
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          make ios-native
+          make ios-core VERSION="${TAG#v}"
+          make ios-project
+      - name: Archive without signing
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="${TAG#v}"
+          # CFBundleShortVersionString is numeric; a prerelease suffix stays in the tag.
+          marketing="${version%%-*}"
+          cd ios
+          xcodebuild archive -project Reverb.xcodeproj -scheme Reverb -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/Reverb.xcarchive" \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            MARKETING_VERSION="$marketing" CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER"
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          cp -R "$RUNNER_TEMP/Reverb.xcarchive/Products/Applications/Reverb.app" "$RUNNER_TEMP/ipa/Payload/"
+          (cd "$RUNNER_TEMP/ipa" && zip -qry "$GITHUB_WORKSPACE/Reverb.ipa" Payload)
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$RUNNER_TEMP/ipa/Payload/Reverb.app/Info.plist"
+      - name: Attach the IPA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" Reverb.ipa --clobber
+      - name: Publish the SideStore/AltStore source
+        if: github.event.release.prerelease == false
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          SHA: ${{ needs.verify-release.outputs.sha }}
+        run: |
+          # A channel release: a prerelease so it never becomes "latest", which
+          # the desktop updater and the phone's banner read.
+          if ! gh release view ios-source >/dev/null 2>&1; then
+            gh release create ios-source --target "$SHA" --prerelease --latest=false \
+              --title "iOS app source" --notes "The SideStore/AltStore source for Reverb on iPhone. Add source.json's URL in SideStore."
+          fi
+          gh release download ios-source --pattern source.json --dir "$RUNNER_TEMP/previous" || true
+          node scripts/ios-source.mjs --repo "$GITHUB_REPOSITORY" --version "$TAG" \
+            --date "$(date -u +%Y-%m-%d)" --size "$(stat -f%z Reverb.ipa)" \
+            --previous "$RUNNER_TEMP/previous/source.json" --out source.json
+          gh release upload ios-source source.json --clobber

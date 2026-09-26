@@ -70,6 +70,7 @@ struct RootView: View {
 }
 
 struct MainView: View {
+    @EnvironmentObject private var core: CoreHost
     @EnvironmentObject private var pairing: PairingModel
     @EnvironmentObject private var links: LinkModel
 
@@ -106,12 +107,57 @@ struct MainView: View {
             .safeAreaInset(edge: .bottom) { NowPlayingBar() }
             .tabItem { Label("Devices", systemImage: "laptopcomputer.and.iphone") }
         }
+        .safeAreaInset(edge: .top) { VersionBanner() }
+        // The core checks for a release at most hourly; peers' versions change
+        // as they are reached.
+        .task {
+            while !Task.isCancelled {
+                await core.refreshVersion()
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
         // Dismissing the sheet drops an unconfirmed link without dialling it.
         .sheet(isPresented: $pairing.isPresented, onDismiss: pairing.discard) {
             PairingView()
         }
         .sheet(isPresented: $links.isPresented) {
             AddFromLinkView()
+        }
+    }
+}
+
+/// A newer release, or a paired device outside the protocol support window.
+/// Neither blocks the app: an update is only offered, and an incompatible
+/// device says which update fixes it.
+struct VersionBanner: View {
+    @EnvironmentObject private var core: CoreHost
+    @AppStorage("dismissedUpdate") private var dismissedUpdate = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let incompatible = core.version?.peers.first(where: { $0.compatibility == .incompatible }) {
+                Label(incompatible.message, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(.orange.opacity(0.2))
+                    .accessibilityIdentifier("version.outsideWindow")
+            }
+            if let info = core.version, !info.latestVersion.isEmpty, info.latestVersion != dismissedUpdate {
+                HStack {
+                    Label("Reverb \(info.latestVersion) is available. Update it in SideStore or AltStore.", systemImage: "arrow.down.app")
+                        .font(.footnote)
+                    Spacer()
+                    if let url = URL(string: info.releaseUrl), !info.releaseUrl.isEmpty {
+                        Link("Details", destination: url).font(.footnote)
+                    }
+                    Button { dismissedUpdate = info.latestVersion } label: { Image(systemName: "xmark") }
+                        .accessibilityLabel("Dismiss")
+                }
+                .padding(10)
+                .background(.thinMaterial)
+                .accessibilityIdentifier("version.update")
+            }
         }
     }
 }

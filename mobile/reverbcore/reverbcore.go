@@ -130,12 +130,13 @@ func Start(dataDir string) (int, error) {
 		return 0, err
 	}
 	rt, err := app.Build(context.Background(), app.Options{
-		DBPath:  filepath.Join(dataDir, "reverb.db"),
-		Version: Version,
-		P2PPort: cfg.P2PPort,
-		Profile: app.ProfilePhone,
-		Getenv:  getenv,
-		Python:  python,
+		DBPath:     filepath.Join(dataDir, "reverb.db"),
+		Version:    Version,
+		UpdateRepo: "uhhhm/reverb",
+		P2PPort:    cfg.P2PPort,
+		Profile:    app.ProfilePhone,
+		Getenv:     getenv,
+		Python:     python,
 	})
 	if err != nil {
 		return 0, err

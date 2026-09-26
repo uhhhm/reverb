@@ -58,6 +58,71 @@ Then open `ios/Reverb.xcodeproj`. The first build asks you to trust the
 phone from Xcode, set your team under Signing & Capabilities; releases are
 unsigned IPAs that SideStore signs (ADR 0004).
 
+## Installing on an iPhone
+
+Reverb is not on the App Store (ADR 0004). Each release attaches an unsigned
+`Reverb.ipa`, and stable releases update a SideStore/AltStore source at a stable
+URL:
+
+```text
+https://github.com/uhhhm/reverb/releases/download/ios-source/source.json
+```
+
+### SideStore with a free Apple ID (recommended)
+
+A free Apple ID signs apps for 7 days; SideStore re-signs them on the phone
+before they expire, with no computer after setup.
+
+1. Follow SideStore's own install guide (sidestore.io) once. It installs
+   SideStore with your Apple ID and a pairing file from a computer, and has
+   you enable Developer Mode on the iPhone.
+2. In SideStore, open **Sources**, tap **+**, and add the source URL above.
+3. Open the Reverb source and tap **Free** (or **Get**) to install Reverb.
+4. Keep SideStore's background refresh on, or open SideStore once a week, so
+   it re-signs Reverb before the 7 days run out.
+
+A free Apple ID can sign three apps at once. Reverb uses two of them: the app
+and its share extension (Add from link). SideStore counts itself as well.
+
+New releases appear under SideStore's **Updates**; the app also shows a banner
+when one exists. A missed re-sign stops Reverb from launching but keeps its
+data: re-signing restores it as it was. Deleting the app deletes the phone's
+database, offline set and any Downloads still pending upload.
+
+AltStore works the same way with the same source, using AltServer on a
+computer on your network to re-sign.
+
+### Signing it yourself with a paid developer account
+
+A paid Apple Developer account signs for a year. Download `Reverb.ipa` from the
+release and re-sign it with your team, for example with Xcode's
+`xcodebuild -exportArchive` from a local archive, or a tool such as
+`fastlane resign`. Register two App IDs (`<your prefix>.reverb` and
+`<your prefix>.reverb.share`) and sign the extension in `PlugIns/` too. You can
+instead build from source: set your team under Signing & Capabilities and run
+on the device from Xcode. Reinstall each new release the same way.
+
+### Staying compatible
+
+The phone often runs an older release than desktops, which update themselves.
+Each release still serves the protocol versions of the release before it
+(`p2p.SupportWindow`), so a phone one minor release behind keeps pairing,
+syncing, fetching files and covers, and streaming. Devices lists each paired
+device's Reverb version. A device outside the window is named there and in a
+banner, with what to update; nothing is dropped silently.
+
+### Publishing a release
+
+`.github/workflows/release.yml` builds the IPA on a macOS runner for every
+published release (`make ios-native`, `make ios-core`, `make ios-project`, then
+an unsigned `xcodebuild archive` zipped into `Payload/`). `MARKETING_VERSION`
+comes from the tag. For stable releases, `scripts/ios-source.mjs` adds the
+version to the previous `source.json` (keeping the last ten, newest first) and
+the job uploads it to the `ios-source` channel release. That release is a
+prerelease so it never becomes "latest", which the desktop updater and the
+phone's banner read. The phone's banner offers a release only once its IPA is
+attached.
+
 ## The API client
 
 `ReverbKit/Sources/ReverbAPI/openapi.yaml` is the subset of

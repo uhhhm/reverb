@@ -56,7 +56,10 @@ struct PlaylistView: View {
             }
         }
         .navigationTitle(detail?.value1.name ?? "Playlist")
-        .toolbar { EditButton() }
+        .toolbar {
+            EditButton()
+            Button("Start Radio", systemImage: "dot.radiowaves.left.and.right") { Task { await player.startRadio(tracks: playable) } }.disabled(playable.isEmpty)
+        }
         .task {
             while !Task.isCancelled {
                 await load()

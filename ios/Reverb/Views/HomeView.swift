@@ -124,6 +124,7 @@ struct RecommendedTrackRow: View {
         .contentShape(Rectangle())
         .onTapGesture { Task { await play() } }
         .contextMenu {
+            Button("Start Radio", systemImage: "dot.radiowaves.left.and.right") { Task { await player.startRadio(tracks: [track.playerTrack]) } }
             if track.source != "library" && track.match?.status != .in_library {
                 Button("Download", systemImage: "arrow.down.circle") {
                     Task {

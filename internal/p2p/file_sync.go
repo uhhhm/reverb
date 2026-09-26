@@ -493,7 +493,7 @@ func (f *FileSyncer) FetchFileViaPeer(ctx context.Context, h host.Host, peerIDSt
 	if err != nil {
 		return err
 	}
-	s, err := h.NewStream(ctx, pid, "/reverb/file/1.0.0")
+	s, err := h.NewStream(ctx, pid, SupportedProtocols(fileProtocol)...)
 	if err != nil {
 		return err
 	}

@@ -21,6 +21,14 @@ final class CoreHost: ObservableObject {
     @Published private(set) var ytDlpVersion = "Loading…"
     @Published private(set) var checkingYtDlp = false
     @Published private(set) var ytDlpUpdateError: String?
+    /// This build's version, the newest published IPA and each paired
+    /// device's protocol compatibility, as the core last reported them.
+    @Published private(set) var version: Components.Schemas.VersionInfo?
+
+    func refreshVersion() async {
+        guard let client else { return }
+        if let info = try? await client.getVersion().ok.body.json { version = info }
+    }
 
     func checkYtDlpUpdate(force: Bool = false) async {
         guard core != nil, !checkingYtDlp else { return }

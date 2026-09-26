@@ -252,7 +252,7 @@ func (s *Syncer) syncPeer(ctx context.Context, pid peer.ID) error {
 	applyCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	st, err := s.host.NewStream(ctx, pid, "/reverb/sync/1.0.0")
+	st, err := s.host.NewStream(ctx, pid, SupportedProtocols(syncProtocol)...)
 	if err != nil {
 		return err
 	}
