@@ -504,7 +504,7 @@ func (m *Manager) enrichISRC(ctx context.Context, req core.DownloadRequest) core
 }
 
 // mintAndStoreCanonicalID mints (or resolves) a catalog entity id for job j and
-// stores it on the row. Called ONLY at link time (BackfillUnlinked / runScan) for
+// stores it on the row. Called ONLY at link time (linkJob) for
 // jobs that are newly matched — never for archived, unlinked, or already-minted jobs.
 // Nil-safe: a nil canonicalMinter silently skips minting (no panic, no error).
 // Returns the minted canonical id, or "" if none (nil minter, minter error, or empty id).
@@ -647,31 +647,52 @@ func (m *Manager) BackfillUnlinked() {
 		if merr != nil || res.Status != core.MatchInLibrary {
 			continue
 		}
-		j.LibraryTrackID = res.LibraryTrackID
-		j.CoverArtID = res.CoverArtID
-		if err := m.store.Update(ctx, j); err != nil {
-			log.Printf("download backfill: update job %s failed: %v", shortID(j.ID), err)
+		if _, ok := m.linkJob(ctx, j, res); !ok {
 			continue
 		}
-		// Task 3: mint canonical id at link time. Scoped to newly-linked jobs only —
-		// never bulk-backfill archived jobs, never mint on a browse.
-		if cid := m.mintAndStoreCanonicalID(ctx, j); cid != "" && m.linkedHook != nil {
-			m.linkedHook(ctx, cid)
-		}
-		// The playlist add comes first, so whoever hears the completion finds
-		// the track already in its playlist.
-		if m.playlists != nil && j.AddToPlaylistID != "" {
-			if perr := m.playlists.AddTracksToPlaylist(ctx, j.AddToPlaylistID, []string{res.LibraryTrackID}); perr != nil {
-				log.Printf("download backfill: add to playlist %s failed for job %s: %v", j.AddToPlaylistID, shortID(j.ID), perr)
-			}
-		}
-		m.publishComplete(j, res.LibraryTrackID)
 		matched++
 		log.Printf("download backfill: re-linked job %s -> library track %s", shortID(j.ID), res.LibraryTrackID)
 	}
 	if matched > 0 {
 		log.Printf("download backfill: re-linked %d previously unmatched completed job(s)", matched)
 	}
+}
+
+// linkJob records that completed job j is the library track res matched, and
+// carries out everything that follows from the link. Both linking triggers —
+// the startup backfill and the post-download scan — go through here.
+//
+// A link that cannot be persisted has no consequences: the job stays unlinked,
+// so the next trigger retries it rather than announcing it a second time. Once
+// persisted, the canonical id is minted, the job joins its target playlist,
+// and only then is the completion published, so whoever hears it finds the
+// track already in its playlist and can address it canonically. It reports
+// the minted canonical id ("" when none) and whether the link was persisted.
+func (m *Manager) linkJob(ctx context.Context, j core.DownloadJob, res core.MatchResult) (string, bool) {
+	j.LibraryTrackID = res.LibraryTrackID
+	j.CoverArtID = res.CoverArtID
+	if err := m.store.Update(ctx, j); err != nil {
+		log.Printf("download: link job %s to library track %s failed: %v", shortID(j.ID), res.LibraryTrackID, err)
+		return "", false
+	}
+	// Mint only at link time, for newly linked jobs: never for archived jobs,
+	// never on a browse.
+	cid := m.mintAndStoreCanonicalID(ctx, j)
+	if cid != "" {
+		j.CanonicalID = cid
+		if m.linkedHook != nil {
+			m.linkedHook(ctx, cid)
+		}
+	}
+	// AddToPlaylistID is carried on the job (mirrored from request_json by
+	// toCoreFlatRow / Enqueue), so no extra store read is needed.
+	if m.playlists != nil && j.AddToPlaylistID != "" {
+		if err := m.playlists.AddTracksToPlaylist(ctx, j.AddToPlaylistID, []string{res.LibraryTrackID}); err != nil {
+			log.Printf("download: add track %s to playlist %s failed for job %s: %v", res.LibraryTrackID, j.AddToPlaylistID, shortID(j.ID), err)
+		}
+	}
+	m.publishComplete(j, res.LibraryTrackID)
+	return cid, true
 }
 
 // BackfillCanonicalIDs is a one-shot, bounded, idempotent pass that mints a stable
@@ -1571,27 +1592,8 @@ func (m *Manager) runScan() {
 		if merr != nil || res.Status != core.MatchInLibrary {
 			continue
 		}
-		j.LibraryTrackID = res.LibraryTrackID
-		j.CoverArtID = res.CoverArtID
-		_ = m.store.Update(ctx, j)
-		// Task 3: mint canonical id at link time. Scoped to newly-linked jobs only.
-		// Task 4: collect non-empty ids for the RefreshLinked call below.
-		if cid := m.mintAndStoreCanonicalID(ctx, j); cid != "" {
+		if cid, ok := m.linkJob(ctx, j, res); ok && cid != "" {
 			linkedCanonicalIDs = append(linkedCanonicalIDs, cid)
-			if m.linkedHook != nil {
-				m.linkedHook(ctx, cid)
-			}
-		}
-		m.publishComplete(j, res.LibraryTrackID)
-
-		// One-time import hook: if the originating request named a target playlist,
-		// append the newly-matched library track to it. Non-fatal on error.
-		// AddToPlaylistID is carried on the job (mirrored from request_json by
-		// toCoreFlatRow / Enqueue) so no extra store read is needed.
-		if m.playlists != nil && j.AddToPlaylistID != "" {
-			if paErr := m.playlists.AddTracksToPlaylist(ctx, j.AddToPlaylistID, []string{res.LibraryTrackID}); paErr != nil {
-				log.Printf("download: add track %s to playlist %s failed: %v", res.LibraryTrackID, j.AddToPlaylistID, paErr)
-			}
 		}
 	}
 
