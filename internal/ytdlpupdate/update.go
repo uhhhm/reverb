@@ -56,6 +56,7 @@ type Updater struct {
 	state      state
 	version    string
 	activePath string
+	active     record
 }
 
 func New(root string, key ed25519.PublicKey, activate Activate) *Updater {
@@ -118,7 +119,7 @@ func (u *Updater) Restore(ctx context.Context) error {
 			last = err
 			continue
 		}
-		u.state.Current = r
+		u.active = r
 		u.version = m.Version
 		u.activePath = dir
 		u.cleanup()
@@ -147,8 +148,18 @@ func (u *Updater) Check(ctx context.Context, client *http.Client, base string) e
 	if err != nil {
 		return err
 	}
-	if m.Sequence <= u.state.HighWater {
+	if m.Sequence < u.state.HighWater {
 		return nil
+	}
+	if m.Sequence == u.state.HighWater {
+		// A fallback must be able to repair the exact accepted release, while
+		// a reused sequence must not introduce different executable content.
+		if !bytes.Equal(r.Manifest, u.state.Current.Manifest) {
+			return errors.New("yt-dlp release sequence was reused")
+		}
+		if bytes.Equal(r.Manifest, u.active.Manifest) {
+			return nil
+		}
 	}
 	archive, err := fetch(ctx, client, base+"/package.zip", maxPackage)
 	if err != nil {
@@ -170,7 +181,7 @@ func (u *Updater) Check(ctx context.Context, client *http.Client, base string) e
 	if err = atomicWrite(u.archivePath(m), archive); err != nil {
 		return err
 	}
-	next := state{Current: r, Previous: u.state.Current, HighWater: m.Sequence}
+	next := state{Current: r, Previous: u.active, HighWater: m.Sequence}
 	data, _ := json.Marshal(next)
 	// Prepare durable metadata before touching the running interpreter.
 	pending, err := os.CreateTemp(u.root, "state-")
@@ -197,6 +208,7 @@ func (u *Updater) Check(ctx context.Context, client *http.Client, base string) e
 		return errors.Join(err, rollback)
 	}
 	u.state = next
+	u.active = r
 	u.version = m.Version
 	u.activePath = dir
 	keep = true

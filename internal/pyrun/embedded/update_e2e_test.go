@@ -182,6 +182,32 @@ func TestSignedUpdateEndToEnd(t *testing.T) {
 		t.Fatalf("restart version: %s", got)
 	}
 	steps = append(steps, "second release replaced cached imports and survived restart")
+	manifestBytes, err := os.ReadFile(filepath.Join(assets, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest ytdlpupdate.Manifest
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	must(os.WriteFile(filepath.Join(root, manifest.SHA256+".zip"), []byte("corrupt installed archive"), 0600))
+	if err := testRunner.ActivateYtDlp(ctx, bundle, original); err != nil {
+		t.Fatal(err)
+	}
+	u = ytdlpupdate.New(root, pub, testRunner.ActivateYtDlp)
+	if err := u.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := version(); got != "2099.01.01" {
+		t.Fatalf("corrupt archive fallback: %s", got)
+	}
+	if err := check(); err != nil {
+		t.Fatal(err)
+	}
+	if got := version(); got != "2099.01.03" {
+		t.Fatalf("manual check did not repair current signed release: %s", got)
+	}
+	steps = append(steps, "corrupt installed archive fell back and was repaired from the same signed release")
 	if report := os.Getenv("REVERB_YTDLP_E2E_REPORT"); report != "" {
 		b, _ := json.MarshalIndent(map[string]any{"passed": true, "bundledVersion": original, "installedVersion": version(), "steps": steps}, "", "  ")
 		must(os.WriteFile(report, append(b, '\n'), 0600))
