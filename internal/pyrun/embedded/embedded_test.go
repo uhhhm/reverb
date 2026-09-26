@@ -369,3 +369,40 @@ func TestHasModule(t *testing.T) {
 		t.Error("a missing module is reported installed")
 	}
 }
+
+// Activation must replace cached imports, restore them after a failed import,
+// preserve QuickJS defaults, and wait for running Python (even after its Go
+// caller has cancelled). Exercise the public Runner interface.
+func TestYtDlpActivationAndRollback(t *testing.T) {
+	if os.Getenv("REVERB_TEST_SITE_PACKAGES") == "" {
+		t.Skip("bundled yt-dlp required")
+	}
+	ctx := context.Background()
+	version := func() string {
+		lines, err := runLines(t, "yt_dlp", "--version")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(strings.Join(lines, "\n"))
+	}
+	original := version()
+	bundle := os.Getenv("REVERB_TEST_SITE_PACKAGES")
+	if err := testRunner.ActivateYtDlp(ctx, bundle, original); err != nil {
+		t.Fatal(err)
+	}
+	broken := t.TempDir()
+	must(os.MkdirAll(filepath.Join(broken, "yt_dlp"), 0700))
+	must(os.WriteFile(filepath.Join(broken, "yt_dlp", "__init__.py"), []byte("raise RuntimeError('broken package')\n"), 0600))
+	if err := testRunner.ActivateYtDlp(ctx, broken, "bad"); err == nil {
+		t.Fatal("activated broken package")
+	}
+	if got := version(); got != original {
+		t.Fatalf("rollback version = %q, want %q", got, original)
+	}
+	if err := testRunner.ActivateYtDlp(ctx, bundle, "wrong version"); err == nil {
+		t.Fatal("accepted mismatching version")
+	}
+	if got := version(); got != original {
+		t.Fatalf("version after mismatch = %q", got)
+	}
+}

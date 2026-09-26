@@ -17,6 +17,21 @@ struct DevicesView: View {
 
     var body: some View {
         List {
+            Section("External playback") {
+                LabeledContent("yt-dlp version", value: core.ytDlpVersion)
+                    .accessibilityIdentifier("ytdlp.version")
+                Button {
+                    Task { await core.checkYtDlpUpdate(force: true) }
+                } label: {
+                    if core.checkingYtDlp { ProgressView() }
+                    else { Text("Check for yt-dlp updates") }
+                }
+                .disabled(core.checkingYtDlp)
+                .accessibilityIdentifier("ytdlp.update")
+                if let error = core.ytDlpUpdateError {
+                    Text(error).font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Section("Sync") {
                 LabeledContent("Status", value: sync.statusText)
                 if let lastSync = sync.lastSync {

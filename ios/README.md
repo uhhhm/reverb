@@ -155,3 +155,51 @@ xcodebuild test -project ios/Reverb.xcodeproj -scheme Reverb \
   addresses, each marked LAN/VPN or public, with a warning when none is local.
   Nothing is dialled or redeemed until Pair is tapped; Cancel or dismissing the
   sheet discards it. A typed code pairs directly.
+
+### Signed yt-dlp updates
+
+The phone checks the `ytdlp-channel` GitHub release on launch and at most once
+per day on foreground activation. Devices → External playback shows the loaded
+yt-dlp version and offers a manual check. The package is a pure-Python yt-dlp
+wheel; its dependencies, native tools and interpreter remain bundled in the IPA.
+An update needing newer dependencies must wait for a compatible IPA.
+
+`internal/ytdlpupdate` verifies an Ed25519 signature over the exact manifest
+bytes, then the archive SHA-256, before extracting or executing anything. The
+manifest carries format `1`, a monotonic release sequence and the Python version
+string. Extraction rejects traversal, symlinks and native extensions and bounds
+both compressed and expanded size. Activation waits for Python jobs, replaces
+cached yt-dlp imports, builds its extractor registry and instantiates YoutubeDL
+with QuickJS. An import/probe failure restores the old imports and search path.
+The active marker is replaced atomically only after that succeeds. The previous
+signed archive is kept; startup re-verifies archives and falls back to it (then
+the bundle) if the current one is corrupt or incompatible. This is a local
+compatibility probe, not a guarantee that every upstream website works.
+
+The dedicated `.github/workflows/ytdlp-release.yml` workflow can publish fixes
+without building an IPA. Dispatch it on `main` with the reviewed PyPI version and
+wheel SHA-256. It checks the hash, signs the wheel, publishes immutable release
+assets, and refreshes the three channel assets. A check during publication may
+fail signature/digest verification; the phone retains its current version and a
+manual retry works after publication finishes.
+
+The app embeds `mobile/reverbcore/ytdlp-public-key.txt`. Before the first release,
+configure the `ytdlp-release` GitHub environment and its `YTDLP_SIGNING_KEY` secret
+with the value in the ignored, mode-0600 `.env.ytdlp-signing` generated for this
+checkout. Keep a secure backup: replacing the public key requires a new IPA.
+Never commit or upload the private key as a release asset. The signing command
+refuses a private key that does not match the committed public key. To provision
+a *new* trust root intentionally, `go run ./cmd/reverb-ytdlp-sign -keygen -out
+.env.ytdlp-signing` creates the environment file without overwriting one.
+
+Repeatable verification (macOS with the native dependencies built):
+
+```sh
+REVERB_YTDLP_E2E_REPORT=/tmp/reverb-ytdlp-e2e.json make test-pyembed
+```
+
+The E2E test uses the real release signer, HTTP delivery, updater and embedded
+CPython. It updates a real yt-dlp package while a Python job is active, rejects
+unsigned/wrongly signed/tampered releases, rolls back a broken import, installs a
+second version and restores it after recreating the updater. The JSON report is
+written only when all assertions pass. It uses an ephemeral test key.

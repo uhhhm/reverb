@@ -18,6 +18,23 @@ final class CoreHost: ObservableObject {
     }
 
     @Published private(set) var state: State = .starting
+    @Published private(set) var ytDlpVersion = "Loading…"
+    @Published private(set) var checkingYtDlp = false
+    @Published private(set) var ytDlpUpdateError: String?
+
+    func checkYtDlpUpdate(force: Bool = false) async {
+        guard core != nil, !checkingYtDlp else { return }
+        checkingYtDlp = true
+        ytDlpUpdateError = nil
+        let result = await Task.detached(priority: .utility) {
+            var error: NSError?
+            ReverbcoreCheckYtDlpUpdate(force, &error)
+            return (ReverbcoreYtDlpVersion(), error?.localizedDescription)
+        }.value
+        ytDlpVersion = result.0.isEmpty ? "Unavailable" : result.0
+        ytDlpUpdateError = result.1
+        checkingYtDlp = false
+    }
 
     /// The core's data directory. Application Support is backed up, so the
     /// database (plays, playlists, pairing) survives a restore; the offline
@@ -60,7 +77,10 @@ final class CoreHost: ObservableObject {
             let result = Self.startCore(dataDirectory: dir)
             await MainActor.run {
                 switch result {
-                case let .success(core): self.state = .running(core)
+                case let .success(core):
+                    self.state = .running(core)
+                    self.ytDlpVersion = ReverbcoreYtDlpVersion()
+                    Task { await self.checkYtDlpUpdate() }
                 case let .failure(error): self.state = .failed(error.localizedDescription)
                 }
             }
@@ -74,7 +94,10 @@ final class CoreHost: ObservableObject {
             if case .failed = state { start() }
             return
         }
-        if (try? await client.getHealth().ok) != nil { return }
+        if (try? await client.getHealth().ok) != nil {
+            Task { await checkYtDlpUpdate() }
+            return
+        }
         let dir = dataDirectory
         state = .starting
         let result = await Task.detached(priority: .userInitiated) {

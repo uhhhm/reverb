@@ -1,0 +1,58 @@
+name: Release signed yt-dlp
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: PyPI yt-dlp version
+        required: true
+      sha256:
+        description: SHA-256 of the pure Python wheel (review before dispatch)
+        required: true
+permissions:
+  contents: write
+concurrency:
+  group: ytdlp-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: ytdlp-release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.14' }
+      - name: Fetch the reviewed wheel
+        env:
+          VERSION: ${{ inputs.version }}
+          SHA256: ${{ inputs.sha256 }}
+        run: |
+          python - <<'PY'
+          import os, re
+          version, digest = os.environ['VERSION'], os.environ['SHA256']
+          assert re.fullmatch(r'[0-9]+(?:\.[0-9]+)*', version)
+          assert re.fullmatch(r'[0-9a-f]{64}', digest)
+          open('/tmp/ytdlp.txt', 'w').write(f'yt-dlp=={version} --hash=sha256:{digest}\n')
+          PY
+          python -m pip download --no-deps --only-binary=:all: --require-hashes -r /tmp/ytdlp.txt -d /tmp/wheels
+          python -m pip install --no-deps --target /tmp/package /tmp/wheels/*.whl
+          PYTHONPATH=/tmp/package python -m yt_dlp --version
+      - name: Verify updater tests and sign
+        env:
+          YTDLP_SIGNING_KEY: ${{ secrets.YTDLP_SIGNING_KEY }}
+        run: |
+          go test ./internal/ytdlpupdate
+          version=$(PYTHONPATH=/tmp/package python -m yt_dlp --version)
+          go run ./cmd/reverb-ytdlp-sign -package /tmp/wheels/*.whl -version "$version" -sequence "$(date +%s)"
+      - name: Publish signed assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="ytdlp-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          gh release create "$tag" dist/ytdlp/* --target "$GITHUB_SHA" --prerelease --title "Signed yt-dlp $tag"
+          if ! gh release view ytdlp-channel >/dev/null 2>&1; then
+            gh release create ytdlp-channel --target "$GITHUB_SHA" --prerelease --title "Signed yt-dlp update channel"
+          fi
+          gh release upload ytdlp-channel dist/ytdlp/* --clobber

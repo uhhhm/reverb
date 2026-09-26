@@ -16,6 +16,7 @@ Everything here is set up once, by setup(), before either tool is imported.
 """
 
 import contextvars
+import importlib
 import io
 import itertools
 import os
@@ -73,6 +74,12 @@ class _Run:
 _current = contextvars.ContextVar("reverb_run", default=None)
 _runs = {}
 _runs_lock = threading.Lock()
+# Readers are Python runs, not Go callers: a cancelled caller can return while
+# Python is still unwinding. Activation never changes imports under such a run.
+_package_gate = threading.Condition()
+_package_readers = 0
+_package_writer = False
+_update_path = None
 _tokens = itertools.count(1)
 _config = {}
 
@@ -490,14 +497,28 @@ def run(module, args, fd, token):
     with _runs_lock:
         _runs[token] = r
     lock = _serialized.get(module)
+    reader = False
+    locked = False
     try:
+        if module != "__reverb_activate_ytdlp":
+            global _package_readers
+            with _package_gate:
+                while _package_writer:
+                    _package_gate.wait(0.1)
+                _package_readers += 1
+                reader = True
         if lock:
             lock.acquire()
+            locked = True
         ctx = contextvars.copy_context()
         return ctx.run(_run_in_context, r, module)
     finally:
-        if lock:
+        if locked:
             lock.release()
+        if reader:
+            with _package_gate:
+                _package_readers -= 1
+                _package_gate.notify_all()
         with _runs_lock:
             _runs.pop(token, None)
         r.close()
@@ -508,6 +529,9 @@ def _run_in_context(r, module):
     try:
         if r.cancelled:
             raise Cancelled()
+        if module == "__reverb_activate_ytdlp":
+            _activate_ytdlp(*r.argv[1:])
+            return 0
         _prepare()
         before = _before.get(module)
         if before:
@@ -525,6 +549,59 @@ def _run_in_context(r, module):
             return 130
         r.write(traceback.format_exc())
         return 1
+
+
+def _activate_ytdlp(directory, version):
+    global _package_writer, _update_path, _prepared
+    with _package_gate:
+        while _package_writer:
+            _package_gate.wait(0.1)
+        _package_writer = True
+    try:
+        with _package_gate:
+            while _package_readers:
+                _package_gate.wait(0.1)
+        old_path = list(sys.path)
+        old_modules = {k: v for k, v in sys.modules.copy().items()
+                       if k == "yt_dlp" or k.startswith("yt_dlp.")}
+        try:
+            for name in old_modules:
+                sys.modules.pop(name, None)
+            if _update_path in sys.path:
+                sys.path.remove(_update_path)
+            if directory:
+                sys.path.insert(0, directory)
+            importlib.invalidate_caches()
+            import yt_dlp
+            from yt_dlp.version import __version__
+            from yt_dlp.extractor import gen_extractor_classes
+            if version and __version__ != version:
+                raise RuntimeError("yt-dlp package version does not match its manifest")
+            # Build its extractor registry and downloader without network I/O.
+            # Imports alone would miss incompatible runtime dependencies.
+            if not gen_extractor_classes():
+                raise RuntimeError("yt-dlp package has no extractors")
+            _prefer_quickjs()
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+                if "quickjs" not in ydl.params.get("js_runtimes", {}):
+                    raise RuntimeError("yt-dlp package cannot use QuickJS")
+            _update_path = directory or None
+            # Do not patch YoutubeDL twice during the first ordinary run.
+            if not _prepared:
+                _prepare_spotdl(_config.get("spotdl_home"))
+                _prepared = True
+        except BaseException:
+            for name in list(sys.modules):
+                if name == "yt_dlp" or name.startswith("yt_dlp."):
+                    sys.modules.pop(name, None)
+            sys.modules.update(old_modules)
+            sys.path[:] = old_path
+            importlib.invalidate_caches()
+            raise
+    finally:
+        with _package_gate:
+            _package_writer = False
+            _package_gate.notify_all()
 
 
 def has_module(name):

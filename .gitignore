@@ -31,3 +31,6 @@ dist/
 
 # packaging cache (standalone python tarball + unpacked runtime)
 desktop/tools/.cache/
+
+# Local yt-dlp release signing secret
+/.env.ytdlp-signing

@@ -125,7 +125,7 @@ func Start(dataDir string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	python, err := phonePython()
+	python, err := phonePython(dataDir)
 	if err != nil {
 		return 0, err
 	}

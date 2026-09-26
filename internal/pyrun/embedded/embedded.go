@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -198,4 +199,20 @@ func run(module string, args []string, fd uintptr, token int64) (int, error) {
 		return 0, errors.New(C.GoString(cerr))
 	}
 	return int(status), nil
+}
+
+// ActivateYtDlp waits for Python jobs, probes a verified package, and replaces
+// cached imports. A failed probe restores the previous imports and search path.
+func (r *Runner) ActivateYtDlp(ctx context.Context, directory, version string) error {
+	var output []string
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// Once started, finish the transaction even if the caller is cancelled.
+	// Injecting an asynchronous exception into a module swap can strand imports.
+	err := r.RunModule(context.Background(), "__reverb_activate_ytdlp", []string{directory, version}, func(line string) { output = append(output, line) })
+	if err != nil {
+		return fmt.Errorf("activate yt-dlp: %w: %s", err, strings.Join(output, "\n"))
+	}
+	return nil
 }

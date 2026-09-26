@@ -8,4 +8,4 @@ import "github.com/uhhhm/reverb/internal/pyrun"
 // runs the host's Python. That is what Linux tests want; an iOS build made
 // without the pyembed tag has no Python, and downloads and external playback
 // fail on it.
-func phonePython() (pyrun.Runner, error) { return nil, nil }
+func phonePython(_ string) (pyrun.Runner, error) { return nil, nil }
