@@ -173,24 +173,15 @@ func TestPhoneRadioPlaysFromItsOfflineSet(t *testing.T) {
 		t.Fatalf("radio leads with %q, want the seed's album-mate Harbor", radio.Tracks[0].Title)
 	}
 
-	// Radio queues its next three behind the seed, as a Radio session does,
-	// and each one plays from the phone's own copy.
+	// A core Radio session started from the seed lines up three tracks
+	// behind it, and each one plays from the phone's own copy.
 	seedID := ""
 	for _, tr := range det.Tracks {
 		if tr.Title == seed.title {
 			seedID = tr.LibraryTrack.ID
 		}
 	}
-	player := func(id, title, artist, album string) map[string]any {
-		return map[string]any{"id": id, "title": title, "artist": artist, "album": album}
-	}
-	phone.must(http.MethodPost, "/player/phone/play",
-		map[string]any{"tracks": []any{player(seedID, seed.title, seed.artist, seed.album)}}, nil, http.StatusOK)
-	var ahead []any
-	for _, tr := range radio.Tracks[:3] {
-		ahead = append(ahead, player(tr.ExternalID, tr.Title, tr.Artist, tr.Album))
-	}
-	var queue struct {
+	type queueState struct {
 		Entries []struct {
 			Origin string `json:"origin"`
 			Track  struct {
@@ -198,12 +189,27 @@ func TestPhoneRadioPlaysFromItsOfflineSet(t *testing.T) {
 				Title string `json:"title"`
 			} `json:"track"`
 		} `json:"entries"`
+		Index  int   `json:"index"`
 		UpNext []int `json:"upNext"`
 	}
-	phone.must(http.MethodPost, "/player/phone/enqueue", map[string]any{"tracks": ahead, "origin": "radio"}, &queue, http.StatusOK)
-	if len(queue.UpNext) != 3 {
-		t.Fatalf("queue has %d tracks up next, want Radio's three: %+v", len(queue.UpNext), queue)
+	var queue queueState
+	phone.must(http.MethodPost, "/player/phone/radio", map[string]any{
+		"lead":  []any{map[string]any{"id": seedID, "title": seed.title, "artist": seed.artist, "album": seed.album}},
+		"seeds": []map[string]string{{"artist": seed.artist, "title": seed.title}},
+	}, &queue, http.StatusOK)
+	deadline = time.Now().Add(20 * time.Second)
+	for len(queue.UpNext) < 3 {
+		if time.Now().After(deadline) {
+			t.Fatalf("Radio lined up %d tracks behind the seed, want three: %+v", len(queue.UpNext), queue)
+		}
+		time.Sleep(100 * time.Millisecond)
+		queue = queueState{}
+		phone.must(http.MethodGet, "/player/phone", nil, &queue, http.StatusOK)
 	}
+	if queue.Index < 0 || queue.Entries[queue.Index].Track.ID != seedID {
+		t.Fatalf("Radio is not playing its seed: %+v", queue)
+	}
+	queue.UpNext = queue.UpNext[:3]
 	type played struct {
 		Title  string `json:"title"`
 		Artist string `json:"artist"`
