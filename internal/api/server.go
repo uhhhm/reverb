@@ -25,6 +25,7 @@ import (
 	"github.com/uhhhm/reverb/internal/portablemigrate"
 	"github.com/uhhhm/reverb/internal/recommendationevent"
 	"github.com/uhhhm/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/release"
 	"github.com/uhhhm/reverb/internal/resolver"
 	"github.com/uhhhm/reverb/internal/scrobble"
 	"github.com/uhhhm/reverb/internal/search"
@@ -178,6 +179,8 @@ type Deps struct {
 	// UpdateRepo is the GitHub "owner/name" the UI polls for releases.
 	// Empty disables the in-app update banner.
 	UpdateRepo string
+	// PhoneRelease reports the newest published IPA on the phone; nil elsewhere.
+	PhoneRelease *release.Tracker
 	// Update backs the desktop self-update endpoints. Nil in server builds,
 	// where the endpoints report that updates are unavailable.
 	Update UpdateService
@@ -374,6 +377,9 @@ type Server struct {
 	// operation measures lazily on first play; this is the user-triggered
 	// alternative for someone who would rather spend the CPU up front.
 	loudness loudnessBackfill
+
+	// prewarmed is which Radio tracks were resolved ahead (see prewarmRadio).
+	prewarmed prewarmSet
 }
 
 func NewServer(deps Deps) *Server {

@@ -59,6 +59,7 @@ emit('web/src/lib/generated/validateRealtime.d.ts', `// Generated; DO NOT EDIT.\
 // `make contracts-check` until the app's copy is refreshed.
 const iosOperations = {
   '/health': { get: 'getHealth' },
+  '/version': { get: 'getVersion' },
   '/p2p/pair/redeem': { post: 'redeemPairingCode' },
   '/p2p/pair/redeem-qr': { post: 'redeemPairingQR' },
   '/pairing/devices': { get: 'listPairedDevices' },
@@ -87,6 +88,8 @@ const iosOperations = {
   '/links/resolve': { post: 'resolveLink' },
   '/links/add': { post: 'addFromLink' },
   '/player/{session}': { get: 'getQueue' },
+  '/player/{session}/radio': { post: 'startRadio' },
+  '/player/{session}/progress': { post: 'playerProgress' },
   '/player/{session}/play': { post: 'playTracks' },
   '/player/{session}/jump': { post: 'jumpInQueue' },
   '/player/{session}/next': { post: 'nextInQueue' },

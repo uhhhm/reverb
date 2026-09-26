@@ -58,6 +58,13 @@ struct DevicesView: View {
                         Text(device.lastSeen.map { "Last reached \($0.formatted(.relative(presentation: .named)))" } ?? "Not reached yet")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        if let peer = core.version?.peers.first(where: { $0.deviceId == device.id }) {
+                            if peer.compatibility == .incompatible {
+                                Text(peer.message).font(.caption).foregroundStyle(.orange)
+                            } else if !peer.version.isEmpty {
+                                Text("Reverb \(peer.version)").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
                     }
                     .accessibilityIdentifier("device.\(device.name)")
                     .swipeActions {
@@ -70,6 +77,12 @@ struct DevicesView: View {
                 Text("Paired devices")
             } footer: {
                 Text("This iPhone syncs with these devices on your network, or over your own VPN.")
+            }
+            if let info = core.version {
+                Section("This iPhone") {
+                    LabeledContent("Reverb version", value: info.version)
+                        .accessibilityIdentifier("version.current")
+                }
             }
             Section {
                 Button("Pair a device") { pairing.isPresented = true }
@@ -89,6 +102,7 @@ struct DevicesView: View {
     private func load() async {
         guard let client = core.client else { return }
         pending = try? await client.listPendingUploads().ok.body.json
+        await core.refreshVersion()
         guard let rows = try? await client.listPairedDevices().ok.body.json else { return }
         devices = rows.filter { !$0.thisDevice }.map {
             Device(id: $0.id, name: $0.name, lastSeen: $0.lastSeen > 0 ? Date(timeIntervalSince1970: TimeInterval($0.lastSeen)) : nil, isServer: $0.isServer)

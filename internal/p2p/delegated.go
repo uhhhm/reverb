@@ -54,7 +54,7 @@ type DelegatedCoverOpener func(context.Context, string, int) (core.CoverArt, err
 
 // RegisterDelegatedHandler serves library audio and artwork to paired peers only.
 func RegisterDelegatedHandler(h host.Host, guard *Guard, open DelegatedStreamOpener, cover DelegatedCoverOpener) {
-	h.SetStreamHandler(delegatedProtocol, safeHandler("delegated", func(s network.Stream) {
+	registerCompatible(h, delegatedProtocol, safeHandler("delegated", func(s network.Stream) {
 		defer s.Close()
 		_ = s.SetDeadline(time.Now().Add(30 * time.Second))
 		if guard == nil || open == nil {
@@ -143,7 +143,7 @@ func requestDelegated(ctx context.Context, h host.Host, pid peer.ID, req delegat
 	if h == nil || req.CatalogID == "" {
 		return core.StreamHandle{}, fmt.Errorf("delegated stream unavailable")
 	}
-	s, err := h.NewStream(ctx, pid, delegatedProtocol)
+	s, err := h.NewStream(ctx, pid, SupportedProtocols(delegatedProtocol)...)
 	if err != nil {
 		return core.StreamHandle{}, err
 	}

@@ -49,7 +49,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Build version and update-check repository */
+        /** Build version, update source, and paired devices' versions */
         get: {
             parameters: {
                 query?: never;
@@ -59,16 +59,13 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description version string, and the GitHub owner/name polled for updates ("" when disabled) */
+                /** @description This build's version and the GitHub owner/name polled for updates ("" when disabled). Also the protocol support window, each paired device's version and compatibility, and on the phone the newest published release that carries an IPA. */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": {
-                            version?: string;
-                            updateRepo?: string;
-                        };
+                        "application/json": components["schemas"]["VersionInfo"];
                     };
                 };
             };
@@ -3331,6 +3328,118 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/{session}/radio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a core-owned Radio session */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    session: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PlayerRadioRequest"];
+                };
+            };
+            responses: {
+                /** @description The updated queue */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QueueState"];
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Player unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/player/{session}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Report listening progress for Radio steering */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    session: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PlayerProgress"];
+                };
+            };
+            responses: {
+                /** @description The updated queue */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["QueueState"];
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Player unavailable */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -7085,6 +7194,8 @@ export interface components {
             track: components["schemas"]["PlayerTrack"];
         };
         QueueState: {
+            /** @description Whether the core is filling this Radio session. */
+            radio?: boolean;
             entries: components["schemas"]["QueueEntry"][];
             /** @description The current entry, or -1 with nothing to play. */
             index: number;
@@ -7111,6 +7222,45 @@ export interface components {
             session: string;
             /** Format: int64 */
             revision: number;
+        };
+        VersionInfo: {
+            version: string;
+            updateRepo: string;
+            /** @description How many minor protocol releases this build serves: the current and those before it. */
+            supportWindow: number;
+            peers: components["schemas"]["PeerVersion"][];
+            /** @description A newer published release with an IPA, or empty. Reported on the phone only. */
+            latestVersion: string;
+            /** @description The SideStore/AltStore source, or empty when updates are disabled. */
+            sourceUrl: string;
+            /** @description The release page for latestVersion, or empty. */
+            releaseUrl: string;
+        };
+        PeerVersion: {
+            peerId: string;
+            deviceId: string;
+            /** @description The peer's build version, or empty until it has been reached. */
+            version: string;
+            /**
+             * @description unknown until the peer has been reached this run.
+             * @enum {string}
+             */
+            compatibility: "compatible" | "incompatible" | "unknown";
+            /** @description What the owner should do when incompatible; otherwise empty. */
+            message: string;
+        };
+        PlayerRadioRequest: {
+            lead: components["schemas"]["PlayerTrack"][];
+            seeds: components["schemas"]["RadioSeed"][];
+        };
+        PlayerProgress: {
+            entryId: string;
+            /** Format: int64 */
+            playId: number;
+            positionMs: number;
+            durationMs: number;
+            playing: boolean;
+            seeking: boolean;
         };
         PlayerTracksRequest: {
             tracks: components["schemas"]["PlayerTrack"][];

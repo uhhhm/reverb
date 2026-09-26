@@ -1,9 +1,7 @@
 import { create } from 'zustand'
 import { AudioEngine, type ApplyOptions, type PlayerState } from './audioEngine'
-import { prewarmExternalStream } from './libraryApi'
 import { httpQueue, newSessionId, type QueueState, type QueueTransport } from './playerApi'
-import { RadioSession, type RadioHost, type RadioStart } from './radio'
-import { fetchRadio } from './recommendationsApi'
+import type { RadioStart } from './radio'
 import type { Track } from './types'
 
 // Single imperative engine instance, living OUTSIDE React.
@@ -60,6 +58,8 @@ function change(
   const run = pending.then(async () => {
     try {
       const state = await request()
+      lastQueue = state
+      usePlayer.setState({ radio: state.radio ?? false })
       engine.apply(state, typeof opts === 'function' ? opts() : opts)
     } catch (err) {
       console.warn('player: queue request failed', err)
@@ -76,57 +76,32 @@ function change(
 
 // Whether playback is on as the answer lands, for moves that keep playing only
 // what was already playing.
+// The latest queue the core answered, and the pacing of progress reports:
+// during Radio at most one a second, and never two at once.
+let lastQueue: QueueState | undefined
+let progressBusy = false
+let lastProgressAt = 0
+
 const keepPlaying = () => ({ autoplay: engine.getState().playing })
 
 export const usePlayer = create<PlayerStore>((set) => {
-  let radio: RadioSession | null = null
-
-  function endRadio() {
-    radio?.end()
-    radio = null
-    set({ radio: false })
-  }
-
-  // Radio chains its changes (remove, then append), so a failed one has to
-  // stop the chain rather than let the next run against a queue it did not
-  // produce.
-  const orFail = (ok: boolean) => {
-    if (!ok) throw new Error('queue request failed')
-  }
-  const host: RadioHost = {
-    fetch: (seeds) => fetchRadio(seeds),
-    getState: () => engine.getState(),
-    play: (tracks, origin) => change(() => queue.play(tracks, 0, origin), { autoplay: true }).then(orFail),
-    append: (tracks) => change(() => queue.enqueue(tracks, 'radio')).then(orFail),
-    remove: (positions) => change(() => queue.remove(positions), keepPlaying).then(orFail),
-    prewarm: (t) => {
-      if (t.externalStream) prewarmExternalStream(t.externalStream.source, t.externalStream.externalId, t.artist, t.title)
-    },
-    // Radio stopped by itself: what it queued stays, as ordinary queue.
-    ended: () => {
-      endRadio()
-      void change(() => queue.radioEnded())
-    },
-  }
-
   // Without the core's answer nothing says what plays next, so playback stops
   // rather than showing a track as playing in silence.
   const stop = () => engine.pause()
   engine.setQueueHandler({
-    ended: (entryId) => void change(() => queue.ended(entryId), { autoplay: true, fromEnded: true }, stop),
-    skip: (entryId) => void change(() => queue.next(entryId), { autoplay: true }, stop),
+    ended: (entryId) => { reportProgress(); void change(() => queue.ended(entryId), { autoplay: true, fromEnded: true }, stop) },
+    skip: (entryId) => { reportProgress(); void change(() => queue.next(entryId), { autoplay: true }, stop) },
   })
 
   // Mirror engine state into the store on every change.
   engine.subscribe((s) => {
     set(s)
-    radio?.update()
+    if (lastQueue?.radio && !progressBusy && Date.now() - lastProgressAt >= 1000) reportProgress()
   })
   return {
     ...engine.getState(),
     radio: false,
     playTrackList: (tracks, startIndex) => {
-      endRadio()
       void change(() => queue.play(tracks, startIndex), { autoplay: true })
     },
     // A track the listener queues plays before any Radio has lined up; the
@@ -134,21 +109,23 @@ export const usePlayer = create<PlayerStore>((set) => {
     enqueue: (t) => void change(() => queue.enqueue([t])),
     removeAt: (i) => void change(() => queue.remove([i]), keepPlaying),
     moveItem: (from, to) => void change(() => queue.move(from, to)),
-    jumpTo: (index) => void change(() => queue.jump(index), { autoplay: true }),
+    jumpTo: (index) => { reportProgress(); void change(() => queue.jump(index), { autoplay: true }) },
     play: () => engine.play(),
     pause: () => engine.pause(),
     toggle: () => engine.toggle(),
-    next: () => void change(() => queue.next(), keepPlaying),
+    next: () => { reportProgress(); void change(() => queue.next(), keepPlaying) },
     prev: () => {
       // Well into a track, previous starts it again; only the player knows
       // how far in it is.
       if (engine.getState().currentTimeMs > RESTART_AFTER_MS) {
+        reportProgress(true, 0)
         engine.seekMs(0)
         return
       }
+      reportProgress()
       void change(() => queue.previous(), keepPlaying)
     },
-    seekMs: (ms) => engine.seekMs(ms),
+    seekMs: (ms) => { reportProgress(true, ms); engine.seekMs(ms) },
     setVolume: (v) => engine.setVolume(v),
     // Read at send time, so two quick toggles flip twice.
     toggleShuffle: () => void change(() => queue.setShuffle(!engine.getState().shuffle)),
@@ -158,23 +135,22 @@ export const usePlayer = create<PlayerStore>((set) => {
         return queue.setRepeat(r === 'off' ? 'all' : r === 'all' ? 'one' : 'off')
       }),
     startRadio: (start) => {
-      endRadio()
-      // Radio's order is its point, and it never runs out: shuffle would
-      // reshuffle played tracks back into up-next, and repeat would loop the
-      // queue instead of refilling it.
-      void change(() => queue.setShuffle(false))
-      void change(() => queue.setRepeat('off'))
-      const session = new RadioSession(host, start)
-      radio = session
-      set({ radio: true })
-      // Begun once shuffle and repeat are off, so its first plan reads them.
-      void pending.then(() => {
-        if (radio === session) session.begin()
-      })
+      void change(() => queue.startRadio(start), { autoplay: true })
     },
     clearQueue: () => {
-      endRadio()
       void change(() => queue.clear())
     },
   }
 })
+
+function reportProgress(seeking = false, positionMs?: number) {
+  if (!lastQueue?.radio) return
+  const entry = lastQueue.entries[lastQueue.index]
+  if (!entry) return
+  const s = engine.getState()
+  const sample = { entryId: entry.id, playId: lastQueue.playId,
+    positionMs: positionMs ?? s.currentTimeMs, durationMs: s.durationMs, playing: s.playing, seeking }
+  progressBusy = true
+  lastProgressAt = Date.now()
+  void change(() => queue.progress(sample)).finally(() => { progressBusy = false })
+}

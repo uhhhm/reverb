@@ -54,6 +54,8 @@ final class Player: ObservableObject {
     /// pause, including the pause an interruption makes.
     @Published private(set) var wantsToPlay = false
     private var tracker = PlayTracker()
+    private var lastProgress = Date.distantPast
+    private var reportingProgress = false
     private var artworkTask: Task<Void, Never>?
 
     init(
@@ -105,6 +107,44 @@ final class Player: ObservableObject {
         }
     }
 
+    /// Starts Radio from a track, album or playlist: the first track plays,
+    /// and up to five tracks spread across the list seed it, as on desktop.
+    /// A track without an artist cannot seed.
+    func startRadio(tracks: [PlayerTrack]) async {
+        let seedable = tracks.filter { !($0.artist ?? "").isEmpty }
+        guard !tracks.isEmpty, !seedable.isEmpty else { return }
+        let step = max(1, seedable.count / 5)
+        let seeds = stride(from: 0, to: seedable.count, by: step).prefix(5).map {
+            Components.Schemas.RadioSeed(artist: seedable[$0].artist ?? "", title: seedable[$0].title)
+        }
+        await startRadio(lead: Array(tracks.prefix(1)), seeds: seeds)
+    }
+
+    /// Starts Radio from an artist: the core opens with a few of their tracks.
+    func startRadio(artist: String) async {
+        await startRadio(lead: [], seeds: [.init(artist: artist)])
+    }
+
+    private func startRadio(lead: [PlayerTrack], seeds: [Components.Schemas.RadioSeed]) async {
+        await change { client, session in
+            try await client.startRadio(path: .init(session: session), body: .json(.init(lead: lead, seeds: seeds))).ok.body.json
+        }
+    }
+
+    /// Tells the core how far the current track has played, so its Radio can
+    /// tell a skip from a finish. Only while Radio runs.
+    private func reportProgress(seeking: Bool = false) async {
+        guard queue?.radio == true, let queue, let entry = currentEntry, let client = core.client else { return }
+        let sample = Components.Schemas.PlayerProgress(entryId: entry.id, playId: queue.playId,
+            positionMs: elapsed * 1000, durationMs: duration * 1000, playing: isPlaying, seeking: seeking)
+        lastProgress = Date()
+        reportingProgress = true
+        defer { reportingProgress = false }
+        if let state = try? await client.playerProgress(path: .init(session: session), body: .json(sample)).ok.body.json {
+            apply(state)
+        }
+    }
+
     func togglePlayPause() {
         wantsToPlay ? pause() : resume()
     }
@@ -137,6 +177,7 @@ final class Player: ObservableObject {
     }
 
     func next() async {
+        await reportProgress()
         finishListening()
         let entry = entryRequest()
         await change { client, session in
@@ -150,6 +191,7 @@ final class Player: ObservableObject {
             seek(to: 0)
             return
         }
+        await reportProgress()
         finishListening()
         let entry = entryRequest()
         await change { client, session in
@@ -167,6 +209,7 @@ final class Player: ObservableObject {
         item.cancelPendingSeeks()
         tracker.seeked(to: target)
         elapsed = target
+        Task { await reportProgress(seeking: true) }
         updateNowPlaying()
         avPlayer.seek(to: CMTime(seconds: cropStart + target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self, weak item] finished in
             Task { @MainActor in
@@ -228,8 +271,8 @@ final class Player: ObservableObject {
             loadedPlayID = state.playId
             load(entry.track)
         }
-        let upcoming = state.entries.dropFirst(state.index + 1).prefix(ExternalPrewarm.queueLookahead)
-        for next in upcoming { prewarm(next.track, core.core) }
+        let upcoming = state.upNext.prefix(ExternalPrewarm.queueLookahead)
+        for i in upcoming where state.entries.indices.contains(i) { prewarm(state.entries[i].track, core.core) }
     }
 
     /// Where AVPlayer reads a track: the core's stream of a library track, or
@@ -322,6 +365,7 @@ final class Player: ObservableObject {
         isPlaying = false
         updateNowPlaying()
         finishListening(completed: true)
+        await reportProgress()
         await reportEnd(entryID: entryID)
     }
 
@@ -489,6 +533,10 @@ final class Player: ObservableObject {
         let position = max(0, seconds - cropStart)
         if avPlayer.timeControlStatus == .playing { tracker.advance(to: position) }
         elapsed = max(0, duration > 0 ? min(position, duration) : position)
+        if queue?.radio == true && !reportingProgress && Date().timeIntervalSince(lastProgress) >= 1 {
+            lastProgress = Date()
+            Task { await reportProgress() }
+        }
         if cropEnd > cropStart, seconds >= cropEnd, wantsToPlay {
             let item = item
             let entryID = currentEntry?.id

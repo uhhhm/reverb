@@ -57,7 +57,7 @@ func coverBlobPath(dir, sha, ext string) string {
 // only. guard is required: without it any dialer could read this device's
 // covers.
 func RegisterCoverHandler(h host.Host, coverDir string, guard *Guard) {
-	h.SetStreamHandler(coverProtocol, safeHandler("cover", func(s network.Stream) {
+	registerCompatible(h, coverProtocol, safeHandler("cover", func(s network.Stream) {
 		defer s.Close()
 		_ = s.SetDeadline(time.Now().Add(30 * time.Second))
 		if coverDir == "" || guard == nil {
@@ -108,7 +108,7 @@ func FetchCover(ctx context.Context, h host.Host, coverDir, peerID, sha, ext str
 	if err != nil {
 		return err
 	}
-	s, err := h.NewStream(ctx, pid, coverProtocol)
+	s, err := h.NewStream(ctx, pid, SupportedProtocols(coverProtocol)...)
 	if err != nil {
 		return err
 	}

@@ -66,6 +66,7 @@ type Entry struct {
 
 // State is the queue as a player sees it.
 type State struct {
+	Radio   bool    `json:"radio"`
 	Entries []Entry `json:"entries"`
 	// Index is the current entry, or -1 with nothing to play.
 	Index   int    `json:"index"`
@@ -89,6 +90,7 @@ type State struct {
 // Queue is one play queue. It is not safe for concurrent use; Service
 // serialises access.
 type Queue struct {
+	radio   *radioSession
 	entries []Entry
 	index   int
 	shuffle bool
@@ -116,6 +118,7 @@ func (q *Queue) State() State {
 	entries := make([]Entry, len(q.entries))
 	copy(entries, q.entries)
 	return State{
+		Radio:    q.radio != nil,
 		Entries:  entries,
 		Index:    q.index,
 		Shuffle:  q.shuffle,
@@ -185,6 +188,7 @@ func (q *Queue) Play(tracks []json.RawMessage, start int, origin Origin) error {
 	if err != nil {
 		return err
 	}
+	q.radio = nil
 	q.entries = entries
 	q.index = -1
 	if len(entries) > 0 {
@@ -459,6 +463,10 @@ func (q *Queue) SetRepeat(r Repeat) error {
 // queued. They stay, but as ordinary queue: from now on a track the listener
 // queues goes after them, as it would with no Radio at all.
 func (q *Queue) RadioEnded() {
+	if q.radio != nil {
+		q.radio = nil
+		q.changed()
+	}
 	changed := false
 	for i := range q.entries {
 		if q.entries[i].Origin == OriginRadio {
@@ -473,6 +481,7 @@ func (q *Queue) RadioEnded() {
 
 // Clear empties the queue. Shuffle and repeat stay as they were.
 func (q *Queue) Clear() {
+	q.RadioEnded()
 	if len(q.entries) == 0 && q.index == -1 {
 		return
 	}

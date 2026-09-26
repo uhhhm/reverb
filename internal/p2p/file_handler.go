@@ -19,7 +19,7 @@ type fileRequest struct {
 // paired peers only. guard is required: without it the handler would hand any
 // file under musicDir to any dialer on the LAN or via DHT/relay.
 func RegisterFileHandler(h host.Host, musicDir string, guard *Guard) {
-	h.SetStreamHandler("/reverb/file/1.0.0", safeHandler("file", func(s network.Stream) {
+	registerCompatible(h, fileProtocol, safeHandler("file", func(s network.Stream) {
 		defer s.Close()
 		// Covers the request and the trust check only; the body copy refreshes
 		// the deadline per chunk, since a multi-gigabyte file cannot finish

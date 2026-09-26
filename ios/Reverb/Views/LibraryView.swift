@@ -122,6 +122,7 @@ enum CatalogLibrary {
 }
 
 struct CatalogArtistView: View {
+    @EnvironmentObject private var player: Player
     let artist: String
     @EnvironmentObject private var core: CoreHost
     @State private var tracks: [CatalogTrack] = []
@@ -135,6 +136,7 @@ struct CatalogArtistView: View {
             }
         }
         .navigationTitle(artist)
+        .toolbar { Button("Start Radio", systemImage: "dot.radiowaves.left.and.right") { Task { await player.startRadio(artist: artist) } } }
         .refreshable { await load() }
         .task {
             while !Task.isCancelled {
@@ -152,6 +154,7 @@ struct CatalogArtistView: View {
 }
 
 struct CatalogAlbumView: View {
+    @EnvironmentObject private var player: Player
     let artist: String
     let album: String
     @EnvironmentObject private var core: CoreHost
@@ -167,6 +170,9 @@ struct CatalogAlbumView: View {
             }
         }
         .navigationTitle(album)
+        .toolbar { Button("Start Radio", systemImage: "dot.radiowaves.left.and.right") {
+            Task { await player.startRadio(tracks: tracks.filter { $0.artist == artist && $0.album == album }.map { PlayerTrack(id: $0.localTrackId ?? $0.id, title: $0.title, artist: $0.artist, album: $0.album, durationMs: $0.durationMs) }) }
+        }.disabled(tracks.isEmpty) }
         .refreshable { await load() }
         .task {
             while !Task.isCancelled {
@@ -201,6 +207,7 @@ struct CatalogTrackRow: View {
         .contentShape(Rectangle())
         .onTapGesture { Task { await play() } }
         .contextMenu {
+            Button("Start Radio", systemImage: "dot.radiowaves.left.and.right") { Task { await player.startRadio(tracks: [PlayerTrack(id: track.localTrackId ?? track.id, title: track.title, artist: track.artist, album: track.album, durationMs: track.durationMs)]) } }
             Menu("Add to playlist") {
                 ForEach(playlists, id: \.id) { playlist in
                     Button(playlist.name) { Task { await add(to: playlist.id) } }
@@ -235,6 +242,7 @@ struct CatalogTrackRow: View {
 }
 
 struct ArtistView: View {
+    @EnvironmentObject private var player: Player
     let artistID: String
     @EnvironmentObject private var core: CoreHost
     @State private var artist: LibraryArtist?
@@ -246,6 +254,7 @@ struct ArtistView: View {
             }
         }
         .navigationTitle(artist?.name ?? "Artist")
+        .toolbar { Button("Start Radio", systemImage: "dot.radiowaves.left.and.right") { Task { if let artist { await player.startRadio(artist: artist.name) } } }.disabled(artist == nil) }
         .task {
             while !Task.isCancelled {
                 if let client = core.client {
@@ -275,6 +284,7 @@ struct AlbumView: View {
             }
         }
         .navigationTitle(album?.name ?? "Album")
+        .toolbar { Button("Start Radio", systemImage: "dot.radiowaves.left.and.right") { Task { await player.startRadio(tracks: (album?.tracks ?? []).map(Player.playerTrack)) } }.disabled(album?.tracks?.isEmpty != false) }
         .task {
             while !Task.isCancelled {
                 if let client = core.client {
@@ -287,6 +297,7 @@ struct AlbumView: View {
 }
 
 struct LibraryTrackRow: View {
+    @EnvironmentObject private var player: Player
     let track: LibraryTrack
     @EnvironmentObject private var core: CoreHost
     @State private var playlists: [Components.Schemas.SyncedPlaylist] = []
@@ -294,6 +305,7 @@ struct LibraryTrackRow: View {
     var body: some View {
         MediaRow(title: track.title, subtitle: track.artist, coverArtID: track.coverArtId)
             .contextMenu {
+                Button("Start Radio", systemImage: "dot.radiowaves.left.and.right") { Task { await player.startRadio(tracks: [Player.playerTrack(track)]) } }
                 Menu("Add to playlist") {
                     ForEach(playlists, id: \.id) { playlist in
                         Button(playlist.name) { Task { await add(to: playlist.id) } }

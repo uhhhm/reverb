@@ -102,6 +102,7 @@ struct SearchView: View {
 }
 
 struct SearchResultRow: View {
+    @EnvironmentObject private var player: Player
     let result: SearchResult
     @EnvironmentObject private var core: CoreHost
 
@@ -114,6 +115,7 @@ struct SearchResultRow: View {
             Spacer()
         }
         .contextMenu {
+            Button("Start Radio", systemImage: "dot.radiowaves.left.and.right") { Task { await player.startRadio(tracks: [result.playerTrack]) } }
             if result.match?.status != "in_library" {
                 Button("Download", systemImage: "arrow.down.circle") {
                     Task {

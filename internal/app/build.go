@@ -54,6 +54,7 @@ import (
 	"github.com/uhhhm/reverb/internal/recommend/listenbrainz"
 	"github.com/uhhhm/reverb/internal/recommendationevent"
 	"github.com/uhhhm/reverb/internal/registry"
+	"github.com/uhhhm/reverb/internal/release"
 	"github.com/uhhhm/reverb/internal/resolver"
 	"github.com/uhhhm/reverb/internal/scrobble"
 	"github.com/uhhhm/reverb/internal/scrobble/lastfm"
@@ -236,8 +237,11 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 
 	phone := opts.Profile == ProfilePhone
 	dataDir := filepath.Dir(opts.DBPath)
+	// The phone learns of new IPAs itself; the desktop has its own updater.
+	var phoneRelease *release.Tracker
 	if phone {
 		SeedPhoneSearchSources(ctx, st.Q(), opts.Getenv)
+		phoneRelease = release.New(opts.UpdateRepo, opts.Version)
 	}
 	// spotDL ships with both desktop builds, so present it as a configured
 	// downloader out of the box when none exists yet. A phone has no spotDL
@@ -387,6 +391,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		Desktop:       opts.Desktop,
 		Version:       opts.Version,
 		UpdateRepo:    opts.UpdateRepo,
+		PhoneRelease:  phoneRelease,
 		DataDir:       dataDir,
 		MusicDir:      musicDir,
 		Resolver:      resolverSvc,
@@ -781,7 +786,7 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 		priv, kerr := p2p.LoadOrCreateIdentity(ctx, r.Store.Q())
 		if kerr != nil {
 			logf("WARNING: p2p identity: %v", kerr)
-		} else if h, err := p2p.NewHostWith(ctx, priv, r.P2PPort, p2p.HostOptions{NoDiscovery: r.noDiscovery}); err != nil {
+		} else if h, err := p2p.NewHostWith(ctx, priv, r.P2PPort, p2p.HostOptions{NoDiscovery: r.noDiscovery, Version: r.Deps.Version}); err != nil {
 			logf("WARNING: p2p host: %v", err)
 		} else {
 			r.P2P = h

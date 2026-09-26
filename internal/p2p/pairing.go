@@ -138,7 +138,7 @@ var pairLimiter = newAttemptLimiter(pairAttemptsPerPeer, pairAttemptsGlobal, pai
 // localDeviceID supplies this node's own device ID for the response; it may be
 // nil, in which case the peer cannot bind us to a device.
 func RegisterPairingHandler(h host.Host, pairing PairingService, guard *Guard, keys DeviceKeyStore, localDeviceID func(context.Context) (string, error)) {
-	h.SetStreamHandler(pairProtocol, safeHandler("pair", func(s network.Stream) {
+	registerCompatible(h, pairProtocol, safeHandler("pair", func(s network.Stream) {
 		defer s.Close()
 		_ = s.SetDeadline(time.Now().Add(10 * time.Second))
 		remote := s.Conn().RemotePeer()
@@ -338,7 +338,7 @@ func RedeemViaAddrs(ctx context.Context, h host.Host, guard *Guard, keys DeviceK
 	// nothing to resolve the peer ID to and fails without ever touching the
 	// network.
 	SeedAddrs(h, pi)
-	s, err := h.NewStream(ctx, pid, pairProtocol)
+	s, err := h.NewStream(ctx, pid, SupportedProtocols(pairProtocol)...)
 	if err != nil {
 		return "", "", fmt.Errorf("open stream: %w", err)
 	}

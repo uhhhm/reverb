@@ -1,5 +1,6 @@
 import { api } from './api'
 import type { components } from './generated/api'
+import type { RadioStart } from './radio'
 import type { Track } from './types'
 
 /** The core's play queue, as it answers every queue request. */
@@ -7,12 +8,17 @@ export type QueueState = components['schemas']['QueueState']
 export type QueueOrigin = 'listener' | 'radio'
 export type RepeatMode = 'off' | 'all' | 'one'
 
+/** A sample of playback, which the core's Radio judges skips and finishes by. */
+export type PlayerProgress = components['schemas']['PlayerProgress']
+
 /**
  * What the player asks of the core's queue. The core owns the queue; the
  * player sends it what the listener did and plays what it answers. Swappable
  * so tests run without a server.
  */
 export interface QueueTransport {
+  startRadio(start: RadioStart): Promise<QueueState>
+  progress(sample: PlayerProgress): Promise<QueueState>
   get(): Promise<QueueState>
   play(tracks: Track[], start: number, origin?: QueueOrigin): Promise<QueueState>
   enqueue(tracks: Track[], origin?: QueueOrigin): Promise<QueueState>
@@ -51,6 +57,8 @@ export function httpQueue(session: string): QueueTransport {
   const base = `/player/${encodeURIComponent(session)}`
   const post = (op: string, body?: unknown) => api.post<QueueState>(`${base}/${op}`, body ?? {})
   return {
+    startRadio: (start) => post('radio', start),
+    progress: (sample) => post('progress', sample),
     get: () => api.get<QueueState>(base),
     play: (tracks, start, origin = 'listener') => post('play', { tracks, start, origin }),
     enqueue: (tracks, origin = 'listener') => post('enqueue', { tracks, origin }),

@@ -61,15 +61,16 @@ type HostOptions struct {
 	// by addresses that were stored or supplied, the way they are across a
 	// VPN. Tests use it to prove a path does not lean on discovery.
 	NoDiscovery bool
+	Version     string
 }
 
 // NewHostWith is NewHost with options.
 func NewHostWith(ctx context.Context, priv crypto.PrivKey, port int, opts HostOptions) (*Host, error) {
-	h, err := newLibp2pHost(priv, port)
+	h, err := newLibp2pHost(priv, port, opts.Version)
 	if err != nil && port != 0 {
 		log.Printf("WARNING: p2p listen on port %d failed (%v); falling back to a random port. "+
 			"Manually entered peer addresses will go stale on restart until the conflict is resolved.", port, err)
-		h, err = newLibp2pHost(priv, 0)
+		h, err = newLibp2pHost(priv, 0, opts.Version)
 	}
 	if err != nil {
 		return nil, err
@@ -109,19 +110,20 @@ func NewHostWith(ctx context.Context, priv crypto.PrivKey, port int, opts HostOp
 // service; a dial in that startup window closes cleanly instead of failing
 // protocol negotiation.
 func setPlaceholderHandlers(h host.Host) {
-	h.SetStreamHandler("/reverb/sync/1.0.0", func(s network.Stream) { s.Close() })
+	h.SetStreamHandler(syncProtocol, func(s network.Stream) { s.Close() })
 	h.SetStreamHandler(pairProtocol, func(s network.Stream) { s.Close() })
-	h.SetStreamHandler("/reverb/file/1.0.0", func(s network.Stream) { s.Close() })
+	h.SetStreamHandler(fileProtocol, func(s network.Stream) { s.Close() })
 	h.SetStreamHandler(coverProtocol, func(s network.Stream) { s.Close() })
 	h.SetStreamHandler(delegatedProtocol, func(s network.Stream) { s.Close() })
 }
 
-func newLibp2pHost(priv crypto.PrivKey, port int) (host.Host, error) {
+func newLibp2pHost(priv crypto.PrivKey, port int, version string) (host.Host, error) {
 	cm, err := connmgr.NewConnManager(10, 50)
 	if err != nil {
 		return nil, fmt.Errorf("connmgr: %w", err)
 	}
 	opts := []libp2p.Option{
+		libp2p.UserAgent("Reverb/" + version),
 		libp2p.ListenAddrStrings(
 			fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", port),
 			fmt.Sprintf("/ip4/0.0.0.0/udp/%d/quic-v1", port),

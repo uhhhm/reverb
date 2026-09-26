@@ -24,15 +24,17 @@ paths:
           content: { application/json: { schema: { type: object, properties: { status: { type: string } }, required: [status] } } }
   /version:
     get:
-      summary: Build version and update-check repository
+      summary: Build version, update source, and paired devices' versions
       responses:
         "200":
-          description: version string, and the GitHub owner/name polled for updates ("" when disabled)
+          description: >-
+            This build's version and the GitHub owner/name polled for updates
+            ("" when disabled). Also the protocol support window, each paired
+            device's version and compatibility, and on the phone the newest
+            published release that carries an IPA.
           content:
             application/json:
-              schema:
-                type: object
-                properties: { version: { type: string }, updateRepo: { type: string } }
+              schema: { $ref: '#/components/schemas/VersionInfo' }
   /update:
     get:
       summary: Desktop self-update state
@@ -963,6 +965,42 @@ paths:
         "200": { description: queue, content: { application/json: { schema: { $ref: '#/components/schemas/QueueState' } } } }
         "400": { description: invalid session }
         "503": { description: player unavailable }
+  /player/{session}/radio:
+    post:
+      parameters:
+        - { name: session, in: path, required: true, schema: { type: string } }
+      summary: Start a core-owned Radio session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlayerRadioRequest' }
+      responses:
+        "200":
+          description: The updated queue
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QueueState' }
+        "400": { description: Invalid request }
+        "503": { description: Player unavailable }
+  /player/{session}/progress:
+    post:
+      parameters:
+        - { name: session, in: path, required: true, schema: { type: string } }
+      summary: Report listening progress for Radio steering
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PlayerProgress' }
+      responses:
+        "200":
+          description: The updated queue
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QueueState' }
+        "400": { description: Invalid request }
+        "503": { description: Player unavailable }
   /player/{session}/play:
     post:
       summary: Replace the queue with a list and start playing it
@@ -2301,6 +2339,7 @@ components:
       type: object
       required: [entries, index, shuffle, repeat, upNext, playId, finished, revision]
       properties:
+        radio: { type: boolean, description: Whether the core is filling this Radio session. }
         entries: { type: array, items: { $ref: '#/components/schemas/QueueEntry' } }
         index: { type: integer, description: "The current entry, or -1 with nothing to play." }
         shuffle: { type: boolean }
@@ -2326,6 +2365,42 @@ components:
       properties:
         session: { type: string }
         revision: { type: integer, format: int64 }
+    VersionInfo:
+      type: object
+      required: [version, updateRepo, supportWindow, peers, latestVersion, sourceUrl, releaseUrl]
+      properties:
+        version: { type: string }
+        updateRepo: { type: string }
+        supportWindow: { type: integer, description: "How many minor protocol releases this build serves: the current and those before it." }
+        peers: { type: array, items: { $ref: '#/components/schemas/PeerVersion' } }
+        latestVersion: { type: string, description: "A newer published release with an IPA, or empty. Reported on the phone only." }
+        sourceUrl: { type: string, description: "The SideStore/AltStore source, or empty when updates are disabled." }
+        releaseUrl: { type: string, description: "The release page for latestVersion, or empty." }
+    PeerVersion:
+      type: object
+      required: [peerId, deviceId, version, compatibility, message]
+      properties:
+        peerId: { type: string }
+        deviceId: { type: string }
+        version: { type: string, description: "The peer's build version, or empty until it has been reached." }
+        compatibility: { type: string, enum: [compatible, incompatible, unknown], description: "unknown until the peer has been reached this run." }
+        message: { type: string, description: "What the owner should do when incompatible; otherwise empty." }
+    PlayerRadioRequest:
+      type: object
+      required: [lead, seeds]
+      properties:
+        lead: { type: array, items: { $ref: '#/components/schemas/PlayerTrack' } }
+        seeds: { type: array, minItems: 1, maxItems: 5, items: { $ref: '#/components/schemas/RadioSeed' } }
+    PlayerProgress:
+      type: object
+      required: [entryId, playId, positionMs, durationMs, playing, seeking]
+      properties:
+        entryId: { type: string }
+        playId: { type: integer, format: int64 }
+        positionMs: { type: number, minimum: 0 }
+        durationMs: { type: number, minimum: 0 }
+        playing: { type: boolean }
+        seeking: { type: boolean }
     PlayerTracksRequest:
       type: object
       required: [tracks]

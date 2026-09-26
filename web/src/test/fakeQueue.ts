@@ -161,6 +161,8 @@ export class FakeQueue {
       return Promise.resolve(this.state())
     }
     return {
+      startRadio: async () => { throw new Error('Radio is tested through the core API') },
+      progress: async () => this.state(),
       get: () => Promise.resolve(this.state()),
       play: (tracks, start, origin) => answer(() => this.play(tracks, start, origin)),
       enqueue: (tracks, origin) => answer(() => this.enqueue(tracks, origin)),
