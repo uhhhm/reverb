@@ -44,6 +44,7 @@ Reverb is a Go modular monolith with an embedded React/TypeScript SPA. **Desktop
 
 ## Testing
 - Use TDD when appropriate
+- Tautological tests considered harmful.  
 - NEVER write unit tests after you write code. 
 - Highly prefer E2E tests afterwards. Use them to verify complex features work. At the end of E2E tests, produce a verifiable and repeatable artifact. 
 - If you must test a system in isolation, FIRST write all the ways it could fail, THEN write the code.
