@@ -2,13 +2,10 @@ package api
 
 import (
 	"errors"
-	"log"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/uhhhm/reverb/internal/play"
-	"github.com/uhhhm/reverb/internal/scrobble"
 )
 
 // handlePlay serves POST /api/v1/plays.
@@ -38,33 +35,6 @@ func (s *Server) handlePlay(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
-	}
-
-	// A play the client explicitly marked unqualified is a recommendation
-	// attempt that was skipped before it became a listen: it stays recorded for
-	// outcome stats, but claiming it as a listen to Last.fm or ListenBrainz
-	// would be false. Qualified is absent for older clients and ordinary
-	// playback, which keeps the historical behaviour of scrobbling.
-	unqualified := in.Qualified != nil && !*in.Qualified
-
-	// Enqueue for scrobbling if the scrobble service is wired in.
-	if s.deps.Scrobble != nil && !unqualified {
-		// Resolve played_at: use the body value when set; fall back to now.
-		playedAt := in.PlayedAt
-		if playedAt == 0 {
-			playedAt = time.Now().Unix()
-		}
-		if err := s.deps.Scrobble.Enqueue(r.Context(), cu.ID, scrobble.ScrobblePlay{
-			Track: scrobble.Track{
-				Title:      in.Title,
-				Artist:     in.Artist,
-				Album:      in.Album,
-				DurationMs: in.DurationMs,
-			},
-			PlayedAt: playedAt,
-		}); err != nil {
-			log.Printf("scrobble: enqueue after play user=%s: %v", cu.ID, err)
-		}
 	}
 
 	w.WriteHeader(http.StatusNoContent)

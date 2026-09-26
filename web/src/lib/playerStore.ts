@@ -76,8 +76,9 @@ function change(
 
 // Whether playback is on as the answer lands, for moves that keep playing only
 // what was already playing.
-// The latest queue the core answered, and the pacing of progress reports:
-// during Radio at most one a second, and never two at once.
+// The latest queue the core answered, and the pacing of progress reports: at
+// most one a second, and never two at once. The core decides what was
+// listened to from these samples, and Radio steers by them.
 let lastQueue: QueueState | undefined
 let progressBusy = false
 let lastProgressAt = 0
@@ -96,7 +97,7 @@ export const usePlayer = create<PlayerStore>((set) => {
   // Mirror engine state into the store on every change.
   engine.subscribe((s) => {
     set(s)
-    if (lastQueue?.radio && !progressBusy && Date.now() - lastProgressAt >= 1000) reportProgress()
+    if (!progressBusy && Date.now() - lastProgressAt >= 1000) reportProgress()
   })
   return {
     ...engine.getState(),
@@ -144,11 +145,11 @@ export const usePlayer = create<PlayerStore>((set) => {
 })
 
 function reportProgress(seeking = false, positionMs?: number) {
-  if (!lastQueue?.radio) return
-  const entry = lastQueue.entries[lastQueue.index]
-  if (!entry) return
+  const q = lastQueue
+  const entry = q?.entries[q.index]
+  if (!q || !entry) return
   const s = engine.getState()
-  const sample = { entryId: entry.id, playId: lastQueue.playId,
+  const sample = { entryId: entry.id, playId: q.playId,
     positionMs: positionMs ?? s.currentTimeMs, durationMs: s.durationMs, playing: s.playing, seeking }
   progressBusy = true
   lastProgressAt = Date.now()

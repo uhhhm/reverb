@@ -1,6 +1,5 @@
 import { Suspense, useEffect } from 'react'
 import { Outlet } from 'react-router-dom'
-import { useQueryClient } from '@tanstack/react-query'
 import { TopBar } from './shell/TopBar'
 import { LibraryRail } from './shell/LibraryRail'
 import { PlayerBar } from './shell/PlayerBar'
@@ -21,11 +20,8 @@ import { useUI } from '../lib/uiStore'
 import { useAlbumPalette } from '../lib/useAlbumPalette'
 import { trackCoverUrl } from '../lib/libraryApi'
 import { rgbToCss } from '../lib/palette'
-import { startPlayTracker } from '../lib/playTracker'
 import { startNowPlaying } from '../lib/nowPlaying'
 import { startMediaSession } from '../lib/mediaSession'
-import { recordPlay } from '../lib/playApi'
-import { useToastStore } from '../lib/toastStore'
 import { useSettings } from '../lib/settingsApi'
 
 function RouteLoading() {
@@ -53,19 +49,6 @@ export function AppShell() {
   // download store, TanStack invalidation, and play-when-ready auto-play.
   useRealtime()
 
-  // One app-wide play tracker: scores qualified plays off the audio engine and
-  // POSTs them to /api/v1/plays.  Starts once when AppShell mounts and cleans
-  // up (unsubscribes) when it unmounts.
-  const queryClient = useQueryClient()
-  const pushToast = useToastStore((s) => s.push)
-  useEffect(() => startPlayTracker(engine, async (input) => {
-    try {
-      await recordPlay(input)
-      await queryClient.invalidateQueries({ queryKey: ['stats'] })
-    } catch {
-      pushToast("Couldn't record this play. Check your connection and try again.", 'error')
-    }
-  }), [pushToast, queryClient])
   // Loudness normalization is a setting, so the engine has to be told about it
   // whenever it loads or changes rather than reading it once at construction.
   const normalization = useSettings().data?.audioNormalization ?? false

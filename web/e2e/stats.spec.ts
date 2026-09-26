@@ -4,7 +4,7 @@ import type { Route } from '@playwright/test'
 
 // Hermetic e2e for the /stats dashboard (SP3-3a; mock-driven, no real backend).
 //
-// installApiMocks registers default empty /stats/* + /plays handlers (so every
+// installApiMocks registers default empty /stats/* handlers (so every
 // page renders). This spec OVERRIDES the /stats/* endpoints with seeded data
 // (Playwright: most-recently-registered-first) and asserts the dashboard renders
 // cards / top-lists / timeline / heatmap, and that switching the range refetches.

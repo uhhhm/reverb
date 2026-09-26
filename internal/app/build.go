@@ -350,6 +350,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	// owner pastes a user token in Settings.
 	scrobbleSvc := scrobble.NewService(st.Q(), lastfm.New(), scrobbleCfg, time.Now, uuid.NewString).
 		WithTokenProvider(scrobble.ListenBrainz, listenbrainzupload.New())
+	playSvc.WithScrobbler(scrobbleSvc)
 
 	// LinkAdd planner owns the add-from-link flow (resolve, catalog, sync,
 	// chapter planning). It reads the LIVE aggregator for Spotify enrichment.
@@ -428,6 +429,17 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	// event bus (session and revision only), for a client that did not make it.
 	deps.Player = player.NewService(func(e player.Event) {
 		bus.Publish(events.Event{Topic: player.TopicQueue, Payload: e})
+	})
+	// Players report playback samples; the core decides what was listened to
+	// and records it for the household owner.
+	deps.Player.OnListen(func(l player.Listen) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := playSvc.Record(ctx, auth.LocalUser().ID, listenPlay(l)); err != nil {
+			log.Printf("player: record listen of %q: %v", l.Title, err)
+			return
+		}
+		bus.Publish(events.Event{Topic: player.TopicListen, Payload: player.ListenEvent{Session: l.Session}})
 	})
 	// Track covers are keyed on the catalog id so they survive a library-backend
 	// swap and can name the same track on a paired device.
@@ -1084,5 +1096,23 @@ func (r *Runtime) waitForBackground(grace time.Duration) {
 	case <-done:
 	case <-time.After(grace):
 		logf("WARNING: background loops did not stop within %s; closing anyway", grace)
+	}
+}
+
+// listenPlay is the play a core-decided listen records.
+func listenPlay(l player.Listen) play.PlayInput {
+	qualified := l.Qualified
+	return play.PlayInput{
+		LibraryTrackID: l.TrackID,
+		Title:          l.Title,
+		Artist:         l.Artist,
+		Album:          l.Album,
+		ISRC:           l.ISRC,
+		DurationMs:     l.DurationMS,
+		MsPlayed:       l.MsPlayed,
+		Completed:      l.Completed,
+		Origin:         core.RecommendationOrigin(l.Origin),
+		SessionID:      l.Run,
+		Qualified:      &qualified,
 	}
 }

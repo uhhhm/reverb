@@ -3399,7 +3399,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Report listening progress for Radio steering */
+        /**
+         * Report a playback sample of the current play
+         * @description Players report where the current play is about once a second while it plays, and on each seek, skip and end. The core decides from these samples what was listened to and records it; Radio also steers by them.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -7223,6 +7226,10 @@ export interface components {
             /** Format: int64 */
             revision: number;
         };
+        /** @description The core recorded a play from a session's playback samples; listening history and stats changed. */
+        PlayerListenEvent: {
+            session: string;
+        };
         VersionInfo: {
             version: string;
             updateRepo: string;
@@ -7518,6 +7525,10 @@ export interface components {
             /** @enum {string} */
             type: "player.queue";
             payload: components["schemas"]["PlayerQueueEvent"];
+        } | {
+            /** @enum {string} */
+            type: "player.listen";
+            payload: components["schemas"]["PlayerListenEvent"];
         };
         ExternalArtist: {
             source: string;

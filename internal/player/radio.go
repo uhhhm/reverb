@@ -113,10 +113,12 @@ func (q *Queue) StartRadio(start RadioStart) error {
 	return nil
 }
 
-// Progress applies a playback sample to Radio's judgement of the current
-// play: listening time, and a finish once heard to within 1.5s of the end
-// having heard at least half. A sample for another play is ignored.
+// Progress applies a playback sample of the current play: to what was
+// listened to, and to Radio's judgement of the play — listening time, and a
+// finish once heard to within 1.5s of the end having heard at least half. A
+// sample for another play is ignored.
 func (q *Queue) Progress(p Progress) {
+	q.listen.sample(q, p)
 	r := q.radio
 	if r == nil || p.EntryID != q.Current() || p.PlayID != q.playID {
 		return

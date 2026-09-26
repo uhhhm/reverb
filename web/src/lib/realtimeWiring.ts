@@ -78,6 +78,11 @@ export function useRealtime(makeSocket?: (url: string) => WebSocketLike): void {
           })
           break
         }
+        case 'player.listen': {
+          // The core recorded a play: listening history and stats moved.
+          void qc.invalidateQueries({ queryKey: ['stats'] })
+          break
+        }
         case 'download.removed': {
           useDownloads.getState().remove(frame.payload.jobIds ?? [])
           break

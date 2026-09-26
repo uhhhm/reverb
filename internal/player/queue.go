@@ -91,6 +91,7 @@ type State struct {
 // serialises access.
 type Queue struct {
 	radio   *radioSession
+	listen  listening
 	entries []Entry
 	index   int
 	shuffle bool

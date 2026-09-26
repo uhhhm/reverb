@@ -2,7 +2,7 @@ import type { PlayerState } from './audioEngine'
 import { trackCoverUrl } from './libraryApi'
 
 // Minimal engine interface — the real AudioEngine satisfies this; tests supply a fake.
-// Same pattern as nowPlaying.ts / playTracker.ts.
+// Same pattern as nowPlaying.ts.
 interface Enginelike {
   subscribe(cb: (s: PlayerState) => void): () => void
   play(): void

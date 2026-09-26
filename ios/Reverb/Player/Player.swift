@@ -53,7 +53,6 @@ final class Player: ObservableObject {
     /// Whether the listener wants sound: set by play and resume, cleared by
     /// pause, including the pause an interruption makes.
     @Published private(set) var wantsToPlay = false
-    private var tracker = PlayTracker()
     private var lastProgress = Date.distantPast
     private var reportingProgress = false
     private var artworkTask: Task<Void, Never>?
@@ -131,10 +130,10 @@ final class Player: ObservableObject {
         }
     }
 
-    /// Tells the core how far the current track has played, so its Radio can
-    /// tell a skip from a finish. Only while Radio runs.
+    /// Tells the core how far the current play has got. The core decides from
+    /// these samples what was listened to, and Radio steers by them.
     private func reportProgress(seeking: Bool = false) async {
-        guard queue?.radio == true, let queue, let entry = currentEntry, let client = core.client else { return }
+        guard let queue, let entry = currentEntry, let client = core.client else { return }
         let sample = Components.Schemas.PlayerProgress(entryId: entry.id, playId: queue.playId,
             positionMs: elapsed * 1000, durationMs: duration * 1000, playing: isPlaying, seeking: seeking)
         lastProgress = Date()
@@ -162,7 +161,7 @@ final class Player: ObservableObject {
         // A core started again while the app was away listens on a new port
         // with a new secret, so the loaded stream would no longer answer.
         if let track = current, item.status == .failed || core.core != loadedCore {
-            load(track, at: elapsed, continuing: true)
+            load(track, at: elapsed)
             return
         }
         wantsToPlay = true
@@ -178,7 +177,6 @@ final class Player: ObservableObject {
 
     func next() async {
         await reportProgress()
-        finishListening()
         let entry = entryRequest()
         await change { client, session in
             try await client.nextInQueue(path: .init(session: session), body: .json(entry)).ok.body.json
@@ -192,7 +190,6 @@ final class Player: ObservableObject {
             return
         }
         await reportProgress()
-        finishListening()
         let entry = entryRequest()
         await change { client, session in
             try await client.previousInQueue(path: .init(session: session), body: .json(entry)).ok.body.json
@@ -207,7 +204,6 @@ final class Player: ObservableObject {
         seeking = true
         handledEnd = false
         item.cancelPendingSeeks()
-        tracker.seeked(to: target)
         elapsed = target
         Task { await reportProgress(seeking: true) }
         updateNowPlaying()
@@ -217,10 +213,7 @@ final class Player: ObservableObject {
                       self.seekVersion == version else { return }
                 self.seeking = false
                 let actual = self.avPlayer.currentTime().seconds
-                if actual.isFinite {
-                    self.elapsed = max(0, actual - self.cropStart)
-                    self.tracker.seeked(to: self.elapsed)
-                }
+                if actual.isFinite { self.elapsed = max(0, actual - self.cropStart) }
                 if !finished { self.lastError = "Playback: Could not seek to that position." }
                 self.updateNowPlaying()
             }
@@ -287,7 +280,7 @@ final class Player: ObservableObject {
         return streamURL?(id) ?? core.core?.streamURL(trackID: id)
     }
 
-    private func load(_ track: PlayerTrack, at seconds: Double = 0, continuing: Bool = false, playing: Bool = true) {
+    private func load(_ track: PlayerTrack, at seconds: Double = 0, playing: Bool = true) {
         guard let url = url(for: track) else { return }
         loadedCore = core.core
         var options: [String: Any] = [AVURLAssetPreferPreciseDurationAndTimingKey: true]
@@ -344,7 +337,6 @@ final class Player: ObservableObject {
         elapsed = seconds
         let estimatedEnd = cropEnd > cropStart ? cropEnd : Double(track.durationMs ?? 0) / 1000
         duration = max(0, estimatedEnd - cropStart)
-        if !continuing { tracker.start(track) }
         if cropStart > 0 || seconds > 0 { seek(to: seconds) }
         wantsToPlay = playing
         if playing {
@@ -359,13 +351,11 @@ final class Player: ObservableObject {
         guard avPlayer.currentItem === item, !seeking, !handledEnd, wantsToPlay else { return }
         handledEnd = true
         refreshDuration(item)
-        let actual = item.currentTime().seconds
-        if actual.isFinite { tracker.advance(to: max(0, actual - cropStart)) }
         elapsed = duration
+        // Reported while still playing, so the core hears the last stretch.
+        await reportProgress()
         isPlaying = false
         updateNowPlaying()
-        finishListening(completed: true)
-        await reportProgress()
         await reportEnd(entryID: entryID)
     }
 
@@ -411,7 +401,7 @@ final class Player: ObservableObject {
             Task {
                 await core.ensureRunning()
                 guard loadedPlayID == playID, queue?.finished != true else { return }
-                load(track, at: position, continuing: true, playing: wanted)
+                load(track, at: position, playing: wanted)
             }
             return
         }
@@ -444,18 +434,6 @@ final class Player: ObservableObject {
         guard cropped != duration else { return }
         duration = cropped
         updateNowPlaying()
-    }
-
-    // MARK: Plays
-
-    /// Reports the track just left as a play when it was listened to enough,
-    /// as the desktop does, so the phone's listening shapes the taste profile.
-    private func finishListening(completed: Bool = false) {
-        guard let play = tracker.finish(durationMs: Int(duration * 1000), completed: completed),
-              let client = core.client else { return }
-        Task {
-            _ = try? await client.recordPlay(body: .json(play))
-        }
     }
 
     // MARK: Audio session
@@ -531,9 +509,8 @@ final class Player: ObservableObject {
         let seconds = item.currentTime().seconds
         guard seconds.isFinite else { return }
         let position = max(0, seconds - cropStart)
-        if avPlayer.timeControlStatus == .playing { tracker.advance(to: position) }
         elapsed = max(0, duration > 0 ? min(position, duration) : position)
-        if queue?.radio == true && !reportingProgress && Date().timeIntervalSince(lastProgress) >= 1 {
+        if !reportingProgress && Date().timeIntervalSince(lastProgress) >= 1 {
             lastProgress = Date()
             Task { await reportProgress() }
         }

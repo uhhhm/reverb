@@ -10,9 +10,8 @@ interface Enginelike {
  * startNowPlaying subscribes to the given engine and fires nowPlayingFn once
  * each time the current track id changes.  It is fire-and-forget: errors are
  * swallowed so they never affect playback.  Returns an unsubscribe function.
- *
- * Design: intentionally a small sibling to playTracker.ts — it DOES NOT touch
- * the qualifying-play accrual logic in that module.
+ * Whether the track is then listened to is the core's call, from the
+ * player's progress samples.
  */
 export function startNowPlaying(
   engine: Enginelike,

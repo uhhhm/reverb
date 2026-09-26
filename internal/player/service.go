@@ -11,6 +11,14 @@ import (
 // TopicQueue is the event bus topic a queue change is published on.
 const TopicQueue = "player.queue"
 
+// TopicListen is the event bus topic a recorded listen is published on.
+const TopicListen = "player.listen"
+
+// ListenEvent says the core recorded a listen from a session's playback.
+type ListenEvent struct {
+	Session string `json:"session"`
+}
+
 // MaxSessions is how many queues the service keeps. Each open player has its
 // own — a desktop window, a browser tab in server mode, the phone — and the
 // least recently used is dropped past this, since a closed tab never says so.
@@ -34,6 +42,7 @@ type Service struct {
 	mu       sync.Mutex
 	sessions map[string]*session
 	publish  func(Event)
+	onListen func(Listen)
 	now      func() time.Time
 	// lookups counts Radio lookups running in the background.
 	lookups sync.WaitGroup
@@ -50,6 +59,10 @@ type session struct {
 func NewService(publish func(Event)) *Service {
 	return &Service{sessions: map[string]*session{}, publish: publish, now: time.Now}
 }
+
+// OnListen has fn hear each listen the core decides on, outside any session
+// lock. Set it before the service is used.
+func (s *Service) OnListen(fn func(Listen)) { s.onListen = fn }
 
 // State reports a session's queue; an unknown session is an empty queue.
 func (s *Service) State(id string) (State, error) {
@@ -96,8 +109,11 @@ func (s *Service) UpdateRadio(ctx context.Context, id string, change func(*Queue
 	if err == nil {
 		s.refill(ctx, id, ses, fetch)
 	}
+	ses.q.listen.settle(ses.q)
+	listens := ses.q.listen.take()
 	st := ses.q.State()
 	ses.mu.Unlock()
+	s.deliver(id, listens)
 	if err != nil {
 		return st, err
 	}
@@ -154,10 +170,24 @@ func (s *Service) lookUp(id string, ses *session, r *radioSession, seeds []Radio
 			s.refill(context.Background(), id, ses, fetch)
 		}
 	}
+	q.listen.settle(q)
+	listens := q.listen.take()
 	st := q.State()
 	ses.mu.Unlock()
+	s.deliver(id, listens)
 	if st.Revision != before && s.publish != nil {
 		s.publish(Event{Session: id, Revision: st.Revision})
+	}
+}
+
+// deliver hands a session's listens to the listener, in the order decided.
+func (s *Service) deliver(session string, listens []Listen) {
+	if s.onListen == nil {
+		return
+	}
+	for _, l := range listens {
+		l.Session = session
+		s.onListen(l)
 	}
 }
 

@@ -4,7 +4,7 @@ import type { PlayerState } from './audioEngine'
 import type { Track } from './types'
 
 // ---------------------------------------------------------------------------
-// Helpers (mirror playTracker.test.ts harness)
+// Helpers
 // ---------------------------------------------------------------------------
 
 function mkTrack(id: string, durationMs = 60_000): Track {

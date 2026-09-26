@@ -86,7 +86,7 @@ func scrobbleTestServer(t *testing.T, sc scrobble.Scrobbler, cfg func() scrobble
 		return fmt.Sprintf("play-%08d-0000-0000-0000-000000000000", playCounter)
 	}
 	catalogSvc := catalog.NewService(st.Q(), time.Now, playIDgen)
-	playSvc := play.NewService(st.Q(), catalogSvc, time.Now, playIDgen)
+	playSvc := play.NewService(st.Q(), catalogSvc, time.Now, playIDgen).WithScrobbler(scrobbleSvc)
 
 	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:       authSvc,

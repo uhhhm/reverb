@@ -987,7 +987,11 @@ paths:
     post:
       parameters:
         - { name: session, in: path, required: true, schema: { type: string } }
-      summary: Report listening progress for Radio steering
+      summary: Report a playback sample of the current play
+      description: >
+        Players report where the current play is about once a second while it
+        plays, and on each seek, skip and end. The core decides from these
+        samples what was listened to and records it; Radio also steers by them.
       requestBody:
         required: true
         content:
@@ -2365,6 +2369,12 @@ components:
       properties:
         session: { type: string }
         revision: { type: integer, format: int64 }
+    PlayerListenEvent:
+      type: object
+      description: The core recorded a play from a session's playback samples; listening history and stats changed.
+      required: [session]
+      properties:
+        session: { type: string }
     VersionInfo:
       type: object
       required: [version, updateRepo, supportWindow, peers, latestVersion, sourceUrl, releaseUrl]
@@ -2959,6 +2969,17 @@ components:
             - player.queue
           payload:
             $ref: '#/components/schemas/PlayerQueueEvent'
+        required:
+        - type
+        - payload
+      - type: object
+        properties:
+          type:
+            type: string
+            enum:
+            - player.listen
+          payload:
+            $ref: '#/components/schemas/PlayerListenEvent'
         required:
         - type
         - payload

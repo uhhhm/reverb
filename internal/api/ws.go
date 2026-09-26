@@ -26,6 +26,7 @@ var wsTopics = []string{
 	p2p.TopicSyncStarted,
 	p2p.TopicSyncFinished,
 	player.TopicQueue,
+	player.TopicListen,
 }
 
 // wsEnvelope is the JSON frame written to the client: {type, payload}.

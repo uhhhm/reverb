@@ -127,6 +127,14 @@ describe('useRealtime', () => {
     }
   })
 
+  it('refreshes listening stats, and only them, when the core records a listen', () => {
+    renderHook(() => useRealtime((url) => new StubSocket(url)), { wrapper })
+    sockets[0].onmessage?.(frame('player.listen', { session: 'tab-1' }))
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['stats'] })
+    expect(invalidateSpy).toHaveBeenCalledTimes(1)
+    expect(useLibraryRevision.getState().revision).toBe(0)
+  })
+
   it('handles download.queue (paused) and download.removed (drop jobs)', () => {
     useDownloads.setState({
       jobs: {

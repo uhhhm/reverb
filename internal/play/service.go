@@ -5,10 +5,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/uhhhm/reverb/internal/catalog"
 	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/scrobble"
 	"github.com/uhhhm/reverb/internal/store/db"
 	"github.com/uhhhm/reverb/internal/syncemit"
 	"github.com/uhhhm/reverb/internal/trackref"
@@ -70,6 +72,20 @@ type Service struct {
 
 	// emitter replicates plays; nil when this device shares nothing.
 	emitter Emitter
+	// scrobbler queues listens for linked scrobbling accounts; nil when unwired.
+	scrobbler Scrobbler
+}
+
+// Scrobbler queues a listen for the user's linked scrobbling accounts.
+// *scrobble.Service satisfies it.
+type Scrobbler interface {
+	Enqueue(ctx context.Context, userID string, p scrobble.ScrobblePlay) error
+}
+
+// WithScrobbler has Record queue each listen for scrobbling. Nil-safe.
+func (s *Service) WithScrobbler(sc Scrobbler) *Service {
+	s.scrobbler = sc
+	return s
 }
 
 // WithEmitter attaches the sync emitter. Nil-safe.
@@ -84,7 +100,9 @@ func NewService(q Querier, cat CanonicalMinter, now func() time.Time, idgen func
 }
 
 // Record mints a catalog ID for the given track and inserts a play row scoped
-// to userID.
+// to userID. A qualified play is then queued for scrobbling: an unqualified
+// one is a recommendation attempt skipped before it became a listen, kept for
+// outcome stats, and claiming it to Last.fm or ListenBrainz would be false.
 //
 // A track played straight from a search source (not in the library) arrives
 // with a synthetic "<source>:<externalId>" id, and that addressing is carried
@@ -153,6 +171,14 @@ func (s *Service) Record(ctx context.Context, userID string, in PlayInput) error
 			SessionID: in.SessionID,
 			Qualified: in.Qualified,
 		})
+	}
+	if s.scrobbler != nil && qualified == 1 {
+		if err := s.scrobbler.Enqueue(ctx, userID, scrobble.ScrobblePlay{
+			Track:    scrobble.Track{Title: in.Title, Artist: in.Artist, Album: in.Album, DurationMs: in.DurationMs},
+			PlayedAt: played,
+		}); err != nil {
+			log.Printf("scrobble: enqueue after play user=%s: %v", userID, err)
+		}
 	}
 	return nil
 }

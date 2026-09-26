@@ -149,6 +149,65 @@ describe('playerStore', () => {
   })
 })
 
+describe('listening samples', () => {
+  // The core decides what was listened to from these samples alone. Failure
+  // cases: it never hears an ordinary play; hears a skip only after the move,
+  // about the wrong track; counts a seek as heard; or is flooded.
+  type Sample = { entryId: string; playId: number; positionMs: number; playing: boolean; seeking: boolean }
+  let samples: Sample[]
+  let calls: string[]
+
+  beforeEach(async () => {
+    core = new FakeQueue()
+    const transport = core.transport()
+    samples = []
+    calls = []
+    setQueueTransport({
+      ...transport,
+      progress: async (sample) => {
+        samples.push(sample as Sample)
+        calls.push(`progress:${sample.entryId}`)
+        return transport.get()
+      },
+      next: async (entryId) => {
+        calls.push('next')
+        return transport.next(entryId)
+      },
+    })
+    await run(() => usePlayer.getState().playTrackList([track('1'), track('2')], 0))
+    samples.length = 0
+    calls.length = 0
+  })
+
+  it('reports the ordinary play being left before moving on', async () => {
+    const left = (await core.transport().get()).entries[0].id
+    await run(() => usePlayer.getState().next())
+    expect(calls.slice(0, 2)).toEqual([`progress:${left}`, 'next'])
+  })
+
+  it('reports a seek as a seek, at its target', async () => {
+    await run(() => usePlayer.getState().seekMs(700))
+    expect(samples).toHaveLength(1)
+    expect(samples[0]).toMatchObject({ positionMs: 700, seeking: true })
+  })
+
+  it('samples ordinary playback at most once a second', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(Date.now() + 5_000)
+      await run(() => engine.setVolume(0.5))
+      await run(() => engine.setVolume(0.4))
+      expect(samples).toHaveLength(1)
+      expect(samples[0]).toMatchObject({ seeking: false })
+      vi.setSystemTime(Date.now() + 1_000)
+      await run(() => engine.setVolume(0.3))
+      expect(samples).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('core Radio', () => {
   // Failure cases: the core never hears how far a left track was played, so
   // it cannot tell a skip; or hears only after the move, about the wrong track.

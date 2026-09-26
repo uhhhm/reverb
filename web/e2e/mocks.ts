@@ -138,6 +138,7 @@ export async function installApiMocks(
       repeat: () => queue.setRepeat(body.mode),
       'radio-ended': () => queue.radioEnded(),
       clear: () => queue.clear(),
+      progress: () => queue.get(),
     }
     const run = ops[op]
     if (!run) return route.fulfill({ status: 404, body: '' })
@@ -221,13 +222,11 @@ export async function installApiMocks(
     route.fulfill({ status: 200, contentType: 'image/png', body: '' }),
   )
 
-  // Default listening-history/stats endpoints (SP3-3a). The playTracker POSTs
-  // /plays from the AppShell on every page, Home fetches /stats/recent for its
-  // "Jump back in" carousel, and the Artist page fetches /stats/entity — so these
-  // must resolve without error on every page. Specs that exercise the /stats
-  // dashboard OVERRIDE these by registering their own handlers AFTER
-  // installApiMocks (Playwright matches most-recently-registered-first).
-  await page.route('**/api/v1/plays', (route: Route) => route.fulfill({ status: 204, body: '' }))
+  // Default listening-history/stats endpoints (SP3-3a). Home fetches
+  // /stats/recent for its "Jump back in" carousel, and the Artist page fetches
+  // /stats/entity — so these must resolve without error on every page. Specs
+  // that exercise the /stats dashboard OVERRIDE these by registering their own
+  // handlers AFTER installApiMocks (Playwright matches most-recently-registered-first).
   await page.route('**/api/v1/stats/recent**', (route: Route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) }),
   )

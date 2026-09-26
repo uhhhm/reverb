@@ -9,6 +9,7 @@ import (
 
 	"github.com/uhhhm/reverb/internal/catalog"
 	"github.com/uhhhm/reverb/internal/play"
+	"github.com/uhhhm/reverb/internal/scrobble"
 	"github.com/uhhhm/reverb/internal/store"
 	"github.com/uhhhm/reverb/internal/store/db"
 )
@@ -387,5 +388,63 @@ func TestRecord_LibraryPlayRecordsNoExternalAlias(t *testing.T) {
 		if a.AliasKind == "external" {
 			t.Fatalf("library play recorded external addressing: %+v", a)
 		}
+	}
+}
+
+// scrobbleRecorder records what Record queued for scrobbling.
+type scrobbleRecorder struct {
+	plays []scrobble.ScrobblePlay
+	users []string
+	err   error
+}
+
+func (r *scrobbleRecorder) Enqueue(_ context.Context, userID string, p scrobble.ScrobblePlay) error {
+	r.users = append(r.users, userID)
+	r.plays = append(r.plays, p)
+	return r.err
+}
+
+// A listen is claimed to a linked scrobbling account; a recommendation
+// skipped before it became a listen is not, and neither is a play that was
+// never stored.
+func TestRecord_ScrobblesListensOnly(t *testing.T) {
+	s, q := newTestPlayService(t)
+	ctx := context.Background()
+	scrobbles := &scrobbleRecorder{}
+	s.WithScrobbler(scrobbles)
+	no, yes := false, true
+
+	for _, in := range []play.PlayInput{
+		{Title: "Ordinary", Artist: "A", Album: "X", DurationMs: 200000, MsPlayed: 120000},
+		{Title: "Radio listen", Artist: "B", DurationMs: 180000, MsPlayed: 100000, Origin: "radio", Qualified: &yes, PlayedAt: 1719000000},
+		{Title: "Radio skip", Artist: "C", DurationMs: 180000, MsPlayed: 9000, Origin: "radio", Qualified: &no},
+	} {
+		if err := s.Record(ctx, "user-1", in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Record(ctx, "user-1", play.PlayInput{Title: "Bad", Artist: "D", Origin: "nowhere"}); err == nil {
+		t.Fatal("recorded an unknown origin")
+	}
+	if len(scrobbles.plays) != 2 || scrobbles.plays[0].Title != "Ordinary" || scrobbles.plays[1].Title != "Radio listen" {
+		t.Fatalf("scrobbled %+v, want the two listens", scrobbles.plays)
+	}
+	first, second := scrobbles.plays[0], scrobbles.plays[1]
+	if first.PlayedAt != 1_700_000_000 || second.PlayedAt != 1719000000 || first.Album != "X" || first.DurationMs != 200000 || scrobbles.users[0] != "user-1" {
+		t.Fatalf("scrobbles = %+v for %v", scrobbles.plays, scrobbles.users)
+	}
+
+	// A scrobble queue failure does not lose the play.
+	scrobbles.err = errors.New("queue full")
+	if err := s.Record(ctx, "user-1", play.PlayInput{Title: "Kept", Artist: "E", DurationMs: 200000, MsPlayed: 150000}); err != nil {
+		t.Fatalf("Record failed with the scrobble queue: %v", err)
+	}
+	rows, _ := q.ListRecentPlays(ctx, db.ListRecentPlaysParams{UserID: "user-1", PlayedAt: 9999999999, Limit: 10})
+	kept := false
+	for _, r := range rows {
+		kept = kept || r.Title == "Kept"
+	}
+	if !kept {
+		t.Fatalf("recent listens = %+v, want Kept among them", rows)
 	}
 }
