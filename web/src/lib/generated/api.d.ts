@@ -7404,7 +7404,7 @@ export interface components {
             /** Format: int64 */
             updatedAt?: number;
         };
-        /** @description A playable recommendation. A library track has source "library", externalId set to the backend track id, canonicalId set to its catalog id, and match.status "in_library"; anything else is a search-source result that plays through external playback. */
+        /** @description A playable recommendation. A library track has source "library", externalId set to the backend track id, canonicalId set to its catalog id where the catalogue has one (a phone's offline copy may have none), and match.status "in_library"; anything else is a search-source result that plays through external playback. */
         RecommendedTrack: {
             source: string;
             externalId: string;

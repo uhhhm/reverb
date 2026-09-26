@@ -25,7 +25,9 @@ import (
 // audio. Nothing in Reverb decodes it; the tags are what identify it.
 func taggedMP3(title, artist, album string, size int) []byte {
 	var body bytes.Buffer
-	for id, text := range map[string]string{"TIT2": title, "TPE1": artist, "TALB": album} {
+	// In a fixed order, so the same tags are the same bytes every run.
+	for _, frame := range [][2]string{{"TIT2", title}, {"TPE1", artist}, {"TALB", album}} {
+		id, text := frame[0], frame[1]
 		data := append([]byte{0}, text...)
 		body.WriteString(id)
 		_ = binary.Write(&body, binary.BigEndian, uint32(len(data)))

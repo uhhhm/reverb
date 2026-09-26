@@ -569,12 +569,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 			}
 			return out, nil
 		}),
-		recommend.WithLocalSimilarity(recommend.NewLocalSimilarity(st.Q(), func() recommend.LocalLibrary {
-			if lib := reloader.Current().Library; lib != nil {
-				return lib
-			}
-			return nil
-		})),
+		recommend.WithLocalSimilarity(localSimilarity(opts.Profile, st.Q(), reloader)),
 		recommend.WithTaste(tasteInputs{q: st.Q(), marks: marks, history: tasteHistory}),
 		// Shelves and Mixes are seeded from plays and the library, and kept
 		// in the local settings table between launches; they never replicate.
@@ -932,6 +927,27 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 	if r.Recommend != nil {
 		r.goTask(func() { r.Recommend.RunSchedule(ctx) })
 	}
+}
+
+// localSimilarity is the offline Radio and similar-tracks fallback. A desktop
+// scores the catalog entities its library binds. A phone binds nothing to its
+// offline set, whose files are copies rather than library membership, so it
+// scores the tracks its folder library can play.
+func localSimilarity(profile Profile, q recommend.LocalQuerier, reloader *ServiceReloader) recommend.LocalSimilarity {
+	if profile == ProfilePhone {
+		return recommend.NewPlayableSimilarity(q, func() recommend.PlayableLibrary {
+			if lib, ok := reloader.Current().Library.(recommend.PlayableLibrary); ok {
+				return lib
+			}
+			return nil
+		})
+	}
+	return recommend.NewLocalSimilarity(q, func() recommend.LocalLibrary {
+		if lib := reloader.Current().Library; lib != nil {
+			return lib
+		}
+		return nil
+	})
 }
 
 // publishLibrary marks the live library's tracks as household catalogue
