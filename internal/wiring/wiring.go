@@ -22,7 +22,6 @@ import (
 	"github.com/uhhhm/reverb/internal/library/localfiles"
 	"github.com/uhhhm/reverb/internal/library/subsonic"
 	"github.com/uhhhm/reverb/internal/matching"
-	"github.com/uhhhm/reverb/internal/offlineset"
 	"github.com/uhhhm/reverb/internal/playlistsync"
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/resolver"
@@ -375,13 +374,12 @@ type ServiceBundle struct {
 	// so the long-lived resolver singleton can re-match against the CURRENT adapter
 	// after a hot-reload rebuilds the bundle. Nil when no library is configured.
 	Matcher resolver.Rematcher
-	// T8 multi-device: stateless sync/offline services reconstructed on every
+	// T8 multi-device: stateless sync services.reconstructed on every
 	// Build (and thus on every live Reload). ServerDeviceID is the ensured
 	// server device id (is_server=1) for logging.
 	Pairing        *reverbsync.PairingService  // never nil after Build
 	SyncStore      *reverbsync.SyncStore       // never nil after Build
 	Deletion       *reverbsync.DeletionService // never nil after Build
-	OfflineSet     *offlineset.Service         // never nil after Build
 	ServerDeviceID string
 }
 
@@ -915,10 +913,9 @@ func (b *Builder) buildServices(
 		log.Printf("playlist sync service active")
 	}
 
-	// T8 multi-device: stateless sync/offline services. Reconstructed on every
+	// T8 multi-device: stateless sync services. Reconstructed on every
 	// Build so live Reload picks up the current DB state without restart.
 	bundle.Pairing = reverbsync.NewPairingService(b.queries)
 	bundle.SyncStore = reverbsync.NewSyncStore(b.queries)
 	bundle.Deletion = reverbsync.NewDeletionService(bundle.SyncStore, b.queries)
-	bundle.OfflineSet = offlineset.NewService(b.queries)
 }

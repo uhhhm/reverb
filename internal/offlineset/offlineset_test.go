@@ -2,6 +2,7 @@ package offlineset_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -60,222 +61,233 @@ func createPlaylistOff(t *testing.T, st *store.Store, id, name string) {
 	})
 }
 
-func TestOfflineSetSetAndGet(t *testing.T) {
+// selection is an Offline set for a store whose server device is dev1, with a
+// notifier that records what the set held at each notification.
+type selection struct {
+	*offlineset.Service
+	notified [][]offlineset.Entry
+}
+
+func newSelection(t *testing.T, q offlineset.Querier) *selection {
+	t.Helper()
+	sel := &selection{}
+	deviceID := func(context.Context) (string, error) { return "dev1", nil }
+	sel.Service = offlineset.NewService(q, deviceID, func() {
+		// The keeper reads the set when it hears the change, so the change
+		// must already be stored.
+		entries, err := sel.List(context.Background())
+		if err != nil {
+			t.Errorf("list at notification: %v", err)
+		}
+		sel.notified = append(sel.notified, entries)
+	})
+	return sel
+}
+
+// failingWrites is a store whose offline-set writes fail.
+type failingWrites struct{ offlineset.Querier }
+
+var errDiskFull = errors.New("disk full")
+
+func (failingWrites) UpsertOfflineSet(context.Context, db.UpsertOfflineSetParams) error {
+	return errDiskFull
+}
+func (failingWrites) DeleteOfflineSetEntry(context.Context, db.DeleteOfflineSetEntryParams) error {
+	return errDiskFull
+}
+
+func TestSetKeepsAPlaylistOfflineAndWakesTheKeeper(t *testing.T) {
 	st := newTestStoreOff(t)
 	ctx := context.Background()
-	q := st.Q()
-	svc := offlineset.NewService(q)
 	createDeviceOff(t, st, "dev1", 1)
-	createPlaylistOff(t, st, "pl1", "Playlist One")
+	createPlaylistOff(t, st, "pl1", "Road Trip")
+	sel := newSelection(t, st.Q())
 
-	if err := svc.Set(ctx, "dev1", "pl1", true); err != nil {
+	e, err := sel.Set(ctx, "pl1", true)
+	if err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-	e, err := svc.Get(ctx, "dev1", "pl1")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
+	if e.DeviceID != "dev1" || e.PlaylistID != "pl1" || !e.Enabled || e.PlaylistName != "Road Trip" {
+		t.Fatalf("Set returned %+v", e)
 	}
-	if e.DeviceID != "dev1" || e.PlaylistID != "pl1" || !e.Enabled {
-		t.Fatalf("entry mismatch: %+v", e)
-	}
-	if e.UpdatedAt == 0 {
-		t.Fatalf("updatedAt zero")
-	}
-	// tolerance: within 5s
 	if delta := time.Now().UnixMilli() - e.UpdatedAt; delta < 0 || delta > 5000 {
-		t.Fatalf("updatedAt delta %d out of range", delta)
+		t.Fatalf("updatedAt %d is not now", e.UpdatedAt)
 	}
-	// toggle disabled
-	if err := svc.Set(ctx, "dev1", "pl1", false); err != nil {
-		t.Fatalf("Set false: %v", err)
+	if len(sel.notified) != 1 || len(sel.notified[0]) != 1 || !sel.notified[0][0].Enabled {
+		t.Fatalf("keeper saw %+v, want one notification holding the enabled playlist", sel.notified)
 	}
-	e2, err := svc.Get(ctx, "dev1", "pl1")
-	if err != nil {
-		t.Fatalf("Get after toggle: %v", err)
+
+	e, err = sel.Set(ctx, "pl1", false)
+	if err != nil || e.Enabled {
+		t.Fatalf("disable returned %+v, %v", e, err)
 	}
-	if e2.Enabled {
-		t.Fatalf("expected disabled, got %+v", e2)
+	if len(sel.notified) != 2 || sel.notified[1][0].Enabled {
+		t.Fatalf("keeper did not see the playlist disabled: %+v", sel.notified)
 	}
 }
 
-func TestOfflineSetListForDevice(t *testing.T) {
+func TestListShowsThisDevicesSetWithPlaylistNames(t *testing.T) {
 	st := newTestStoreOff(t)
 	ctx := context.Background()
-	svc := offlineset.NewService(st.Q())
 	createDeviceOff(t, st, "dev1", 1)
-	createPlaylistOff(t, st, "plA", "A")
-	createPlaylistOff(t, st, "plB", "B")
-	createPlaylistOff(t, st, "plC", "C")
+	createDeviceOff(t, st, "dev2", 0)
+	createPlaylistOff(t, st, "plA", "Alpha")
+	createPlaylistOff(t, st, "plB", "Beta")
+	createPlaylistOff(t, st, "plC", "Gamma")
+	sel := newSelection(t, st.Q())
+	for _, id := range []string{"plB", "plA"} {
+		if _, err := sel.Set(ctx, id, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Another Device's choice is not this Device's Offline set.
+	if err := st.Q().UpsertOfflineSet(ctx, db.UpsertOfflineSetParams{DeviceID: "dev2", PlaylistID: "plC", Enabled: 1, UpdatedAt: 1}); err != nil {
+		t.Fatal(err)
+	}
 
-	if err := svc.Set(ctx, "dev1", "plB", true); err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.Set(ctx, "dev1", "plA", true); err != nil {
-		t.Fatal(err)
-	}
-	// plC not added
-
-	list, err := svc.ListForDevice(ctx, "dev1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 2 {
-		t.Fatalf("list len %d want 2", len(list))
-	}
-	// ordered by playlist_id
-	if list[0].PlaylistID != "plA" || list[1].PlaylistID != "plB" {
-		t.Fatalf("order %v", list)
-	}
-	// empty device
-	empty, err := svc.ListForDevice(ctx, "dev-unknown")
+	list, err := sel.List(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(empty) != 0 {
-		t.Fatalf("expected empty, got %d", len(empty))
+	if len(list) != 2 || list[0].PlaylistID != "plA" || list[0].PlaylistName != "Alpha" || list[1].PlaylistID != "plB" || list[1].PlaylistName != "Beta" {
+		t.Fatalf("list = %+v, want plA Alpha then plB Beta", list)
 	}
 }
 
-func TestOfflineSetRemove(t *testing.T) {
+func TestRemoveDropsAPlaylistAndWakesTheKeeper(t *testing.T) {
 	st := newTestStoreOff(t)
 	ctx := context.Background()
-	svc := offlineset.NewService(st.Q())
-	createDeviceOff(t, st, "dev1", 1)
-	createPlaylistOff(t, st, "pl1", "P1")
-
-	if err := svc.Set(ctx, "dev1", "pl1", true); err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.Remove(ctx, "dev1", "pl1"); err != nil {
-		t.Fatalf("Remove: %v", err)
-	}
-	_, err := svc.Get(ctx, "dev1", "pl1")
-	if err == nil {
-		t.Fatalf("expected not found after remove")
-	}
-	// idempotent remove again
-	if err := svc.Remove(ctx, "dev1", "pl1"); err != nil {
-		t.Fatalf("second Remove: %v", err)
-	}
-	list, _ := svc.ListForDevice(ctx, "dev1")
-	if len(list) != 0 {
-		t.Fatalf("expected 0 after remove, got %d", len(list))
-	}
-}
-
-func TestOfflineSetPlaylistNotFound(t *testing.T) {
-	st := newTestStoreOff(t)
-	ctx := context.Background()
-	svc := offlineset.NewService(st.Q())
-	createDeviceOff(t, st, "dev1", 1)
-
-	err := svc.Set(ctx, "dev1", "nonexistent", true)
-	if err == nil {
-		t.Fatal("expected error for missing playlist")
-	}
-	// should be ErrPlaylistNotFound
-	if err.Error() != offlineset.ErrPlaylistNotFound.Error() {
-		t.Fatalf("expected ErrPlaylistNotFound, got %v", err)
-	}
-	// Get for missing entry should be ErrEntryNotFound
-	_, err = svc.Get(ctx, "dev1", "nonexistent")
-	if err == nil {
-		t.Fatal("expected Get error")
-	}
-}
-
-func TestOfflineSetFKCascade(t *testing.T) {
-	st := newTestStoreOff(t)
-	ctx := context.Background()
-	q := st.Q()
-	svc := offlineset.NewService(q)
 	createDeviceOff(t, st, "dev1", 1)
 	createPlaylistOff(t, st, "pl1", "P1")
 	createPlaylistOff(t, st, "pl2", "P2")
+	sel := newSelection(t, st.Q())
+	for _, id := range []string{"pl1", "pl2"} {
+		if _, err := sel.Set(ctx, id, true); err != nil {
+			t.Fatal(err)
+		}
+	}
 
-	if err := svc.Set(ctx, "dev1", "pl1", true); err != nil {
-		t.Fatal(err)
+	if err := sel.Remove(ctx, "pl1"); err != nil {
+		t.Fatalf("Remove: %v", err)
 	}
-	if err := svc.Set(ctx, "dev1", "pl2", true); err != nil {
-		t.Fatal(err)
+	last := sel.notified[len(sel.notified)-1]
+	if len(sel.notified) != 3 || len(last) != 1 || last[0].PlaylistID != "pl2" {
+		t.Fatalf("keeper saw %+v after remove, want only pl2", sel.notified)
 	}
-	// delete pl1
-	if err := q.DeleteSyncedPlaylist(ctx, "pl1"); err != nil {
-		t.Fatalf("DeleteSyncedPlaylist: %v", err)
-	}
-	list, err := svc.ListForDevice(ctx, "dev1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 1 || list[0].PlaylistID != "pl2" {
-		t.Fatalf("after cascade list %v", list)
-	}
-	_, err = svc.Get(ctx, "dev1", "pl1")
-	if err == nil {
-		t.Fatalf("expected not found after cascade")
-	}
-	// pl2 still present
-	e, err := svc.Get(ctx, "dev1", "pl2")
-	if err != nil || e == nil {
-		t.Fatalf("pl2 should remain: %v %v", e, err)
+	// Removing a playlist that is not in the set is not an error.
+	if err := sel.Remove(ctx, "pl1"); err != nil {
+		t.Fatalf("second Remove: %v", err)
 	}
 }
 
+// Every way a selection change can fail leaves the set as it was and the
+// keeper undisturbed.
+func TestFailedSelectionChangesNeitherTheSetNorTheKeeper(t *testing.T) {
+	st := newTestStoreOff(t)
+	ctx := context.Background()
+	createDeviceOff(t, st, "dev1", 1)
+	createPlaylistOff(t, st, "pl1", "P1")
+	createPlaylistOff(t, st, "pl2", "P2")
+	seed := newSelection(t, st.Q())
+	if _, err := seed.Set(ctx, "pl1", true); err != nil {
+		t.Fatal(err)
+	}
+
+	noDevice := &selection{}
+	noDevice.Service = offlineset.NewService(st.Q(),
+		func(context.Context) (string, error) { return "", errors.New("no server device") },
+		func() { noDevice.notified = append(noDevice.notified, nil) })
+	broken := newSelection(t, failingWrites{st.Q()})
+	healthy := newSelection(t, st.Q())
+
+	cases := []struct {
+		name    string
+		sel     *selection
+		change  func(*offlineset.Service) error
+		wantErr error
+	}{
+		{"set unknown playlist", healthy, func(s *offlineset.Service) error { _, err := s.Set(ctx, "nope", true); return err }, offlineset.ErrPlaylistNotFound},
+		{"remove unknown playlist", healthy, func(s *offlineset.Service) error { return s.Remove(ctx, "nope") }, offlineset.ErrPlaylistNotFound},
+		{"set without a device", noDevice, func(s *offlineset.Service) error { _, err := s.Set(ctx, "pl2", true); return err }, nil},
+		{"remove without a device", noDevice, func(s *offlineset.Service) error { return s.Remove(ctx, "pl1") }, nil},
+		{"set write fails", broken, func(s *offlineset.Service) error { _, err := s.Set(ctx, "pl2", true); return err }, errDiskFull},
+		{"remove write fails", broken, func(s *offlineset.Service) error { return s.Remove(ctx, "pl1") }, errDiskFull},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := c.change(c.sel.Service)
+			if err == nil {
+				t.Fatal("change succeeded")
+			}
+			if c.wantErr != nil && !errors.Is(err, c.wantErr) {
+				t.Fatalf("err = %v, want %v", err, c.wantErr)
+			}
+			if len(c.sel.notified) != 0 {
+				t.Fatal("keeper was notified of a failed change")
+			}
+			list, err := healthy.List(ctx)
+			if err != nil || len(list) != 1 || list[0].PlaylistID != "pl1" || !list[0].Enabled {
+				t.Fatalf("set changed to %+v (%v)", list, err)
+			}
+		})
+	}
+}
+
+func TestDesktopSelectionNeedsNoKeeper(t *testing.T) {
+	st := newTestStoreOff(t)
+	createDeviceOff(t, st, "dev1", 1)
+	createPlaylistOff(t, st, "pl1", "P1")
+	svc := offlineset.NewService(st.Q(), func(context.Context) (string, error) { return "dev1", nil }, nil)
+	if _, err := svc.Set(context.Background(), "pl1", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Remove(context.Background(), "pl1"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeletedPlaylistLeavesTheSet(t *testing.T) {
+	st := newTestStoreOff(t)
+	ctx := context.Background()
+	createDeviceOff(t, st, "dev1", 1)
+	createPlaylistOff(t, st, "pl1", "P1")
+	createPlaylistOff(t, st, "pl2", "P2")
+	sel := newSelection(t, st.Q())
+	for _, id := range []string{"pl1", "pl2"} {
+		if _, err := sel.Set(ctx, id, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Q().DeleteSyncedPlaylist(ctx, "pl1"); err != nil {
+		t.Fatal(err)
+	}
+	list, err := sel.List(ctx)
+	if err != nil || len(list) != 1 || list[0].PlaylistID != "pl2" {
+		t.Fatalf("after delete list = %+v (%v)", list, err)
+	}
+}
+
+// The Offline set is local to each Device (ADR 0003): no change replicates.
 func TestOfflineSetNoSyncEmission(t *testing.T) {
 	st := newTestStoreOff(t)
 	ctx := context.Background()
 	q := st.Q()
-	svc := offlineset.NewService(q)
 	createDeviceOff(t, st, "dev1", 1)
 	createPlaylistOff(t, st, "pl1", "P1")
-	createPlaylistOff(t, st, "pl2", "P2")
+	sel := newSelection(t, q)
 
-	before, err := q.CountSyncChanges(ctx)
-	if err != nil {
-		t.Fatal(err)
+	steps := []func() error{
+		func() error { _, err := sel.Set(ctx, "pl1", true); return err },
+		func() error { _, err := sel.Set(ctx, "pl1", false); return err },
+		func() error { _, err := sel.List(ctx); return err },
+		func() error { return sel.Remove(ctx, "pl1") },
 	}
-	if before != 0 {
-		t.Fatalf("before %d want 0", before)
-	}
-	if err := svc.Set(ctx, "dev1", "pl1", true); err != nil {
-		t.Fatal(err)
-	}
-	after, _ := q.CountSyncChanges(ctx)
-	if after != before {
-		t.Fatalf("Set emitted sync_change: before %d after %d", before, after)
-	}
-	if err := svc.Set(ctx, "dev1", "pl1", false); err != nil {
-		t.Fatal(err)
-	}
-	after, _ = q.CountSyncChanges(ctx)
-	if after != before {
-		t.Fatalf("Set toggle emitted sync_change")
-	}
-	// List should not emit
-	_, _ = svc.ListForDevice(ctx, "dev1")
-	after, _ = q.CountSyncChanges(ctx)
-	if after != before {
-		t.Fatalf("List emitted sync_change")
-	}
-	// Get should not emit
-	_, _ = svc.Get(ctx, "dev1", "pl1")
-	after, _ = q.CountSyncChanges(ctx)
-	if after != before {
-		t.Fatalf("Get emitted sync_change")
-	}
-	if err := svc.Remove(ctx, "dev1", "pl1"); err != nil {
-		t.Fatal(err)
-	}
-	after, _ = q.CountSyncChanges(ctx)
-	if after != before {
-		t.Fatalf("Remove emitted sync_change: before %d after %d", before, after)
-	}
-	// also test second playlist
-	if err := svc.Set(ctx, "dev1", "pl2", true); err != nil {
-		t.Fatal(err)
-	}
-	after, _ = q.CountSyncChanges(ctx)
-	if after != before {
-		t.Fatalf("second Set emitted sync_change")
+	for i, step := range steps {
+		if err := step(); err != nil {
+			t.Fatalf("step %d: %v", i, err)
+		}
+		if n, _ := q.CountSyncChanges(ctx); n != 0 {
+			t.Fatalf("step %d emitted %d sync_change rows", i, n)
+		}
 	}
 }

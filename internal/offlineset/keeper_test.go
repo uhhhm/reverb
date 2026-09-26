@@ -53,8 +53,8 @@ func TestPruneRemovesOnlyWhatTheOfflineSetFetched(t *testing.T) {
 		FreeSpace:    func(string) (int64, error) { return 1 << 40, nil },
 		Rescan:       files.ScanAndSync,
 	})
-	svc := offlineset.NewService(q)
-	if err := svc.Set(ctx, "phone", "pl1", true); err != nil {
+	svc := offlineset.NewService(q, func(context.Context) (string, error) { return "phone", nil }, nil)
+	if _, err := svc.Set(ctx, "pl1", true); err != nil {
 		t.Fatal(err)
 	}
 	offer := p2p.FileManifest{RelPath: "Band/Record/Fetched.mp3", ContentHash: hashOf("Band/Record/Fetched.mp3"), Size: 23, Title: "Fetched", Artist: "Band", Album: "Record"}
@@ -89,7 +89,7 @@ func TestPruneRemovesOnlyWhatTheOfflineSetFetched(t *testing.T) {
 		t.Fatalf("status = %+v", status)
 	}
 
-	if err := svc.Remove(ctx, "phone", "pl1"); err != nil {
+	if err := svc.Remove(ctx, "pl1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := k.Prune(ctx); err != nil {
@@ -125,7 +125,7 @@ func TestUnknownFreeSpaceFetchesNothing(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := offlineset.NewService(q).Set(ctx, "phone", "pl1", true); err != nil {
+	if _, err := offlineset.NewService(q, func(context.Context) (string, error) { return "phone", nil }, nil).Set(ctx, "pl1", true); err != nil {
 		t.Fatal(err)
 	}
 	k := offlineset.NewKeeper(offlineset.KeeperConfig{

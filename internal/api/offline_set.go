@@ -36,11 +36,14 @@ type OfflineKeeper interface {
 	PendingUploads(ctx context.Context) ([]offlineset.PendingUpload, error)
 }
 
-// offlineSetChanged has the keeper act on a changed offline set now.
-func (s *Server) offlineSetChanged() {
+// offlineSet is the server Device's Offline set. A change wakes the keeper,
+// when there is one: a desktop keeps every file.
+func (s *Server) offlineSet() *offlineset.Service {
+	var changed func()
 	if s.deps.OfflineKeeper != nil {
-		s.deps.OfflineKeeper.Changed()
+		changed = s.deps.OfflineKeeper.Changed
 	}
+	return offlineset.NewService(s.deps.OfflineSet, s.serverDeviceID, changed)
 }
 
 func (s *Server) handleOfflineSetStatus(w http.ResponseWriter, r *http.Request) {
@@ -109,28 +112,17 @@ func (s *Server) handleListOfflineSet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "offline set unavailable"})
 		return
 	}
-	ctx := r.Context()
-	deviceID, err := s.serverDeviceID(ctx)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not resolve server device"})
-		return
-	}
-	svc := offlineset.NewService(s.deps.OfflineSet)
-	entries, err := svc.ListForDevice(ctx, deviceID)
+	entries, err := s.offlineSet().List(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not list offline set"})
 		return
 	}
 	out := make([]offlineSetListItem, 0, len(entries))
 	for _, e := range entries {
-		name := ""
-		if pl, err := s.deps.OfflineSet.GetSyncedPlaylist(ctx, e.PlaylistID); err == nil {
-			name = pl.Name
-		}
 		out = append(out, offlineSetListItem{
 			PlaylistID:   e.PlaylistID,
 			Enabled:      e.Enabled,
-			PlaylistName: name,
+			PlaylistName: e.PlaylistName,
 			UpdatedAt:    e.UpdatedAt,
 		})
 	}
@@ -140,12 +132,6 @@ func (s *Server) handleListOfflineSet(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleSetOfflineSet(w http.ResponseWriter, r *http.Request) {
 	if s.deps.OfflineSet == nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "offline set unavailable"})
-		return
-	}
-	ctx := r.Context()
-	deviceID, err := s.serverDeviceID(ctx)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not resolve server device"})
 		return
 	}
 	playlistID := chi.URLParam(r, "playlistId")
@@ -158,20 +144,9 @@ func (s *Server) handleSetOfflineSet(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "enabled is required"})
 		return
 	}
-	svc := offlineset.NewService(s.deps.OfflineSet)
-	err = svc.Set(ctx, deviceID, playlistID, *body.Enabled)
+	entry, err := s.offlineSet().Set(r.Context(), playlistID, *body.Enabled)
 	if err != nil {
-		if errors.Is(err, offlineset.ErrPlaylistNotFound) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "playlist not found"})
-			return
-		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	s.offlineSetChanged()
-	entry, err := svc.Get(ctx, deviceID, playlistID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read offline set entry"})
+		writeOfflineSetError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -186,31 +161,22 @@ func (s *Server) handleDeleteOfflineSet(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "offline set unavailable"})
 		return
 	}
-	ctx := r.Context()
-	deviceID, err := s.serverDeviceID(ctx)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not resolve server device"})
-		return
-	}
 	playlistID := chi.URLParam(r, "playlistId")
 	if playlistID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "playlistId is required"})
 		return
 	}
-	// Validate playlist exists — 404 if not.
-	if _, err := s.deps.OfflineSet.GetSyncedPlaylist(ctx, playlistID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "playlist not found"})
-			return
-		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not validate playlist"})
+	if err := s.offlineSet().Remove(r.Context(), playlistID); err != nil {
+		writeOfflineSetError(w, err)
 		return
 	}
-	svc := offlineset.NewService(s.deps.OfflineSet)
-	if err := svc.Remove(ctx, deviceID, playlistID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	s.offlineSetChanged()
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func writeOfflineSetError(w http.ResponseWriter, err error) {
+	if errors.Is(err, offlineset.ErrPlaylistNotFound) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "playlist not found"})
+		return
+	}
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 }
