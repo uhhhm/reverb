@@ -108,13 +108,24 @@ test('native audio advances from local to external, pauses, skips, and clears', 
 test('native audio stops at the final crop and replays the cropped window', async ({ page }) => {
   await openPlaylist(page, [track('crop', { durationMs: 4000, cropStartMs: 1000, cropEndMs: 1800 })])
   const bar = page.getByTestId('player-bar')
+  // The bar offers Play before the queue answer has loaded anything, so the
+  // label alone does not say playback reached the crop end: wait for the
+  // element itself to stop there. Pressing the toggle any earlier would
+  // pause the autoplay instead of replaying.
+  await expect(bar.getByText('Track crop', { exact: true })).toBeVisible()
+  await expect.poll(async () => {
+    const a = await audioState(page)
+    return a.paused && a.time >= 1.7
+  }, { intervals: [50] }).toBe(true)
+  expect((await audioState(page)).time).toBeLessThan(2.5)
   await expect(bar.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
-  const stopped = await audioState(page)
-  expect(stopped.paused).toBe(true)
-  expect(stopped.time).toBeLessThan(2.5)
   await bar.getByRole('button', { name: 'Play', exact: true }).click()
   await expect(bar.getByRole('button', { name: 'Pause', exact: true })).toBeVisible()
-  expect((await audioState(page)).time).toBeLessThan(1.8)
+  // The replay plays the window again from its start, not the trimmed intro.
+  await expect.poll(async () => {
+    const a = await audioState(page)
+    return !a.paused && a.time >= 0.95 && a.time < 1.8
+  }, { intervals: [50] }).toBe(true)
 })
 
 test('repeat one restarts the full resource after a backend seek', async ({ page }) => {
