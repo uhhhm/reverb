@@ -161,6 +161,7 @@ export class FakeQueue {
       return Promise.resolve(this.state())
     }
     return {
+      session: 'fake-session',
       startRadio: async () => { throw new Error('Radio is tested through the core API') },
       progress: async () => this.state(),
       get: () => Promise.resolve(this.state()),
@@ -185,16 +186,6 @@ export class FakeQueue {
         if (this.repeat === mode) return
         this.repeat = mode
         this.changed()
-      }),
-      radioEnded: () => answer(() => {
-        let changed = false
-        for (const e of this.entries) {
-          if (e.origin === 'radio') {
-            e.origin = 'listener'
-            changed = true
-          }
-        }
-        if (changed) this.changed()
       }),
       clear: () => answer(() => this.clear()),
     }

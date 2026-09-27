@@ -17,6 +17,8 @@ export type PlayerProgress = components['schemas']['PlayerProgress']
  * so tests run without a server.
  */
 export interface QueueTransport {
+  /** The player session this queue belongs to. */
+  readonly session: string
   startRadio(start: RadioStart): Promise<QueueState>
   progress(sample: PlayerProgress): Promise<QueueState>
   get(): Promise<QueueState>
@@ -32,8 +34,6 @@ export interface QueueTransport {
   ended(entryId: string): Promise<QueueState>
   setShuffle(on: boolean): Promise<QueueState>
   setRepeat(mode: RepeatMode): Promise<QueueState>
-  /** The Radio session stopped; what it queued becomes the listener's. */
-  radioEnded(): Promise<QueueState>
   clear(): Promise<QueueState>
 }
 
@@ -57,6 +57,7 @@ export function httpQueue(session: string): QueueTransport {
   const base = `/player/${encodeURIComponent(session)}`
   const post = (op: string, body?: unknown) => api.post<QueueState>(`${base}/${op}`, body ?? {})
   return {
+    session,
     startRadio: (start) => post('radio', start),
     progress: (sample) => post('progress', sample),
     get: () => api.get<QueueState>(base),
@@ -70,7 +71,6 @@ export function httpQueue(session: string): QueueTransport {
     ended: (entryId) => post('ended', { entryId }),
     setShuffle: (on) => post('shuffle', { on }),
     setRepeat: (mode) => post('repeat', { mode }),
-    radioEnded: () => post('radio-ended'),
     clear: () => post('clear'),
   }
 }

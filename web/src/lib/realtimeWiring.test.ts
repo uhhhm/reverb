@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { renderHook } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import { createElement, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useRealtime } from './realtimeWiring'
 import { useDownloads } from './downloadStore'
 import { useLibraryRevision } from './libraryRevisionStore'
 import type { WebSocketLike } from './realtime'
+import { setQueueTransport, usePlayer } from './playerStore'
+import { FakeQueue } from '../test/fakeQueue'
+import type { Track } from './types'
 
 // downloadApi resync is stubbed (no real network).
 vi.mock('./downloadApi', () => ({
@@ -150,5 +153,45 @@ describe('useRealtime', () => {
 
     s.onmessage?.(frame('download.removed', { jobIds: ['x'] }))
     expect(useDownloads.getState().jobs['x']).toBeUndefined()
+  })
+
+  // A playing player catches up through its once-a-second progress answer; a
+  // paused one sends nothing, so only the notice can tell it. Failure cases:
+  // the notice is ignored; a notice for another tab's session moves this one;
+  // or every notice of a change this player already has refetches.
+  it('shows a paused player a queue change made by another request, from its session notice', async () => {
+    const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+    const track = (id: string) => ({
+      id, title: 'T' + id, albumId: 'al', album: 'Album', artistId: 'ar', artist: 'Artist',
+      coverArtId: 'co', trackNumber: 1, discNumber: 1, durationMs: 1000, bitRate: 320,
+      suffix: 'mp3', contentType: 'audio/mpeg',
+    }) as Track
+    const core = new FakeQueue()
+    const transport = core.transport()
+    const get = vi.fn(transport.get)
+    setQueueTransport({ ...transport, get })
+    usePlayer.getState().playTrackList([track('1'), track('2')], 0)
+    await flush()
+    usePlayer.getState().pause()
+    renderHook(() => useRealtime((url) => new StubSocket(url)), { wrapper })
+    const s = sockets[0]
+
+    // This player's own change: it already holds that revision.
+    s.onmessage?.(frame('player.queue', { session: transport.session, revision: core.revision }))
+    await flush()
+    expect(get).not.toHaveBeenCalled()
+
+    // A Radio refill lands after pause.
+    core.enqueue([track('3'), track('4')], 'radio')
+    s.onmessage?.(frame('player.queue', { session: 'another-tab', revision: core.revision }))
+    await flush()
+    expect(usePlayer.getState().queue.map((t) => t.id)).toEqual(['1', '2'])
+
+    s.onmessage?.(frame('player.queue', { session: transport.session, revision: core.revision }))
+    await flush()
+    expect(usePlayer.getState().queue.map((t) => t.id)).toEqual(['1', '2', '3', '4'])
+    expect(usePlayer.getState().origins).toEqual(['listener', 'listener', 'radio', 'radio'])
+    expect(usePlayer.getState().current?.id).toBe('1')
+    expect(usePlayer.getState().playing).toBe(false)
   })
 })

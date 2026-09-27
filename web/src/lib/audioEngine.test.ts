@@ -1293,3 +1293,28 @@ describe('AudioEngine network interruptions', () => {
     expect(engine.getState().playing).toBe(false)
   })
 })
+
+describe('AudioEngine state snapshots', () => {
+  // Views that show the queue re-render when its arrays change identity. A
+  // playback tick, or the core answering a progress sample with the queue it
+  // already sent, must not look like a new queue; a real change must.
+  it('keeps the queue arrays while the queue is unchanged, and replaces them when it changes', () => {
+    const { engine, audios } = newEngine()
+    engine.playTrackList(list, 0)
+    const before = engine.getState()
+
+    audios[0].currentTime = 0.5
+    audios[0].fire('timeupdate')
+    engine.apply(engine.q.state())
+    const after = engine.getState()
+    expect(after.queue).toBe(before.queue)
+    expect(after.upNext).toBe(before.upNext)
+    expect(after.origins).toBe(before.origins)
+
+    engine.enqueue(track('4'))
+    const changed = engine.getState()
+    expect(changed.queue).not.toBe(before.queue)
+    expect(changed.queue.map((t) => t.id)).toEqual(['1', '2', '3', '4'])
+    expect(changed.upNext).toEqual([1, 2, 3])
+  })
+})

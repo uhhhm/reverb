@@ -4,7 +4,9 @@ import { httpQueue, newSessionId, type QueueState, type QueueTransport } from '.
 import type { RadioStart } from './radio'
 import type { Track } from './types'
 
-// Single imperative engine instance, living OUTSIDE React.
+// Single imperative engine instance, living OUTSIDE React. It plays audio and
+// holds the core's last answer; everything that drives playback goes through
+// the store's actions below.
 export const engine = new AudioEngine()
 
 // The core owns the queue. This page is one player session of it.
@@ -39,10 +41,7 @@ interface PlayerActions {
   clearQueue(): void
 }
 
-export type PlayerStore = PlayerState & PlayerActions & {
-  /** Whether a Radio session is keeping the queue filled. */
-  radio: boolean
-}
+export type PlayerStore = PlayerState & PlayerActions
 
 // Queue requests go out one at a time, in the order the listener made them,
 // and each answer is played before the next request is sent. Two quick clicks
@@ -58,8 +57,6 @@ function change(
   const run = pending.then(async () => {
     try {
       const state = await request()
-      lastQueue = state
-      usePlayer.setState({ radio: state.radio ?? false })
       engine.apply(state, typeof opts === 'function' ? opts() : opts)
     } catch (err) {
       console.warn('player: queue request failed', err)
@@ -74,15 +71,14 @@ function change(
   return run
 }
 
-// Whether playback is on as the answer lands, for moves that keep playing only
-// what was already playing.
-// The latest queue the core answered, and the pacing of progress reports: at
-// most one a second, and never two at once. The core decides what was
-// listened to from these samples, and Radio steers by them.
-let lastQueue: QueueState | undefined
+// The pacing of progress reports: at most one a second, and never two at once.
+// The core decides what was listened to from these samples, and Radio steers
+// by them.
 let progressBusy = false
 let lastProgressAt = 0
 
+// Whether playback is on as the answer lands, for moves that keep playing only
+// what was already playing.
 const keepPlaying = () => ({ autoplay: engine.getState().playing })
 
 export const usePlayer = create<PlayerStore>((set) => {
@@ -101,7 +97,6 @@ export const usePlayer = create<PlayerStore>((set) => {
   })
   return {
     ...engine.getState(),
-    radio: false,
     playTrackList: (tracks, startIndex) => {
       void change(() => queue.play(tracks, startIndex), { autoplay: true })
     },
@@ -145,13 +140,39 @@ export const usePlayer = create<PlayerStore>((set) => {
 })
 
 function reportProgress(seeking = false, positionMs?: number) {
-  const q = lastQueue
-  const entry = q?.entries[q.index]
-  if (!q || !entry) return
+  const q = engine.queueSnapshot()
+  const entry = q.entries[q.index]
+  if (!entry) return
   const s = engine.getState()
   const sample = { entryId: entry.id, playId: q.playId,
     positionMs: positionMs ?? s.currentTimeMs, durationMs: s.durationMs, playing: s.playing, seeking }
   progressBusy = true
   lastProgressAt = Date.now()
   void change(() => queue.progress(sample)).finally(() => { progressBusy = false })
+}
+
+/**
+ * A queue change the core announced for a session. A playing player catches
+ * up through its progress answers; a paused one sends none, so this is how it
+ * sees a change another request made, such as a Radio refill landing after
+ * pause. Only this player's session, and only a revision it does not hold.
+ */
+export function onQueueNotice(notice: { session: string; revision: number }) {
+  if (notice.session !== queue.session) return
+  if (notice.revision === engine.queueSnapshot().revision) return
+  void change(() => queue.get())
+}
+
+/**
+ * The player as OS controls and observers see it: the store's state and
+ * actions. Media keys, the lock screen and now-playing reports go through
+ * here, so a seek from any of them reaches the core as a seek.
+ */
+export const player = {
+  subscribe: (cb: (s: PlayerState) => void) => usePlayer.subscribe(cb),
+  play: () => usePlayer.getState().play(),
+  pause: () => usePlayer.getState().pause(),
+  next: () => usePlayer.getState().next(),
+  prev: () => usePlayer.getState().prev(),
+  seekMs: (ms: number) => usePlayer.getState().seekMs(ms),
 }

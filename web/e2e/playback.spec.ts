@@ -1,6 +1,10 @@
 import { test, expect, type Page } from '@playwright/test'
-import { installApiMocks, installWsMock } from './mocks'
+import { installApiMocks, installWsMock, playerRequests } from './mocks'
 import type { Track } from '../src/lib/types'
+
+// Each run keeps its trace as the artifact: every player request and the audio
+// element's state around each seek, pause and skip.
+test.use({ trace: 'on' })
 
 // PCM silence exercises native decoding, media clocks, seeks, and event order
 // without a live music service or sound from the test runner.
@@ -141,4 +145,82 @@ test('repeat one restarts the full resource after a backend seek', async ({ page
   await expect.poll(async () => (await audioState(page)).time).toBeGreaterThan(0.1)
   expect((await audioState(page)).time).toBeLessThan(5)
   expect(errors).toEqual([])
+})
+
+// The OS drives Reverb through navigator.mediaSession: the lock screen, media
+// keys and the system media overlay. Chromium offers no way to press those, so
+// the page keeps the handlers Reverb registers and the test calls them as the
+// OS would.
+async function captureMediaSession(page: Page) {
+  await page.addInitScript(() => {
+    const handlers: Record<string, MediaSessionActionHandler | null> = {}
+    Object.assign(window, { mediaSessionHandlers: handlers })
+    const ms = navigator.mediaSession
+    const register = ms.setActionHandler.bind(ms)
+    ms.setActionHandler = (action, handler) => {
+      handlers[action] = handler
+      register(action, handler)
+    }
+  })
+}
+
+async function osAction(page: Page, action: MediaSessionAction, seekTime?: number) {
+  await page.evaluate(([a, t]) => {
+    const handlers = (window as unknown as { mediaSessionHandlers: Record<string, MediaSessionActionHandler> }).mediaSessionHandlers
+    handlers[a as string]({ action: a as MediaSessionAction, seekTime: t as number | undefined })
+  }, [action, seekTime] as const)
+}
+
+type Sample = { entryId: string; positionMs: number; playing: boolean; seeking: boolean }
+
+test.describe('OS media controls', () => {
+  test('every seek reaches the core as a seek before playback continues from it', async ({ page }, testInfo) => {
+    const errors: string[] = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    await captureMediaSession(page)
+    await openPlaylist(page, [track('long', { durationMs: 30000 }), track('after', { durationMs: 30000 })])
+    const bar = page.getByTestId('player-bar')
+    await expect(bar.getByText('Track long', { exact: true })).toBeVisible()
+    await expect.poll(async () => (await audioState(page)).time).toBeGreaterThan(0.5)
+
+    // A lock-screen scrub forward.
+    await osAction(page, 'seekto', 12)
+    await expect.poll(async () => (await audioState(page)).time).toBeGreaterThanOrEqual(12)
+    // Paused and resumed from the OS, then dragged in Reverb's own bar, then
+    // scrubbed back from the lock screen.
+    await osAction(page, 'pause')
+    await expect.poll(async () => (await audioState(page)).paused).toBe(true)
+    await expect(bar.getByRole('button', { name: 'Play', exact: true })).toBeVisible()
+    await osAction(page, 'play')
+    await expect.poll(async () => (await audioState(page)).paused).toBe(false)
+    const beforeBarSeek = (await audioState(page)).time
+    // Two 5s steps: each sits right at the core's largest step that still
+    // reads as playing, so only the seeking mark keeps it from counting.
+    const seekBar = bar.getByRole('slider', { name: 'Seek', exact: true })
+    await seekBar.press('ArrowRight')
+    await seekBar.press('ArrowRight')
+    await expect.poll(async () => (await audioState(page)).time).toBeGreaterThan(beforeBarSeek + 8)
+    await osAction(page, 'seekto', 4)
+    await expect.poll(async () => (await audioState(page)).time).toBeLessThan(8)
+    // One more ordinary sample from the last target.
+    await expect.poll(() => playerRequests.filter((r) => r.op === 'progress').at(-1)?.body.seeking, { timeout: 5000 }).toBe(false)
+
+    const samples = playerRequests.filter((r) => r.op === 'progress').map((r) => r.body as unknown as Sample)
+    await testInfo.attach('player-requests.json', { body: JSON.stringify(playerRequests, null, 2), contentType: 'application/json' })
+    const seeks = samples.filter((s) => s.seeking).map((s) => Math.round(s.positionMs / 1000))
+    expect(seeks[0]).toBe(12)
+    expect(seeks.at(-1)).toBe(4)
+    expect(seeks.length).toBe(4)
+    expect(samples.every((s) => s.entryId === samples[0].entryId)).toBe(true)
+    // No sample from a new position arrives before the seek to it: between
+    // consecutive samples of one entry, any jump larger than a playback tick
+    // is itself marked as a seek.
+    for (let i = 1; i < samples.length; i++) {
+      const [prev, cur] = [samples[i - 1], samples[i]]
+      if (prev.entryId !== cur.entryId) continue
+      const step = cur.positionMs - prev.positionMs
+      if (step > 1500 || step < -250) expect(cur, `sample ${i} jumps ${step}ms without saying it seeked`).toMatchObject({ seeking: true })
+    }
+    expect(errors).toEqual([])
+  })
 })

@@ -6,6 +6,7 @@ import { useSyncStore } from './syncStore'
 import { useLibraryRevision } from './libraryRevisionStore'
 import { useUpdateStore } from './updateStore'
 import { EMPTY_UPDATE_STATE } from './updateApi'
+import { onQueueNotice } from './playerStore'
 import { getDownloads, getQueueState } from './downloadApi'
 import type { RealtimeEvent } from './types'
 
@@ -76,6 +77,12 @@ export function useRealtime(makeSocket?: (url: string) => WebSocketLike): void {
             ...EMPTY_UPDATE_STATE,
             ...frame.payload,
           })
+          break
+        }
+        case 'player.queue': {
+          // Another request changed a queue; a paused player would not
+          // otherwise hear of it.
+          onQueueNotice(frame.payload)
           break
         }
         case 'player.listen': {

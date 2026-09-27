@@ -1,9 +1,10 @@
 import type { PlayerState } from './audioEngine'
 import { trackCoverUrl } from './libraryApi'
 
-// Minimal engine interface — the real AudioEngine satisfies this; tests supply a fake.
-// Same pattern as nowPlaying.ts.
-interface Enginelike {
+// What OS controls drive: the player store's actions (playerStore's `player`),
+// never the engine, so a seek from the lock screen reaches the core as a seek.
+// Tests supply a fake.
+interface Playerlike {
   subscribe(cb: (s: PlayerState) => void): () => void
   play(): void
   pause(): void
@@ -26,19 +27,19 @@ const ACTIONS: MediaSessionAction[] = [
  * track metadata + artwork. No-op where the API is unavailable.
  * Returns a teardown function (unsubscribe + clear handlers/metadata).
  */
-export function startMediaSession(engine: Enginelike): () => void {
+export function startMediaSession(player: Playerlike): () => void {
   if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) {
     return () => {}
   }
   const ms = navigator.mediaSession
 
   const handlers: Partial<Record<MediaSessionAction, MediaSessionActionHandler>> = {
-    play: () => engine.play(),
-    pause: () => engine.pause(),
-    previoustrack: () => engine.prev(),
-    nexttrack: () => engine.next(),
+    play: () => player.play(),
+    pause: () => player.pause(),
+    previoustrack: () => player.prev(),
+    nexttrack: () => player.next(),
     seekto: (d) => {
-      if (typeof d.seekTime === 'number') engine.seekMs(d.seekTime * 1000)
+      if (typeof d.seekTime === 'number') player.seekMs(d.seekTime * 1000)
     },
   }
   for (const action of ACTIONS) {
@@ -50,7 +51,7 @@ export function startMediaSession(engine: Enginelike): () => void {
   }
 
   let lastId = ''
-  const unsub = engine.subscribe((s) => {
+  const unsub = player.subscribe((s) => {
     if (!s.current) {
       lastId = ''
       ms.metadata = null

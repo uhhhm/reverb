@@ -40,6 +40,7 @@ function baseState(): PlayerState {
     repeat: 'off',
     upNext: [],
     origins: [],
+    radio: false,
   }
 }
 

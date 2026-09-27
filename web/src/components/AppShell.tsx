@@ -15,7 +15,7 @@ import { Toaster } from './ui/Toaster'
 import { UpdatePrompt } from './UpdatePrompt'
 import { Skeleton } from './ui/Skeleton'
 import { useRealtime } from '../lib/realtimeWiring'
-import { usePlayer, engine } from '../lib/playerStore'
+import { usePlayer, engine, player } from '../lib/playerStore'
 import { useUI } from '../lib/uiStore'
 import { useAlbumPalette } from '../lib/useAlbumPalette'
 import { trackCoverUrl } from '../lib/libraryApi'
@@ -54,17 +54,9 @@ export function AppShell() {
   const normalization = useSettings().data?.audioNormalization ?? false
   useEffect(() => engine.setNormalization(normalization), [normalization])
 
-  useEffect(() => startNowPlaying(engine), [])
-  // Media keys play and seek the audio here, but skipping moves the queue,
-  // which the core owns.
-  useEffect(() => startMediaSession({
-    subscribe: (cb) => engine.subscribe(cb),
-    play: () => engine.play(),
-    pause: () => engine.pause(),
-    seekMs: (ms) => engine.seekMs(ms),
-    next: () => usePlayer.getState().next(),
-    prev: () => usePlayer.getState().prev(),
-  }), [])
+  useEffect(() => startNowPlaying(player), [])
+  // Media keys and the lock screen drive the player store like the UI does.
+  useEffect(() => startMediaSession(player), [])
 
   const current = usePlayer((s) => s.current)
   const rightPanel = useUI((s) => s.rightPanel)

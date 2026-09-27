@@ -73,6 +73,24 @@ export interface PlayerState {
   upNext: number[]
   /** Who queued each entry, parallel to queue. */
   origins: QueueOrigin[]
+  /** Whether a Radio session is keeping the queue filled. */
+  radio: boolean
+}
+
+/**
+ * Whether two answers hold the same queue: the same revision, and the same
+ * entries. Revision alone is not enough, since the core numbers revisions per
+ * session and a session it recreates starts counting again.
+ */
+function sameQueue(a: QueueState, b: QueueState): boolean {
+  if (a.revision !== b.revision) return false
+  if (a.entries.length !== b.entries.length || a.upNext.length !== b.upNext.length) return false
+  for (let i = 0; i < a.entries.length; i++) {
+    const x = a.entries[i]
+    const y = b.entries[i]
+    if (x.id !== y.id || x.origin !== y.origin || x.track.id !== y.track.id) return false
+  }
+  return a.upNext.every((n, i) => n === b.upNext[i])
 }
 
 function realAudioFactory(): AudioElement {
@@ -118,7 +136,12 @@ export class AudioEngine {
   // current entry and preloads the first one up next; what those are is the
   // core's decision, never the engine's.
   private snap: QueueState = EMPTY_QUEUE
+  // Derived from snap, and replaced only when the queue's contents change:
+  // views re-render on a new array, and the core answers every progress sample
+  // with the whole queue.
   private tracks: Track[] = []
+  private upNext: number[] = []
+  private origins: QueueOrigin[] = []
   private queueHandler: QueueHandler | null = null
   // The entry the loaded track belongs to. Tracks arrive as fresh objects on
   // every apply, so the entry id, not object identity, says whether the
@@ -605,8 +628,13 @@ export class AudioEngine {
    */
   apply(state: QueueState, opts: ApplyOptions = {}) {
     const prevPlayId = this.snap.playId
+    const changed = !sameQueue(this.snap, state)
     this.snap = state
-    this.tracks = state.entries.map((e) => e.track as unknown as Track)
+    if (changed) {
+      this.tracks = state.entries.map((e) => e.track as unknown as Track)
+      this.upNext = [...state.upNext]
+      this.origins = state.entries.map((e) => e.origin)
+    }
     if (!this.getState().current) {
       this.unload()
       this.emit()
@@ -622,6 +650,11 @@ export class AudioEngine {
     }
     if (this.active.src) this.preloadNext()
     this.emit()
+  }
+
+  /** The core's queue as last applied. */
+  queueSnapshot(): QueueState {
+    return this.snap
   }
 
   /** The current entry's id, or '' with nothing to play. */
@@ -711,7 +744,7 @@ export class AudioEngine {
   getState(): PlayerState {
     const index = this.snap.index
     return {
-      queue: [...this.tracks],
+      queue: this.tracks,
       index,
       current: index >= 0 && index < this.tracks.length ? this.tracks[index] : null,
       playing: this.playing,
@@ -722,8 +755,9 @@ export class AudioEngine {
       volume: this.volume,
       shuffle: this.snap.shuffle,
       repeat: this.snap.repeat,
-      upNext: [...this.snap.upNext],
-      origins: this.snap.entries.map((e) => e.origin),
+      upNext: this.upNext,
+      origins: this.origins,
+      radio: this.snap.radio ?? false,
     }
   }
 

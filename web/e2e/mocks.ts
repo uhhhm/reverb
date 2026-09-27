@@ -72,6 +72,11 @@ export const ownerMe = {
   createdAt: 1700000000,
 }
 
+// playerRequests is every player queue request the page made, in the order the
+// stand-in core received them: op is the path after /player/{session} ('' for
+// GET). Reset per test.
+export const playerRequests: { op: string; body: Record<string, unknown> }[] = []
+
 // installApiMocks intercepts every /api/v1/* HTTP call. `authed` gates the /me
 // payload (the app hydrates its capability store from /me on load). `me` overrides
 // the authenticated /me payload (defaults to the full owner).
@@ -121,9 +126,11 @@ export async function installApiMocks(
   // The play queue lives in the core; a stand-in answers the player's queue
   // requests the way the core does, one queue per page.
   const queue = new FakeQueue().transport()
+  playerRequests.length = 0
   await page.route(/\/api\/v1\/player\/[^/]+(?:\/([a-z-]+))?$/, async (route: Route) => {
     const op = /\/player\/[^/]+(?:\/([a-z-]+))?$/.exec(new URL(route.request().url()).pathname)?.[1] ?? ''
     const body = (route.request().postDataJSON() ?? {}) as Record<string, never>
+    playerRequests.push({ op, body })
     const ops: Record<string, () => Promise<unknown>> = {
       '': () => queue.get(),
       play: () => queue.play(body.tracks, body.start ?? 0, body.origin),
@@ -136,7 +143,6 @@ export async function installApiMocks(
       ended: () => queue.ended(body.entryId),
       shuffle: () => queue.setShuffle(body.on),
       repeat: () => queue.setRepeat(body.mode),
-      'radio-ended': () => queue.radioEnded(),
       clear: () => queue.clear(),
       progress: () => queue.get(),
     }

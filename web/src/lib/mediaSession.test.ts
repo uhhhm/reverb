@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { startMediaSession } from './mediaSession'
 import type { PlayerState } from './audioEngine'
+import { engine, player, setQueueTransport, usePlayer } from './playerStore'
+import { FakeQueue } from '../test/fakeQueue'
 
 // jsdom has no Media Session API — install a fake before each test.
 interface FakeMediaSession {
@@ -61,6 +63,7 @@ function makeState(overrides: Partial<PlayerState> = {}): PlayerState {
     repeat: 'off',
     upNext: [],
     origins: [],
+    radio: false,
     ...overrides,
   }
 }
@@ -196,5 +199,49 @@ describe('startMediaSession', () => {
     // teardown nulls every registered handler
     const nulled = ms.setActionHandler.mock.calls.filter(([, h]) => h === null)
     expect(nulled.length).toBe(5)
+  })
+})
+
+describe('media session through the player store', () => {
+  // Failure cases: an OS seek reaches the engine without the core hearing it
+  // was a seek, so the core counts the jumped-over span as heard; or the core
+  // hears a sample from the new position before the seek itself.
+  beforeEach(() => {
+    Object.defineProperty(navigator, 'mediaSession', {
+      value: { metadata: null, playbackState: 'none', setActionHandler: vi.fn(), setPositionState: vi.fn() },
+      configurable: true,
+    })
+    vi.stubGlobal('MediaMetadata', FakeMediaMetadata)
+  })
+
+  it('reports an OS seek to the core as a seek, ahead of playback from the target', async () => {
+    const core = new FakeQueue()
+    const transport = core.transport()
+    const calls: string[] = []
+    setQueueTransport({
+      ...transport,
+      progress: async (sample) => {
+        calls.push(`progress seeking=${sample.seeking} at=${sample.positionMs}`)
+        return transport.get()
+      },
+    })
+    usePlayer.getState().playTrackList([makeTrack('1', 'Airbag'), makeTrack('2', 'Paranoid Android')], 0)
+    await new Promise((r) => setTimeout(r, 0))
+    const seek = vi.spyOn(engine, 'seekMs').mockImplementation((ms) => { calls.push(`engine seek ${ms}`) })
+    calls.length = 0
+
+    const stop = startMediaSession(player)
+    const handlers = new Map(
+      vi.mocked(navigator.mediaSession.setActionHandler).mock.calls.map(([a, h]) => [a, h]),
+    )
+    ;(handlers.get('seekto') as (d: { seekTime?: number }) => void)({ seekTime: 42 })
+    // Playback carries on from the target; the next sample is an ordinary one.
+    usePlayer.getState().next()
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(calls).toContain('engine seek 42000')
+    expect(calls.filter((c) => c.startsWith('progress'))[0]).toBe('progress seeking=true at=42000')
+    stop()
+    seek.mockRestore()
   })
 })

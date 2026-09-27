@@ -164,6 +164,49 @@ func TestOnlyHeardTimeCounts(t *testing.T) {
 	}
 }
 
+// A seek from the lock screen or media keys reaches the core the way the web
+// player store sends every seek: a sample at the target marked seeking, then
+// ordinary samples from there. Short OS seeks stay under the step that reads
+// as a jump, so without the seeking mark each one would count as heard.
+func TestShortOSSeeksAreNotHeard(t *testing.T) {
+	// Ten seconds heard, then five 4.9s seeks, each followed by one second of
+	// playback: 15s heard, 24.5s jumped over. Counting the jumps would pass
+	// the 30s half of a 60s track.
+	osSeeks := func(l *listening) {
+		entry, playID := l.current()
+		l.listen(0, 10_000)
+		at := 10_000.0
+		for range 5 {
+			at += 4_900
+			l.sample(player.Progress{EntryID: entry, PlayID: playID, PositionMS: at, Playing: true, Seeking: true})
+			l.listen(at, at+1_000)
+			at += 1_000
+		}
+	}
+
+	t.Run("an ordinary play is not recorded", func(t *testing.T) {
+		l := newListening(t)
+		l.play(song("a", 60_000), song("b", 60_000))
+		osSeeks(l)
+		l.next()
+		if len(l.listens) != 0 {
+			t.Fatalf("recorded %+v from 15s heard", l.listens)
+		}
+	})
+	t.Run("a Radio attempt counts only what was heard", func(t *testing.T) {
+		l := newListening(t)
+		l.play(recommended("rec", 60_000, "radio"), song("b", 60_000))
+		osSeeks(l)
+		l.next()
+		if len(l.listens) != 1 {
+			t.Fatalf("listens = %+v, want the attempt", l.listens)
+		}
+		if got := l.listens[0]; got.Qualified || got.MsPlayed != 15_000 {
+			t.Fatalf("attempt = %+v, want unqualified with 15s heard", got)
+		}
+	})
+}
+
 func TestAShortTrackIsNeverAListen(t *testing.T) {
 	l := newListening(t)
 	l.play(song("jingle", 30_000), song("b", 60_000))

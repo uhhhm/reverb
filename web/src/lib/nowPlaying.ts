@@ -1,20 +1,21 @@
 import type { PlayerState } from './audioEngine'
 import * as scrobbleApi from './scrobbleApi'
 
-// Minimal engine interface — real AudioEngine satisfies this; tests supply a fake.
-interface Enginelike {
+// What is playing, as the player store reports it (playerStore's `player`).
+// Tests supply a fake.
+interface Playerlike {
   subscribe(cb: (s: PlayerState) => void): () => void
 }
 
 /**
- * startNowPlaying subscribes to the given engine and fires nowPlayingFn once
+ * startNowPlaying subscribes to the player and fires nowPlayingFn once
  * each time the current track id changes.  It is fire-and-forget: errors are
  * swallowed so they never affect playback.  Returns an unsubscribe function.
  * Whether the track is then listened to is the core's call, from the
  * player's progress samples.
  */
 export function startNowPlaying(
-  engine: Enginelike,
+  player: Playerlike,
   nowPlayingFn: (t: {
     title: string
     artist: string
@@ -40,5 +41,5 @@ export function startNowPlaying(
     nowPlayingFn({ title, artist, album, durationMs }).catch(() => {})
   }
 
-  return engine.subscribe(handleState)
+  return player.subscribe(handleState)
 }
