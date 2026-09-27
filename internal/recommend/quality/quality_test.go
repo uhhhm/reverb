@@ -109,6 +109,19 @@ func TestLoadDatabaseReadsCanonicalPlayIdentity(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// A recommendation the owner skipped is recorded unqualified. Production
+	// taste and similarity ignore it, so the evaluator must too.
+	if err := st.Q().InsertCatalogEntity(ctx, db.InsertCatalogEntityParams{
+		ID: "track-2", Kind: "track", Title: "Track 002", Artist: "Artist 002",
+		Mbid: "recording-002", CreatedAt: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Q().InsertPlay(ctx, db.InsertPlayParams{
+		ID: "play-2", UserID: "owner", CatalogID: "track-2", PlayedAt: 124, CreatedAt: 124, Qualified: 0,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}

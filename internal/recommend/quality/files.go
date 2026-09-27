@@ -84,9 +84,11 @@ func Compare(current, baseline Report) []string {
 	return regressions
 }
 
-// LoadDatabase replaces fixture history with plays and canonical identities
-// from a real Reverb database. Opening without migration keeps evaluation
-// read-only with respect to the user's schema and data.
+// LoadDatabase replaces fixture history with qualified plays and canonical
+// identities from a real Reverb database. A skipped recommendation is stored
+// unqualified and production taste ignores it, so the evaluator does too.
+// Opening without migration keeps evaluation read-only with respect to the
+// user's schema and data.
 func LoadDatabase(ctx context.Context, path string) ([]Play, error) {
 	if _, err := os.Stat(path); err != nil {
 		return nil, err
@@ -102,6 +104,9 @@ func LoadDatabase(ctx context.Context, path string) ([]Play, error) {
 	}
 	out := make([]Play, 0, len(rows))
 	for _, row := range rows {
+		if row.Qualified != 1 {
+			continue
+		}
 		entity, err := st.Q().GetCatalogEntity(ctx, row.CatalogID)
 		if err != nil {
 			return nil, fmt.Errorf("catalog entity %s: %w", row.CatalogID, err)

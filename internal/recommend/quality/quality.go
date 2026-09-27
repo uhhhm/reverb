@@ -293,8 +293,8 @@ func nameKey(artist, title string) string {
 }
 
 // historyTaste feeds the training plays, and any imported history, to the
-// taste profile. The fixture keeps only what the evaluator needs, so every
-// play counts as completed.
+// taste profile. The history holds only qualified plays, so every play counts
+// as completed.
 type historyTaste struct {
 	plays   []Play
 	history []HistoryListens

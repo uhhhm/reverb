@@ -39,7 +39,7 @@ type LocalRecommendationPlayableTracksRow struct {
 
 // localRecommendationPlayableTracks scores candidates on the signals of
 // LocalRecommendationTracks: shared artist and album, managed-playlist
-// co-occurrence, and playback-session co-occurrence. Plays name catalog
+// co-occurrence, and playback-session co-occurrence of qualified plays. Plays name catalog
 // entities, so session co-occurrence and the catalog id match on normalised
 // artist and title. The seed's album comes from the candidates, else from the
 // catalogue. sqlc cannot analyse a CTE that selects from json_each, so this is
@@ -89,6 +89,7 @@ WITH playable AS (
            JOIN catalog_entity ce ON ce.id = pc.catalog_id
            WHERE lower(trim(se.artist)) = lower(?2) AND (?3 = '' OR lower(trim(se.title)) = lower(?3))
              AND lower(trim(ce.artist)) = lower(trim(p.artist)) AND lower(trim(ce.title)) = lower(trim(p.title))
+             AND ps.qualified = 1 AND pc.qualified = 1
          ) AS score
   FROM playable p
   JOIN seed

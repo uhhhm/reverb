@@ -260,6 +260,7 @@ WITH seed AS (
          4 * EXISTS (
            SELECT 1 FROM plays ps JOIN plays pc ON pc.session_id = ps.session_id
            WHERE ps.catalog_id = seed.id AND pc.catalog_id = e.id AND ps.session_id != ''
+             AND ps.qualified = 1 AND pc.qualified = 1
          ) AS score
   FROM catalog_entity e
   JOIN backend_binding b ON b.catalog_id = e.id AND b.backend_id != '' AND b.known_absent = 0
@@ -286,6 +287,7 @@ WITH candidate_artists AS (
            JOIN plays pc ON pc.session_id = ps.session_id AND pc.session_id != ''
            JOIN catalog_entity ce ON ce.id = pc.catalog_id
            WHERE lower(se.artist) = lower(sqlc.arg(seed_artist)) AND lower(ce.artist) = lower(e.artist)
+             AND ps.qualified = 1 AND pc.qualified = 1
          ) AS score
   FROM catalog_entity e
   JOIN backend_binding b ON b.catalog_id = e.id AND b.backend_id != '' AND b.known_absent = 0
