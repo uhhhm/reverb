@@ -1317,4 +1317,29 @@ describe('AudioEngine state snapshots', () => {
     expect(changed.queue.map((t) => t.id)).toEqual(['1', '2', '3', '4'])
     expect(changed.upNext).toEqual([1, 2, 3])
   })
+
+  it('keeps the queue arrays for an equal answer whose tracks carry nested values', () => {
+    const { engine } = newEngine()
+    const ext = { ...track('x'), externalStream: { source: 'deezer', externalId: 'x' } }
+    engine.playTrackList([track('1'), ext], 0)
+    const before = engine.getState()
+    // Every answer is freshly parsed, nested objects included.
+    engine.apply(JSON.parse(JSON.stringify(engine.q.state())))
+    expect(engine.getState().queue).toBe(before.queue)
+  })
+
+  it('shows the tracks of a recreated session even when its revision and entry ids repeat', () => {
+    const { engine } = newEngine()
+    engine.playTrackList(list, 0)
+    const before = engine.q.state()
+    // The core dropped the session and a new one counted up to the same
+    // revision with the same entry ids, holding the same track ids retitled.
+    const recreated = {
+      ...before,
+      entries: before.entries.map((e) => ({ ...e, track: { ...e.track, title: 'Renamed ' + e.track.id } })),
+    }
+    engine.apply(recreated)
+    expect(engine.getState().queue.map((t) => t.title)).toEqual(['Renamed 1', 'Renamed 2', 'Renamed 3'])
+    expect(engine.getState().current?.title).toBe('Renamed 1')
+  })
 })

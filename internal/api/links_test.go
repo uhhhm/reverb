@@ -667,3 +667,41 @@ func TestLinkAddBatchChapterSplit(t *testing.T) {
 		t.Fatalf("enqueueCalls %d want 2", fake.enqueueCalls)
 	}
 }
+
+// Links in a batch are planned concurrently. The same track named twice must
+// still be minted once: two entities for one track split its history, and
+// the second is published to peers with no alias to find it by.
+func TestLinkAddBatchMintsARepeatedTrackOnce(t *testing.T) {
+	srv, st, cookie, _, _ := linkTestServerWith(t, newFakeManager())
+	var items []string
+	for i := 0; i < 20; i++ {
+		items = append(items, `{"url":"https://open.spotify.com/track/spTwice","download":false}`)
+	}
+	rec := doLink(t, srv, cookie, http.MethodPost, "/api/v1/links/add-batch", `{"items":[`+strings.Join(items, ",")+`]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("batch status %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Results []struct {
+			CatalogID string `json:"catalogId"`
+			Error     string `json:"error"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, r := range resp.Results {
+		if r.Error != "" {
+			t.Fatalf("item failed: %s", r.Error)
+		}
+		ids[r.CatalogID] = true
+	}
+	var entities int
+	if err := st.DB().QueryRow(`SELECT count(*) FROM catalog_entity WHERE source = 'spotify' AND external_id = 'spTwice'`).Scan(&entities); err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || entities != 1 {
+		t.Fatalf("catalog ids %v, %d entities, want one", ids, entities)
+	}
+}

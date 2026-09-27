@@ -78,19 +78,34 @@ export interface PlayerState {
 }
 
 /**
- * Whether two answers hold the same queue: the same revision, and the same
- * entries. Revision alone is not enough, since the core numbers revisions per
- * session and a session it recreates starts counting again.
+ * Whether two answers hold the same queue: the same revision and the same
+ * entries, compared by content. Revision alone is not enough, since the core
+ * numbers revisions per session and a session it recreates counts again from
+ * zero, reusing entry ids for different tracks. Nearly every progress answer
+ * (about once a second while playing) matches, so the comparison walks fields
+ * rather than serialising the queue.
  */
 function sameQueue(a: QueueState, b: QueueState): boolean {
-  if (a.revision !== b.revision) return false
-  if (a.entries.length !== b.entries.length || a.upNext.length !== b.upNext.length) return false
-  for (let i = 0; i < a.entries.length; i++) {
-    const x = a.entries[i]
+  if (a.revision !== b.revision || a.entries.length !== b.entries.length) return false
+  if (a.upNext.length !== b.upNext.length || !a.upNext.every((n, i) => n === b.upNext[i])) return false
+  return a.entries.every((x, i) => {
     const y = b.entries[i]
-    if (x.id !== y.id || x.origin !== y.origin || x.track.id !== y.track.id) return false
-  }
-  return a.upNext.every((n, i) => n === b.upNext[i])
+    return x.id === y.id && x.origin === y.origin && sameFields(x.track, y.track)
+  })
+}
+
+/** Whether two parsed JSON objects hold the same values, key by key. */
+function sameFields(x: object, y: object): boolean {
+  const xs = x as Record<string, unknown>
+  const ys = y as Record<string, unknown>
+  const keys = Object.keys(xs)
+  if (keys.length !== Object.keys(ys).length) return false
+  return keys.every((k) => {
+    const [p, q] = [xs[k], ys[k]]
+    if (p === q) return true
+    // Nested values arrive as fresh objects in every answer.
+    return typeof p === 'object' && p !== null && typeof q === 'object' && q !== null && sameFields(p, q)
+  })
 }
 
 function realAudioFactory(): AudioElement {

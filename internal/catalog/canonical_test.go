@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -141,5 +142,39 @@ func TestCanonicalFor_ISRCAndNormConverge(t *testing.T) {
 	c2, _ := s.CanonicalFor(ctx, base)     // no isrc -> norm alias hit -> SAME entity
 	if c1 != c2 {
 		t.Fatalf("norm alias should converge: %s vs %s", c1, c2)
+	}
+}
+
+// Callers mint concurrently: a batch of links, download workers linking jobs.
+// The same track asked for at once must still get one entity, or its history
+// splits across two ids and the loser is published with no alias.
+func TestConcurrentCanonicalForMintsOnce(t *testing.T) {
+	svc, st := newTestServiceWithStore(t)
+	id := Identity{Kind: "track", Title: "Same", Artist: "Band", Source: "spotify", ExternalID: "once"}
+	ids := make([]string, 20)
+	var wg sync.WaitGroup
+	for i := range ids {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cid, err := svc.CanonicalFor(context.Background(), id)
+			if err != nil {
+				t.Error(err)
+			}
+			ids[i] = cid
+		}()
+	}
+	wg.Wait()
+	var entities int
+	if err := st.DB().QueryRow(`SELECT count(*) FROM catalog_entity WHERE external_id = 'once'`).Scan(&entities); err != nil {
+		t.Fatal(err)
+	}
+	for _, cid := range ids {
+		if cid != ids[0] {
+			t.Fatalf("ids = %v, want one", ids)
+		}
+	}
+	if entities != 1 {
+		t.Fatalf("%d entities, want one", entities)
 	}
 }

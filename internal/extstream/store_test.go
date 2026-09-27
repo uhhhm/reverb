@@ -8,6 +8,7 @@ import (
 
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/store"
+	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 func newStore(t *testing.T) Store {
@@ -191,4 +192,39 @@ func (d *deadIDRunner) Run(_ context.Context, _ string, args []string, onLine fu
 		return nil
 	}
 	return fmt.Errorf("video unavailable")
+}
+
+// Before YouTube results resolved by their own id, one was searched for by
+// artist and title, and the hit, possibly another upload, was stored. That
+// stored id, or a still-valid URL for it, must not keep playing the wrong
+// upload.
+func TestYouTubeTrackIgnoresAVideoIDAnEarlierSearchStored(t *testing.T) {
+	st := newStore(t)
+	now := time.Unix(1_000_000, 0)
+	clock := func() time.Time { return now }
+	ctx := context.Background()
+	wrong := fmt.Sprintf("https://rr1.googlevideo.com/wrong?expire=%d", now.Add(6*time.Hour).Unix())
+	if err := st.UpsertExtstreamURL(ctx, db.UpsertExtstreamURLParams{
+		Source: "youtube", ExternalID: "rightUpload", VideoID: "otherUpload", Url: wrong,
+		UrlExpiresAt: now.Add(6 * time.Hour).Unix(), UpdatedAt: now.Unix(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	right := fmt.Sprintf("https://rr1.googlevideo.com/right?expire=%d", now.Add(6*time.Hour).Unix())
+	r := &fakeRunner{lines: []string{right}}
+	s := New(&fakeLookup{}, WithRunner(r), WithStore(st), WithClock(clock))
+	got, err := s.Resolve(ctx, "youtube", "rightUpload")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != right {
+		t.Fatalf("url = %q, want the result's own video", got)
+	}
+	if target := r.gotArgs[len(r.gotArgs)-1]; target != "https://www.youtube.com/watch?v=rightUpload" {
+		t.Fatalf("resolved %q", target)
+	}
+	if r.searchCount() != 0 {
+		t.Fatalf("searched %d times", r.searchCount())
+	}
 }

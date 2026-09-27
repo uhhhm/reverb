@@ -63,6 +63,8 @@ func (s *Service) Adopt(ctx context.Context, remoteID string, id Identity) (stri
 	if remoteID == "" {
 		return "", errors.New("catalog: adopt needs an id")
 	}
+	s.mint.Lock()
+	defer s.mint.Unlock()
 	now := s.now().Unix()
 	aliases := aliasesFor(id)
 

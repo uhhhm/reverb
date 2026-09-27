@@ -18,7 +18,8 @@ import (
 
 func youtubeLink(id string) string { return "https://www.youtube.com/watch?v=" + id }
 
-// linkedJobs waits until every job is completed and linked to a library track.
+// linkedJobs waits until every job is completed, linked to a library track and
+// given its catalog id, which is minted a moment after the link is stored.
 func (d *syncDevice) linkedJobs(ids ...string) map[string]core.DownloadJob {
 	d.t.Helper()
 	deadline := time.Now().Add(45 * time.Second)
@@ -30,7 +31,7 @@ func (d *syncDevice) linkedJobs(ids ...string) map[string]core.DownloadJob {
 			if j.Status == core.DownloadFailed {
 				d.t.Fatalf("download %s failed: %s", j.ID, j.Error)
 			}
-			if j.Status == core.DownloadCompleted && j.LibraryTrackID != "" {
+			if j.Status == core.DownloadCompleted && j.LibraryTrackID != "" && j.CanonicalID != "" {
 				done[j.ID] = j
 			}
 		}
@@ -127,10 +128,28 @@ func TestAddFromLinkJoinsAManagedPlaylistOnBothDevices(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		converge(t, phone, desktop, "the playlists stay as they are", func() bool { return true })
 	}
+	type row struct {
+		Title, State, CatalogID string
+	}
+	type download struct {
+		Title, LinkCatalogID, DownloadCatalogID string
+	}
+	var artifact struct {
+		Playlists map[string][]row
+		Downloads []download
+	}
+	artifact.Playlists = map[string][]row{}
 	for _, d := range []*syncDevice{phone, desktop} {
 		got, _ := d.playlist(pl.ID)
 		if !equalStrings(playlistTitles(got), want) {
 			t.Fatalf("%s playlist after further rounds = %v, want %v", d.name, playlistTitles(got), want)
 		}
+		for _, tr := range got.Tracks {
+			artifact.Playlists[d.name] = append(artifact.Playlists[d.name], row{tr.Title, string(tr.State), tr.CanonicalID})
+		}
 	}
+	for _, id := range jobIDs {
+		artifact.Downloads = append(artifact.Downloads, download{jobs[id].Title, catalogIDs[id], jobs[id].CanonicalID})
+	}
+	writeE2EArtifact(t, "add-from-link-playlist.json", artifact)
 }

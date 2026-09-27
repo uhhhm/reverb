@@ -223,6 +223,11 @@ func (s *Service) ResolveHinted(ctx context.Context, source, externalID, artist,
 		// for hours. Checking the store before spending seconds on yt-dlp is
 		// what makes replaying a recent track instant after a restart.
 		url, videoID, fresh := s.storedURL(detached, source, externalID)
+		// An id stored for a YouTube result by an earlier artist-and-title
+		// search may be another upload.
+		if own, ok := ownVideoID(source, externalID); ok && videoID != own {
+			url, videoID, fresh = "", own, false
+		}
 		if fresh {
 			s.memoize(key, url)
 			return url, nil
@@ -292,11 +297,6 @@ func (s *Service) resolveUncached(ctx context.Context, source, externalID, artis
 	defer cancel()
 
 	videoID := strings.TrimSpace(knownVideoID)
-	if videoID == "" && source == "youtube" {
-		// A YouTube result names its video already. Searching by artist and
-		// title could land on a different upload.
-		videoID = externalID
-	}
 	if videoID == "" {
 		query, err := s.searchQuery(ctx, source, externalID, artist, title)
 		if err != nil {
@@ -312,7 +312,9 @@ func (s *Service) resolveUncached(ctx context.Context, source, externalID, artis
 	if err != nil {
 		// A stored id that no longer resolves (video pulled, region-locked)
 		// must not wedge the track forever: drop it and search again.
-		if knownVideoID != "" && knownVideoID != externalID {
+		// A YouTube result has no other upload to fall back to: searching could
+		// only play a different one.
+		if _, own := ownVideoID(source, externalID); knownVideoID != "" && !own {
 			return s.resolveUncached(ctx, source, externalID, artist, title, "")
 		}
 		return "", err
@@ -372,6 +374,16 @@ func (s *Service) mediaURL(ctx context.Context, videoID string) (string, error) 
 		}
 	}
 	return "", fmt.Errorf("extstream: no playable source found for %s (%s)", videoID, lastLine)
+}
+
+// ownVideoID is the video a result names itself, when it does: a YouTube
+// result is its own video, and resolving it any other way could play a
+// different upload.
+func ownVideoID(source, externalID string) (string, bool) {
+	if source == "youtube" {
+		return externalID, true
+	}
+	return "", false
 }
 
 func watchURL(videoID string) string {

@@ -155,11 +155,13 @@ function reportProgress(seeking = false, positionMs?: number) {
  * A queue change the core announced for a session. A playing player catches
  * up through its progress answers; a paused one sends none, so this is how it
  * sees a change another request made, such as a Radio refill landing after
- * pause. Only this player's session, and only a revision it does not hold.
+ * pause. Only this player's session is fetched. The revision is not trusted to
+ * skip the fetch: a session the core recreates counts from zero again, so a
+ * matching number can name a different queue. Refetching a queue the player
+ * already holds changes nothing it shows.
  */
-export function onQueueNotice(notice: { session: string; revision: number }) {
+export function onQueueNotice(notice: { session: string }) {
   if (notice.session !== queue.session) return
-  if (notice.revision === engine.queueSnapshot().revision) return
   void change(() => queue.get())
 }
 

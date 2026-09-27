@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/uhhhm/reverb/internal/store/db"
@@ -62,6 +63,11 @@ type Service struct {
 	q     Querier
 	now   func() time.Time
 	idgen func() string // returns a uuid-ish token (no prefix)
+
+	// mint serialises the look-up-then-insert of CanonicalFor and Adopt.
+	// Callers mint concurrently (a batch of links, download workers), and two
+	// that both miss would each mint an entity for the same track.
+	mint sync.Mutex
 
 	// emitter publishes newly minted entities to the sync log; nil when this
 	// device replicates nothing.

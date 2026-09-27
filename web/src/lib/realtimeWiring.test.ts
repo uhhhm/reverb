@@ -158,7 +158,8 @@ describe('useRealtime', () => {
   // A playing player catches up through its once-a-second progress answer; a
   // paused one sends nothing, so only the notice can tell it. Failure cases:
   // the notice is ignored; a notice for another tab's session moves this one;
-  // or every notice of a change this player already has refetches.
+  // or a notice is skipped because its revision matches the one held, which a
+  // session the core recreated can repeat.
   it('shows a paused player a queue change made by another request, from its session notice', async () => {
     const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)) })
     const track = (id: string) => ({
@@ -176,10 +177,21 @@ describe('useRealtime', () => {
     renderHook(() => useRealtime((url) => new StubSocket(url)), { wrapper })
     const s = sockets[0]
 
-    // This player's own change: it already holds that revision.
+    // The core dropped this session and recreated it: a new queue that has
+    // counted up to the revision the player holds.
+    const held = core.revision
+    core.play([track('9')], 0)
+    core.revision = held
+    s.onmessage?.(frame('player.queue', { session: transport.session, revision: held }))
+    await flush()
+    expect(usePlayer.getState().queue.map((t) => t.id)).toEqual(['9'])
+    expect(usePlayer.getState().playing).toBe(false)
+    // Setup for what follows: back to the two-track queue, paused.
+    core.play([track('1'), track('2')], 0)
     s.onmessage?.(frame('player.queue', { session: transport.session, revision: core.revision }))
     await flush()
-    expect(get).not.toHaveBeenCalled()
+    expect(usePlayer.getState().queue.map((t) => t.id)).toEqual(['1', '2'])
+    get.mockClear()
 
     // A Radio refill lands after pause.
     core.enqueue([track('3'), track('4')], 'radio')

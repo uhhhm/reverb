@@ -55,13 +55,15 @@ func newDownloadingPhone(t *testing.T) *syncDevice {
 }
 
 // download has the phone download a track and waits until it is linked to
-// the phone's library, returning the job.
+// the phone's library and given its catalog id, returning the job. The link
+// is stored a moment before the catalog id is minted.
 func (d *syncDevice) download(title string) core.DownloadJob {
 	d.t.Helper()
 	var job core.DownloadJob
 	d.must(http.MethodPost, "/downloads", map[string]any{
 		"source": "deezer", "externalId": "dz-" + title, "artist": "Band", "title": title, "album": "Record",
 	}, &job, http.StatusOK)
+	var last core.DownloadJob
 	deadline := time.Now().Add(45 * time.Second)
 	for time.Now().Before(deadline) {
 		var jobs []core.DownloadJob
@@ -73,13 +75,14 @@ func (d *syncDevice) download(title string) core.DownloadJob {
 			if j.Status == core.DownloadFailed {
 				d.t.Fatalf("download of %q failed: %s", title, j.Error)
 			}
-			if j.Status == core.DownloadCompleted && j.LibraryTrackID != "" {
+			if j.Status == core.DownloadCompleted && j.LibraryTrackID != "" && j.CanonicalID != "" {
 				return j
 			}
+			last = j
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	d.t.Fatalf("download of %q never reached the library", title)
+	d.t.Fatalf("download of %q never reached the library with a catalog id: %+v", title, last)
 	return job
 }
 

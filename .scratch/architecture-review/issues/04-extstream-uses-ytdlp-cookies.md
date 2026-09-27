@@ -20,3 +20,7 @@ The path belongs to one owner. The adapter package exposes where its cookies liv
 - [x] One function defines the cookies path, and both packages use it.
 - [x] Resolving a YouTube external track uses its video id rather than a text search. If that is left out, record why in a comment on this ticket.
 - [x] `go test ./internal/extstream ./internal/download/...` passes.
+
+**Notes from implementation.**
+- A YouTube result always resolves its own video id. A video id or URL stored for it by an earlier artist-and-title search is ignored, because that search may have landed on another upload.
+- A YouTube result whose video no longer resolves (pulled or region-locked) fails. It does not fall back to a text search, because any hit would be a different upload. Other sources still fall back from a stale stored id to searching.

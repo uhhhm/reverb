@@ -42,6 +42,8 @@ func prefixFor(kind string) string {
 // record any newly-supplied aliases. On a miss it mints a new entity and
 // writes all aliases.
 func (s *Service) CanonicalFor(ctx context.Context, id Identity) (string, error) {
+	s.mint.Lock()
+	defer s.mint.Unlock()
 	aliases := aliasesFor(id)
 
 	// 1. Lookup in priority order (isrc → external → norm).
