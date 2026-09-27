@@ -114,6 +114,7 @@ type Service struct {
 	resolve         func() BindingResolver // optional provider; Tasks 4-5 add call sites
 	canonicalMinter CanonicalMinter        // optional; Task 5 mints canonical ids at persist time
 	emitter         Emitter                // optional; replicates edits to paired devices
+	locks           *EditLocks             // serializes edits per playlist; shared across reloads via WithEditLocks
 }
 
 // NewService constructs a playlist-sync Service. resolve is an optional provider
@@ -121,7 +122,7 @@ type Service struct {
 // (no panic). Tasks 4-5 add the actual Resolve/RefreshLinked call sites; this Task
 // (1) only stores the dep for the wiring seam to be reachable.
 func NewService(src PlaylistSource, m Matcher, dl Downloader, store Store, lib LibraryWriter, now func() int64, newID func() string, resolve func() BindingResolver) *Service {
-	return &Service{src: src, match: m, dl: dl, store: store, lib: lib, now: now, newID: newID, resolve: resolve}
+	return &Service{src: src, match: m, dl: dl, store: store, lib: lib, now: now, newID: newID, resolve: resolve, locks: NewEditLocks()}
 }
 
 // WithLibraryReader attaches a LibraryReader so MigrateLibraryPlaylists can read
@@ -300,10 +301,14 @@ func (s *Service) Sync(ctx context.Context, id string) (core.SyncedPlaylistDetai
 		return core.SyncedPlaylistDetail{}, fmt.Errorf("sync %s: %w", id, err)
 	}
 	tj, _ := json.Marshal(pl.Tracks)
-	if err := s.store.UpdateTracks(ctx, id, pl.Name, pl.CoverURL, string(tj), s.now()); err != nil {
+	// The fetch runs unlocked; only the write is serialized, so a Rename racing
+	// this sync cannot write back the tracklist it read before the sync.
+	if err := s.edit(ctx, id, func(row *SyncedRow) (bool, error) {
+		row.Name, row.CoverURL, row.TracksJSON = pl.Name, pl.CoverURL, string(tj)
+		return true, nil
+	}); err != nil {
 		return core.SyncedPlaylistDetail{}, err
 	}
-	s.publish(ctx, id)
 	det, err := s.Detail(ctx, id)
 	if err != nil {
 		return det, err
@@ -548,39 +553,36 @@ func (s *Service) AddTrackWithResult(ctx context.Context, id string, entry core.
 // it, the entry stays a streamed track (Add to playlist, no download).
 // Returns ErrNotEditable if the playlist is mode='synced'.
 func (s *Service) AddTracks(ctx context.Context, id string, entries []core.ExternalResult, download bool) (core.SyncedPlaylistDetail, int, error) {
-	row, err := s.store.Get(ctx, id)
+	var added []core.ExternalResult
+	err := s.edit(ctx, id, func(row *SyncedRow) (bool, error) {
+		if row.Mode != "once" {
+			return false, ErrNotEditable
+		}
+		var tracks []core.ExternalResult
+		_ = json.Unmarshal([]byte(row.TracksJSON), &tracks)
+		// Dedupe by source+externalId.
+		present := make(map[core.TrackKey]bool, len(tracks)+len(entries))
+		for _, t := range tracks {
+			present[core.TrackKey{Source: t.Source, ExternalID: t.ExternalID}] = true
+		}
+		for _, entry := range entries {
+			key := core.TrackKey{Source: entry.Source, ExternalID: entry.ExternalID}
+			if present[key] {
+				continue
+			}
+			present[key] = true
+			added = append(added, s.withCanonicalID(ctx, entry))
+		}
+		if len(added) == 0 {
+			return false, nil
+		}
+		tj, _ := json.Marshal(append(tracks, added...))
+		row.TracksJSON = string(tj)
+		return true, nil
+	})
 	if err != nil {
 		return core.SyncedPlaylistDetail{}, 0, err
 	}
-	if row.Mode != "once" {
-		return core.SyncedPlaylistDetail{}, 0, ErrNotEditable
-	}
-	var tracks []core.ExternalResult
-	_ = json.Unmarshal([]byte(row.TracksJSON), &tracks)
-	// Dedupe by source+externalId.
-	present := make(map[core.TrackKey]bool, len(tracks)+len(entries))
-	for _, t := range tracks {
-		present[core.TrackKey{Source: t.Source, ExternalID: t.ExternalID}] = true
-	}
-	var added []core.ExternalResult
-	for _, entry := range entries {
-		key := core.TrackKey{Source: entry.Source, ExternalID: entry.ExternalID}
-		if present[key] {
-			continue
-		}
-		present[key] = true
-		added = append(added, s.withCanonicalID(ctx, entry))
-	}
-	if len(added) == 0 {
-		detail, detailErr := s.Detail(ctx, id)
-		return detail, 0, detailErr
-	}
-	tracks = append(tracks, added...)
-	tj, _ := json.Marshal(tracks)
-	if err := s.store.UpdateTracks(ctx, id, row.Name, row.CoverURL, string(tj), s.now()); err != nil {
-		return core.SyncedPlaylistDetail{}, 0, err
-	}
-	s.publish(ctx, id)
 	if download {
 		for _, entry := range added {
 			s.enqueueIfMissing(ctx, entry)
@@ -639,43 +641,41 @@ func (s *Service) withCanonicalID(ctx context.Context, entry core.ExternalResult
 // RemoveTrack removes an entry from a mode='once' managed playlist's tracklist.
 // Returns ErrNotEditable if the playlist is mode='synced'.
 func (s *Service) RemoveTrack(ctx context.Context, id, source, externalID string) (core.SyncedPlaylistDetail, error) {
-	row, err := s.store.Get(ctx, id)
+	err := s.edit(ctx, id, func(row *SyncedRow) (bool, error) {
+		if row.Mode != "once" {
+			return false, ErrNotEditable
+		}
+		var tracks []core.ExternalResult
+		_ = json.Unmarshal([]byte(row.TracksJSON), &tracks)
+		filtered := tracks[:0]
+		for _, t := range tracks {
+			if !(t.Source == source && t.ExternalID == externalID) {
+				filtered = append(filtered, t)
+			}
+		}
+		tj, _ := json.Marshal(filtered)
+		row.TracksJSON = string(tj)
+		return true, nil
+	})
 	if err != nil {
 		return core.SyncedPlaylistDetail{}, err
 	}
-	if row.Mode != "once" {
-		return core.SyncedPlaylistDetail{}, ErrNotEditable
-	}
-	var tracks []core.ExternalResult
-	_ = json.Unmarshal([]byte(row.TracksJSON), &tracks)
-	filtered := tracks[:0]
-	for _, t := range tracks {
-		if !(t.Source == source && t.ExternalID == externalID) {
-			filtered = append(filtered, t)
-		}
-	}
-	tj, _ := json.Marshal(filtered)
-	if err := s.store.UpdateTracks(ctx, id, row.Name, row.CoverURL, string(tj), s.now()); err != nil {
-		return core.SyncedPlaylistDetail{}, err
-	}
-	s.publish(ctx, id)
 	return s.Detail(ctx, id)
 }
 
 // SetCover updates the cover_url for a mode='once' playlist.
 // Returns ErrNotEditable when the playlist is mode='synced'.
 func (s *Service) SetCover(ctx context.Context, id, coverURL string) (core.SyncedPlaylistDetail, error) {
-	row, err := s.store.Get(ctx, id)
+	err := s.edit(ctx, id, func(row *SyncedRow) (bool, error) {
+		if row.Mode != "once" {
+			return false, ErrNotEditable
+		}
+		row.CoverURL = coverURL
+		return true, nil
+	})
 	if err != nil {
 		return core.SyncedPlaylistDetail{}, err
 	}
-	if row.Mode != "once" {
-		return core.SyncedPlaylistDetail{}, ErrNotEditable
-	}
-	if err := s.store.UpdateTracks(ctx, id, row.Name, coverURL, row.TracksJSON, s.now()); err != nil {
-		return core.SyncedPlaylistDetail{}, err
-	}
-	s.publish(ctx, id)
 	return s.Detail(ctx, id)
 }
 
@@ -687,14 +687,13 @@ func (s *Service) Rename(ctx context.Context, id, name string) (core.SyncedPlayl
 	if name == "" {
 		return core.SyncedPlaylistDetail{}, errors.New("name cannot be empty")
 	}
-	row, err := s.store.Get(ctx, id)
+	err := s.edit(ctx, id, func(row *SyncedRow) (bool, error) {
+		row.Name = name
+		return true, nil
+	})
 	if err != nil {
 		return core.SyncedPlaylistDetail{}, err
 	}
-	if err := s.store.UpdateTracks(ctx, id, name, row.CoverURL, row.TracksJSON, s.now()); err != nil {
-		return core.SyncedPlaylistDetail{}, err
-	}
-	s.publish(ctx, id)
 	return s.Detail(ctx, id)
 }
 
@@ -703,15 +702,24 @@ func (s *Service) Rename(ctx context.Context, id, name string) (core.SyncedPlayl
 // Entries in the tracklist not found in order are appended at the end in their original relative order.
 // Returns ErrNotEditable when the playlist is mode='synced'.
 func (s *Service) ReorderTracks(ctx context.Context, id string, order []core.TrackKey) (core.SyncedPlaylistDetail, error) {
-	row, err := s.store.Get(ctx, id)
+	err := s.edit(ctx, id, func(row *SyncedRow) (bool, error) {
+		if row.Mode != "once" {
+			return false, ErrNotEditable
+		}
+		row.TracksJSON = reorder(row.TracksJSON, order)
+		return true, nil
+	})
 	if err != nil {
 		return core.SyncedPlaylistDetail{}, err
 	}
-	if row.Mode != "once" {
-		return core.SyncedPlaylistDetail{}, ErrNotEditable
-	}
+	return s.Detail(ctx, id)
+}
+
+// reorder returns tracksJSON with the entries named in order first, in that
+// order, followed by the rest in their original relative order.
+func reorder(tracksJSON string, order []core.TrackKey) string {
 	var tracks []core.ExternalResult
-	_ = json.Unmarshal([]byte(row.TracksJSON), &tracks)
+	_ = json.Unmarshal([]byte(tracksJSON), &tracks)
 
 	// Build a lookup: (source, externalID) → track entry.
 	type key struct{ source, externalID string }
@@ -738,11 +746,7 @@ func (s *Service) ReorderTracks(ctx context.Context, id string, order []core.Tra
 	}
 
 	tj, _ := json.Marshal(reordered)
-	if err := s.store.UpdateTracks(ctx, id, row.Name, row.CoverURL, string(tj), s.now()); err != nil {
-		return core.SyncedPlaylistDetail{}, err
-	}
-	s.publish(ctx, id)
-	return s.Detail(ctx, id)
+	return string(tj)
 }
 
 func rowToSummary(r SyncedRow, trackCount int) core.SyncedPlaylist {

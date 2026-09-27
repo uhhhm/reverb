@@ -577,6 +577,9 @@ type Builder struct {
 	// canonicalMinter is set by SetCanonicalMinter (Task 5) so BuildSyncService can
 	// forward it to playlistsync.Service via WithCanonicalMinter. Nil-safe.
 	canonicalMinter playlistsync.CanonicalMinter
+	// playlistLocks is shared by every playlistsync.Service Build creates, so an
+	// edit on the Service a reload replaced cannot overwrite one on its successor.
+	playlistLocks *playlistsync.EditLocks
 	// downloadCompletion is applied to every manager Build creates, including
 	// replacement managers produced by live adapter reloads.
 	downloadCompletion func(context.Context, core.DownloadRequest, string) error
@@ -652,6 +655,7 @@ func NewBuilder(
 		clock:         clock,
 		getenv:        getenv,
 		dataDir:       dataDir,
+		playlistLocks: playlistsync.NewEditLocks(),
 	}
 }
 
