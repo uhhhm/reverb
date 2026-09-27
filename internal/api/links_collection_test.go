@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/linkadd"
-	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
 
 // fakeCollections answers album and playlist lookups from fixed tracks.
@@ -34,9 +34,8 @@ func (f *fakeCollections) GetPlaylist(_ context.Context, source, id string) (cor
 
 // collectionLinkServer is linkTestServer with a phone's link planner, which
 // expands albums and playlists into their tracks.
-func collectionLinkServer(t *testing.T) (*Server, *http.Cookie, *fakeManager, func(string) bool) {
+func collectionLinkServer(t *testing.T) (*Server, *http.Cookie, *fakeManager, *recordingPlaylists) {
 	t.Helper()
-	srv, st, cookie, fake := linkTestServer(t, nil)
 	cols := &fakeCollections{
 		album: core.ExternalAlbum{Source: "spotify", ExternalID: "4aawyAB9vmqN3uQ7FjRGTy", Name: "Discovery", Artist: "Daft Punk", Tracks: []core.ExternalResult{
 			{Source: "spotify", ExternalID: "trk1", Title: "One More Time", Artist: "Daft Punk", ISRC: "GBDUW0000053"},
@@ -46,22 +45,27 @@ func collectionLinkServer(t *testing.T) (*Server, *http.Cookie, *fakeManager, fu
 			{Source: "spotify", ExternalID: "trk3", Title: "Song", Artist: "Singer", Album: "LP"},
 		}},
 	}
-	syncStore := reverbsync.NewSyncStore(st.Q())
-	srv.deps.LinkAdd = linkadd.New(st.Q(), syncStore, fake, linkadd.WithCollections(cols),
-		linkadd.WithDeviceID(func(ctx context.Context) (string, error) { return reverbsync.ServerDeviceID(ctx, st.Q()) }))
+	srv, st, cookie, fake, playlists := linkTestServerWith(t, nil, linkadd.WithCollections(cols))
 	seedPlaylist(t, st, "pl-phone")
-	hasCatalog := func(id string) bool {
-		_, err := st.Q().GetCatalogEntity(context.Background(), id)
-		return err == nil
+	return srv, cookie, fake, playlists
+}
+
+// memberIDs is each playlist entry's source id, in order.
+func memberIDs(adds []playlistAdd) []string {
+	var out []string
+	for _, a := range adds {
+		for _, e := range a.entries {
+			out = append(out, e.ExternalID)
+		}
 	}
-	return srv, cookie, fake, hasCatalog
+	return out
 }
 
 // On a phone, whose yt-dlp downloads one track at a time, an album link
 // becomes one download per track, each named by the source's own metadata,
 // and each track joins the playlist.
 func TestLinkAddExpandsAnAlbumIntoItsTracks(t *testing.T) {
-	srv, cookie, fake, hasCatalog := collectionLinkServer(t)
+	srv, cookie, fake, playlists := collectionLinkServer(t)
 	rec := doLink(t, srv, cookie, http.MethodPost, "/api/v1/links/add",
 		`{"url":"https://open.spotify.com/album/4aawyAB9vmqN3uQ7FjRGTy","playlistId":"pl-phone","download":true}`)
 	if rec.Code != http.StatusOK {
@@ -72,12 +76,16 @@ func TestLinkAddExpandsAnAlbumIntoItsTracks(t *testing.T) {
 	}
 	first := fake.allReqs[0]
 	if first.ExternalID != "trk1" || first.Title != "One More Time" || first.Artist != "Daft Punk" ||
-		first.Album != "Discovery" || first.ISRC != "GBDUW0000053" || first.AddToPlaylistID != "pl-phone" {
+		first.Album != "Discovery" || first.ISRC != "GBDUW0000053" {
 		t.Fatalf("first request = %+v", first)
 	}
-	for _, id := range []string{"trk1", "trk2"} {
-		if !hasCatalog(linkadd.CatalogID("spotify", "track", id)) {
-			t.Fatalf("track %s has no catalog entry", id)
+	adds := playlists.all()
+	if got := memberIDs(adds); len(adds) != 1 || strings.Join(got, ",") != "trk1,trk2" {
+		t.Fatalf("playlist edits = %+v, want the album's tracks in order", adds)
+	}
+	for _, e := range adds[0].entries {
+		if e.CanonicalID == "" || e.Album != "Discovery" {
+			t.Fatalf("member %+v has no catalog id or album", e)
 		}
 	}
 	var out struct {
@@ -117,7 +125,7 @@ func TestLinkAddReportsPartialDownloadAfterPlaylistWasAdded(t *testing.T) {
 
 // A playlist link adds its tracks without downloading them when asked.
 func TestLinkAddExpandsAPlaylistWithoutDownloading(t *testing.T) {
-	srv, cookie, fake, hasCatalog := collectionLinkServer(t)
+	srv, cookie, fake, playlists := collectionLinkServer(t)
 	rec := doLink(t, srv, cookie, http.MethodPost, "/api/v1/links/add",
 		`{"url":"https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M","playlistId":"pl-phone","download":false}`)
 	if rec.Code != http.StatusOK {
@@ -126,8 +134,8 @@ func TestLinkAddExpandsAPlaylistWithoutDownloading(t *testing.T) {
 	if len(fake.allReqs) != 0 {
 		t.Fatalf("enqueued %d downloads with download false", len(fake.allReqs))
 	}
-	if !hasCatalog(linkadd.CatalogID("spotify", "track", "trk3")) {
-		t.Fatal("the playlist's track has no catalog entry")
+	if got := memberIDs(playlists.all()); strings.Join(got, ",") != "trk3" {
+		t.Fatalf("members = %v, want the playlist's track", got)
 	}
 }
 
@@ -143,5 +151,36 @@ func TestLinkAddRefusesASpotifyTrackItCannotName(t *testing.T) {
 	}
 	if len(fake.allReqs) != 0 {
 		t.Fatalf("enqueued %+v for an unnamed track", fake.allReqs)
+	}
+}
+
+// A desktop downloads an album link whole, as spotDL takes it, but the
+// playlist it is added to still gets the album's tracks.
+func TestLinkAddListsAnAlbumForAPlaylistButDownloadsItWhole(t *testing.T) {
+	cols := &fakeCollections{album: core.ExternalAlbum{Source: "spotify", ExternalID: "4aawyAB9vmqN3uQ7FjRGTy", Name: "Discovery", Artist: "Daft Punk", Tracks: []core.ExternalResult{
+		{Source: "spotify", ExternalID: "trk1", Title: "One More Time", Artist: "Daft Punk"},
+		{Source: "spotify", ExternalID: "trk2", Title: "Aerodynamic", Artist: "Daft Punk"},
+	}}}
+	srv, st, cookie, fake, playlists := linkTestServerWith(t, nil, linkadd.WithCollectionListing(cols))
+	seedPlaylist(t, st, "pl-desk")
+	rec := doLink(t, srv, cookie, http.MethodPost, "/api/v1/links/add",
+		`{"url":"https://open.spotify.com/album/4aawyAB9vmqN3uQ7FjRGTy","playlistId":"pl-desk"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(fake.allReqs) != 1 || fake.allReqs[0].ExternalID != "4aawyAB9vmqN3uQ7FjRGTy" {
+		t.Fatalf("downloads = %+v, want the album link once", fake.allReqs)
+	}
+	if got := memberIDs(playlists.all()); strings.Join(got, ",") != "trk1,trk2" {
+		t.Fatalf("members = %v, want the album's tracks", got)
+	}
+
+	// Without a way to list it, the link is refused before anything is written.
+	srv2, st2, cookie2, fake2, playlists2 := linkTestServerWith(t, nil)
+	seedPlaylist(t, st2, "pl-desk")
+	rec = doLink(t, srv2, cookie2, http.MethodPost, "/api/v1/links/add",
+		`{"url":"https://open.spotify.com/album/4aawyAB9vmqN3uQ7FjRGTy","playlistId":"pl-desk"}`)
+	if rec.Code != http.StatusUnprocessableEntity || fake2.enqueueCalls != 0 || len(playlists2.all()) != 0 {
+		t.Fatalf("status %d, %d downloads, %+v", rec.Code, fake2.enqueueCalls, playlists2.all())
 	}
 }

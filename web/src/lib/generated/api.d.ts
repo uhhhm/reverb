@@ -5714,6 +5714,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         url: string;
+                        /** @description A managed playlist to add the link to. An album or playlist link joins as its tracks; a chapter split joins as the video, once. */
                         playlistId?: string;
                         download?: boolean;
                         /**
@@ -5754,21 +5755,28 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description unsupported URL, bad time range, or chapter split not possible */
+                /** @description the playlist mirrors its source and cannot take tracks */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description unsupported URL, bad time range, chapter split not possible, or an album or playlist link into a playlist on a device that cannot list its tracks */
                 422: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content?: never;
                 };
-                /** @description on a phone, which adds an album or playlist as its tracks and downloads by artist and title: the collection could not be listed, or a Spotify track could not be named */
+                /** @description the album or playlist could not be listed, or on a phone, which downloads by artist and title, a Spotify track could not be named */
                 502: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content?: never;
                 };
-                /** @description no downloader configured */
+                /** @description no downloader configured, or playlists unavailable */
                 503: {
                     headers: {
                         [name: string]: unknown;

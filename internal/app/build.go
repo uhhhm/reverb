@@ -392,21 +392,31 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		WithTokenProvider(scrobble.ListenBrainz, listenbrainzupload.New())
 	playSvc.WithScrobbler(scrobbleSvc)
 
-	// LinkAdd planner owns the add-from-link flow (resolve, catalog, sync,
-	// chapter planning). It reads the LIVE aggregator for Spotify enrichment.
+	// LinkAdd planner owns the add-from-link flow (resolve, catalog, playlist,
+	// chapter planning). It reads the LIVE aggregator for Spotify enrichment
+	// and the LIVE playlist module, so both survive adapter reloads. Tracks are
+	// minted through the catalog, so a later download names the same entity.
 	linkOpts := []linkadd.Option{
 		linkadd.WithDownloaderProvider(func() linkadd.Downloader { return reloader.Current().Downloads }),
 		linkadd.WithTrackLookup(ProviderLookup{Get: reloader.TrackLookupProvider()}),
-		linkadd.WithDeviceID(func(ctx context.Context) (string, error) {
-			return reverbsync.AuthorDeviceID(ctx, st.Q())
+		linkadd.WithCatalog(catalogSvc),
+		linkadd.WithPlaylists(func() linkadd.Playlists {
+			if svc := reloader.Current().Sync; svc != nil {
+				return svc
+			}
+			return nil
 		}),
 	}
 	// A phone's yt-dlp downloads one track at a time, so an album or playlist
-	// link is added as its tracks.
+	// link is added as its tracks. A desktop downloads the link whole and
+	// lists its tracks only for a playlist.
+	collections := ProviderCollections{Get: reloader.TrackLookupProvider()}
 	if phone {
-		linkOpts = append(linkOpts, linkadd.WithCollections(ProviderCollections{Get: reloader.TrackLookupProvider()}))
+		linkOpts = append(linkOpts, linkadd.WithCollections(collections))
+	} else {
+		linkOpts = append(linkOpts, linkadd.WithCollectionListing(collections))
 	}
-	linkAddSvc := linkadd.New(st.Q(), syncStore, nil, linkOpts...)
+	linkAddSvc := linkadd.New(st.Q(), nil, linkOpts...)
 
 	// Uploaded album and track art lives beside the database rather than in the
 	// music library, which Reverb never writes to. Blobs are addressed by content
@@ -458,7 +468,6 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		DeviceKeys:           st.Q(),
 		PairingDB:            st.DB(),
 		OfflineSet:           st.Q(),
-		LinkStore:            st.Q(),
 		LinkAdd:              linkAddSvc,
 		FileStore:            st.Q(),
 		SyncEmit:             emitter,

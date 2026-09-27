@@ -5,20 +5,61 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/uhhhm/reverb/internal/catalog"
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/linkadd"
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/store"
 	"github.com/uhhhm/reverb/internal/store/db"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
+	"github.com/uhhhm/reverb/internal/syncemit"
 )
 
+// recordingPlaylists stands in for the playlist module: it records each edit
+// add-from-link makes, in order.
+type recordingPlaylists struct {
+	mu   sync.Mutex
+	adds []playlistAdd
+}
+
+type playlistAdd struct {
+	id       string
+	entries  []core.ExternalResult
+	download bool
+}
+
+func (p *recordingPlaylists) AddTracks(_ context.Context, id string, entries []core.ExternalResult, download bool) (core.SyncedPlaylistDetail, int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.adds = append(p.adds, playlistAdd{id: id, entries: entries, download: download})
+	return core.SyncedPlaylistDetail{}, len(entries), nil
+}
+
+func (p *recordingPlaylists) all() []playlistAdd {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]playlistAdd(nil), p.adds...)
+}
+
 func linkTestServer(t *testing.T, mgr DownloadManager) (*Server, *store.Store, *http.Cookie, *fakeManager) {
+	srv, st, cookie, fake, _ := linkTestServerWith(t, mgr)
+	return srv, st, cookie, fake
+}
+
+// linkTestServerWith is linkTestServer that also returns the playlist module
+// the links join. Tracks are minted through a real catalog, which publishes
+// them to the change log.
+func linkTestServerWith(t *testing.T, mgr DownloadManager, opts ...linkadd.Option) (*Server, *store.Store, *http.Cookie, *fakeManager, *recordingPlaylists) {
 	t.Helper()
 	st, err := store.Open(t.TempDir() + "/links.db")
 	if err != nil {
@@ -29,7 +70,6 @@ func linkTestServer(t *testing.T, mgr DownloadManager) (*Server, *store.Store, *
 		t.Fatal(err)
 	}
 	authSvc, tok := seededAuthToken(t, st)
-	// Ensure server device for sync emit
 	if _, err := reverbsync.EnsureServerDevice(context.Background(), st.Q()); err != nil {
 		t.Fatal(err)
 	}
@@ -40,28 +80,47 @@ func linkTestServer(t *testing.T, mgr DownloadManager) (*Server, *store.Store, *
 	fake, _ := mgr.(*fakeManager)
 	if fake == nil {
 		fake = newFakeManager()
-		// if mgr was not fake, keep original but fake stays separate for assertions
-		// In tests where mgr is fake, this is the same.
 	}
-	linkAddSvc := linkadd.New(st.Q(), syncStore, mgr, linkadd.WithDeviceID(func(ctx context.Context) (string, error) {
-		return reverbsync.ServerDeviceID(ctx, st.Q())
+	catalogSvc := catalog.NewService(st.Q(), time.Now, uuid.NewString)
+	catalogSvc.WithEmitter(syncemit.New(syncStore, catalogSvc, func(ctx context.Context) string {
+		id, _ := reverbsync.ServerDeviceID(ctx, st.Q())
+		return id
 	}))
+	playlists := &recordingPlaylists{}
+	linkAddSvc := linkadd.New(st.Q(), mgr, append([]linkadd.Option{
+		linkadd.WithCatalog(catalogSvc),
+		linkadd.WithPlaylists(func() linkadd.Playlists { return playlists }),
+	}, opts...)...)
 	srv := NewServer(Deps{AllowedHosts: testAllowedHosts,
 		Auth:          authSvc,
 		Downloads:     mgr,
 		Search:        registry.NewRegistry("search"),
 		Downloader:    registry.NewRegistry("downloader"),
 		SyncStore:     syncStore,
-		LinkStore:     st.Q(),
 		OfflineSet:    st.Q(),
 		PairingStore:  st.Q(),
 		PlaylistOwner: st.Q(),
 		LinkAdd:       linkAddSvc,
 	})
 	cookie := &http.Cookie{Name: sessionCookie, Value: tok}
-	_ = authSvc
-	_ = tok
-	return srv, st, cookie, fake
+	return srv, st, cookie, fake, playlists
+}
+
+// playlistChanges lists every change-log row add-from-link wrote about a
+// playlist. The playlist module is the only writer of those.
+func playlistChanges(t *testing.T, st *store.Store) []reverbsync.SyncChange {
+	t.Helper()
+	changes, err := reverbsync.NewSyncStore(st.Q()).ListSince(context.Background(), 0, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []reverbsync.SyncChange
+	for _, ch := range changes {
+		if ch.EntityType == "playlist" {
+			out = append(out, ch)
+		}
+	}
+	return out
 }
 
 func doLink(t *testing.T, srv *Server, cookie *http.Cookie, method, path, body string) *httptest.ResponseRecorder {
@@ -204,12 +263,12 @@ func TestLinkResolve(t *testing.T) {
 		}
 		// verify track sync exists via store helper
 		ss := reverbsync.NewSyncStore(st2.Q())
-		latest, err := ss.GetLatestForField(context.Background(), "track", catalogID, "title")
+		latest, err := ss.GetLatestForField(context.Background(), reverbsync.EntityCatalog, catalogID, reverbsync.FieldIdentity)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if latest == nil {
-			t.Fatalf("no track title sync_change")
+			t.Fatalf("the catalog did not publish the new track")
 		}
 		// second add with same URL should be idempotent (reuse catalog, no error)
 		rec2 := doLink(t, srv2, cookie2, http.MethodPost, "/api/v1/links/add", `{"url":"https://open.spotify.com/track/spDL1"}`)
@@ -248,61 +307,49 @@ func TestLinkResolve(t *testing.T) {
 		}
 	})
 
-	t.Run("add with playlistId validates and enqueues with AddToPlaylistID and emits playlist sync", func(t *testing.T) {
-		mgr4 := newFakeManager()
-		srv4, st4, cookie4, fake4 := linkTestServer(t, mgr4)
-		// create a synced playlist
-		pl, err := st4.Q().UpsertSyncedPlaylist(context.Background(), db.UpsertSyncedPlaylistParams{
-			ID:         "plTest1",
-			Source:     "spotify",
-			ExternalID: "extPl1",
-			Name:       "Test Playlist",
-			CoverUrl:   "",
-			TracksJson: "[]",
-			Mode:       "once",
-			CreatedAt:  time.Now().Unix(),
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		_ = pl
-		_ = st4.Q().SetSyncedPlaylistOwner(context.Background(), db.SetSyncedPlaylistOwnerParams{
-			OwnerUserID: sql.NullString{String: "local", Valid: true},
-			ID:          "plTest1",
-		})
+	t.Run("add with playlistId joins through the playlist module", func(t *testing.T) {
+		srv4, st4, cookie4, fake4, playlists := linkTestServerWith(t, newFakeManager())
+		seedPlaylist(t, st4, "plTest1")
 		rec := doLink(t, srv4, cookie4, http.MethodPost, "/api/v1/links/add", `{"url":"https://open.spotify.com/track/spPL1","playlistId":"plTest1"}`)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("add with playlist %d: %s", rec.Code, rec.Body.String())
 		}
-		var resp map[string]json.RawMessage
+		var resp struct {
+			PlaylistID string `json:"playlistId"`
+			CatalogID  string `json:"catalogId"`
+		}
 		_ = json.Unmarshal(rec.Body.Bytes(), &resp)
-		if _, ok := resp["playlistId"]; !ok {
-			t.Fatalf("missing playlistId in resp")
+		if resp.PlaylistID != "plTest1" {
+			t.Fatalf("playlistId = %q", resp.PlaylistID)
 		}
-		if fake4.lastReq.AddToPlaylistID != "plTest1" {
-			t.Fatalf("AddToPlaylistID %q want plTest1", fake4.lastReq.AddToPlaylistID)
+		adds := playlists.all()
+		if len(adds) != 1 || adds[0].id != "plTest1" || adds[0].download || len(adds[0].entries) != 1 {
+			t.Fatalf("playlist edits = %+v, want one entry into plTest1 with no download of its own", adds)
 		}
-		// emits playlist sync_change
-		ss := reverbsync.NewSyncStore(st4.Q())
-		// Check any sync change for playlist plTest1
-		count, _ := st4.Q().CountSyncChanges(context.Background())
-		if count == 0 {
-			t.Fatalf("no sync_change")
+		if e := adds[0].entries[0]; e.Source != "spotify" || e.ExternalID != "spPL1" || e.CanonicalID != resp.CatalogID || e.Type != core.EntityTrack {
+			t.Fatalf("entry = %+v", e)
 		}
-		// Look for playlist entity
-		found := false
-		changes, err := ss.ListSince(context.Background(), 0, 100)
-		if err != nil {
+		// The library backend's playlists are another id space.
+		if fake4.lastReq.AddToPlaylistID != "" {
+			t.Fatalf("AddToPlaylistID = %q, want none", fake4.lastReq.AddToPlaylistID)
+		}
+		if ch := playlistChanges(t, st4); len(ch) != 0 {
+			t.Fatalf("add-from-link wrote playlist changes itself: %+v", ch)
+		}
+	})
+
+	t.Run("add to a mirrored playlist is refused before anything is written", func(t *testing.T) {
+		srv7, st7, cookie7, fake7, playlists := linkTestServerWith(t, newFakeManager())
+		seedPlaylist(t, st7, "plMirror")
+		if _, err := st7.DB().Exec(`UPDATE synced_playlists SET mode = 'synced' WHERE id = 'plMirror'`); err != nil {
 			t.Fatal(err)
 		}
-		for _, ch := range changes {
-			if ch.EntityType == "playlist" && ch.EntityID == "plTest1" {
-				found = true
-				break
-			}
+		rec := doLink(t, srv7, cookie7, http.MethodPost, "/api/v1/links/add", `{"url":"https://open.spotify.com/track/spMirror","playlistId":"plMirror"}`)
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status %d, want 409: %s", rec.Code, rec.Body.String())
 		}
-		if !found {
-			t.Fatalf("expected playlist sync_change, got %+v", changes)
+		if fake7.enqueueCalls != 0 || len(playlists.all()) != 0 {
+			t.Fatalf("wrote after refusing: %d downloads, %+v", fake7.enqueueCalls, playlists.all())
 		}
 	})
 
@@ -420,14 +467,15 @@ func TestLinkAddSplitChaptersFansOut(t *testing.T) {
 	}
 }
 
-// Every chapter must carry the playlist target, so a split adds them all.
-func TestLinkAddSplitChaptersAllJoinPlaylist(t *testing.T) {
+// A chapter split joins a playlist as the video it came from, once: a
+// chapter has no source id of its own that a paired device could stream.
+func TestLinkAddSplitChaptersJoinsThePlaylistOnce(t *testing.T) {
 	mgr := newFakeManager()
 	mgr.chapters = []core.Chapter{
 		{Title: "One", StartSec: 0, EndSec: 10},
 		{Title: "Two", StartSec: 10, EndSec: 20},
 	}
-	srv, st, cookie, fake := linkTestServer(t, mgr)
+	srv, st, cookie, fake, playlists := linkTestServerWith(t, mgr)
 	seedPlaylist(t, st, "pl-chap")
 
 	rec := doLink(t, srv, cookie, http.MethodPost, "/api/v1/links/add",
@@ -438,10 +486,9 @@ func TestLinkAddSplitChaptersAllJoinPlaylist(t *testing.T) {
 	if len(fake.allReqs) != 2 {
 		t.Fatalf("enqueued %d requests, want 2", len(fake.allReqs))
 	}
-	for i, req := range fake.allReqs {
-		if req.AddToPlaylistID != "pl-chap" {
-			t.Fatalf("chapter %d missing playlist target: %+v", i, req)
-		}
+	adds := playlists.all()
+	if len(adds) != 1 || len(adds[0].entries) != 1 || adds[0].entries[0].ExternalID != "chap2" {
+		t.Fatalf("playlist edits = %+v, want the video once", adds)
 	}
 }
 
@@ -543,11 +590,50 @@ func TestLinkAddBatch(t *testing.T) {
 	if fake.enqueueCalls != 2 {
 		t.Fatalf("enqueueCalls %d want 2 (two valid links)", fake.enqueueCalls)
 	}
-	// Verify playlist membership sync for first item (second and third: only first had playlistId)
-	// At least one playlist sync_change should exist.
-	count, _ := st.Q().CountSyncChanges(context.Background())
-	if count == 0 {
-		t.Fatalf("expected sync_change for batch")
+}
+
+// A batch into one playlist is one edit with the links in the batch's order,
+// however the concurrent lookups finish; a failed link is left out.
+func TestLinkAddBatchJoinsEachPlaylistInBatchOrder(t *testing.T) {
+	srv, st, cookie, fake, playlists := linkTestServerWith(t, newFakeManager())
+	seedPlaylist(t, st, "pl-a")
+	seedPlaylist(t, st, "pl-b")
+	var items []string
+	var wantA []string
+	for i := 0; i < 12; i++ {
+		id := fmt.Sprintf("spOrder%02d", i)
+		pl := "pl-a"
+		if i%4 == 3 {
+			pl = "pl-b"
+		} else {
+			wantA = append(wantA, id)
+		}
+		items = append(items, fmt.Sprintf(`{"url":"https://open.spotify.com/track/%s","playlistId":%q}`, id, pl))
+	}
+	items = append(items[:5], append([]string{`{"url":"https://example.com/bad","playlistId":"pl-a"}`}, items[5:]...)...)
+	rec := doLink(t, srv, cookie, http.MethodPost, "/api/v1/links/add-batch", `{"items":[`+strings.Join(items, ",")+`]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("batch status %d: %s", rec.Code, rec.Body.String())
+	}
+	adds := playlists.all()
+	if len(adds) != 2 || adds[0].id != "pl-a" || adds[1].id != "pl-b" {
+		t.Fatalf("playlist edits = %+v, want one per playlist", adds)
+	}
+	var gotA []string
+	for _, e := range adds[0].entries {
+		gotA = append(gotA, e.ExternalID)
+	}
+	if strings.Join(gotA, ",") != strings.Join(wantA, ",") {
+		t.Fatalf("pl-a got %v, want %v", gotA, wantA)
+	}
+	if len(adds[1].entries) != 3 {
+		t.Fatalf("pl-b got %+v", adds[1].entries)
+	}
+	if fake.enqueueCalls != 12 {
+		t.Fatalf("enqueueCalls %d want 12", fake.enqueueCalls)
+	}
+	if ch := playlistChanges(t, st); len(ch) != 0 {
+		t.Fatalf("add-from-link wrote playlist changes itself: %+v", ch)
 	}
 }
 

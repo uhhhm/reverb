@@ -789,6 +789,8 @@ paths:
                   type: string
                 playlistId:
                   type: string
+                  description: |
+                    A managed playlist to add the link to. An album or playlist link joins as its tracks; a chapter split joins as the video, once.
                 download:
                   type: boolean
                 quality:
@@ -823,12 +825,14 @@ paths:
           description: url is required
         "404":
           description: playlist not found
+        "409":
+          description: the playlist mirrors its source and cannot take tracks
         "422":
-          description: unsupported URL, bad time range, or chapter split not possible
+          description: unsupported URL, bad time range, chapter split not possible, or an album or playlist link into a playlist on a device that cannot list its tracks
         "502":
-          description: "on a phone, which adds an album or playlist as its tracks and downloads by artist and title: the collection could not be listed, or a Spotify track could not be named"
+          description: the album or playlist could not be listed, or on a phone, which downloads by artist and title, a Spotify track could not be named
         "503":
-          description: no downloader configured
+          description: no downloader configured, or playlists unavailable
   /player/{session}:
     get:
       operationId: getQueue

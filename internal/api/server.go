@@ -283,9 +283,8 @@ type Deps struct {
 	PairingDB interface {
 		ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
 	}
-	LinkStore LinkStore
-	LinkAdd   LinkAddService
-	P2P       func() *p2p.Host
+	LinkAdd LinkAddService
+	P2P     func() *p2p.Host
 	// P2PGuard provides the libp2p peer trust set for pairing binds.
 	P2PGuard func() *p2p.Guard
 	// P2PSyncer exposes the anti-entropy syncer so the UI can trigger a round
