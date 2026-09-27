@@ -250,7 +250,6 @@ func TestOutputTemplateSanitizesPlaceholders(t *testing.T) {
 }
 
 func TestStartCookiesArgOnlyWhenConfigured(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	r := &fakeRunner{lines: []string{"[download] 10.0% of 1MiB"}}
 	a := newAdapter(t, r, nil)
 	if _, err := a.Start(context.Background(), core.DownloadRequest{Artist: "A", Title: "T"}, func(int) {}); err != nil {

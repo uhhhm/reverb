@@ -166,8 +166,10 @@ func (a *Adapter) CanDownload(ctx context.Context, req core.DownloadRequest) (bo
 	return buildQuery(req) != "", nil
 }
 
-// cookiesFilePath returns the path this adapter's cookies.txt lives at.
-func cookiesFilePath() string {
+// CookiesFilePath is where the owner's YouTube cookies.txt is saved, or "" when
+// there is no user config dir. External streams (internal/extstream) read the
+// same file, so the owner configures cookies once.
+func CookiesFilePath() string {
 	cfg, err := os.UserConfigDir()
 	if err != nil || cfg == "" {
 		return ""
@@ -178,7 +180,7 @@ func cookiesFilePath() string {
 // writeCookiesFile persists admin-pasted cookies.txt content so it can be handed
 // to yt-dlp as a real file path. Mode 0600: this is authenticated session data.
 func writeCookiesFile(content string) (string, error) {
-	path := cookiesFilePath()
+	path := CookiesFilePath()
 	if path == "" {
 		return "", fmt.Errorf("could not resolve user config dir")
 	}

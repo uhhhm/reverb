@@ -15,7 +15,6 @@ import (
 	"fmt"
 	neturl "net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +23,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/download/ytdlp"
 	"github.com/uhhhm/reverb/internal/store/db"
 	"github.com/uhhhm/reverb/internal/trackref"
 )
@@ -127,7 +127,9 @@ func WithStore(st Store) Option { return func(s *Service) { s.store = st } }
 func WithJSRuntime(path string) Option { return func(s *Service) { s.jsRuntime = path } }
 
 // WithCookiesFile points yt-dlp at a cookies.txt, which is what gets past
-// YouTube's bot checks on the resolve.
+// YouTube's bot checks on the resolve. The file is checked on every run, so
+// cookies saved after the Service was built are used and a missing file is
+// simply not passed.
 func WithCookiesFile(path string) Option { return func(s *Service) { s.cookiesFile = path } }
 
 // WithTTL overrides how long a resolved URL is cached.
@@ -144,29 +146,19 @@ func WithClock(now func() time.Time) Option { return func(s *Service) { s.now = 
 
 // NewFromEnv builds the Service the way both composition roots want it: yt-dlp's
 // binary from REVERB_YTDLP_PATH (the desktop bundle sets this to its vendored
-// copy) and the downloader's own cookies.txt when one has been written. Cookies
-// are what get a resolve past YouTube's bot checks, so sharing the file means an
-// operator configures them once.
+// copy) and the yt-dlp downloader adapter's cookies.txt. Cookies are what get a
+// resolve past YouTube's bot checks, so sharing the file means the owner
+// configures them once.
 func NewFromEnv(lookup TrackLookup, getenv func(string) string, opts ...Option) *Service {
 	base := []Option{
 		WithBinary(getenv("REVERB_YTDLP_PATH")),
-		WithCookiesFile(existingPath(ytdlpCookiesPath())),
+		WithCookiesFile(ytdlp.CookiesFilePath()),
 		WithJSRuntime(existingPath(getenv("REVERB_DENO_PATH"))),
 	}
 	return New(lookup, append(base, opts...)...)
 }
 
-// ytdlpCookiesPath is where the yt-dlp downloader adapter writes the operator's
-// cookies.txt.
-func ytdlpCookiesPath() string {
-	cfg, err := os.UserConfigDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(cfg, "yt-dlp", "cookies.txt")
-}
-
-// existingPath returns path if it exists, else "" — an absent cookies file means
+// existingPath returns path if it exists, else "": an absent cookies file means
 // "no cookies configured", not a path to hand yt-dlp so it can reject it.
 func existingPath(path string) string {
 	if path == "" {
@@ -300,6 +292,11 @@ func (s *Service) resolveUncached(ctx context.Context, source, externalID, artis
 	defer cancel()
 
 	videoID := strings.TrimSpace(knownVideoID)
+	if videoID == "" && source == "youtube" {
+		// A YouTube result names its video already. Searching by artist and
+		// title could land on a different upload.
+		videoID = externalID
+	}
 	if videoID == "" {
 		query, err := s.searchQuery(ctx, source, externalID, artist, title)
 		if err != nil {
@@ -315,7 +312,7 @@ func (s *Service) resolveUncached(ctx context.Context, source, externalID, artis
 	if err != nil {
 		// A stored id that no longer resolves (video pulled, region-locked)
 		// must not wedge the track forever: drop it and search again.
-		if knownVideoID != "" {
+		if knownVideoID != "" && knownVideoID != externalID {
 			return s.resolveUncached(ctx, source, externalID, artist, title, "")
 		}
 		return "", err
@@ -387,8 +384,8 @@ func (s *Service) baseArgs() []string {
 	if s.jsRuntime != "" {
 		args = append(args, "--js-runtimes", "deno:"+s.jsRuntime)
 	}
-	if s.cookiesFile != "" {
-		args = append(args, "--cookies", s.cookiesFile)
+	if cookies := existingPath(s.cookiesFile); cookies != "" {
+		args = append(args, "--cookies", cookies)
 	}
 	return args
 }
