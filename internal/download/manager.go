@@ -1783,31 +1783,21 @@ func (m *Manager) Retry(ctx context.Context, jobID string, manualURL string) (co
 	if err := m.store.Update(ctx, job); err != nil {
 		return core.DownloadJob{}, err
 	}
-	// When a manual URL is provided, seed (or update) the in-memory request AND
-	// persist it to request_json so the ManualURL survives a server restart between
-	// Retry and the worker picking up the job. Centralized via requestForJob so
-	// DurationMs/Quality/Granularity/Section* are preserved (legacy fallback is
-	// documented on requestForJob).
-	if manualURL != "" {
-		req := m.requestForJob(ctx, job)
+	// A manual URL belongs to the retry it came with: a plain retry searches again
+	// rather than reusing a link that may be why the job failed. A changed
+	// ManualURL is persisted to request_json so it survives a restart between Retry
+	// and dispatch. requestForJob preserves DurationMs/Quality/Granularity/Section*
+	// (its legacy fallback is documented there).
+	req := m.requestForJob(ctx, job)
+	if req.ManualURL != manualURL {
 		req.ManualURL = manualURL
-		m.mu.Lock()
-		m.reqs[job.ID] = req
-		m.mu.Unlock()
 		if err := m.store.UpdateRequest(ctx, job.ID, req); err != nil {
 			log.Printf("download: Retry %s: failed to persist ManualURL to store: %v", shortID(job.ID), err)
 		}
 	}
-
 	m.mu.Lock()
-	req, haveReq := m.reqs[job.ID]
+	m.reqs[job.ID] = req
 	m.mu.Unlock()
-	if !haveReq {
-		req = m.requestForJob(ctx, job)
-		m.mu.Lock()
-		m.reqs[job.ID] = req
-		m.mu.Unlock()
-	}
 
 	m.publishEvent(TopicQueued, job, "")
 
@@ -1988,16 +1978,6 @@ func (m *Manager) publishQueueState(paused bool) {
 		return
 	}
 	m.bus.Publish(events.Event{Topic: TopicQueueState, Payload: core.QueueStateEvent{Paused: paused}})
-}
-
-// SeedRequest is the seam for cross-restart request recovery: it rehydrates the
-// originating request (including Granularity) for a job whose in-memory entry was
-// lost across a process restart. Not yet wired to a production caller — deferred
-// until the composition root drives restart rehydration from request_json.
-func (m *Manager) SeedRequest(jobID string, req core.DownloadRequest) {
-	m.mu.Lock()
-	m.reqs[jobID] = req
-	m.mu.Unlock()
 }
 
 // ListChapters enumerates a source URL's internal chapters using the first

@@ -357,3 +357,26 @@ func TestRefreshLinked_BindsAnUnboundTrack(t *testing.T) {
 		t.Fatalf("nav-1 resolves to %q, want %q", id, cid)
 	}
 }
+
+// A backend swap leaves the canonical id stable but moves the track and cover
+// ids. RefreshLinked must re-resolve through the matcher so the next Resolve
+// serves the new backend's cover, not the cached pre-swap one.
+func TestRefreshLinked_ReResolvesAfterBackendSwap(t *testing.T) {
+	s, q, fm := newTestResolver(t)
+	ctx := context.Background()
+	cid := seedEntity(t, q, "sp-swap", "Swap Song", "B", "C", 180000)
+
+	if pre, err := s.Resolve(ctx, cid); err != nil || !pre.Found || pre.CoverArtID != "al-1" {
+		t.Fatalf("pre-swap resolve = %+v, %v; want cover al-1", pre, err)
+	}
+
+	fm.result = core.MatchResult{Status: core.MatchInLibrary, LibraryTrackID: "nav-2", CoverArtID: "al-2"}
+	if err := s.RefreshLinked(ctx, []string{cid}); err != nil {
+		t.Fatal(err)
+	}
+
+	post, err := s.Resolve(ctx, cid)
+	if err != nil || !post.Found || post.BackendID != "nav-2" || post.CoverArtID != "al-2" {
+		t.Fatalf("post-swap resolve = %+v, %v; want nav-2 / al-2", post, err)
+	}
+}

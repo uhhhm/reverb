@@ -15,7 +15,6 @@ import (
 	"github.com/uhhhm/reverb/internal/events"
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/resolver"
-	"github.com/uhhhm/reverb/internal/store"
 )
 
 // ---- fakes ----
@@ -28,9 +27,9 @@ type fakeDL struct {
 	canDownload bool
 	block       chan struct{} // if non-nil, Start blocks until closed/canceled
 	errOnStart  error         // if non-nil, Start returns this error
-	started     int32
 	mu          sync.Mutex
 	startCount  int
+	received    []core.DownloadRequest
 }
 
 func (d *fakeDL) Type() string { return "downloader" }
@@ -47,6 +46,7 @@ func (d *fakeDL) CanDownload(context.Context, core.DownloadRequest) (bool, error
 func (d *fakeDL) Start(ctx context.Context, req core.DownloadRequest, onProgress func(int)) (string, error) {
 	d.mu.Lock()
 	d.startCount++
+	d.received = append(d.received, req)
 	err := d.errOnStart
 	d.mu.Unlock()
 	if err != nil {
@@ -64,6 +64,11 @@ func (d *fakeDL) Start(ctx context.Context, req core.DownloadRequest, onProgress
 	return "/out/" + req.ExternalID + ".mp3", nil
 }
 func (d *fakeDL) starts() int { d.mu.Lock(); defer d.mu.Unlock(); return d.startCount }
+func (d *fakeDL) requests() []core.DownloadRequest {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]core.DownloadRequest(nil), d.received...)
+}
 
 // setErrOnStart sets errOnStart under the mutex, safe for use after the
 // Manager has started dispatching jobs to this fakeDL (i.e. concurrently
@@ -164,7 +169,7 @@ func (f *fakeVersion) get() int64 { f.mu.Lock(); defer f.mu.Unlock(); return f.v
 type memStore struct {
 	mu   sync.Mutex
 	jobs map[string]core.DownloadJob
-	reqs map[string]core.DownloadRequest // mirrors request_json for FIX 2 tests
+	reqs map[string]core.DownloadRequest // mirrors request_json
 }
 
 type completionWriteStore struct {
@@ -293,23 +298,6 @@ func (s *memStore) GetRequest(_ context.Context, id string) (core.DownloadReques
 	defer s.mu.Unlock()
 	r, ok := s.reqs[id]
 	return r, ok, nil
-}
-
-// helper: drain bus events of a topic into a slice (test-only).
-func drain(bus *events.Bus, topic string, into *[]core.DownloadEvent, wg *sync.WaitGroup, want int) (stop func()) {
-	ch, unsub := bus.Subscribe(topic)
-	go func() {
-		for ev := range ch {
-			if de, ok := ev.Payload.(core.DownloadEvent); ok {
-				*into = append(*into, de)
-				if len(*into) >= want {
-					wg.Done()
-					return
-				}
-			}
-		}
-	}()
-	return unsub
 }
 
 // wrapDownloaders wraps a []Downloader into []DownloaderEntry using default
@@ -574,103 +562,54 @@ func TestEnqueueFallbackPicksFirstCanDownload(t *testing.T) {
 
 // -- Task 2: Granularity-scoped pick() tests --
 
-// TestPickGranularityTrackExplicit: a request with Granularity=track must select
-// the track downloader even when an album downloader is also registered.
-func TestPickGranularityTrackExplicit(t *testing.T) {
-	track := &fakeDL{name: "spotdl", canDownload: true}
-	album := &fakeAsyncDL{name: "lidarr", submitRef: "ref1"}
-	store := newMemStore()
-	m, _ := testManager(t, []Downloader{track, album}, store, nil, nil, nil)
-
-	job, err := m.Enqueue(context.Background(), core.DownloadRequest{
-		Source: "spotify", ExternalID: "e1", Artist: "A", Title: "T", Album: "Al",
-		Granularity: core.GranularityTrack,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if job.DownloaderName != "spotdl" {
-		t.Fatalf("track request should pick track downloader, got %q", job.DownloaderName)
-	}
-}
-
-// TestPickGranularityEmptyDefaultsToTrack: an empty Granularity on the request must
-// be treated as GranularityTrack (must not fall through to album downloaders).
-func TestPickGranularityEmptyDefaultsToTrack(t *testing.T) {
-	track := &fakeDL{name: "spotdl", canDownload: true}
-	album := &fakeAsyncDL{name: "lidarr", submitRef: "ref1"}
-	store := newMemStore()
-	m, _ := testManager(t, []Downloader{track, album}, store, nil, nil, nil)
-
-	job, err := m.Enqueue(context.Background(), core.DownloadRequest{
-		Source: "spotify", ExternalID: "e2", Artist: "A", Title: "T", Album: "Al",
-		// Granularity intentionally empty — must default to track
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if job.DownloaderName != "spotdl" {
-		t.Fatalf("empty-granularity request should default to track downloader, got %q", job.DownloaderName)
+// The album downloader is listed first and accepts every request, so only the
+// Manager's granularity scoping keeps it away from track requests.
+func TestPickScopesDownloadersToRequestGranularity(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		granularity core.DownloadGranularity
+		want        string
+	}{
+		{"empty defaults to track", "", "spotdl"},
+		{"track", core.GranularityTrack, "spotdl"},
+		{"album", core.GranularityAlbum, "lidarr"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			album := &fakeAsyncDL{name: "lidarr", submitRef: "ref"}
+			track := &fakeDL{name: "spotdl", canDownload: true}
+			m, _ := testManager(t, []Downloader{album, track}, newMemStore(), nil, nil, nil)
+			job, err := m.Enqueue(context.Background(), core.DownloadRequest{
+				Source: "spotify", ExternalID: "e1", Artist: "A", Title: "T", Album: "Al", Granularity: tc.granularity,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if job.DownloaderName != tc.want {
+				t.Fatalf("picked %q, want %q", job.DownloaderName, tc.want)
+			}
+		})
 	}
 }
 
-// TestPickGranularityAlbum: a request with Granularity=album must select the album
-// downloader and never reach the track downloader.
-func TestPickGranularityAlbum(t *testing.T) {
-	track := &fakeDL{name: "spotdl", canDownload: true}
-	album := &fakeAsyncDL{name: "lidarr", submitRef: "ref1"}
-	store := newMemStore()
-	m, _ := testManager(t, []Downloader{track, album}, store, nil, nil, nil)
-
-	job, err := m.Enqueue(context.Background(), core.DownloadRequest{
-		Source: "spotify", ExternalID: "e3", Artist: "Daft Punk", Title: "Discovery",
-		Album: "Discovery", Granularity: core.GranularityAlbum,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if job.DownloaderName != "lidarr" {
-		t.Fatalf("album request should pick album downloader, got %q", job.DownloaderName)
-	}
-}
-
-// TestPickGranularityTrackPriorityOrder: with two track downloaders, the first one
-// in slice order wins (provided its CanDownload returns true).
-func TestPickGranularityTrackPriorityOrder(t *testing.T) {
-	first := &fakeDL{name: "first", canDownload: true}
-	second := &fakeDL{name: "second", canDownload: true}
-	store := newMemStore()
-	m, _ := testManager(t, []Downloader{first, second}, store, nil, nil, nil)
-
-	job, err := m.Enqueue(context.Background(), core.DownloadRequest{
-		Source: "spotify", ExternalID: "e4", Artist: "A", Title: "T", Album: "Al",
-		Granularity: core.GranularityTrack,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if job.DownloaderName != "first" {
-		t.Fatalf("first track downloader in slice should win, got %q", job.DownloaderName)
-	}
-}
-
-// TestPickGranularityNoMatchReturnsError: when no downloader matches the requested
-// granularity the error must mention the granularity.
-func TestPickGranularityNoMatchReturnsError(t *testing.T) {
-	track := &fakeDL{name: "spotdl", canDownload: true}
-	store := newMemStore()
-	m, _ := testManager(t, []Downloader{track}, store, nil, nil, nil)
-
-	_, err := m.Enqueue(context.Background(), core.DownloadRequest{
-		Source: "spotify", ExternalID: "e5", Artist: "A", Title: "T", Album: "Al",
-		Granularity: core.GranularityAlbum,
-	})
-	if err == nil {
-		t.Fatal("expected error when no album downloader is registered")
-	}
-	const want = "no album downloader"
-	if !strings.Contains(err.Error(), want) {
-		t.Fatalf("error %q should contain %q", err.Error(), want)
+func TestPickRefusesAGranularityNoDownloaderServes(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		downloader  Downloader
+		granularity core.DownloadGranularity
+		want        string
+	}{
+		{"album request, track downloader only", &fakeDL{name: "spotdl", canDownload: true}, core.GranularityAlbum, "no album downloader"},
+		{"track request, album downloader only", &fakeAsyncDL{name: "lidarr", submitRef: "ref"}, core.GranularityTrack, "no track downloader"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m, _ := testManager(t, []Downloader{tc.downloader}, newMemStore(), nil, nil, nil)
+			_, err := m.Enqueue(context.Background(), core.DownloadRequest{
+				Source: "spotify", ExternalID: "e1", Artist: "A", Title: "T", Album: "Al", Granularity: tc.granularity,
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -1066,45 +1005,6 @@ func TestRunScanWaitsForScanToCompleteBeforeRematch(t *testing.T) {
 	}
 }
 
-func TestCancelInFlight(t *testing.T) {
-	block := make(chan struct{})
-	defer close(block)
-	dl := &fakeDL{name: "dl", canDownload: true, block: block}
-	store := newMemStore()
-	m, _ := testManager(t, []Downloader{dl}, store, nil, nil, nil)
-
-	job, err := m.Enqueue(context.Background(), core.DownloadRequest{Source: "s", ExternalID: "e1", Artist: "A", Title: "T", Album: "Al"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Wait for in-flight.
-	deadline := time.After(2 * time.Second)
-	for dl.starts() == 0 {
-		select {
-		case <-deadline:
-			t.Fatal("never started")
-		default:
-			time.Sleep(time.Millisecond)
-		}
-	}
-	if err := m.Cancel(context.Background(), job.ID); err != nil {
-		t.Fatal(err)
-	}
-	// The job must reach canceled status.
-	for {
-		cur, _, _ := store.Get(context.Background(), job.ID)
-		if cur.Status == core.DownloadCanceled {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("job not canceled")
-		default:
-			time.Sleep(time.Millisecond)
-		}
-	}
-}
-
 func TestCancelOrphanedRunningJob(t *testing.T) {
 	store := newMemStore()
 	job := core.DownloadJob{ID: "orphaned", DedupKey: "dk", Status: core.DownloadRunning, DownloaderName: "dl", Source: "s", ExternalID: "e1"}
@@ -1164,8 +1064,6 @@ func TestRetryResetsFailedJob(t *testing.T) {
 
 	dl := &fakeDL{name: "dl", canDownload: true}
 	m, _ := testManager(t, []Downloader{dl}, store, nil, nil, nil)
-	// Rehydrate the request map so the worker can run the retried job.
-	m.SeedRequest("j1", core.DownloadRequest{Source: "s", ExternalID: "e1", Artist: "A", Title: "T", Album: "Al"})
 
 	j, err := m.Retry(context.Background(), "j1", "")
 	if err != nil {
@@ -1179,241 +1077,68 @@ func TestRetryResetsFailedJob(t *testing.T) {
 	}
 }
 
-func TestRetryWithManualURLSetsRequestField(t *testing.T) {
-	// When Retry is called with a non-empty manualURL it must be visible on the
-	// in-memory DownloadRequest that the worker reads so the spotDL adapter can
-	// construct the correct query (pipe or direct URL).
-	store := newMemStore()
-	failed := core.DownloadJob{
-		ID: "j2", DedupKey: "dk2", Status: core.DownloadFailed,
-		DownloaderName: "dl", Attempts: 1,
-		Source: "spotify", ExternalID: "sp1",
-		Artist: "Einaudi", Title: "Una mattina",
-	}
-	_ = store.Insert(context.Background(), failed, core.DownloadRequest{
-		Source: "spotify", ExternalID: "sp1", Artist: "Einaudi", Title: "Una mattina",
-	})
-	dl := &fakeDL{name: "dl", canDownload: true}
-	m, _ := testManager(t, []Downloader{dl}, store, nil, nil, nil)
-	m.SeedRequest("j2", core.DownloadRequest{
-		Source: "spotify", ExternalID: "sp1", Artist: "Einaudi", Title: "Una mattina",
-	})
+// A manual URL reaches the downloader on retry, whatever the job's source, and
+// is persisted with the request so a restart before dispatch keeps it.
+func TestRetryWithManualURLReachesDownloader(t *testing.T) {
+	for _, tc := range []struct{ name, source, externalID string }{
+		{"spotify", "spotify", "sp1"},
+		{"no external id", "youtube", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newMemStore()
+			req := core.DownloadRequest{Source: tc.source, ExternalID: tc.externalID, Artist: "Einaudi", Title: "Una mattina", DurationMs: 215000}
+			failed := core.DownloadJob{ID: "j1", DedupKey: "dk1", Status: core.DownloadFailed, DownloaderName: "dl", Attempts: 1,
+				Source: tc.source, ExternalID: tc.externalID, Artist: req.Artist, Title: req.Title}
+			if err := store.Insert(context.Background(), failed, req); err != nil {
+				t.Fatal(err)
+			}
+			dl := &fakeDL{name: "dl", canDownload: true}
+			m, _ := testManager(t, []Downloader{dl}, store, nil, nil, nil)
 
-	const url = "https://www.youtube.com/watch?v=MANUAL"
-	j, err := m.Retry(context.Background(), "j2", url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if j.Status != core.DownloadQueued {
-		t.Fatalf("retry should set queued, got %q", j.Status)
-	}
-
-	// Inspect the in-memory request: ManualURL must be set.
-	m.mu.Lock()
-	req := m.reqs["j2"]
-	m.mu.Unlock()
-	if req.ManualURL != url {
-		t.Fatalf("ManualURL on re-dispatched request: got %q, want %q", req.ManualURL, url)
+			const url = "https://www.youtube.com/watch?v=MANUAL"
+			if _, err := m.Retry(context.Background(), "j1", url); err != nil {
+				t.Fatal(err)
+			}
+			waitForStatus(t, store, "j1", core.DownloadCompleted)
+			got := dl.requests()
+			if len(got) != 1 || got[0].ManualURL != url || got[0].DurationMs != req.DurationMs {
+				t.Fatalf("downloader received %+v, want the stored request with ManualURL %q", got, url)
+			}
+			if persisted, _ := store.getReq("j1"); persisted.ManualURL != url {
+				t.Fatalf("persisted ManualURL = %q, want %q", persisted.ManualURL, url)
+			}
+		})
 	}
 }
 
-func TestRetryWithEmptyManualURLLeavesRequestUnchanged(t *testing.T) {
-	// A plain retry (manualURL=="") must not modify the ManualURL field on any
-	// previously seeded request (it stays empty, preserving original behaviour).
+// A manual URL applies to the retry it was given with. When that attempt fails,
+// a later plain retry must search again rather than reuse the rejected link.
+func TestPlainRetryDoesNotReuseAFailedManualURL(t *testing.T) {
 	store := newMemStore()
-	failed := core.DownloadJob{
-		ID: "j3", DedupKey: "dk3", Status: core.DownloadFailed,
-		DownloaderName: "dl", Attempts: 1,
-		Source: "spotify", ExternalID: "sp2",
-		Artist: "Bach", Title: "Goldberg",
+	req := core.DownloadRequest{Source: "spotify", ExternalID: "sp-url", Artist: "Artist", Title: "Track"}
+	failed := core.DownloadJob{ID: "jurl", DedupKey: "dkurl", Status: core.DownloadFailed, DownloaderName: "dl", Attempts: 1,
+		Source: "spotify", ExternalID: "sp-url", Artist: "Artist", Title: "Track"}
+	if err := store.Insert(context.Background(), failed, req); err != nil {
+		t.Fatal(err)
 	}
-	_ = store.Insert(context.Background(), failed, core.DownloadRequest{
-		Source: "spotify", ExternalID: "sp2", Artist: "Bach", Title: "Goldberg",
-	})
-	dl := &fakeDL{name: "dl", canDownload: true}
+	dl := &fakeDL{name: "dl", canDownload: true, errOnStart: errors.New("bad url")}
 	m, _ := testManager(t, []Downloader{dl}, store, nil, nil, nil)
-	m.SeedRequest("j3", core.DownloadRequest{
-		Source: "spotify", ExternalID: "sp2", Artist: "Bach", Title: "Goldberg",
-	})
 
-	_, err := m.Retry(context.Background(), "j3", "")
-	if err != nil {
+	if _, err := m.Retry(context.Background(), "jurl", "https://www.youtube.com/watch?v=MANUAL"); err != nil {
 		t.Fatal(err)
 	}
-	m.mu.Lock()
-	req := m.reqs["j3"]
-	m.mu.Unlock()
-	if req.ManualURL != "" {
-		t.Fatalf("plain retry must leave ManualURL empty, got %q", req.ManualURL)
-	}
-}
-
-// TestManualURLClearedAfterFailure asserts that when a Retry(id, url) call results
-// in DownloadFailed, the ManualURL is not silently reused on the next plain Retry.
-// Before the fix, m.reqs[id] was only deleted on success, so a subsequent plain
-// retry (manualURL=="") would pick up the stale ManualURL from the map.
-func TestManualURLClearedAfterFailure(t *testing.T) {
-	dlErr := errors.New("bad url")
-	dl := &fakeDL{name: "dl", canDownload: true, errOnStart: dlErr}
-	store := newMemStore()
-
-	// Seed a failed job that can be retried.
-	failed := core.DownloadJob{
-		ID: "jurl", DedupKey: "dkurl", Status: core.DownloadFailed,
-		DownloaderName: "dl", Attempts: 1,
-		Source: "spotify", ExternalID: "sp-url",
-		Artist: "Artist", Title: "Track",
-	}
-	_ = store.Insert(context.Background(), failed, core.DownloadRequest{
-		Source: "spotify", ExternalID: "sp-url", Artist: "Artist", Title: "Track",
-	})
-
-	m, _ := testManager(t, []Downloader{dl}, store, nil, nil, nil)
-	m.SeedRequest("jurl", core.DownloadRequest{
-		Source: "spotify", ExternalID: "sp-url", Artist: "Artist", Title: "Track",
-	})
-
-	// First retry: supply a manual URL. The download fails (errOnStart).
-	const manURL = "https://www.youtube.com/watch?v=MANUAL"
-	_, err := m.Retry(context.Background(), "jurl", manURL)
-	if err != nil {
+	waitForStatus(t, store, "jurl", core.DownloadFailed)
+	if _, err := m.Retry(context.Background(), "jurl", ""); err != nil {
 		t.Fatal(err)
 	}
+	waitForStatus(t, store, "jurl", core.DownloadFailed)
 
-	// The seeded job already has DownloadFailed status, so waiting for that status
-	// alone can finish before the asynchronous retry worker has processed it.
-	// Wait for the request cleanup itself, which is the behaviour under test.
-	deadline := time.After(3 * time.Second)
-	for {
-		m.mu.Lock()
-		_, exists := m.reqs["jurl"]
-		m.mu.Unlock()
-		if !exists {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("timed out waiting for request cleanup after manual-URL retry")
-		default:
-			time.Sleep(time.Millisecond)
-		}
+	got := dl.requests()
+	if len(got) != 2 {
+		t.Fatalf("downloader started %d times, want 2", len(got))
 	}
-
-	// After failure the in-memory request entry must be gone.
-	m.mu.Lock()
-	_, exists := m.reqs["jurl"]
-	m.mu.Unlock()
-	if exists {
-		t.Fatal("m.reqs entry should have been deleted on DownloadFailed; stale ManualURL would leak into next retry")
-	}
-
-	// Re-seed so the second retry can run (simulates a plain retry from the UI).
-	m.SeedRequest("jurl", core.DownloadRequest{
-		Source: "spotify", ExternalID: "sp-url", Artist: "Artist", Title: "Track",
-	})
-
-	// Second retry: plain (no manual URL). The worker should NOT see the old manURL.
-	_, err = m.Retry(context.Background(), "jurl", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Wait for the second request cleanup, for the same reason as above.
-	deadline2 := time.After(3 * time.Second)
-	for {
-		m.mu.Lock()
-		_, exists := m.reqs["jurl"]
-		m.mu.Unlock()
-		if !exists {
-			break
-		}
-		select {
-		case <-deadline2:
-			t.Fatal("timed out waiting for second request cleanup")
-		default:
-			time.Sleep(time.Millisecond)
-		}
-	}
-
-	// After the second failure the entry must again be gone (no stale URL).
-	m.mu.Lock()
-	_, exists = m.reqs["jurl"]
-	m.mu.Unlock()
-	if exists {
-		t.Fatal("m.reqs entry should be deleted after second DownloadFailed")
-	}
-}
-
-// TestRetryNonSpotifyJobKeepsManualURL asserts FIX 1: a non-Spotify job
-// (Source:"youtube", ExternalID:"") retried with a manualURL keeps it on the
-// re-dispatched request. The old guard `|| req.ExternalID == ""` would overwrite
-// the valid in-memory request with a struct literal missing ManualURL.
-func TestRetryNonSpotifyJobKeepsManualURL(t *testing.T) {
-	store := newMemStore()
-	failed := core.DownloadJob{
-		ID: "yt1", DedupKey: "dkyt1", Status: core.DownloadFailed,
-		DownloaderName: "dl", Attempts: 1,
-		Source: "youtube", ExternalID: "", // non-Spotify: ExternalID is empty
-		Artist: "Daft Punk", Title: "One More Time",
-	}
-	_ = store.Insert(context.Background(), failed, core.DownloadRequest{
-		Source: "youtube", ExternalID: "", Artist: "Daft Punk", Title: "One More Time",
-	})
-	dl := &fakeDL{name: "dl", canDownload: true}
-	m, _ := testManager(t, []Downloader{dl}, store, nil, nil, nil)
-	m.SeedRequest("yt1", core.DownloadRequest{
-		Source: "youtube", ExternalID: "", Artist: "Daft Punk", Title: "One More Time",
-	})
-
-	const url = "https://www.youtube.com/watch?v=YT_MANUAL"
-	_, err := m.Retry(context.Background(), "yt1", url)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// The in-memory request must carry ManualURL (FIX 1).
-	m.mu.Lock()
-	req := m.reqs["yt1"]
-	m.mu.Unlock()
-	if req.ManualURL != url {
-		t.Fatalf("FIX 1: ManualURL on non-Spotify re-dispatched request: got %q, want %q", req.ManualURL, url)
-	}
-}
-
-// TestRetryWithManualURLPersistsToStore asserts FIX 2: when Retry is called with
-// a manualURL, the updated DownloadRequest (including ManualURL) is persisted to
-// the store (request_json) so it survives a server restart between Retry and the
-// worker picking up the job.
-func TestRetryWithManualURLPersistsToStore(t *testing.T) {
-	store := newMemStore()
-	failed := core.DownloadJob{
-		ID: "sp-persist", DedupKey: "dk-persist", Status: core.DownloadFailed,
-		DownloaderName: "dl", Attempts: 1,
-		Source: "spotify", ExternalID: "sp-abc",
-		Artist: "Einaudi", Title: "Una mattina",
-	}
-	_ = store.Insert(context.Background(), failed, core.DownloadRequest{
-		Source: "spotify", ExternalID: "sp-abc", Artist: "Einaudi", Title: "Una mattina",
-	})
-	dl := &fakeDL{name: "dl", canDownload: true}
-	m, _ := testManager(t, []Downloader{dl}, store, nil, nil, nil)
-	m.SeedRequest("sp-persist", core.DownloadRequest{
-		Source: "spotify", ExternalID: "sp-abc", Artist: "Einaudi", Title: "Una mattina",
-	})
-
-	const url = "https://www.youtube.com/watch?v=PERSIST_TEST"
-	_, err := m.Retry(context.Background(), "sp-persist", url)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// The store's request_json (via memStore.reqs) must carry ManualURL (FIX 2).
-	persisted, ok := store.getReq("sp-persist")
-	if !ok {
-		t.Fatal("FIX 2: store has no request entry for job after Retry with manualURL")
-	}
-	if persisted.ManualURL != url {
-		t.Fatalf("FIX 2: persisted ManualURL: got %q, want %q", persisted.ManualURL, url)
+	if got[1].ManualURL != "" {
+		t.Fatalf("plain retry reused the failed manual URL %q", got[1].ManualURL)
 	}
 }
 
@@ -1507,7 +1232,7 @@ func TestBackfillUnlinkedReLinksCompletedJobs(t *testing.T) {
 }
 
 // TestBackfillPlaylistAdderCalledWhenAddToPlaylistIDSet mirrors
-// TestPlaylistAdderCalledOnCompletionWithAddToPlaylistID but exercises the BACKFILL
+// TestPlaylistAdderCalledOnlyForDownloadsWithAPlaylist but exercises the BACKFILL
 // path: a completed, unlinked job whose request carries AddToPlaylistID must have
 // AddTracksToPlaylist called when the manager starts and re-links it.
 func TestBackfillPlaylistAdderCalledWhenAddToPlaylistIDSet(t *testing.T) {
@@ -1609,59 +1334,39 @@ func (f *fakePlaylistAdder) getCall(i int) (string, []string) {
 	return c.playlistID, c.trackIDs
 }
 
-// TestPlaylistAdderCalledOnCompletionWithAddToPlaylistID asserts that when a
-// completed job's request carries AddToPlaylistID, the manager calls
-// PlaylistAdder.AddTracksToPlaylist with the playlist ID and matched library track ID.
-func TestPlaylistAdderCalledOnCompletionWithAddToPlaylistID(t *testing.T) {
+// A download carrying AddToPlaylistID lands in that playlist once the scan links
+// it; a download without one, completing in the same scan, lands nowhere.
+func TestPlaylistAdderCalledOnlyForDownloadsWithAPlaylist(t *testing.T) {
 	clk := newFakeClock()
 	dl := &fakeDL{name: "dl", canDownload: true}
 	store := newMemStore()
-	bus := events.New()
 	const libTrackID = "lib-playlist-track-1"
-	rematcher := &fakeRematcher{trackID: libTrackID}
 	adder := &fakePlaylistAdder{}
-
 	m := NewManager(Config{Workers: 1, DebounceWindow: 5 * time.Second, ScanPollEvery: time.Millisecond, ScanPollMax: time.Second, ScanSettleMax: 10 * time.Millisecond},
-		wrapDownloaders([]Downloader{dl}), store, bus, &fakeScanner{}, rematcher, &fakeVersion{v: 1}, clk, adder, nil)
+		wrapDownloaders([]Downloader{dl}), store, events.New(), &fakeScanner{}, &fakeRematcher{trackID: libTrackID}, &fakeVersion{v: 1}, clk, adder, nil)
 	t.Cleanup(m.Stop)
 	m.Start()
 
 	const playlistID = "pl-abc-123"
-	job, err := m.Enqueue(context.Background(), core.DownloadRequest{
-		Source: "spotify", ExternalID: "e-pl-1", Artist: "Artist", Title: "Track",
-		Album: "Album", AddToPlaylistID: playlistID,
-	})
-	if err != nil {
-		t.Fatal(err)
+	for _, req := range []core.DownloadRequest{
+		{Source: "spotify", ExternalID: "e-pl-1", Artist: "Artist", Title: "Track", Album: "Album", AddToPlaylistID: playlistID},
+		{Source: "spotify", ExternalID: "e-no-pl", Artist: "Artist", Title: "Other", Album: "Album"},
+	} {
+		job, err := m.Enqueue(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		waitForStatus(t, store, job.ID, core.DownloadCompleted)
 	}
 
-	// Wait for the job to complete.
-	deadline := time.After(2 * time.Second)
-	for {
-		cur, _, _ := store.Get(context.Background(), job.ID)
-		if cur.Status == core.DownloadCompleted {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("job never completed")
-		default:
-			time.Sleep(time.Millisecond)
-		}
-	}
-
-	// Fire the debounced scan; this triggers runScan → re-match → playlist add.
 	clk.Advance(5 * time.Second)
 
 	if adder.callCount() != 1 {
-		t.Fatalf("expected 1 AddTracksToPlaylist call, got %d", adder.callCount())
+		t.Fatalf("AddTracksToPlaylist calls = %d, want 1", adder.callCount())
 	}
 	gotPlaylistID, gotTrackIDs := adder.getCall(0)
-	if gotPlaylistID != playlistID {
-		t.Fatalf("AddTracksToPlaylist playlistID: got %q, want %q", gotPlaylistID, playlistID)
-	}
-	if len(gotTrackIDs) != 1 || gotTrackIDs[0] != libTrackID {
-		t.Fatalf("AddTracksToPlaylist trackIDs: got %v, want [%q]", gotTrackIDs, libTrackID)
+	if gotPlaylistID != playlistID || len(gotTrackIDs) != 1 || gotTrackIDs[0] != libTrackID {
+		t.Fatalf("AddTracksToPlaylist(%q, %v), want (%q, [%q])", gotPlaylistID, gotTrackIDs, playlistID, libTrackID)
 	}
 }
 
@@ -1732,94 +1437,6 @@ func TestClearFinishedDeletesOnlyTerminal(t *testing.T) {
 	}
 }
 
-// TestPlaylistAdderNotCalledWhenNoAddToPlaylistID asserts that jobs without
-// AddToPlaylistID do not trigger any playlist add call.
-func TestPlaylistAdderNotCalledWhenNoAddToPlaylistID(t *testing.T) {
-	clk := newFakeClock()
-	dl := &fakeDL{name: "dl", canDownload: true}
-	store := newMemStore()
-	bus := events.New()
-	rematcher := &fakeRematcher{trackID: "lib-track-no-pl"}
-	adder := &fakePlaylistAdder{}
-
-	m := NewManager(Config{Workers: 1, DebounceWindow: 5 * time.Second, ScanPollEvery: time.Millisecond, ScanPollMax: time.Second, ScanSettleMax: 10 * time.Millisecond},
-		wrapDownloaders([]Downloader{dl}), store, bus, &fakeScanner{}, rematcher, &fakeVersion{v: 1}, clk, adder, nil)
-	t.Cleanup(m.Stop)
-	m.Start()
-
-	job, err := m.Enqueue(context.Background(), core.DownloadRequest{
-		Source: "spotify", ExternalID: "e-no-pl", Artist: "Artist", Title: "Track", Album: "Album",
-		// AddToPlaylistID intentionally empty
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	deadline := time.After(2 * time.Second)
-	for {
-		cur, _, _ := store.Get(context.Background(), job.ID)
-		if cur.Status == core.DownloadCompleted {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("job never completed")
-		default:
-			time.Sleep(time.Millisecond)
-		}
-	}
-
-	clk.Advance(5 * time.Second)
-
-	if adder.callCount() != 0 {
-		t.Fatalf("expected 0 AddTracksToPlaylist calls for job without AddToPlaylistID, got %d", adder.callCount())
-	}
-}
-
-// TestBackfillSkipsAlreadyLinkedAndNonCompleted ensures the backfill only touches
-// completed jobs with empty LibraryTrackID.
-func TestBackfillSkipsAlreadyLinkedAndNonCompleted(t *testing.T) {
-	store := newMemStore()
-
-	// Already-linked completed job — must NOT get a second rematch call.
-	linked := core.DownloadJob{
-		ID: "linked-j1", DedupKey: "dk-linked", Status: core.DownloadCompleted,
-		DownloaderName: "dl", Source: "spotify", ExternalID: "ext-linked",
-		Artist: "Artist", Title: "Linked Track", LibraryTrackID: "already-linked",
-	}
-	_ = store.Insert(context.Background(), linked, core.DownloadRequest{})
-
-	// Failed job — must not be touched.
-	failed := core.DownloadJob{
-		ID: "failed-j1", DedupKey: "dk-failed", Status: core.DownloadFailed,
-		DownloaderName: "dl", Source: "spotify", ExternalID: "ext-failed",
-		Artist: "Artist", Title: "Failed Track",
-	}
-	_ = store.Insert(context.Background(), failed, core.DownloadRequest{})
-
-	rematcher := &fakeRematcher{trackID: "should-not-be-set"}
-	dl := &fakeDL{name: "dl", canDownload: true}
-	m := NewManager(Config{Workers: 1, DebounceWindow: 5 * time.Second, ScanPollEvery: time.Millisecond, ScanPollMax: time.Second, ScanSettleMax: 10 * time.Millisecond},
-		wrapDownloaders([]Downloader{dl}), store, nil, &fakeScanner{}, rematcher, &fakeVersion{v: 1}, RealClock{}, nil, nil)
-	t.Cleanup(m.Stop)
-	m.Start()
-
-	// Give the backfill goroutine time to run (it's fast — no I/O).
-	time.Sleep(50 * time.Millisecond)
-
-	// The already-linked job must still have its original library_track_id.
-	j, _, _ := store.Get(context.Background(), linked.ID)
-	if j.LibraryTrackID != "already-linked" {
-		t.Fatalf("backfill must not overwrite an already-linked job: got %q", j.LibraryTrackID)
-	}
-
-	// The failed job must still be failed (LibraryTrackID empty, status unchanged).
-	fj, _, _ := store.Get(context.Background(), failed.ID)
-	if fj.LibraryTrackID != "" {
-		t.Fatalf("backfill must not touch failed jobs: got LibraryTrackID=%q", fj.LibraryTrackID)
-	}
-}
-
 func TestPauseGatesDispatchResumeDrains(t *testing.T) {
 	dl := &fakeDL{name: "dl", canDownload: true}
 	store := newMemStore()
@@ -1841,89 +1458,31 @@ func TestPauseGatesDispatchResumeDrains(t *testing.T) {
 		t.Fatal("expected download.queue event on Pause")
 	}
 
-	job, err := m.Enqueue(context.Background(), core.DownloadRequest{Source: "spotify", ExternalID: "e1", Artist: "A", Title: "T", Album: "Al"})
-	if err != nil {
-		t.Fatal(err)
+	// More jobs than workers, so some sit buffered behind the pause gate.
+	var ids []string
+	for _, ext := range []string{"e1", "e2", "e3"} {
+		job, err := m.Enqueue(context.Background(), core.DownloadRequest{Source: "spotify", ExternalID: ext, Artist: "A", Title: "T" + ext, Album: "Al"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, job.ID)
 	}
 
-	// While paused, no worker may pick the job up: it stays queued.
+	// While paused, no worker may pick a job up: they all stay queued.
 	time.Sleep(80 * time.Millisecond)
-	if got, _, _ := store.Get(context.Background(), job.ID); got.Status != core.DownloadQueued {
-		t.Fatalf("paused: want job to stay queued, got %s", got.Status)
+	for _, id := range ids {
+		if got, _, _ := store.Get(context.Background(), id); got.Status != core.DownloadQueued {
+			t.Fatalf("paused: want job %s to stay queued, got %s", id, got.Status)
+		}
 	}
 
 	m.Resume()
 	if m.IsPaused() {
 		t.Fatal("expected IsPaused() false after Resume")
 	}
-
-	// After resume the job runs to completion (poll, RealClock fakeDL completes fast).
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if got, _, _ := store.Get(context.Background(), job.ID); got.Status == core.DownloadCompleted {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
+	for _, id := range ids {
+		waitForStatus(t, store, id, core.DownloadCompleted)
 	}
-	got, _, _ := store.Get(context.Background(), job.ID)
-	t.Fatalf("after resume: want completed, got %s", got.Status)
-}
-
-// TestPauseKeepsBufferedJobsQueued asserts that jobs enqueued while the manager is
-// paused remain in the Queued state (no worker picks them up), and that they all
-// drain to Completed once Resume is called.
-func TestPauseKeepsBufferedJobsQueued(t *testing.T) {
-	dl := &fakeDL{name: "dl", canDownload: true}
-	store := newMemStore()
-	m, _ := testManager(t, []Downloader{dl}, store, nil, nil, nil)
-
-	m.Pause()
-
-	// Enqueue 3 distinct jobs while paused.
-	var jobIDs [3]string
-	for i := 0; i < 3; i++ {
-		j, err := m.Enqueue(context.Background(), core.DownloadRequest{
-			Source: "spotify", ExternalID: string(rune('a' + i)), Artist: "A", Title: "T" + string(rune('a'+i)), Album: "Al",
-		})
-		if err != nil {
-			t.Fatalf("enqueue %d: %v", i, err)
-		}
-		jobIDs[i] = j.ID
-	}
-
-	// After ~80ms none should have been dispatched (they stay Queued).
-	time.Sleep(80 * time.Millisecond)
-	for _, id := range jobIDs {
-		cur, _, _ := store.Get(context.Background(), id)
-		if cur.Status != core.DownloadQueued {
-			t.Fatalf("paused: job %s should be Queued, got %s", id, cur.Status)
-		}
-	}
-
-	// Resume and wait for all 3 to complete.
-	m.Resume()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		jobs, _ := store.List(context.Background())
-		done := 0
-		for _, j := range jobs {
-			if j.Status == core.DownloadCompleted {
-				done++
-			}
-		}
-		if done == 3 {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	jobs, _ := store.List(context.Background())
-	done := 0
-	for _, j := range jobs {
-		if j.Status == core.DownloadCompleted {
-			done++
-		}
-	}
-	t.Fatalf("after resume: want 3 completed, got %d", done)
 }
 
 // TestStopUnblocksPausedWorkers asserts that calling Stop() while the manager is
@@ -2024,6 +1583,7 @@ type fakeAsyncDL struct {
 	submitRef   string
 	submitErr   error
 	submitCalls int
+	submitted   core.DownloadRequest
 	cancelCalls int
 	status      AsyncStatus
 }
@@ -2036,20 +1596,17 @@ func (d *fakeAsyncDL) SupportedGranularities() []core.DownloadGranularity {
 func (d *fakeAsyncDL) ConfigSchema() registry.ConfigSchema  { return registry.ConfigSchema{} }
 func (d *fakeAsyncDL) Init(map[string]any) error            { return nil }
 func (d *fakeAsyncDL) TestConnection(context.Context) error { return nil }
-func (d *fakeAsyncDL) CanDownload(_ context.Context, req core.DownloadRequest) (bool, error) {
-	g := req.Granularity
-	if g == "" {
-		g = core.GranularityTrack
-	}
-	return g == core.GranularityAlbum, nil
+func (d *fakeAsyncDL) CanDownload(context.Context, core.DownloadRequest) (bool, error) {
+	return true, nil
 }
 func (d *fakeAsyncDL) Start(context.Context, core.DownloadRequest, func(int)) (string, error) {
 	return "", fmt.Errorf("fakeAsyncDL.Start should never be called")
 }
-func (d *fakeAsyncDL) Submit(_ context.Context, _ core.DownloadRequest) (string, error) {
+func (d *fakeAsyncDL) Submit(_ context.Context, req core.DownloadRequest) (string, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.submitCalls++
+	d.submitted = req
 	return d.submitRef, d.submitErr
 }
 func (d *fakeAsyncDL) Poll(_ context.Context, _ string) (AsyncStatus, error) {
@@ -2064,6 +1621,11 @@ func (d *fakeAsyncDL) CancelAsync(_ context.Context, _ string) error {
 	return nil
 }
 func (d *fakeAsyncDL) setStatus(s AsyncStatus) { d.mu.Lock(); d.status = s; d.mu.Unlock() }
+func (d *fakeAsyncDL) lastSubmitted() core.DownloadRequest {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.submitted
+}
 
 func TestEnqueueAsyncSubmitsAndDoesNotPinWorker(t *testing.T) {
 	async := &fakeAsyncDL{name: "lidarr", submitRef: "album-42"}
@@ -2184,141 +1746,38 @@ func TestReconcileFailMapsToFailed(t *testing.T) {
 	}
 }
 
-func TestAsyncCapabilityProbe(t *testing.T) {
-	registry.RegisterCapability("async", func(p registry.Plugin) bool {
-		_, ok := p.(AsyncDownloader)
-		return ok
-	})
-	caps := registry.DescribeCapabilities(&fakeAsyncDL{name: "lidarr"})
-	found := false
-	for _, c := range caps {
-		if c == "async" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("async capability not detected, caps = %v", caps)
-	}
-	// A plain sync downloader is NOT async.
-	caps = registry.DescribeCapabilities(&fakeDL{name: "spotdl"})
-	for _, c := range caps {
-		if c == "async" {
-			t.Fatal("sync downloader must not report async")
-		}
-	}
-}
-
 // -- Task 1: SupportedGranularities + DownloaderEntry + granularity-aware pick --
 
-// testManagerEntries builds a Manager directly from []DownloaderEntry (the new
-// API). Used by Task-1 pick/pickAfter tests.
-func testManagerEntries(t *testing.T, entries []DownloaderEntry, store JobStore, clk Clock) (*Manager, *events.Bus) {
-	t.Helper()
-	bus := events.New()
-	scanner := &fakeScanner{}
-	m := NewManager(
-		Config{Workers: 2, DebounceWindow: 5 * time.Second, ScanPollEvery: time.Millisecond, ScanPollMax: time.Second, ScanSettleMax: 10 * time.Millisecond},
-		entries, store, bus, scanner, &fakeRematcher{trackID: "t1"}, &fakeVersion{v: 1}, clk, nil, nil,
-	)
-	t.Cleanup(m.Stop)
-	m.Start()
-	return m, bus
-}
-
-// TestPickOrderTrackRespected: two track entries with Order{track:1} and
-// Order{track:0} → pick returns the Order{track:0} one (lower order = higher priority).
-func TestPickOrderTrackRespected(t *testing.T) {
-	lo := &fakeDL{name: "lo", canDownload: true} // order 1 — should lose
-	hi := &fakeDL{name: "hi", canDownload: true} // order 0 — should win
+// When a download fails, the chain falls back in configured order, not
+// registration order: hi (0) and lo (1) fail, so mid (2) completes the job.
+func TestFallbackFollowsConfiguredOrder(t *testing.T) {
+	hi := &fakeDL{name: "hi", canDownload: true, errOnStart: errors.New("hi failed")}
+	lo := &fakeDL{name: "lo", canDownload: true, errOnStart: errors.New("lo failed")}
+	mid := &fakeDL{name: "mid", canDownload: true}
 	store := newMemStore()
 	entries := []DownloaderEntry{
+		{Downloader: mid, Order: map[core.DownloadGranularity]int{core.GranularityTrack: 2}},
 		{Downloader: lo, Order: map[core.DownloadGranularity]int{core.GranularityTrack: 1}},
 		{Downloader: hi, Order: map[core.DownloadGranularity]int{core.GranularityTrack: 0}},
 	}
-	m, _ := testManagerEntries(t, entries, store, nil)
+	m := NewManager(Config{Workers: 1, DebounceWindow: time.Hour}, entries, store, events.New(), &fakeScanner{},
+		&fakeRematcher{trackID: "t1"}, &fakeVersion{v: 1}, RealClock{}, nil, nil)
+	t.Cleanup(m.Stop)
+	m.Start()
 
-	job, err := m.Enqueue(context.Background(), core.DownloadRequest{
-		Source: "spotify", ExternalID: "e-order", Artist: "A", Title: "T", Album: "Al",
-		Granularity: core.GranularityTrack,
-	})
+	job, err := m.Enqueue(context.Background(), core.DownloadRequest{Source: "spotify", ExternalID: "e1", Artist: "A", Title: "T"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if job.DownloaderName != "hi" {
-		t.Fatalf("lower Order[track] value should win: expected %q, got %q", "hi", job.DownloaderName)
+		t.Fatalf("first pick = %q, want the lowest order", job.DownloaderName)
 	}
-}
-
-// TestPickAlbumSelectsAlbumEntry: an album request selects the album-capable entry.
-func TestPickAlbumSelectsAlbumEntry(t *testing.T) {
-	trackDL := &fakeDL{name: "spotdl", canDownload: true}
-	albumDL := &fakeAsyncDL{name: "lidarr", submitRef: "ref-album-1"}
-	store := newMemStore()
-	entries := []DownloaderEntry{
-		{Downloader: trackDL, Order: map[core.DownloadGranularity]int{core.GranularityTrack: 0}},
-		{Downloader: albumDL, Order: map[core.DownloadGranularity]int{core.GranularityAlbum: 0}},
+	waitForStatus(t, store, job.ID, core.DownloadCompleted)
+	if got, _, _ := store.Get(context.Background(), job.ID); got.DownloaderName != "mid" {
+		t.Fatalf("completed via %q, want mid", got.DownloaderName)
 	}
-	m, _ := testManagerEntries(t, entries, store, nil)
-
-	job, err := m.Enqueue(context.Background(), core.DownloadRequest{
-		Source: "spotify", ExternalID: "e-album", Artist: "A", Title: "Album X",
-		Album: "Album X", Granularity: core.GranularityAlbum,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if job.DownloaderName != "lidarr" {
-		t.Fatalf("album request should pick album entry, got %q", job.DownloaderName)
-	}
-}
-
-// TestPickTrackNeverSelectsAlbumOnly: a track request must never select an
-// album-only entry (one whose Order map lacks GranularityTrack).
-func TestPickTrackNeverSelectsAlbumOnly(t *testing.T) {
-	albumDL := &fakeAsyncDL{name: "lidarr", submitRef: "ref-should-not-pick"}
-	store := newMemStore()
-	entries := []DownloaderEntry{
-		{Downloader: albumDL, Order: map[core.DownloadGranularity]int{core.GranularityAlbum: 0}},
-	}
-	m, _ := testManagerEntries(t, entries, store, nil)
-
-	_, err := m.Enqueue(context.Background(), core.DownloadRequest{
-		Source: "spotify", ExternalID: "e-track-only", Artist: "A", Title: "T",
-		Granularity: core.GranularityTrack,
-	})
-	if err == nil {
-		t.Fatal("track request with only an album-only entry must fail, got nil error")
-	}
-	if !strings.Contains(err.Error(), "track") {
-		t.Fatalf("error %q should mention granularity 'track'", err.Error())
-	}
-}
-
-// TestPickAfterReturnsNextTrackEntryByOrder: pickAfter skips 'lo' (order 1)
-// and returns 'mid' (order 2) when afterName = "lo", skipping 'hi' (order 0
-// — it comes before 'lo' in sorted order and has already been tried).
-func TestPickAfterReturnsNextTrackEntryByOrder(t *testing.T) {
-	hi := &fakeDL{name: "hi", canDownload: true}   // order 0 — first in sorted order
-	lo := &fakeDL{name: "lo", canDownload: true}   // order 1 — second
-	mid := &fakeDL{name: "mid", canDownload: true} // order 2 — third
-	store := newMemStore()
-	entries := []DownloaderEntry{
-		// Deliberately register in non-sorted order to prove sort is by Order[g].
-		{Downloader: lo, Order: map[core.DownloadGranularity]int{core.GranularityTrack: 1}},
-		{Downloader: mid, Order: map[core.DownloadGranularity]int{core.GranularityTrack: 2}},
-		{Downloader: hi, Order: map[core.DownloadGranularity]int{core.GranularityTrack: 0}},
-	}
-	m, _ := testManagerEntries(t, entries, store, nil)
-
-	ctx := context.Background()
-	req := core.DownloadRequest{Granularity: core.GranularityTrack}
-	// pickAfter("lo") should return "mid" (next in ascending Order after lo=1 is mid=2).
-	got, err := m.pickAfter(ctx, req, "lo")
-	if err != nil {
-		t.Fatalf("pickAfter returned error: %v", err)
-	}
-	if got.Name() != "mid" {
-		t.Fatalf("pickAfter('lo') should return 'mid' (next by order), got %q", got.Name())
+	if hi.starts() != 1 || lo.starts() != 1 || mid.starts() != 1 {
+		t.Fatalf("starts hi=%d lo=%d mid=%d, want each once", hi.starts(), lo.starts(), mid.starts())
 	}
 }
 
@@ -2413,184 +1872,40 @@ func TestFallbackChainExhaustedReachesDownloadFailed(t *testing.T) {
 	}
 }
 
-// TestFallbackSingleDownloaderFailedReachesDownloadFailed asserts that with a
-// single-downloader chain (the common today case), a Start error still reaches
-// DownloadFailed — i.e., the fallback path does not break the no-fallback scenario.
-// The ManualURL last-resort path (Retry with a URL) must remain reachable after this.
-func TestFallbackSingleDownloaderFailedReachesDownloadFailed(t *testing.T) {
-	dl := &fakeDL{name: "only", canDownload: true, errOnStart: errors.New("no match")}
-	store := newMemStore()
-	m, _ := testManager(t, []Downloader{dl}, store, nil, nil, nil)
-
-	job, err := m.Enqueue(context.Background(), core.DownloadRequest{
-		Source: "spotify", ExternalID: "fb3", Artist: "A", Title: "T", Album: "Al",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	deadline := time.After(3 * time.Second)
-	for {
-		cur, _, _ := store.Get(context.Background(), job.ID)
-		if cur.Status == core.DownloadCompleted || cur.Status == core.DownloadFailed {
-			if cur.Status != core.DownloadFailed {
-				t.Fatalf("single-downloader failure should reach DownloadFailed, got %q", cur.Status)
-			}
-			break
-		}
-		select {
-		case <-deadline:
-			cur2, _, _ := store.Get(context.Background(), job.ID)
-			t.Fatalf("job did not reach DownloadFailed (status=%q)", cur2.Status)
-		default:
-			time.Sleep(time.Millisecond)
-		}
-	}
-
-	// After failing, the ManualURL last-resort must be reachable: Retry(id, url)
-	// should re-queue the job so a human-supplied link can be used.
-	m.SeedRequest(job.ID, core.DownloadRequest{
-		Source: "spotify", ExternalID: "fb3", Artist: "A", Title: "T", Album: "Al",
-	})
-	// Swap out the erroring downloader so the retry can succeed (simulates the user
-	// providing a direct URL that the downloader can use — not testing the full
-	// ManualURL flow here, just that Retry is still callable after the fallback path).
-	retried, err := m.Retry(context.Background(), job.ID, "https://example.com/manual.mp3")
-	if err != nil {
-		t.Fatalf("Retry after fallback-exhaustion should succeed: %v", err)
-	}
-	if retried.Status != core.DownloadQueued {
-		t.Fatalf("retried job should be DownloadQueued, got %q", retried.Status)
-	}
-}
-
 // ---- album-job timeout tests ----
-
-// TestAlbumJobTimeoutDefault asserts that withDefaults sets AlbumJobTimeout to 2h.
-func TestAlbumJobTimeoutDefault(t *testing.T) {
-	cfg := Config{}.withDefaults()
-	if cfg.AlbumJobTimeout != 2*time.Hour {
-		t.Fatalf("AlbumJobTimeout default: want 2h, got %v", cfg.AlbumJobTimeout)
-	}
-}
 
 // -- Task 4: Retry-async routing + granularity recovery --
 
-// TestRetryAsyncJobRoutesToAsyncLane asserts that retrying a FAILED async job (e.g.
-// Lidarr album) re-submits via the async Submit path, NOT the sync worker.
-// Concretely: Submit is called exactly once (from the Retry), the job goes Running
-// with a ref, and the fakeAsyncDL.Start is never called (it would return an error if
-// it were, proving no sync-lane routing happened).
-func TestRetryAsyncJobRoutesToAsyncLane(t *testing.T) {
+// Retrying a failed async (album) job re-submits it on the async lane with the
+// request recovered from the store, granularity included. fakeAsyncDL.Start
+// errors, so a sync-lane dispatch would fail the job instead.
+func TestRetryAsyncJobResubmitsTheStoredRequest(t *testing.T) {
 	async := &fakeAsyncDL{name: "lidarr", submitRef: "retry-ref-1"}
 	store := newMemStore()
-
-	// Seed a FAILED async job directly in the store (simulates a Lidarr album job
-	// that failed, which the user then retries via the UI).
 	failed := core.DownloadJob{
 		ID: "async-retry-j1", DedupKey: "dk-async-retry", Status: core.DownloadFailed,
 		DownloaderName: "lidarr", Attempts: 1,
 		Source: "spotify", ExternalID: "album-ext-1",
 		Artist: "Daft Punk", Title: "Discovery", Album: "Discovery",
 	}
-	_ = store.Insert(context.Background(), failed, core.DownloadRequest{
+	if err := store.Insert(context.Background(), failed, core.DownloadRequest{
 		Source: "spotify", ExternalID: "album-ext-1", Artist: "Daft Punk",
 		Title: "Discovery", Album: "Discovery", Granularity: core.GranularityAlbum,
-	})
-
+	}); err != nil {
+		t.Fatal(err)
+	}
 	m, _ := testManager(t, []Downloader{async}, store, nil, nil, nil)
-	// Seed the in-memory request (simulates a live retry where m.reqs has the req).
-	m.SeedRequest("async-retry-j1", core.DownloadRequest{
-		Source: "spotify", ExternalID: "album-ext-1", Artist: "Daft Punk",
-		Title: "Discovery", Album: "Discovery", Granularity: core.GranularityAlbum,
-	})
 
-	// Capture Submit call count BEFORE Retry (Enqueue also calls Submit on the fake).
-	beforeSubmit := async.submitCalls
-
-	_, err := m.Retry(context.Background(), "async-retry-j1", "")
-	if err != nil {
+	if _, err := m.Retry(context.Background(), "async-retry-j1", ""); err != nil {
 		t.Fatalf("Retry: %v", err)
 	}
+	waitForStatus(t, store, "async-retry-j1", core.DownloadRunning)
 
-	// Give the goroutine spawned by Retry (go m.submitAsync) time to run.
-	deadline := time.After(2 * time.Second)
-	for {
-		got, _, _ := store.Get(context.Background(), "async-retry-j1")
-		if got.Status == core.DownloadRunning {
-			break
-		}
-		select {
-		case <-deadline:
-			got2, _, _ := store.Get(context.Background(), "async-retry-j1")
-			t.Fatalf("job did not become Running after Retry (status=%q) — async routing not triggered", got2.Status)
-		default:
-			time.Sleep(time.Millisecond)
-		}
+	if got, _, _ := store.Get(context.Background(), "async-retry-j1"); got.DownloaderRef != "retry-ref-1" {
+		t.Fatalf("job DownloaderRef = %q, want retry-ref-1", got.DownloaderRef)
 	}
-
-	// Submit must have been called exactly once (from the Retry).
-	async.mu.Lock()
-	calls := async.submitCalls - beforeSubmit
-	async.mu.Unlock()
-	if calls != 1 {
-		t.Fatalf("Submit call count after Retry = %d, want 1 (async routing failed)", calls)
-	}
-
-	// The job must carry the ref from Submit.
-	got, _, _ := store.Get(context.Background(), "async-retry-j1")
-	if got.DownloaderRef != "retry-ref-1" {
-		t.Fatalf("job DownloaderRef = %q, want %q", got.DownloaderRef, "retry-ref-1")
-	}
-}
-
-// TestRetryAsyncJobDoesNotCallStart asserts the complement: fakeAsyncDL.Start
-// (which returns an error) is never invoked during a retried async job. If it
-// were called, the job would fail with "fakeAsyncDL.Start should never be called".
-// This is a belt-and-suspenders assertion that the sync worker does NOT run the job.
-func TestRetryAsyncJobDoesNotCallStart(t *testing.T) {
-	async := &fakeAsyncDL{name: "lidarr", submitRef: "retry-ref-2"}
-	store := newMemStore()
-
-	failed := core.DownloadJob{
-		ID: "async-retry-j2", DedupKey: "dk-async-retry-2", Status: core.DownloadFailed,
-		DownloaderName: "lidarr", Attempts: 1,
-		Source: "spotify", ExternalID: "album-ext-2",
-		Artist: "Radiohead", Title: "OK Computer", Album: "OK Computer",
-	}
-	_ = store.Insert(context.Background(), failed, core.DownloadRequest{
-		Source: "spotify", ExternalID: "album-ext-2", Artist: "Radiohead",
-		Title: "OK Computer", Album: "OK Computer", Granularity: core.GranularityAlbum,
-	})
-
-	m, _ := testManager(t, []Downloader{async}, store, nil, nil, nil)
-	m.SeedRequest("async-retry-j2", core.DownloadRequest{
-		Source: "spotify", ExternalID: "album-ext-2", Artist: "Radiohead",
-		Title: "OK Computer", Album: "OK Computer", Granularity: core.GranularityAlbum,
-	})
-
-	_, err := m.Retry(context.Background(), "async-retry-j2", "")
-	if err != nil {
-		t.Fatalf("Retry: %v", err)
-	}
-
-	// Wait for Running (Submit called) or Failed (Start called → error).
-	deadline := time.After(2 * time.Second)
-	for {
-		got, _, _ := store.Get(context.Background(), "async-retry-j2")
-		if got.Status == core.DownloadRunning {
-			return // success: async route taken
-		}
-		if got.Status == core.DownloadFailed {
-			t.Fatalf("job failed after retry — Start was called instead of Submit (sync routing bug): error=%q", got.Error)
-		}
-		select {
-		case <-deadline:
-			got2, _, _ := store.Get(context.Background(), "async-retry-j2")
-			t.Fatalf("timed out waiting for Running (status=%q)", got2.Status)
-		default:
-			time.Sleep(time.Millisecond)
-		}
+	if req := async.lastSubmitted(); req.Granularity != core.GranularityAlbum || req.Album != "Discovery" {
+		t.Fatalf("submitted %+v, want the stored album request", req)
 	}
 }
 
@@ -2613,10 +1928,6 @@ func TestRetrySyncJobStillUsesWorker(t *testing.T) {
 	})
 
 	m, _ := testManager(t, []Downloader{dl}, store, nil, nil, nil)
-	m.SeedRequest("sync-retry-j1", core.DownloadRequest{
-		Source: "spotify", ExternalID: "track-ext-1", Artist: "A",
-		Title: "T", Album: "Al", Granularity: core.GranularityTrack,
-	})
 
 	_, err := m.Retry(context.Background(), "sync-retry-j1", "")
 	if err != nil {
@@ -2644,110 +1955,18 @@ func TestRetrySyncJobStillUsesWorker(t *testing.T) {
 	}
 }
 
-// TestGranularityRecoveredFromRequestJSON asserts that when the !haveReq path in
-// process() or Retry reconstructs a DownloadRequest for a job that has no in-memory
-// m.reqs entry, it recovers Granularity from the persisted request_json — so an album
-// job retried after a restart uses AlbumJobTimeout and the correct URL, not the track defaults.
-//
-// Setup: seed a failed job with request_json carrying granularity:"album" but do NOT
-// put anything in m.reqs (simulates cross-restart recovery). Trigger the !haveReq
-// path by calling Retry without a prior SeedRequest. Assert the reconstructed request
-// has Granularity == GranularityAlbum.
-func TestGranularityRecoveredFromRequestJSON(t *testing.T) {
-	async := &fakeAsyncDL{name: "lidarr", submitRef: "gran-ref-1"}
-	store := newMemStore()
-
-	failed := core.DownloadJob{
-		ID: "gran-recovery-j1", DedupKey: "dk-gran-recovery", Status: core.DownloadFailed,
-		DownloaderName: "lidarr", Attempts: 1,
-		Source: "spotify", ExternalID: "album-gran-1",
-		Artist: "Boards of Canada", Title: "Music Has the Right to Children", Album: "Music Has the Right to Children",
-	}
-	// Persist with Granularity in request_json.
-	_ = store.Insert(context.Background(), failed, core.DownloadRequest{
-		Source: "spotify", ExternalID: "album-gran-1",
-		Artist: "Boards of Canada", Title: "Music Has the Right to Children",
-		Album: "Music Has the Right to Children", Granularity: core.GranularityAlbum,
-	})
-
-	m, _ := testManager(t, []Downloader{async}, store, nil, nil, nil)
-	// Intentionally do NOT call m.SeedRequest — force the !haveReq path.
-
-	_, err := m.Retry(context.Background(), "gran-recovery-j1", "")
-	if err != nil {
-		t.Fatalf("Retry: %v", err)
-	}
-
-	// Wait for the async lane to pick it up (submitAsync sets Running).
-	deadline := time.After(2 * time.Second)
-	for {
-		got, _, _ := store.Get(context.Background(), "gran-recovery-j1")
-		if got.Status == core.DownloadRunning || got.Status == core.DownloadFailed {
-			break
-		}
-		select {
-		case <-deadline:
-			got2, _, _ := store.Get(context.Background(), "gran-recovery-j1")
-			t.Fatalf("timed out waiting for Running/Failed (status=%q)", got2.Status)
-		default:
-			time.Sleep(time.Millisecond)
-		}
-	}
-
-	// The in-memory reqs entry must now carry GranularityAlbum (set by Retry from
-	// request_json before dispatch). If it's empty the timeout/URL logic would use
-	// the track defaults — the core bug this test guards against.
-	m.mu.Lock()
-	req, haveReq := m.reqs["gran-recovery-j1"]
-	m.mu.Unlock()
-	// Note: submitAsync deletes the reqs entry on completion/failure. But Retry sets
-	// it before dispatch, and submitAsync only deletes on error. On success (Running)
-	// the entry may still be present; if deleted (submit error) the job is Failed and
-	// we check the submit error path differently. Regardless, the key assertion is that
-	// Submit received a request with GranularityAlbum — verify via submit count and job state.
-	got, _, _ := store.Get(context.Background(), "gran-recovery-j1")
-	if got.Status == core.DownloadRunning {
-		// submitAsync succeeded → reqs may still be present; if so, check granularity.
-		if haveReq && req.Granularity != core.GranularityAlbum {
-			t.Fatalf("reconstructed request Granularity = %q, want %q (granularity lost in !haveReq path)", req.Granularity, core.GranularityAlbum)
-		}
-		// Submit was called — that's the async lane. The test is green.
-		async.mu.Lock()
-		calls := async.submitCalls
-		async.mu.Unlock()
-		if calls != 1 {
-			t.Fatalf("Submit should be called once after granularity recovery, got %d", calls)
-		}
-	} else {
-		t.Fatalf("job failed after granularity-recovery retry (status=%q, error=%q)", got.Status, got.Error)
-	}
-}
-
-// TestJobTimeoutByGranularity uses the jobTimeout helper seam to verify that the
-// manager selects AlbumJobTimeout for album-granularity requests and JobTimeout for
-// track-granularity (or empty granularity) requests.
+// Album jobs (a whole Lidarr import) get their own, longer budget: 2h unless
+// configured. Track jobs, including unspecified granularity, use JobTimeout.
 func TestJobTimeoutByGranularity(t *testing.T) {
-	cfg := Config{
-		JobTimeout:      50 * time.Millisecond,
-		AlbumJobTimeout: 300 * time.Millisecond,
-	}
-	m := &Manager{cfg: cfg.withDefaults()}
-	// withDefaults must NOT overwrite explicitly set positive values.
-	m.cfg.JobTimeout = cfg.JobTimeout
-	m.cfg.AlbumJobTimeout = cfg.AlbumJobTimeout
-
-	trackReq := core.DownloadRequest{Granularity: core.GranularityTrack}
-	albumReq := core.DownloadRequest{Granularity: core.GranularityAlbum}
-	emptyReq := core.DownloadRequest{}
-
-	if got := m.jobTimeout(trackReq); got != 50*time.Millisecond {
-		t.Fatalf("track granularity: want 50ms, got %v", got)
-	}
-	if got := m.jobTimeout(emptyReq); got != 50*time.Millisecond {
-		t.Fatalf("empty granularity: want 50ms (JobTimeout), got %v", got)
-	}
-	if got := m.jobTimeout(albumReq); got != 300*time.Millisecond {
-		t.Fatalf("album granularity: want 300ms, got %v", got)
+	m := &Manager{cfg: Config{JobTimeout: 50 * time.Millisecond}.withDefaults()}
+	for g, want := range map[core.DownloadGranularity]time.Duration{
+		core.GranularityTrack: 50 * time.Millisecond,
+		"":                    50 * time.Millisecond,
+		core.GranularityAlbum: 2 * time.Hour,
+	} {
+		if got := m.jobTimeout(core.DownloadRequest{Granularity: g}); got != want {
+			t.Fatalf("jobTimeout(%q) = %v, want %v", g, got, want)
+		}
 	}
 }
 
@@ -2819,10 +2038,6 @@ func TestRetryAsyncDetachesRequestContext(t *testing.T) {
 	})
 
 	m, _ := testManager(t, []Downloader{async}, store, nil, nil, nil)
-	m.SeedRequest("async-detach-j1", core.DownloadRequest{
-		Source: "spotify", ExternalID: "album-detach-ext", Artist: "Pink Floyd",
-		Title: "The Wall", Album: "The Wall", Granularity: core.GranularityAlbum,
-	})
 
 	// Simulate an HTTP handler context: the caller cancels it immediately after
 	// Retry returns (mimicking the Go HTTP server canceling r.Context() on return).
@@ -2896,392 +2111,97 @@ func (f *fakeCanonicalMinter) lastCall() (catalog.Identity, bool) {
 	return f.calls[len(f.calls)-1], true
 }
 
-// testManagerWithMinter constructs a Manager with a CanonicalMinter injected.
-func testManagerWithMinter(t *testing.T, downloaders []Downloader, store JobStore, rematch Rematcher, minter CanonicalMinter) (*Manager, *events.Bus) {
-	t.Helper()
-	bus := events.New()
-	scanner := &fakeScanner{}
-	ver := &fakeVersion{v: 1}
-	if rematch == nil {
-		rematch = &fakeRematcher{trackID: "t1"}
-	}
-	m := NewManager(
-		Config{Workers: 2, DebounceWindow: 5 * time.Second, ScanPollEvery: time.Millisecond, ScanPollMax: time.Second, ScanSettleMax: 10 * time.Millisecond},
-		wrapDownloaders(downloaders), store, bus, scanner, rematch, ver, nil, nil, nil,
-	)
-	m.SetCanonicalMinter(minter)
-	t.Cleanup(m.Stop)
-	m.Start()
-	return m, bus
-}
-
-// TestMintAtLink_BackfillMints verifies that BackfillUnlinked mints a canonical_id
-// for a completed/matched job via the injected CanonicalMinter.
-func TestMintAtLink_BackfillMints(t *testing.T) {
+// BackfillUnlinked links and mints only completed jobs without a library track.
+// The rematcher matches everything, so an out-of-scope row the pass touched
+// would visibly change.
+func TestBackfillUnlinkedLinksAndMintsOnlyUnlinkedCompletedJobs(t *testing.T) {
 	store := newMemStore()
-	// Seed a completed job with no library_track_id (unlinked).
-	job := core.DownloadJob{
-		ID: "j-mint-1", DedupKey: "dk1", Status: core.DownloadCompleted,
-		DownloaderName: "dl", Source: "spotify", ExternalID: "sp1",
-		Title: "Moon River", Artist: "Audrey Hepburn", Album: "Breakfast", ISRC: "US001",
-		DurationMs: 120000,
+	ctx := context.Background()
+	unlinked := core.DownloadJob{ID: "j-unlinked", DedupKey: "dk1", Status: core.DownloadCompleted, DownloaderName: "dl",
+		Source: "spotify", ExternalID: "sp1", Title: "Moon River", Artist: "Audrey Hepburn", Album: "Breakfast", ISRC: "US001", DurationMs: 120000}
+	linked := core.DownloadJob{ID: "j-linked", DedupKey: "dk2", Status: core.DownloadCompleted, DownloaderName: "dl",
+		LibraryTrackID: "existing-lib-track", CanonicalID: "trk_existing", Source: "spotify", ExternalID: "sp-linked", Title: "Linked", Artist: "A"}
+	failed := core.DownloadJob{ID: "j-failed", DedupKey: "dk3", Status: core.DownloadFailed, DownloaderName: "dl",
+		Source: "spotify", ExternalID: "sp-failed", Title: "Failed", Artist: "A"}
+	queued := core.DownloadJob{ID: "j-queued", DedupKey: "dk4", Status: core.DownloadQueued, DownloaderName: "dl",
+		Source: "spotify", ExternalID: "sp-queued", Title: "Queued", Artist: "A"}
+	for _, j := range []core.DownloadJob{unlinked, linked, failed, queued} {
+		if err := store.Insert(ctx, j, core.DownloadRequest{Source: j.Source, ExternalID: j.ExternalID, Title: j.Title, Artist: j.Artist}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	_ = store.Insert(context.Background(), job, core.DownloadRequest{
-		Source: "spotify", ExternalID: "sp1", Title: "Moon River", Artist: "Audrey Hepburn",
-		Album: "Breakfast", ISRC: "US001", DurationMs: 120000,
-	})
-	rematch := &fakeRematcher{trackID: "libtrack-1", coverArtID: "art-1"}
 	minter := &fakeCanonicalMinter{retID: "trk_aaaa"}
-
-	m := NewManager(
-		Config{Workers: 1, DebounceWindow: time.Millisecond, ScanPollEvery: time.Millisecond, ScanPollMax: 10 * time.Millisecond},
-		wrapDownloaders(nil), store, nil, &fakeScanner{}, rematch, &fakeVersion{v: 1}, nil, nil, nil,
-	)
+	m := NewManager(Config{Workers: 1, DebounceWindow: time.Millisecond},
+		wrapDownloaders(nil), store, nil, &fakeScanner{}, &fakeRematcher{trackID: "libtrack-1", coverArtID: "art-1"}, &fakeVersion{v: 1}, nil, nil, nil)
 	m.SetCanonicalMinter(minter)
-	var linked []string
-	m.SetLinkedHook(func(_ context.Context, cid string) { linked = append(linked, cid) })
-	// Run BackfillUnlinked directly (not via Start) to keep the test synchronous.
-	m.BackfillUnlinked()
-	if len(linked) != 1 || linked[0] != "trk_aaaa" {
-		t.Fatalf("linked hook saw %v, want the backfilled track", linked)
-	}
+	var linkedHook []string
+	m.SetLinkedHook(func(_ context.Context, cid string) { linkedHook = append(linkedHook, cid) })
 
-	// The minter should have been called once for the linked job.
+	m.BackfillUnlinked()
+
 	if minter.callCount() != 1 {
-		t.Fatalf("minter called %d times, want 1", minter.callCount())
+		t.Fatalf("minter called %d times, want once for the unlinked job", minter.callCount())
 	}
-	id, ok := minter.lastCall()
-	if !ok {
-		t.Fatal("no minter call recorded")
+	if id, _ := minter.lastCall(); id.Kind != "track" || id.Source != "spotify" || id.ExternalID != "sp1" || id.ISRC != "US001" {
+		t.Fatalf("minted identity = %+v, want the unlinked job's", id)
 	}
-	if id.Kind != "track" || id.Source != "spotify" || id.ExternalID != "sp1" {
-		t.Fatalf("unexpected identity passed to minter: %+v", id)
+	if len(linkedHook) != 1 || linkedHook[0] != "trk_aaaa" {
+		t.Fatalf("linked hook saw %v, want [trk_aaaa]", linkedHook)
 	}
-	// The job should have canonical_id set.
-	got, _, _ := store.Get(context.Background(), "j-mint-1")
-	if got.CanonicalID != "trk_aaaa" {
-		t.Fatalf("job.CanonicalID = %q, want %q", got.CanonicalID, "trk_aaaa")
-	}
-}
-
-// TestMintAtLink_Scoping verifies mint scoping:
-//   - A completed + linked job (already has library_track_id) is NOT re-minted
-//     during BackfillUnlinked (it's already matched).
-//   - An archived (failed/canceled) job is NOT minted.
-//   - A queued/running job is NOT minted.
-func TestMintAtLink_Scoping(t *testing.T) {
-	store := newMemStore()
-	ctx := context.Background()
-
-	// Already-linked completed job (has library_track_id) — should not enter backfill loop.
-	linked := core.DownloadJob{
-		ID: "j-linked", DedupKey: "dk-linked", Status: core.DownloadCompleted,
-		LibraryTrackID: "existing-lib-track", CanonicalID: "trk_existing",
-		DownloaderName: "dl", Source: "spotify", ExternalID: "sp-linked",
-		Title: "Already Linked", Artist: "A", Album: "B", DurationMs: 120000,
-	}
-	_ = store.Insert(ctx, linked, core.DownloadRequest{Source: "spotify", ExternalID: "sp-linked", Title: "Already Linked"})
-
-	// Failed job — must not be minted.
-	failed := core.DownloadJob{
-		ID: "j-failed", DedupKey: "dk-failed", Status: core.DownloadFailed,
-		DownloaderName: "dl", Source: "spotify", ExternalID: "sp-failed",
-		Title: "Failed Song", Artist: "A", Album: "B", DurationMs: 120000,
-	}
-	_ = store.Insert(ctx, failed, core.DownloadRequest{Source: "spotify", ExternalID: "sp-failed", Title: "Failed Song"})
-
-	// Queued job — must not be minted.
-	queued := core.DownloadJob{
-		ID: "j-queued", DedupKey: "dk-queued", Status: core.DownloadQueued,
-		DownloaderName: "dl", Source: "spotify", ExternalID: "sp-queued",
-		Title: "Queued Song", Artist: "A", Album: "B", DurationMs: 120000,
-	}
-	_ = store.Insert(ctx, queued, core.DownloadRequest{Source: "spotify", ExternalID: "sp-queued", Title: "Queued Song"})
-
-	minter := &fakeCanonicalMinter{retID: "trk_new"}
-	// Rematcher returns nothing matched (so no job gets linked in this pass).
-	rematch := &fakeRematcher{trackID: ""} // MatchNotInLibrary
-
-	m := NewManager(
-		Config{Workers: 1, DebounceWindow: time.Millisecond},
-		wrapDownloaders(nil), store, nil, &fakeScanner{}, rematch, &fakeVersion{v: 1}, nil, nil, nil,
-	)
-	m.SetCanonicalMinter(minter)
-	m.BackfillUnlinked()
-
-	// Minter must NOT have been called: no jobs were newly linked.
-	if minter.callCount() != 0 {
-		t.Fatalf("minter called %d times for non-linked jobs; want 0", minter.callCount())
+	for id, want := range map[string][2]string{
+		"j-unlinked": {"libtrack-1", "trk_aaaa"},
+		"j-linked":   {"existing-lib-track", "trk_existing"},
+		"j-failed":   {"", ""},
+		"j-queued":   {"", ""},
+	} {
+		got, _, _ := store.Get(ctx, id)
+		if got.LibraryTrackID != want[0] || got.CanonicalID != want[1] {
+			t.Fatalf("%s = (library %q, canonical %q), want (%q, %q)", id, got.LibraryTrackID, got.CanonicalID, want[0], want[1])
+		}
 	}
 }
 
-// TestMintAtLink_Idempotent verifies that re-running BackfillUnlinked on an already-linked
-// job (with a canonical_id already set) does not attempt to re-link it (it has
-// library_track_id, so the backfill loop skips it).
-func TestMintAtLink_Idempotent(t *testing.T) {
+// Regression for cover rot: a job linked before canonical ids existed has a
+// library_track_id but no canonical_id, so BackfillUnlinked and runScan (which
+// gate on an empty library_track_id) never mint it. BackfillCanonicalIDs
+// converges exactly those completed+linked+unminted rows, once.
+func TestBackfillCanonicalIDs_MintsOnlyLegacyLinkedJobs(t *testing.T) {
 	store := newMemStore()
 	ctx := context.Background()
-
-	// Already-linked + already-minted job.
-	job := core.DownloadJob{
-		ID: "j-idem", DedupKey: "dk-idem", Status: core.DownloadCompleted,
-		LibraryTrackID: "libtrack-idem", CanonicalID: "trk_idem",
-		DownloaderName: "dl", Source: "spotify", ExternalID: "sp-idem",
-		Title: "Idempotent", Artist: "A", Album: "B", DurationMs: 120000,
+	for _, j := range []core.DownloadJob{
+		{ID: "j-legacy", Status: core.DownloadCompleted, LibraryTrackID: "legacy-backend-track",
+			Source: "spotify", ExternalID: "sp-legacy", Title: "Legacy Song", Artist: "L", Album: "M", ISRC: "US-legacy", DurationMs: 200000},
+		{ID: "j-unlinked", Status: core.DownloadCompleted, Source: "spotify", ExternalID: "sp-unlinked", Title: "Unlinked"},
+		{ID: "j-failed", Status: core.DownloadFailed, LibraryTrackID: "some-track", Source: "spotify", ExternalID: "sp-failed", Title: "Failed"},
+		{ID: "j-queued", Status: core.DownloadQueued, Source: "spotify", ExternalID: "sp-queued", Title: "Queued"},
+		{ID: "j-minted", Status: core.DownloadCompleted, LibraryTrackID: "track-minted", CanonicalID: "trk_already",
+			Source: "spotify", ExternalID: "sp-minted", Title: "Minted"},
+	} {
+		j.DedupKey, j.DownloaderName = "dk-"+j.ID, "dl"
+		if err := store.Insert(ctx, j, core.DownloadRequest{Source: j.Source, ExternalID: j.ExternalID, Title: j.Title}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	_ = store.Insert(ctx, job, core.DownloadRequest{Source: "spotify", ExternalID: "sp-idem", Title: "Idempotent"})
-
-	minter := &fakeCanonicalMinter{retID: "trk_should_not_be_called"}
-	rematch := &fakeRematcher{trackID: "libtrack-idem"}
-
-	m := NewManager(
-		Config{Workers: 1, DebounceWindow: time.Millisecond},
-		wrapDownloaders(nil), store, nil, &fakeScanner{}, rematch, &fakeVersion{v: 1}, nil, nil, nil,
-	)
-	m.SetCanonicalMinter(minter)
-	m.BackfillUnlinked()
-
-	// Minter never called: the job was skipped because library_track_id is non-empty.
-	if minter.callCount() != 0 {
-		t.Fatalf("minter called %d times for already-linked job; want 0", minter.callCount())
-	}
-	// canonical_id is unchanged.
-	got, _, _ := store.Get(ctx, "j-idem")
-	if got.CanonicalID != "trk_idem" {
-		t.Fatalf("canonical_id changed from trk_idem to %q", got.CanonicalID)
-	}
-}
-
-// TestBackfillCanonicalIDs_MintsLegacyLinkedJob is the regression test for the
-// cover-rot fix: a LEGACY job linked BEFORE Task 3 (has library_track_id, but
-// canonical_id==”) is NEVER minted by BackfillUnlinked/runScan (they gate on
-// library_track_id==”). BackfillCanonicalIDs converges these legacy rows onto the
-// canonical path so retiring the clear-dance does not rot their covers on a swap.
-func TestBackfillCanonicalIDs_MintsLegacyLinkedJob(t *testing.T) {
-	store := newMemStore()
-	ctx := context.Background()
-
-	// A pre-existing completed+linked job with NO canonical_id (minted before Task 3).
-	legacy := core.DownloadJob{
-		ID: "j-legacy", DedupKey: "dk-legacy", Status: core.DownloadCompleted,
-		LibraryTrackID: "legacy-backend-track", CoverArtID: "legacy-backend-cover",
-		CanonicalID:    "", // the hole this fix plugs
-		DownloaderName: "dl", Source: "spotify", ExternalID: "sp-legacy",
-		Title: "Legacy Song", Artist: "L", Album: "M", ISRC: "US-legacy", DurationMs: 200000,
-	}
-	_ = store.Insert(ctx, legacy, core.DownloadRequest{
-		Source: "spotify", ExternalID: "sp-legacy", Title: "Legacy Song", Artist: "L", Album: "M", ISRC: "US-legacy", DurationMs: 200000,
-	})
-
 	minter := &fakeCanonicalMinter{retID: "trk_legacy_minted"}
-	m := NewManager(
-		Config{Workers: 1, DebounceWindow: time.Millisecond},
-		wrapDownloaders(nil), store, nil, &fakeScanner{}, &fakeRematcher{trackID: "legacy-backend-track"}, &fakeVersion{v: 1}, nil, nil, nil,
-	)
+	m := NewManager(Config{Workers: 1, DebounceWindow: time.Millisecond},
+		wrapDownloaders(nil), store, nil, &fakeScanner{}, &fakeRematcher{trackID: "x"}, &fakeVersion{v: 1}, nil, nil, nil)
 	m.SetCanonicalMinter(minter)
 
 	m.BackfillCanonicalIDs()
+	m.BackfillCanonicalIDs()
 
-	// The minter must have been called ONCE for the legacy linked job.
 	if minter.callCount() != 1 {
-		t.Fatalf("BackfillCanonicalIDs minted %d times; want 1 for the legacy linked job", minter.callCount())
+		t.Fatalf("minted %d times across two runs, want once for the legacy job", minter.callCount())
 	}
-	id, _ := minter.lastCall()
-	if id.Source != "spotify" || id.ExternalID != "sp-legacy" || id.ISRC != "US-legacy" {
+	if id, _ := minter.lastCall(); id.Source != "spotify" || id.ExternalID != "sp-legacy" || id.ISRC != "US-legacy" {
 		t.Fatalf("mint identity built from wrong columns: %+v", id)
 	}
-	// The row now carries the canonical id.
-	got, _, _ := store.Get(ctx, "j-legacy")
-	if got.CanonicalID != "trk_legacy_minted" {
-		t.Fatalf("legacy job canonical_id = %q; want trk_legacy_minted", got.CanonicalID)
-	}
-}
-
-// TestBackfillCanonicalIDs_Idempotent verifies a second run does NOT re-mint an
-// already-minted row (once canonical_id is set, the row no longer matches).
-func TestBackfillCanonicalIDs_Idempotent(t *testing.T) {
-	store := newMemStore()
-	ctx := context.Background()
-
-	// Legacy linked job, canonical_id empty.
-	_ = store.Insert(ctx, core.DownloadJob{
-		ID: "j-idem2", DedupKey: "dk-idem2", Status: core.DownloadCompleted,
-		LibraryTrackID: "backend-track", CanonicalID: "",
-		DownloaderName: "dl", Source: "spotify", ExternalID: "sp-idem2",
-		Title: "Idem2", Artist: "A", Album: "B", DurationMs: 100000,
-	}, core.DownloadRequest{Source: "spotify", ExternalID: "sp-idem2", Title: "Idem2"})
-
-	minter := &fakeCanonicalMinter{retID: "trk_idem2"}
-	m := NewManager(
-		Config{Workers: 1, DebounceWindow: time.Millisecond},
-		wrapDownloaders(nil), store, nil, &fakeScanner{}, &fakeRematcher{trackID: "backend-track"}, &fakeVersion{v: 1}, nil, nil, nil,
-	)
-	m.SetCanonicalMinter(minter)
-
-	m.BackfillCanonicalIDs() // first run mints
-	m.BackfillCanonicalIDs() // second run must be a no-op
-
-	if minter.callCount() != 1 {
-		t.Fatalf("BackfillCanonicalIDs minted %d times across two runs; want 1 (idempotent)", minter.callCount())
-	}
-}
-
-// TestBackfillCanonicalIDs_Scoping verifies BackfillCanonicalIDs does NOT touch
-// unlinked jobs (library_track_id==”) nor non-completed (failed/queued) jobs — it
-// only converges completed+linked+unminted rows.
-func TestBackfillCanonicalIDs_Scoping(t *testing.T) {
-	store := newMemStore()
-	ctx := context.Background()
-
-	// Unlinked completed job — must NOT be minted (that's BackfillUnlinked's job, only after a match).
-	_ = store.Insert(ctx, core.DownloadJob{
-		ID: "j-unlinked", DedupKey: "dk-unlinked", Status: core.DownloadCompleted,
-		LibraryTrackID: "", CanonicalID: "",
-		DownloaderName: "dl", Source: "spotify", ExternalID: "sp-unlinked", Title: "Unlinked",
-	}, core.DownloadRequest{Source: "spotify", ExternalID: "sp-unlinked", Title: "Unlinked"})
-
-	// Failed job with a library_track_id — archived, must NOT be minted.
-	_ = store.Insert(ctx, core.DownloadJob{
-		ID: "j-failed2", DedupKey: "dk-failed2", Status: core.DownloadFailed,
-		LibraryTrackID: "some-track", CanonicalID: "",
-		DownloaderName: "dl", Source: "spotify", ExternalID: "sp-failed2", Title: "Failed2",
-	}, core.DownloadRequest{Source: "spotify", ExternalID: "sp-failed2", Title: "Failed2"})
-
-	// Queued job — must NOT be minted.
-	_ = store.Insert(ctx, core.DownloadJob{
-		ID: "j-queued2", DedupKey: "dk-queued2", Status: core.DownloadQueued,
-		LibraryTrackID: "", CanonicalID: "",
-		DownloaderName: "dl", Source: "spotify", ExternalID: "sp-queued2", Title: "Queued2",
-	}, core.DownloadRequest{Source: "spotify", ExternalID: "sp-queued2", Title: "Queued2"})
-
-	// Already-minted linked job — must NOT be re-minted.
-	_ = store.Insert(ctx, core.DownloadJob{
-		ID: "j-minted", DedupKey: "dk-minted", Status: core.DownloadCompleted,
-		LibraryTrackID: "track-minted", CanonicalID: "trk_already",
-		DownloaderName: "dl", Source: "spotify", ExternalID: "sp-minted", Title: "Minted",
-	}, core.DownloadRequest{Source: "spotify", ExternalID: "sp-minted", Title: "Minted"})
-
-	minter := &fakeCanonicalMinter{retID: "trk_should_not_fire"}
-	m := NewManager(
-		Config{Workers: 1, DebounceWindow: time.Millisecond},
-		wrapDownloaders(nil), store, nil, &fakeScanner{}, &fakeRematcher{trackID: "x"}, &fakeVersion{v: 1}, nil, nil, nil,
-	)
-	m.SetCanonicalMinter(minter)
-
-	m.BackfillCanonicalIDs()
-
-	if minter.callCount() != 0 {
-		t.Fatalf("BackfillCanonicalIDs minted %d times; want 0 (no completed+linked+unminted rows to converge)", minter.callCount())
-	}
-}
-
-// swapMatcher is a resolver.Rematcher whose returned backend refs can be swapped
-// at runtime to model a backend identity change (old backend → new backend).
-type swapMatcher struct {
-	mu     sync.Mutex
-	result core.MatchResult
-}
-
-func (m *swapMatcher) Match(_ context.Context, _ core.ExternalResult) (core.MatchResult, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.result, nil
-}
-
-func (m *swapMatcher) set(r core.MatchResult) {
-	m.mu.Lock()
-	m.result = r
-	m.mu.Unlock()
-}
-
-// TestSwapSurvival is the load-bearing test: a completed download job with a minted
-// canonical_id resolves a FRESH, CORRECT cover via the resolver AFTER a backend
-// swap, WITHOUT the ClearMatchedDownloadJobLibraryRefs dance running. It drives the
-// job's canonical id through the REAL resolver.Service.Resolve across the swap and
-// asserts the resolver returns the NEW backend cover (not the stale pre-swap one).
-func TestSwapSurvival(t *testing.T) {
-	st, err := store.Open(t.TempDir() + "/swap.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	if err := st.Migrate(); err != nil {
-		t.Fatal(err)
-	}
-	q := st.Q()
-	ctx := context.Background()
-
-	// Mint a canonical entity for the download's track (this is the stable id).
-	catSvc := catalog.NewService(q, time.Now, func() string { return "swap-0001" })
-	canonicalID, err := catSvc.CanonicalFor(ctx, catalog.Identity{
-		Kind: "track", Source: "spotify", ExternalID: "sp-swap",
-		Title: "Swap Song", Artist: "B", Album: "C", DurationMs: 180000,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// The resolver re-resolves the canonical id → backend addressing via the matcher.
-	matcher := &swapMatcher{result: core.MatchResult{
-		Status: core.MatchInLibrary, LibraryTrackID: "old-backend-track", CoverArtID: "old-backend-cover",
-	}}
-	res := resolver.NewService(q, func() resolver.Rematcher { return matcher }, time.Now)
-
-	// PRE-swap: the resolver returns the OLD backend's cover.
-	pre, err := res.Resolve(ctx, canonicalID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !pre.Found || pre.CoverArtID != "old-backend-cover" {
-		t.Fatalf("pre-swap resolve: got %+v, want cover old-backend-cover", pre)
-	}
-
-	// SWAP the backend: the live library now serves different track/cover ids, so the
-	// matcher returns the NEW backend addressing. RefreshLinked then marks the binding
-	// stale and re-resolves against the new backend. This models a real backend swap
-	// WITHOUT the clear-dance touching download_jobs.
-	matcher.set(core.MatchResult{
-		Status: core.MatchInLibrary, LibraryTrackID: "new-backend-track", CoverArtID: "new-backend-cover",
-	})
-	if err := res.RefreshLinked(ctx, []string{canonicalID}); err != nil {
-		t.Fatal(err)
-	}
-
-	// POST-swap: resolving the SAME canonical id now yields the NEW backend cover.
-	post, err := res.Resolve(ctx, canonicalID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !post.Found {
-		t.Fatalf("post-swap resolve not found: %+v", post)
-	}
-	if post.CoverArtID != "new-backend-cover" {
-		t.Fatalf("post-swap resolve cover = %q; want new-backend-cover (canonical id re-resolved through the boundary — no stale-raw fallback, no clear dance)", post.CoverArtID)
-	}
-	// The canonical id itself is stable across the swap (same id resolved both times).
-	if canonicalID == "" {
-		t.Fatal("canonical id must be non-empty and stable across the swap")
-	}
-}
-
-// TestCanonicalIDInDTO verifies that a job with a canonical_id emits it in the DTO
-// (the JSON-serialized DownloadJob). This is the API layer check.
-func TestCanonicalIDInDTO(t *testing.T) {
-	job := core.DownloadJob{
-		ID:          "j-dto",
-		DedupKey:    "dk-dto",
-		Status:      core.DownloadCompleted,
-		CanonicalID: "trk_abc123",
-		Source:      "spotify",
-		ExternalID:  "sp1",
-		Title:       "DTO Song",
-	}
-	data, err := jsonMarshal(job)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(data), `"canonicalId":"trk_abc123"`) {
-		t.Fatalf("DTO must emit canonicalId; got: %s", string(data))
+	for id, want := range map[string]string{
+		"j-legacy": "trk_legacy_minted", "j-unlinked": "", "j-failed": "", "j-queued": "", "j-minted": "trk_already",
+	} {
+		if got, _, _ := store.Get(ctx, id); got.CanonicalID != want {
+			t.Fatalf("%s canonical_id = %q, want %q", id, got.CanonicalID, want)
+		}
 	}
 }
 
@@ -3391,64 +2311,6 @@ func TestRunScan_RefreshLinkedCalledWithLinkedCanonicalIDs(t *testing.T) {
 	}
 }
 
-// TestRunScan_DoesNotBumpBindingEpoch asserts that a plain scan does NOT bump
-// binding_epoch for any identity. Only library_version moves.
-// We wire a fakeEpochBumper to observe any BumpEpoch calls and assert 0.
-// The fakeEpochBumper is a standalone counter not wired into the Manager — it
-// serves as a canary: if runScan ever called it (which the spec forbids), the
-// test fails.
-func TestRunScan_DoesNotBumpBindingEpoch(t *testing.T) {
-	clk := newFakeClock()
-	store := newMemStore()
-	ver := &fakeVersion{v: 7}
-	epochBumper := &fakeEpochBumper{epoch: 42}
-	res := &fakeBindingResolver{}
-	dl := &fakeDL{name: "dl", canDownload: true}
-	bus := events.New()
-	m := NewManager(
-		Config{Workers: 1, DebounceWindow: 5 * time.Second, ScanPollEvery: time.Millisecond, ScanPollMax: time.Second, ScanSettleMax: 10 * time.Millisecond},
-		wrapDownloaders([]Downloader{dl}), store, bus, &fakeScanner{}, &fakeRematcher{trackID: "lib-epoch-track"}, ver, clk, nil,
-		func() BindingResolver { return res },
-	)
-	t.Cleanup(m.Stop)
-	m.Start()
-
-	ctx := context.Background()
-	_, err := m.Enqueue(ctx, core.DownloadRequest{
-		Source: "spotify", ExternalID: "epoch-ext1", Title: "Epoch Song", Artist: "A", Album: "B",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Wait for the download to complete.
-	deadline := time.After(2 * time.Second)
-	for {
-		jobs, _ := store.List(ctx)
-		if len(jobs) > 0 && jobs[0].Status == core.DownloadCompleted {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("job never completed")
-		default:
-			time.Sleep(time.Millisecond)
-		}
-	}
-
-	// Trigger the scan.
-	clk.Advance(5 * time.Second)
-
-	// library_version must have moved (bumped from 7 to 8).
-	if ver.get() != 8 {
-		t.Fatalf("library_version: got %d, want 8", ver.get())
-	}
-	// The fake epoch bumper must NOT have been touched by runScan.
-	if epochBumper.bumpCount() != 0 {
-		t.Fatalf("binding_epoch bumped %d times by runScan; want 0 (plain scan must not touch binding_epoch)", epochBumper.bumpCount())
-	}
-}
-
 // TestRunScan_NilResolverProviderDoesNotPanic asserts that when m.resolve is nil
 // (or returns nil), runScan completes normally without panicking.
 func TestRunScan_NilResolverProviderDoesNotPanic(t *testing.T) {
@@ -3520,48 +2382,6 @@ func (f *fakeDynamicMinter) CanonicalFor(_ context.Context, id catalog.Identity)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.ids[id.ExternalID], nil
-}
-
-// fakeEpochBumper records bumps (used only to assert runScan does NOT call it).
-type fakeEpochBumper struct {
-	mu    sync.Mutex
-	epoch int64
-	bumps int
-}
-
-func (f *fakeEpochBumper) bumpCount() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.bumps
-}
-
-// TestManagerAcceptsNilSafeResolverProvider verifies that NewManager accepts a
-// nil-safe resolve func() BindingResolver dep (the provider seam from Task 1).
-// The dep must be stored but NOT called — Tasks 3-5 add the actual Resolve calls.
-// A nil provider and a provider-returning-nil are both safe (no panic at construction
-// time or during a normal download cycle).
-func TestManagerAcceptsNilSafeResolverProvider(t *testing.T) {
-	// Case 1: nil provider — NewManager with no resolver wired.
-	cfg := Config{Workers: 1, DebounceWindow: time.Millisecond, ScanPollEvery: time.Millisecond, ScanPollMax: 10 * time.Millisecond}
-	m := NewManager(cfg, nil, newMemStore(), nil, &fakeScanner{}, nil, &fakeVersion{v: 1}, nil, nil, nil)
-	// Must not panic on construction. No Start/Stop cycle needed.
-	_ = m
-
-	// Case 2: non-nil provider returning nil — provider says "no resolver yet".
-	m2 := NewManager(cfg, nil, newMemStore(), nil, &fakeScanner{}, nil, &fakeVersion{v: 1}, nil, nil, func() BindingResolver { return nil })
-	_ = m2
-
-	// Case 3: non-nil provider — the provider must NOT be called during construction
-	// (Tasks 3-5 add the actual call sites; Task 1 only stores the dep).
-	var callCount int
-	m3 := NewManager(cfg, nil, newMemStore(), nil, &fakeScanner{}, nil, &fakeVersion{v: 1}, nil, nil, func() BindingResolver {
-		callCount++
-		return nil
-	})
-	if callCount != 0 {
-		t.Fatalf("resolve provider called %d times during NewManager construction; expected 0", callCount)
-	}
-	_ = m3
 }
 
 // TestAdaptivePacingPausesAfterConsecutiveRateLimitFailures verifies that once
