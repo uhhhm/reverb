@@ -98,15 +98,12 @@ func LoadDatabase(ctx context.Context, path string) ([]Play, error) {
 		return nil, err
 	}
 	defer st.Close()
-	rows, err := st.Q().ListAllPlays(ctx)
+	rows, err := st.Q().ListQualifiedPlays(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]Play, 0, len(rows))
 	for _, row := range rows {
-		if row.Qualified != 1 {
-			continue
-		}
 		entity, err := st.Q().GetCatalogEntity(ctx, row.CatalogID)
 		if err != nil {
 			return nil, fmt.Errorf("catalog entity %s: %w", row.CatalogID, err)

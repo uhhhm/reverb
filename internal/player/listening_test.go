@@ -1,6 +1,7 @@
 package player_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -25,6 +26,8 @@ type listening struct {
 	svc     *player.Service
 	session string
 	listens []player.Listen
+	// fetch answers Radio's lookups; nil ends a Radio session at once.
+	fetch player.RadioFetch
 }
 
 func newListening(t *testing.T) *listening {
@@ -42,7 +45,17 @@ func newListening(t *testing.T) *listening {
 
 func (l *listening) do(change func(*player.Queue) error) player.State {
 	l.t.Helper()
-	st, err := l.svc.Update(l.session, change)
+	st, err := l.svc.UpdateRadio(context.Background(), l.session, change, l.fetch)
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	if l.fetch == nil {
+		return st
+	}
+	// A Radio lookup answers in the background; wait for it so the state
+	// returned is the one a player's next request would see.
+	l.svc.Settle()
+	st, err = l.svc.State(l.session)
 	if err != nil {
 		l.t.Fatal(err)
 	}

@@ -11,7 +11,7 @@ import (
 )
 
 const countPlays = `-- name: CountPlays :one
-SELECT COUNT(*) FROM plays WHERE qualified = 1
+SELECT COUNT(*) FROM qualified_plays
 `
 
 func (q *Queries) CountPlays(ctx context.Context) (int64, error) {
@@ -22,7 +22,7 @@ func (q *Queries) CountPlays(ctx context.Context) (int64, error) {
 }
 
 const countPlaysByCatalog = `-- name: CountPlaysByCatalog :one
-SELECT COUNT(*) FROM plays WHERE user_id = ? AND catalog_id = ? AND qualified = 1
+SELECT COUNT(*) FROM qualified_plays WHERE user_id = ? AND catalog_id = ?
 `
 
 type CountPlaysByCatalogParams struct {
@@ -404,8 +404,8 @@ func (q *Queries) ListDeletedPlays(ctx context.Context) ([]string, error) {
 
 const listPlayedSince = `-- name: ListPlayedSince :many
 SELECT DISTINCT e.title, e.artist
-FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.played_at >= ? AND p.qualified = 1
+FROM qualified_plays p JOIN catalog_entity e ON e.id = p.catalog_id
+WHERE p.played_at >= ?
 `
 
 type ListPlayedSinceRow struct {
@@ -436,11 +436,47 @@ func (q *Queries) ListPlayedSince(ctx context.Context, playedAt int64) ([]ListPl
 	return items, nil
 }
 
+const listQualifiedPlays = `-- name: ListQualifiedPlays :many
+SELECT id, user_id, catalog_id, played_at, ms_played, completed, created_at, origin, session_id FROM qualified_plays ORDER BY played_at ASC
+`
+
+func (q *Queries) ListQualifiedPlays(ctx context.Context) ([]QualifiedPlay, error) {
+	rows, err := q.db.QueryContext(ctx, listQualifiedPlays)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []QualifiedPlay
+	for rows.Next() {
+		var i QualifiedPlay
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.CatalogID,
+			&i.PlayedAt,
+			&i.MsPlayed,
+			&i.Completed,
+			&i.CreatedAt,
+			&i.Origin,
+			&i.SessionID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecentPlays = `-- name: ListRecentPlays :many
 SELECT p.id, p.catalog_id, p.played_at, e.title, e.artist, e.album
-FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
+FROM qualified_plays p JOIN catalog_entity e ON e.id = p.catalog_id
 WHERE p.user_id = ? AND p.played_at < ?
-  AND p.qualified = 1
 ORDER BY p.played_at DESC LIMIT ?
 `
 
@@ -501,12 +537,11 @@ WITH candidate_artists AS (
          ) +
          4 * EXISTS (
            SELECT 1
-           FROM plays ps
+           FROM qualified_plays ps
            JOIN catalog_entity se ON se.id = ps.catalog_id
-           JOIN plays pc ON pc.session_id = ps.session_id AND pc.session_id != ''
+           JOIN qualified_plays pc ON pc.session_id = ps.session_id AND pc.session_id != ''
            JOIN catalog_entity ce ON ce.id = pc.catalog_id
            WHERE lower(se.artist) = lower(?2) AND lower(ce.artist) = lower(e.artist)
-             AND ps.qualified = 1 AND pc.qualified = 1
          ) AS score
   FROM catalog_entity e
   JOIN backend_binding b ON b.catalog_id = e.id AND b.backend_id != '' AND b.known_absent = 0
@@ -572,9 +607,8 @@ WITH seed AS (
                            AND lower(json_extract(jt.value, '$.title')) = lower(e.title))
          ) +
          4 * EXISTS (
-           SELECT 1 FROM plays ps JOIN plays pc ON pc.session_id = ps.session_id
+           SELECT 1 FROM qualified_plays ps JOIN qualified_plays pc ON pc.session_id = ps.session_id
            WHERE ps.catalog_id = seed.id AND pc.catalog_id = e.id AND ps.session_id != ''
-             AND ps.qualified = 1 AND pc.qualified = 1
          ) AS score
   FROM catalog_entity e
   JOIN backend_binding b ON b.catalog_id = e.id AND b.backend_id != '' AND b.known_absent = 0
@@ -647,7 +681,7 @@ WITH origins AS (
   WHERE a.user_id = ?1 AND a.created_at >= ?2 AND a.created_at < ?3
 ), play_totals AS (
   SELECT p.origin, COUNT(*) AS plays,
-         SUM(CASE WHEN p.qualified = 0 THEN 1 ELSE 0 END) AS skips,
+         SUM(CASE WHEN p.qualified = 0 AND p.completed = 0 THEN 1 ELSE 0 END) AS skips,
          SUM(CASE WHEN p.completed = 1 THEN 1 ELSE 0 END) AS completions
   FROM plays p
   WHERE p.user_id = ?1 AND p.origin != '' AND p.played_at >= ?2 AND p.played_at < ?3
@@ -683,6 +717,7 @@ type RecommendationStatsRow struct {
 	Additions   int64   `json:"additions"`
 }
 
+// A skip is a play that neither qualified nor completed, as the player judges it.
 func (q *Queries) RecommendationStats(ctx context.Context, arg RecommendationStatsParams) ([]RecommendationStatsRow, error) {
 	rows, err := q.db.QueryContext(ctx, recommendationStats, arg.UserID, arg.FromTime, arg.ToTime)
 	if err != nil {
@@ -732,8 +767,8 @@ SELECT
     COALESCE(SUM(p.ms_played), 0) AS ms_played,
     MIN(p.played_at) AS first_played,
     MAX(p.played_at) AS last_played
-FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND e.album = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
+FROM qualified_plays p JOIN catalog_entity e ON e.id = p.catalog_id
+WHERE p.user_id = ? AND e.album = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ?
 `
 
 type StatsEntityAlbumParams struct {
@@ -775,8 +810,8 @@ SELECT
     COALESCE(SUM(p.ms_played), 0) AS ms_played,
     MIN(p.played_at) AS first_played,
     MAX(p.played_at) AS last_played
-FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
+FROM qualified_plays p JOIN catalog_entity e ON e.id = p.catalog_id
+WHERE p.user_id = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ?
 `
 
 type StatsEntityArtistParams struct {
@@ -816,8 +851,8 @@ SELECT
     COALESCE(SUM(p.ms_played), 0) AS ms_played,
     MIN(p.played_at) AS first_played,
     MAX(p.played_at) AS last_played
-FROM plays p
-WHERE p.user_id = ? AND p.catalog_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
+FROM qualified_plays p
+WHERE p.user_id = ? AND p.catalog_id = ? AND p.played_at >= ? AND p.played_at < ?
 `
 
 type StatsEntityTrackParams struct {
@@ -853,8 +888,8 @@ func (q *Queries) StatsEntityTrack(ctx context.Context, arg StatsEntityTrackPara
 
 const statsPlaysInWindow = `-- name: StatsPlaysInWindow :many
 SELECT p.played_at, p.ms_played
-FROM plays p
-WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
+FROM qualified_plays p
+WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ?
 ORDER BY p.played_at ASC
 `
 
@@ -899,8 +934,8 @@ SELECT
     COUNT(DISTINCT e.artist)    AS distinct_artists,
     COUNT(DISTINCT e.album)     AS distinct_albums,
     COALESCE(SUM(p.ms_played), 0) AS ms_played
-FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
+FROM qualified_plays p JOIN catalog_entity e ON e.id = p.catalog_id
+WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ?
 `
 
 type StatsSummaryParams struct {
@@ -938,8 +973,8 @@ WITH aggregated AS (
         e.artist,
         COUNT(*)         AS plays,
         SUM(p.ms_played) AS ms_played
-    FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-    WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
+    FROM qualified_plays p JOIN catalog_entity e ON e.id = p.catalog_id
+    WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ?
     GROUP BY e.album, e.artist
 )
 SELECT
@@ -1018,8 +1053,8 @@ WITH aggregated AS (
         e.artist,
         COUNT(*)         AS plays,
         SUM(p.ms_played) AS ms_played
-    FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-    WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
+    FROM qualified_plays p JOIN catalog_entity e ON e.id = p.catalog_id
+    WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ?
     GROUP BY e.artist
 )
 SELECT
@@ -1101,8 +1136,8 @@ SELECT
     e.external_id,
     COUNT(*)          AS plays,
     SUM(p.ms_played)  AS ms_played
-FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
+FROM qualified_plays p JOIN catalog_entity e ON e.id = p.catalog_id
+WHERE p.user_id = ? AND p.played_at >= ? AND p.played_at < ?
 GROUP BY p.catalog_id
 ORDER BY COUNT(*) DESC, SUM(p.ms_played) DESC
 LIMIT ?
@@ -1171,8 +1206,8 @@ SELECT
     e.album,
     COUNT(*)          AS plays,
     SUM(p.ms_played)  AS ms_played
-FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND e.album = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
+FROM qualified_plays p JOIN catalog_entity e ON e.id = p.catalog_id
+WHERE p.user_id = ? AND e.album = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ?
 GROUP BY p.catalog_id
 ORDER BY COUNT(*) DESC, SUM(p.ms_played) DESC
 LIMIT ?
@@ -1241,8 +1276,8 @@ SELECT
     e.album,
     COUNT(*)          AS plays,
     SUM(p.ms_played)  AS ms_played
-FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
+FROM qualified_plays p JOIN catalog_entity e ON e.id = p.catalog_id
+WHERE p.user_id = ? AND e.artist = ? AND p.played_at >= ? AND p.played_at < ?
 GROUP BY p.catalog_id
 ORDER BY COUNT(*) DESC, SUM(p.ms_played) DESC
 LIMIT ?
@@ -1309,8 +1344,8 @@ SELECT
     e.album,
     COUNT(*)          AS plays,
     SUM(p.ms_played)  AS ms_played
-FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.user_id = ? AND p.catalog_id = ? AND p.played_at >= ? AND p.played_at < ? AND p.qualified = 1
+FROM qualified_plays p JOIN catalog_entity e ON e.id = p.catalog_id
+WHERE p.user_id = ? AND p.catalog_id = ? AND p.played_at >= ? AND p.played_at < ?
 GROUP BY p.catalog_id
 ORDER BY COUNT(*) DESC, SUM(p.ms_played) DESC
 LIMIT ?
@@ -1371,8 +1406,8 @@ func (q *Queries) StatsTopTracksByCatalogID(ctx context.Context, arg StatsTopTra
 
 const topPlayedArtistsBetween = `-- name: TopPlayedArtistsBetween :many
 SELECT CAST(MIN(e.artist) AS TEXT) AS artist, COUNT(*) AS plays
-FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.played_at >= ?1 AND p.played_at < ?2 AND p.qualified = 1
+FROM qualified_plays p JOIN catalog_entity e ON e.id = p.catalog_id
+WHERE p.played_at >= ?1 AND p.played_at < ?2
   AND e.artist != ''
 GROUP BY lower(e.artist)
 ORDER BY plays DESC, lower(MIN(e.artist))
@@ -1415,8 +1450,8 @@ func (q *Queries) TopPlayedArtistsBetween(ctx context.Context, arg TopPlayedArti
 
 const topPlayedTracksBetween = `-- name: TopPlayedTracksBetween :many
 SELECT CAST(MIN(e.title) AS TEXT) AS title, CAST(MIN(e.artist) AS TEXT) AS artist, COUNT(*) AS plays
-FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.played_at >= ?1 AND p.played_at < ?2 AND p.qualified = 1
+FROM qualified_plays p JOIN catalog_entity e ON e.id = p.catalog_id
+WHERE p.played_at >= ?1 AND p.played_at < ?2
   AND e.title != '' AND e.artist != ''
 GROUP BY lower(e.artist), lower(e.title)
 ORDER BY plays DESC, lower(MIN(e.artist)), lower(MIN(e.title))

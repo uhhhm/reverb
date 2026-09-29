@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	// radioSeedLimit bounds how many seeds one Radio request looks up.
-	radioSeedLimit = 5
+	// RadioSeedLimit is how many seeds one Radio request looks up.
+	RadioSeedLimit = 5
 	// radioArtistTracks is how many of an artist's own tracks start a Radio
 	// seeded by that artist.
 	radioArtistTracks = 3
@@ -40,8 +40,8 @@ func (s *Service) Radio(ctx context.Context, seeds []Seed) TrackResult {
 	if !settings.Online || len(s.tracks) == 0 {
 		return s.localRadio(ctx, seeds)
 	}
-	if len(seeds) > radioSeedLimit {
-		seeds = seeds[:radioSeedLimit]
+	if len(seeds) > RadioSeedLimit {
+		seeds = seeds[:RadioSeedLimit]
 	}
 
 	var lead []core.ExternalResult

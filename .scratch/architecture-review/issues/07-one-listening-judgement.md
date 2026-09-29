@@ -28,16 +28,16 @@ This continues ADR 0003 (queue and Radio policy live in the core).
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [x] The owner decides the Radio skip rule, recorded in a comment here.
-- [ ] `docs/architecture.md` states the single rule (qualified, completed, skipped), replacing both the `internal/player` listening rule and the Radio "less than half" skip wording.
-- [ ] Write tests first, at the `player.Service` interface. They cover each boundary case (30 s floor, half, 4-minute cap, seeks, repeat from the start, leaving early), and each asserts both the recorded play and the Radio steering direction.
-- [ ] `internal/player/radio.go` keeps no heard-time counter of its own.
-- [ ] Stats' recommendation skip rate counts plays that are neither qualified nor completed (`plays.sql` `RecommendationStats`), so a recommendation track under 30 s that plays to the end is not a skip.
-- [ ] No hand-written `qualified = 1` remains in `plays.sql` or `store/db`. Reads use the shared qualified-listens source, and a test shows an unqualified play is excluded from Summary, Top, Timeline, Clock and Entity stats.
-- [ ] `internal/api` contains no Radio seed conversion or queue-track construction.
-- [ ] `go test ./internal/player ./internal/play ./internal/recommend/... ./internal/api ./internal/app` and `make gen-check` pass. The listening and offline-Radio e2e tests in `internal/app` still pass.
+- [x] `docs/architecture.md` states the single rule (qualified, completed, skipped), replacing both the `internal/player` listening rule and the Radio "less than half" skip wording.
+- [x] Write tests first, at the `player.Service` interface. They cover each boundary case (30 s floor, half, 4-minute cap, seeks, repeat from the start, leaving early), and each asserts both the recorded play and the Radio steering direction.
+- [x] `internal/player/radio.go` keeps no heard-time counter of its own.
+- [x] Stats' recommendation skip rate counts plays that are neither qualified nor completed (`plays.sql` `RecommendationStats`), so a recommendation track under 30 s that plays to the end is not a skip.
+- [x] No hand-written `qualified = 1` remains in `plays.sql` or `store/db`. Reads use the shared qualified-listens source, and a test shows an unqualified play is excluded from Summary, Top, Timeline, Clock and Entity stats.
+- [x] `internal/api` contains no Radio seed conversion or queue-track construction.
+- [x] `go test ./internal/player ./internal/play ./internal/recommend/... ./internal/api ./internal/app` and `make gen-check` pass. The listening and offline-Radio e2e tests in `internal/app` still pass.
 
 ## Comments
 

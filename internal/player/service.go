@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"sync"
 	"time"
+
+	"github.com/uhhhm/reverb/internal/recommend"
 )
 
 // TopicQueue is the event bus topic a queue change is published on.
@@ -109,7 +111,7 @@ func (s *Service) UpdateRadio(ctx context.Context, id string, change func(*Queue
 	if err == nil {
 		s.refill(ctx, id, ses, fetch)
 	}
-	ses.q.listen.settle(ses.q)
+	ses.q.settle()
 	listens := ses.q.listen.take()
 	st := ses.q.State()
 	ses.mu.Unlock()
@@ -157,7 +159,7 @@ func (s *Service) refill(ctx context.Context, id string, ses *session, fetch Rad
 
 // lookUp runs one background Radio lookup and applies it, unless the session
 // has since ended or started another Radio.
-func (s *Service) lookUp(id string, ses *session, r *radioSession, seeds []RadioSeed, fetch RadioFetch) {
+func (s *Service) lookUp(id string, ses *session, r *radioSession, seeds []recommend.Seed, fetch RadioFetch) {
 	defer s.lookups.Done()
 	rows, err := fetch(context.Background(), seeds)
 	ses.mu.Lock()
@@ -170,7 +172,7 @@ func (s *Service) lookUp(id string, ses *session, r *radioSession, seeds []Radio
 			s.refill(context.Background(), id, ses, fetch)
 		}
 	}
-	q.listen.settle(q)
+	q.settle()
 	listens := q.listen.take()
 	st := q.State()
 	ses.mu.Unlock()

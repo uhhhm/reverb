@@ -11,8 +11,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/uhhhm/reverb/internal/player"
-	"github.com/uhhhm/reverb/internal/recommend"
-	"github.com/uhhhm/reverb/internal/trackref"
 )
 
 // maxPlayerBody bounds a queue request. Playing a whole library sends every
@@ -152,7 +150,7 @@ func (s *Server) playerUpdate(w http.ResponseWriter, r *http.Request, body any, 
 			return
 		}
 	}
-	st, err := s.deps.Player.UpdateRadio(r.Context(), chi.URLParam(r, "session"), change, s.radioTracks)
+	st, err := s.deps.Player.UpdateRadio(r.Context(), chi.URLParam(r, "session"), change, player.RadioFrom(s.deps.Recommend))
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, player.ErrTooLong) {
@@ -218,37 +216,4 @@ func (p *prewarmSet) claim(key string) bool {
 	}
 	p.seen[key] = true
 	return true
-}
-
-// radioTracks projects recommendations into the same playable transport both
-// clients already understand. Recommendation policy remains in recommend.
-func (s *Server) radioTracks(ctx context.Context, seeds []player.RadioSeed) ([]json.RawMessage, error) {
-	if s.deps.Recommend == nil {
-		return nil, nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	input := make([]recommend.Seed, len(seeds))
-	for i, v := range seeds {
-		input[i] = recommend.Seed(v)
-	}
-	result := s.deps.Recommend.Radio(ctx, input)
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	var out []json.RawMessage
-	for _, t := range result.Tracks {
-		id := t.ExternalID
-		row := map[string]any{"id": id, "title": t.Title, "artist": t.Artist, "album": t.Album, "durationMs": t.DurationMs, "albumId": "", "artistId": "", "coverArtId": t.CoverArtID, "trackNumber": 0, "discNumber": 0, "bitRate": 0, "suffix": "", "contentType": "", "recommendationOrigin": "radio", "reason": t.Reason, "isrc": t.ISRC, "mbid": t.MBID}
-		if t.Source != "library" {
-			row["id"] = trackref.EncodeExternalID(t.Source, id)
-			row["externalStream"] = map[string]string{"source": t.Source, "externalId": id}
-		}
-		raw, err := json.Marshal(row)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, raw)
-	}
-	return out, nil
 }

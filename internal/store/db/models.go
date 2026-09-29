@@ -251,6 +251,18 @@ type Play struct {
 	Qualified int64  `json:"qualified"`
 }
 
+type QualifiedPlay struct {
+	ID        string `json:"id"`
+	UserID    string `json:"user_id"`
+	CatalogID string `json:"catalog_id"`
+	PlayedAt  int64  `json:"played_at"`
+	MsPlayed  int64  `json:"ms_played"`
+	Completed int64  `json:"completed"`
+	CreatedAt int64  `json:"created_at"`
+	Origin    string `json:"origin"`
+	SessionID string `json:"session_id"`
+}
+
 type RecommendationAdd struct {
 	ID        string `json:"id"`
 	UserID    string `json:"user_id"`

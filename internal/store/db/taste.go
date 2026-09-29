@@ -18,17 +18,20 @@ type TastePlayRow struct {
 	Completed bool
 }
 
-// tastePlaysFrom selects the plays the taste profile reads. Both reads below
-// share it so a play can never be eligible for one and not the other.
-const tastePlaysFrom = `FROM plays p JOIN catalog_entity e ON e.id = p.catalog_id
-WHERE p.qualified = 1`
+// tastePlaysFrom selects the plays the taste profile reads: the listens, with
+// their catalog names. Both reads below share it so a play can never be
+// eligible for one and not the other. plays is joined only for its rowid,
+// which the view does not carry.
+const tastePlaysFrom = `FROM qualified_plays q
+JOIN plays p ON p.id = q.id
+JOIN catalog_entity e ON e.id = q.catalog_id`
 
 // ListTastePlaysAfter returns up to limit plays stored after seq, in the
 // order they were stored. It reads rowid, which sqlc cannot express, so it
 // is written by hand.
 func (q *Queries) ListTastePlaysAfter(ctx context.Context, after int64, limit int) ([]TastePlayRow, error) {
-	rows, err := q.db.QueryContext(ctx, `SELECT p.id, p.rowid, e.title, e.artist, p.played_at, p.completed
-`+tastePlaysFrom+` AND p.rowid > ? ORDER BY p.rowid LIMIT ?`, after, limit)
+	rows, err := q.db.QueryContext(ctx, `SELECT q.id, p.rowid, e.title, e.artist, q.played_at, q.completed
+`+tastePlaysFrom+` WHERE p.rowid > ? ORDER BY p.rowid LIMIT ?`, after, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -52,8 +55,8 @@ func (q *Queries) ListTastePlaysAfter(ctx context.Context, after int64, limit in
 // play it folded in was replaced rather than followed.
 func (q *Queries) TastePlayIDAt(ctx context.Context, seq int64) (string, error) {
 	var id string
-	err := q.db.QueryRowContext(ctx, `SELECT p.id
-`+tastePlaysFrom+` AND p.rowid = ?`, seq).Scan(&id)
+	err := q.db.QueryRowContext(ctx, `SELECT q.id
+`+tastePlaysFrom+` WHERE p.rowid = ?`, seq).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}

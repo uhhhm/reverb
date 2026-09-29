@@ -29,6 +29,8 @@ func TestRecommendationStatsRatesBySurfaceAndTimeRange(t *testing.T) {
 	for _, in := range []play.PlayInput{
 		{Title: "Completed", Artist: "A", Origin: "radio", PlayedAt: 1100, Completed: true, Qualified: &qualified},
 		{Title: "Skipped", Artist: "B", Origin: "radio", PlayedAt: 1200, Qualified: &skipped},
+		// Too short to qualify, but played to the end: finished, not skipped.
+		{Title: "Interlude", Artist: "D", Origin: "radio", PlayedAt: 1250, Completed: true, Qualified: &skipped},
 		{Title: "Outside", Artist: "C", Origin: "shelf", PlayedAt: 900, Qualified: &qualified},
 	} {
 		if err := svc.Record(context.Background(), "u1", in); err != nil {
@@ -45,7 +47,8 @@ func TestRecommendationStatsRatesBySurfaceAndTimeRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Origin != "radio" || got[0].Plays != 2 || got[0].SkipRate != .5 || got[0].CompletionRate != .5 || got[0].AddRate != .5 {
+	third := 1.0 / 3
+	if len(got) != 1 || got[0].Origin != "radio" || got[0].Plays != 3 || got[0].SkipRate != third || got[0].CompletionRate != 2*third || got[0].AddRate != third {
 		t.Fatalf("recommendation stats = %+v", got)
 	}
 }

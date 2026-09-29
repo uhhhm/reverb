@@ -4,26 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/uhhhm/reverb/internal/matching"
+	"github.com/uhhhm/reverb/internal/recommend"
 )
-
-// RadioSeed names a recording, or an artist when Title is empty.
-type RadioSeed struct {
-	Artist string `json:"artist"`
-	Title  string `json:"title,omitempty"`
-	MBID   string `json:"mbid,omitempty"`
-}
 
 // RadioStart is what a Radio session starts with: tracks to play first (none
 // for an artist's Radio) and one to five seeds to recommend from.
 type RadioStart struct {
 	Lead  []json.RawMessage `json:"lead"`
-	Seeds []RadioSeed       `json:"seeds"`
+	Seeds []recommend.Seed  `json:"seeds"`
 }
 
 // Progress is a sample of playback, tagged with the exact play it describes.
@@ -41,13 +36,13 @@ type Progress struct {
 const radioRetry = 10 * time.Second
 
 // RadioFetch looks up recommendations for seeds, as playable queue tracks.
-type RadioFetch func(context.Context, []RadioSeed) ([]json.RawMessage, error)
+type RadioFetch func(context.Context, []recommend.Seed) ([]json.RawMessage, error)
 
 // radioTrack is what Radio reads of a queued track.
 type radioTrack struct {
-	RadioSeed
-	DurationMS float64    `json:"durationMs"`
-	Reason     *RadioSeed `json:"reason"`
+	recommend.Seed
+	DurationMS float64         `json:"durationMs"`
+	Reason     *recommend.Seed `json:"reason"`
 }
 
 func track(raw json.RawMessage) radioTrack {
@@ -62,19 +57,17 @@ var reissue = regexp.MustCompile(`(?i)\s*(?:[\(\[\{][^\)\]\}]*\b(?:remaster(?:ed
 
 // recording keys one recording however many sources or reissues carry it, so
 // a reissue in a later batch is not queued again.
-func recording(t RadioSeed) string {
+func recording(t recommend.Seed) string {
 	return matching.Normalize(t.Artist) + "\x1f" + matching.Normalize(reissue.ReplaceAllString(t.Title, ""))
 }
 
 type radioSession struct {
-	pool                   []json.RawMessage
-	pending                []RadioSeed
+	pool    []json.RawMessage
+	pending []recommend.Seed
+	// seen, seeded and finished are recordings: fetched already, used as a seed,
+	// and judged completed this session.
 	seen, seeded, finished map[string]bool
 	steering, skips        map[string]int
-	entry                  string
-	playID                 int64
-	heard, last, duration  float64
-	complete               bool
 	// fetching is set while a background lookup is out.
 	fetching bool
 	// restore is how many tracks a re-rank took back from the queue; the next
@@ -85,8 +78,8 @@ type radioSession struct {
 
 // StartRadio starts a fresh, unsteered session. Invalid input leaves playback intact.
 func (q *Queue) StartRadio(start RadioStart) error {
-	if len(start.Seeds) == 0 || len(start.Seeds) > 5 {
-		return errors.New("radio needs one to five seeds")
+	if len(start.Seeds) == 0 || len(start.Seeds) > recommend.RadioSeedLimit {
+		return fmt.Errorf("radio needs one to %d seeds", recommend.RadioSeedLimit)
 	}
 	for _, s := range start.Seeds {
 		if strings.TrimSpace(s.Artist) == "" {
@@ -100,7 +93,7 @@ func (q *Queue) StartRadio(start RadioStart) error {
 	_ = q.SetRepeat(RepeatOff)
 	r := &radioSession{pending: start.Seeds, seen: map[string]bool{}, seeded: map[string]bool{}, finished: map[string]bool{}, steering: map[string]int{}, skips: map[string]int{}}
 	for _, t := range start.Lead {
-		r.seen[recording(track(t).RadioSeed)] = true
+		r.seen[recording(track(t).Seed)] = true
 	}
 	for _, s := range start.Seeds {
 		if s.Title != "" {
@@ -109,83 +102,56 @@ func (q *Queue) StartRadio(start RadioStart) error {
 	}
 	q.radio = r
 	q.changed()
-	r.observe(q)
 	return nil
 }
 
-// Progress applies a playback sample of the current play: to what was
-// listened to, and to Radio's judgement of the play — listening time, and a
-// finish once heard to within 1.5s of the end having heard at least half. A
-// sample for another play is ignored.
+// Progress applies a playback sample of the current play. The core judges what
+// was listened to from it (see listening.go); Radio steers by that judgement.
+// A sample for another play is ignored.
 func (q *Queue) Progress(p Progress) {
 	q.listen.sample(q, p)
-	r := q.radio
-	if r == nil || p.EntryID != q.Current() || p.PlayID != q.playID {
-		return
-	}
-	r.observe(q)
-	if p.DurationMS > 0 {
-		r.duration = p.DurationMS
-	}
-	// Started over after finishing: a repeat, judged afresh from here.
-	if r.complete && p.PositionMS < 1500 {
-		r.complete = false
-		r.heard = 0
-		r.last = p.PositionMS
-		r.steer(q, track(q.entries[q.index].Track), 1)
-		return
-	}
-	delta := p.PositionMS - r.last
-	if p.Playing && !p.Seeking && delta > 0 && delta < 5000 {
-		r.heard += delta
-	}
-	r.last = p.PositionMS
-	if !r.complete && r.duration > 0 && p.PositionMS >= r.duration-1500 && r.heard >= r.duration/2 {
-		r.complete = true
-		r.finished[recording(track(q.entries[q.index].Track).RadioSeed)] = true
-		r.steer(q, track(q.entries[q.index].Track), 1)
+	q.steerByJudgement()
+}
+
+// settle follows the queue onto its current play, ending the one it leaves, and
+// has Radio steer by what was judged.
+func (q *Queue) settle() {
+	q.listen.settle(q)
+	q.steerByJudgement()
+}
+
+// steerByJudgement hands the judgements made so far to the Radio session each
+// was made in, if that session is still the one running.
+func (q *Queue) steerByJudgement() {
+	pending := q.listen.pending
+	q.listen.pending = nil
+	for _, j := range pending {
+		if j.radio != nil && j.radio == q.radio {
+			q.radio.steerBy(q, j)
+		}
 	}
 }
-func (r *radioSession) observe(q *Queue) {
-	if q.Current() == r.entry && q.playID == r.playID {
-		return
-	}
-	// The same entry started over is not a move away from it: finished, it
-	// is a repeat; otherwise listening goes on counting.
-	if r.entry != "" && q.Current() == r.entry {
-		r.playID = q.playID
-		r.last = 0
-		if r.complete {
-			r.complete = false
-			r.heard = 0
-			r.steer(q, track(q.entries[q.index].Track), 1)
-		}
-		return
-	}
-	if r.entry != "" && !r.complete && r.duration > 0 && r.heard < r.duration/2 {
-		for _, e := range q.entries {
-			if e.ID == r.entry {
-				r.steer(q, track(e.Track), -1)
-				break
-			}
-		}
-	}
-	r.entry = q.Current()
-	r.playID = q.playID
-	r.heard = 0
-	r.last = 0
-	r.duration = 0
-	r.complete = false
-	if q.index >= 0 {
-		t := track(q.entries[q.index].Track)
-		r.duration = t.DurationMS
-		if r.finished[recording(t.RadioSeed)] {
+
+// steerBy steers by one turn in a play's judgement: finishing a track, or
+// starting one already finished, pulls its artist and the tracks recommended
+// from or alongside it up; skipping pushes them down.
+func (r *radioSession) steerBy(q *Queue, j judgement) {
+	t := track(j.track)
+	key := recording(t.Seed)
+	switch j.kind {
+	case playBegan:
+		if r.finished[key] {
 			r.steer(q, t, 1)
 		}
+	case playCompleted:
+		r.finished[key] = true
+		r.steer(q, t, 1)
+	case playSkipped:
+		r.steer(q, t, -1)
 	}
 }
 func (r *radioSession) steer(q *Queue, t radioTrack, by int) {
-	key := recording(t.RadioSeed)
+	key := recording(t.Seed)
 	artist := matching.Normalize(t.Artist)
 	r.steering["artist:"+artist] += by
 	r.steering["seed:"+key] += by
@@ -261,19 +227,19 @@ func (r *radioSession) fill(q *Queue) {
 		r.restore--
 	}
 }
-func (r *radioSession) seeds(q *Queue) []RadioSeed {
+func (r *radioSession) seeds(q *Queue) []recommend.Seed {
 	if len(r.pending) > 0 {
 		out := r.pending
 		r.pending = nil
 		return out
 	}
-	var out []RadioSeed
+	var out []recommend.Seed
 	for i := len(q.entries) - 1; i >= 0 && len(out) < 3; i-- {
 		t := track(q.entries[i].Track)
-		k := recording(t.RadioSeed)
+		k := recording(t.Seed)
 		if !r.seeded[k] && r.skips[matching.Normalize(t.Artist)] < 2 {
 			r.seeded[k] = true
-			out = append(out, t.RadioSeed)
+			out = append(out, t.Seed)
 		}
 	}
 	return out
@@ -281,12 +247,12 @@ func (r *radioSession) seeds(q *Queue) []RadioSeed {
 
 // radioNeeds lines up what the pool holds and reports the seeds to look up
 // next, if Radio needs more. With nothing left to look up or play, Radio ends.
-func (q *Queue) radioNeeds() ([]RadioSeed, bool) {
+func (q *Queue) radioNeeds() ([]recommend.Seed, bool) {
 	r := q.radio
 	if r == nil {
 		return nil, false
 	}
-	r.observe(q)
+	q.settle()
 	r.fill(q)
 	if r.fetching || len(q.upcoming(3)) >= 3 || time.Now().Before(r.retry) {
 		return nil, false
@@ -303,14 +269,14 @@ func (q *Queue) radioNeeds() ([]RadioSeed, bool) {
 
 // radioFetched adds a lookup's answer to the pool, never a recording twice.
 // A failed lookup keeps its seeds for a retry after radioRetry.
-func (q *Queue) radioFetched(r *radioSession, seeds []RadioSeed, rows []json.RawMessage, err error) {
+func (q *Queue) radioFetched(r *radioSession, seeds []recommend.Seed, rows []json.RawMessage, err error) {
 	if err != nil {
 		r.pending = seeds
 		r.retry = time.Now().Add(radioRetry)
 		return
 	}
 	for _, raw := range rows {
-		k := recording(track(raw).RadioSeed)
+		k := recording(track(raw).Seed)
 		if !r.seen[k] {
 			r.seen[k] = true
 			r.pool = append(r.pool, raw)
@@ -318,5 +284,4 @@ func (q *Queue) radioFetched(r *radioSession, seeds []RadioSeed, rows []json.Raw
 	}
 	r.sort()
 	r.fill(q)
-	r.observe(q)
 }

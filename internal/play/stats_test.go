@@ -1157,3 +1157,59 @@ func TestEntity_AlbumPerUserIsolation(t *testing.T) {
 		t.Errorf("album user isolation: want ms=100000 got %d", es.MsPlayed)
 	}
 }
+
+// A play that did not qualify is an attempt kept for recommendation outcomes,
+// never a listen: every reader of listening history leaves it out.
+func TestEveryStatsReaderLeavesOutAPlayThatDidNotQualify(t *testing.T) {
+	stats, svc := newTestStatsHarness(t)
+	ctx := context.Background()
+	track := play.PlayInput{Title: "Track A", Artist: "Artist X", Album: "Album 1", DurationMs: 200000}
+	for _, in := range []struct {
+		msPlayed  int
+		playedAt  int64
+		qualified bool
+	}{{180000, 1100, true}, {5000, 1200, false}} {
+		p := track
+		p.MsPlayed, p.PlayedAt, p.Qualified = in.msPlayed, in.playedAt, &in.qualified
+		if err := svc.Record(ctx, "u1", p); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	sum, err := stats.Summary(ctx, "u1", winFrom, winTo)
+	if err != nil || sum.Plays != 1 || sum.MsPlayed != 180000 {
+		t.Errorf("Summary = %+v, %v; want the one listen", sum, err)
+	}
+	for name, top := range map[string]func() ([]play.TopRow, error){
+		"TopTracks":  func() ([]play.TopRow, error) { return stats.TopTracks(ctx, "u1", winFrom, winTo, 10) },
+		"TopArtists": func() ([]play.TopRow, error) { return stats.TopArtists(ctx, "u1", winFrom, winTo, 10) },
+		"TopAlbums":  func() ([]play.TopRow, error) { return stats.TopAlbums(ctx, "u1", winFrom, winTo, 10) },
+	} {
+		if rows, err := top(); err != nil || len(rows) != 1 || rows[0].Plays != 1 {
+			t.Errorf("%s = %+v, %v; want one row of one play", name, rows, err)
+		}
+	}
+	if tl, err := stats.Timeline(ctx, "u1", winFrom, winTo, "day"); err != nil || len(tl) != 1 || tl[0].Plays != 1 || tl[0].MsPlayed != 180000 {
+		t.Errorf("Timeline = %+v, %v; want one play", tl, err)
+	}
+	clockPlays := 0
+	cells, err := stats.Clock(ctx, "u1", winFrom, winTo, 0)
+	for _, c := range cells {
+		clockPlays += c.Plays
+	}
+	if err != nil || clockPlays != 1 {
+		t.Errorf("Clock holds %d plays, %v; want 1", clockPlays, err)
+	}
+	if recent, err := stats.Recent(ctx, "u1", winTo, 10); err != nil || len(recent) != 1 {
+		t.Errorf("Recent = %+v, %v; want one play", recent, err)
+	}
+	tracks, err := stats.TopTracks(ctx, "u1", winFrom, winTo, 1)
+	if err != nil || len(tracks) != 1 {
+		t.Fatalf("TopTracks = %+v, %v", tracks, err)
+	}
+	for kind, id := range map[string]string{"artist": "Artist X", "album": "Album 1", "track": tracks[0].CatalogID} {
+		if e, err := stats.Entity(ctx, "u1", kind, id, "Artist X", winFrom, winTo); err != nil || e.Plays != 1 || e.MsPlayed != 180000 || len(e.TopTracks) != 1 || e.TopTracks[0].Plays != 1 {
+			t.Errorf("Entity(%s) = %+v, %v; want the one listen", kind, e, err)
+		}
+	}
+}

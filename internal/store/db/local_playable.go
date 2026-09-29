@@ -83,13 +83,12 @@ WITH playable AS (
          ) +
          4 * EXISTS (
            SELECT 1
-           FROM plays ps
+           FROM qualified_plays ps
            JOIN catalog_entity se ON se.id = ps.catalog_id
-           JOIN plays pc ON pc.session_id = ps.session_id AND pc.session_id != '' AND pc.id != ps.id
+           JOIN qualified_plays pc ON pc.session_id = ps.session_id AND pc.session_id != '' AND pc.id != ps.id
            JOIN catalog_entity ce ON ce.id = pc.catalog_id
            WHERE lower(trim(se.artist)) = lower(?2) AND (?3 = '' OR lower(trim(se.title)) = lower(?3))
              AND lower(trim(ce.artist)) = lower(trim(p.artist)) AND lower(trim(ce.title)) = lower(trim(p.title))
-             AND ps.qualified = 1 AND pc.qualified = 1
          ) AS score
   FROM playable p
   JOIN seed
