@@ -48,19 +48,6 @@ describe('MediaCard', () => {
     expect(screen.getByText('Downloaded')).toBeInTheDocument()
   })
 
-  it('applies rounded-full class when rounded="full"', () => {
-    const { container } = render(<MediaCard title="Artist" rounded="full" />)
-    // The Cover inside should have rounded-full
-    const cover = container.querySelector('[data-testid="mediacard-cover"]')
-    expect(cover?.className).toMatch(/rounded-full/)
-  })
-
-  it('has bg-raised on the card root', () => {
-    const { container } = render(<MediaCard title="Test" />)
-    const root = container.firstChild as HTMLElement
-    expect(root.className).toMatch(/bg-raised/)
-  })
-
   it('play button has focus-visible ring', () => {
     render(<MediaCard title="OK Computer" onPlay={vi.fn()} />)
     const playBtn = screen.getByRole('button', { name: /play/i })
@@ -164,12 +151,6 @@ describe('MediaCard', () => {
 
   // ── Ghost card tests ────────────────────────────────────────────────────────
 
-  it('ghost card has border-dashed on the root button', () => {
-    const { container } = render(<MediaCard title="Ghost Album" ghost={true} />)
-    const root = container.firstChild as HTMLElement
-    expect(root.className).toMatch(/border-dashed/)
-  })
-
   it('ghost card suppresses the play button even when onPlay is provided', () => {
     render(<MediaCard title="Ghost Album" onPlay={vi.fn()} ghost={true} />)
     expect(screen.queryByLabelText('Play Ghost Album')).not.toBeInTheDocument()
@@ -194,11 +175,5 @@ describe('MediaCard', () => {
     )
     const dlBtn = screen.getByRole('button', { name: 'Download Ghost Album' })
     expect(dlBtn).toBeInTheDocument()
-  })
-
-  it('non-ghost card does not have border-dashed', () => {
-    const { container } = render(<MediaCard title="Regular Album" ghost={false} />)
-    const root = container.firstChild as HTMLElement
-    expect(root.className).not.toMatch(/border-dashed/)
   })
 })

@@ -10,6 +10,7 @@ export function Chip({ selected = false, onClick, children }: ChipProps) {
   return (
     <button
       type="button"
+      aria-pressed={selected}
       onClick={onClick}
       className={[
         'inline-flex items-center px-3 py-1.5 rounded-full text-sm font-semibold',

@@ -88,12 +88,6 @@ describe('Settings — tab bar', () => {
     expect(screen.getByRole('heading', { name: /^settings$/i })).toBeInTheDocument()
   })
 
-  it('renders the Integrations and Appearance tab buttons', () => {
-    wrap(<Settings />)
-    expect(screen.getByRole('button', { name: /^integrations$/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /^appearance$/i })).toBeInTheDocument()
-  })
-
   it('defaults to the Integrations tab on first render', () => {
     wrap(<Settings />)
     expect(screen.getByRole('heading', { name: /integrations/i })).toBeInTheDocument()

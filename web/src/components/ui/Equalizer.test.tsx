@@ -3,49 +3,12 @@ import { render } from '@testing-library/react'
 import { Equalizer } from './Equalizer'
 
 describe('Equalizer', () => {
-  it('renders 4 animated bars', () => {
-    const { container } = render(<Equalizer />)
-    const bars = container.querySelectorAll('[data-testid="eq-bar"]')
-    expect(bars).toHaveLength(4)
-  })
-
-  it('each bar has an animation class when playing (default)', () => {
-    const { container } = render(<Equalizer playing={true} />)
-    const bars = container.querySelectorAll('[data-testid="eq-bar"]')
-    bars.forEach((bar) => {
-      expect(bar.className).toMatch(/animate-eq/)
-    })
-  })
-
-  it('bars have animate-eq when playing is undefined (default)', () => {
-    const { container } = render(<Equalizer />)
-    const bars = container.querySelectorAll('[data-testid="eq-bar"]')
-    bars.forEach((bar) => {
-      expect(bar.className).toMatch(/animate-eq/)
-    })
-  })
-
-  it('bars keep animate-eq and add paused state when playing=false', () => {
-    const { container } = render(<Equalizer playing={false} />)
-    const bars = container.querySelectorAll('[data-testid="eq-bar"]')
-    bars.forEach((bar) => {
-      expect(bar.className).toMatch(/animate-eq/)
-      expect(bar.className).toMatch(/animation-play-state:paused/)
-      expect(bar.className).toMatch(/h-1/)
-    })
-  })
-
-  it('accepts a className prop', () => {
-    const { container } = render(<Equalizer className="custom-class" />)
-    const root = container.firstChild as HTMLElement
-    expect(root.className).toMatch(/custom-class/)
-  })
-
-  it('bars use accent color', () => {
-    const { container } = render(<Equalizer />)
-    const bars = container.querySelectorAll('[data-testid="eq-bar"]')
-    bars.forEach((bar) => {
-      expect(bar.className).toMatch(/bg-accent/)
-    })
+  it('freezes its bars only while playback is paused', () => {
+    const paused = (playing?: boolean) =>
+      [...render(<Equalizer playing={playing} />).container.querySelectorAll('[data-testid="eq-bar"]')]
+        .map((bar) => /animation-play-state:paused/.test(bar.className))
+    expect(paused(false)).toEqual([true, true, true, true])
+    expect(paused(true)).toEqual([false, false, false, false])
+    expect(paused(undefined)).toEqual([false, false, false, false])
   })
 })

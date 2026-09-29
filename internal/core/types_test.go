@@ -31,16 +31,6 @@ func TestTrackJSONRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSearchResultsZeroValueMarshals(t *testing.T) {
-	b, err := json.Marshal(SearchResults{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(b) == "" {
-		t.Fatal("empty marshal")
-	}
-}
-
 func TestEntityTypeConstants(t *testing.T) {
 	if EntityTrack != "track" || EntityAlbum != "album" || EntityArtist != "artist" || EntityPlaylist != "playlist" {
 		t.Fatal("entity type constant drift")

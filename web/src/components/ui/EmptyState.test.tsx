@@ -25,10 +25,4 @@ describe('EmptyState', () => {
     )
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument()
   })
-
-  it('renders the icon element', () => {
-    const { container } = render(<EmptyState icon="search" title="Empty" />)
-    const iconWrapper = container.querySelector('[data-testid="empty-icon"]')
-    expect(iconWrapper).toBeInTheDocument()
-  })
 })

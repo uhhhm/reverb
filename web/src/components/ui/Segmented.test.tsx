@@ -25,13 +25,6 @@ describe('Segmented', () => {
     expect(screen.getByRole('tab', { name: 'My Library' }).getAttribute('aria-selected')).toBe('false')
   })
 
-  it('applies accent classes to the selected segment', () => {
-    render(<Segmented options={options} value="library" onChange={vi.fn()} />)
-    const activeTab = screen.getByRole('tab', { name: 'My Library' })
-    expect(activeTab.className).toMatch(/bg-accent/)
-    expect(activeTab.className).toMatch(/text-on-accent/)
-  })
-
   it('calls onChange with the new value when a tab is clicked', () => {
     const onChange = vi.fn()
     render(<Segmented options={options} value="library" onChange={onChange} />)

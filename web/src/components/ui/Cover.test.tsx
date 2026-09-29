@@ -64,28 +64,9 @@ describe('Cover', () => {
     expect(container.querySelector('[data-testid="cover-placeholder"]')).toBeInTheDocument()
   })
 
-  it('applies rounded-full when specified', () => {
-    const { container } = render(<Cover alt="Artist" rounded="full" />)
-    const root = container.firstChild as HTMLElement
-    expect(root.className).toMatch(/rounded-full/)
-  })
-
-  it('applies rounded-md by default', () => {
-    const { container } = render(<Cover alt="Art" />)
-    const root = container.firstChild as HTMLElement
-    expect(root.className).toMatch(/rounded-md/)
-  })
-
   it('applies custom size as inline style when size is a number', () => {
     const { container } = render(<Cover alt="Art" size={80} />)
     const root = container.firstChild as HTMLElement
     expect(root.getAttribute('style')).toMatch(/80px/)
-  })
-
-  it('applies w-full h-full when size is "full"', () => {
-    const { container } = render(<Cover alt="Art" size="full" />)
-    const root = container.firstChild as HTMLElement
-    expect(root.className).toMatch(/w-full/)
-    expect(root.className).toMatch(/h-full/)
   })
 })

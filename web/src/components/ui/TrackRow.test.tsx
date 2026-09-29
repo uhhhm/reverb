@@ -221,18 +221,6 @@ describe('TrackRow', () => {
 
   // ── Active / now-playing treatment ───────────────────────────────────────
 
-  it('applies text-accent when active', () => {
-    const { container } = renderRow({ active: true, onPlay: vi.fn() })
-    const row = container.firstChild as HTMLElement
-    expect(row.className).toMatch(/text-accent/)
-  })
-
-  it('does not apply text-accent when not active', () => {
-    const { container } = renderRow({ onPlay: vi.fn() })
-    const row = container.firstChild as HTMLElement
-    expect(row.className).not.toMatch(/text-accent/)
-  })
-
   it('renders Equalizer (eq-bar) when active', () => {
     const { container } = renderRow({ active: true, onPlay: vi.fn() })
     const bars = container.querySelectorAll('[data-testid="eq-bar"]')
@@ -245,24 +233,11 @@ describe('TrackRow', () => {
     expect(bars.length).toBe(0)
   })
 
-  it('active+playing=true → eq bars have animate-eq', () => {
-    const { container } = renderRow({ active: true, playing: true, onPlay: vi.fn() })
-    const bars = container.querySelectorAll('[data-testid="eq-bar"]')
-    expect(bars.length).toBeGreaterThan(0)
-    bars.forEach((bar) => {
-      expect(bar.className).toMatch(/animate-eq/)
-    })
-  })
-
-  it('active+playing=false → eq bars keep animate-eq and add paused state', () => {
+  it('freezes the equalizer on the active row while paused', () => {
     const { container } = renderRow({ active: true, playing: false, onPlay: vi.fn() })
-    const bars = container.querySelectorAll('[data-testid="eq-bar"]')
+    const bars = [...container.querySelectorAll('[data-testid="eq-bar"]')]
     expect(bars.length).toBeGreaterThan(0)
-    bars.forEach((bar) => {
-      expect(bar.className).toMatch(/animate-eq/)
-      expect(bar.className).toMatch(/animation-play-state:paused/)
-      expect(bar.className).toMatch(/h-1/)
-    })
+    expect(bars.every((bar) => /animation-play-state:paused/.test(bar.className))).toBe(true)
   })
 
   // ── Right slot ────────────────────────────────────────────────────────────

@@ -1,14 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
-import { useAlbumPalette } from './useAlbumPalette'
-import { __setComputeFnForTests, __resetForTests } from './paletteService'
 import type { RGB } from './palette'
+import { installFakePaletteWorker } from '../test/fakePaletteWorker'
 
 // Mock useSettings so the gate is controllable.
 vi.mock('./settingsApi', () => ({
   useSettings: vi.fn(),
 }))
-import { useSettings } from './settingsApi'
+let useSettings: typeof import('./settingsApi').useSettings
+let useAlbumPalette: typeof import('./useAlbumPalette').useAlbumPalette
+let extract: (url: string) => Promise<RGB>
 
 function setSettings(dynamicBackground: boolean | undefined) {
   vi.mocked(useSettings).mockReturnValue({
@@ -17,10 +18,13 @@ function setSettings(dynamicBackground: boolean | undefined) {
 }
 
 describe('useAlbumPalette', () => {
-  beforeEach(() => {
-    __resetForTests()
-    __setComputeFnForTests(async () => [200, 30, 40] as RGB)
+  beforeEach(async () => {
+    extract = async () => [200, 30, 40]
+    installFakePaletteWorker((url) => extract(url))
+    ;({ useSettings } = await import('./settingsApi'))
+    ;({ useAlbumPalette } = await import('./useAlbumPalette'))
   })
+  afterEach(() => vi.unstubAllGlobals())
 
   it('returns null while settings are still loading', () => {
     setSettings(undefined)
@@ -54,13 +58,12 @@ describe('useAlbumPalette', () => {
     setSettings(true)
     // Gate the compute so /cover/b stays pending after /cover/a has resolved.
     let releaseB: (v: RGB) => void = () => {}
-    __setComputeFnForTests((url) =>
+    extract = (url) =>
       url === '/cover/a'
         ? Promise.resolve([200, 30, 40] as RGB)
         : new Promise<RGB>((res) => {
             releaseB = res
-          }),
-    )
+          })
 
     const { result, rerender } = renderHook(({ url }) => useAlbumPalette(url), {
       initialProps: { url: '/cover/a' },

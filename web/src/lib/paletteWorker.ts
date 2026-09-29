@@ -3,7 +3,7 @@
 // around the pure helpers in ./palette — no extraction math lives here.
 //
 // NOTE: this file is never imported by tests (jsdom has no Worker/OffscreenCanvas);
-// the palette SERVICE is tested with an injected fake computeFn instead.
+// the palette SERVICE is tested against a fake Worker speaking the same protocol.
 import { dominantColorFromPixels, type RGB } from './palette'
 
 // SAMPLE_SIZE downscales the cover before sampling: 32×32 = 1024 pixels is plenty
