@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -65,6 +66,9 @@ type syncDevice struct {
 // playlist service come up, and no Navidrome is spawned.
 func fakeSubsonic(t *testing.T) *httptest.Server {
 	t.Helper()
+	// Like Navidrome, a started scan is seen running once, then done, so the
+	// download manager's wait for it to begin ends at once.
+	var scanStarted atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch filepath.Base(r.URL.Path) {
@@ -79,8 +83,11 @@ func fakeSubsonic(t *testing.T) *httptest.Server {
 			_, _ = io.WriteString(w, `{"subsonic-response":{"status":"ok","version":"1.16.1","artists":{"index":[]}}}`)
 		case "getAlbumList2":
 			_, _ = io.WriteString(w, `{"subsonic-response":{"status":"ok","version":"1.16.1","albumList2":{"album":[]}}}`)
-		case "getScanStatus", "startScan":
-			_, _ = io.WriteString(w, `{"subsonic-response":{"status":"ok","version":"1.16.1","scanStatus":{"scanning":false,"count":0}}}`)
+		case "startScan":
+			scanStarted.Store(true)
+			_, _ = io.WriteString(w, `{"subsonic-response":{"status":"ok","version":"1.16.1","scanStatus":{"scanning":true,"count":0}}}`)
+		case "getScanStatus":
+			_, _ = fmt.Fprintf(w, `{"subsonic-response":{"status":"ok","version":"1.16.1","scanStatus":{"scanning":%t,"count":0}}}`, scanStarted.Swap(false))
 		default:
 			_, _ = io.WriteString(w, `{"subsonic-response":{"status":"ok","version":"1.16.1"}}`)
 		}

@@ -79,6 +79,13 @@ type ScanController interface {
 	ScanStatus(ctx context.Context) (core.ScanStatus, error)
 }
 
+// SynchronousScanner is a ScanController whose StartScan returns only once the
+// scan has finished, so the Manager rematches straight away instead of waiting
+// for a scan to begin. The localfiles library is one; Navidrome is not.
+type SynchronousScanner interface {
+	ScansSynchronously() bool
+}
+
 // Rematcher re-resolves an external result after a scan. *matching.Service fits.
 type Rematcher interface {
 	Match(ctx context.Context, ext core.ExternalResult) (core.MatchResult, error)
@@ -1556,7 +1563,9 @@ func (m *Manager) runScan() {
 		log.Printf("library scan after download failed: %v", err)
 		return
 	}
-	m.waitForScan(ctx)
+	if s, ok := m.scanner.(SynchronousScanner); !ok || !s.ScansSynchronously() {
+		m.waitForScan(ctx)
+	}
 
 	// Bump library_version FIRST so re-matches recompute against fresh data
 	// (invalidates match_cache rows whose library_version is now stale).

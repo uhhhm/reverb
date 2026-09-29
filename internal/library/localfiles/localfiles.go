@@ -154,6 +154,10 @@ func (a *Adapter) StartScan(ctx context.Context) error {
 	return a.scanLocked(ctx)
 }
 
+// ScansSynchronously tells the download manager that StartScan has finished by
+// the time it returns, so there is no scan to wait for.
+func (a *Adapter) ScansSynchronously() bool { return true }
+
 // scanLocked reads the directory; the caller holds scanMu.
 func (a *Adapter) scanLocked(ctx context.Context) error {
 	a.mu.Lock()

@@ -2672,6 +2672,40 @@ func TestStopCancelsInFlightDownloads(t *testing.T) {
 	}
 }
 
+// syncScanner finishes its scan inside StartScan, like the localfiles library.
+type syncScanner struct{ fakeScanner }
+
+func (*syncScanner) ScansSynchronously() bool { return true }
+
+// A scan that is already over when StartScan returns never reports
+// Scanning=true, so waiting for it to begin only burns the settle window —
+// seconds a phone's newly fetched tracks spend unplayable.
+func TestSynchronousScanRematchesWithoutWaitingForTheScanToStart(t *testing.T) {
+	clk := newFakeClock()
+	store := newMemStore()
+	m := NewManager(Config{Workers: 1, DebounceWindow: time.Second, ScanPollEvery: time.Millisecond, ScanSettleMax: time.Hour},
+		wrapDownloaders([]Downloader{&fakeDL{name: "dl", canDownload: true}}), store, events.New(), &syncScanner{},
+		&fakeRematcher{trackID: "lib-1"}, &fakeVersion{v: 1}, clk, nil, nil)
+	t.Cleanup(m.Stop)
+	m.Start()
+	job, err := m.Enqueue(context.Background(), core.DownloadRequest{Source: "spotify", ExternalID: "e1", Artist: "A", Title: "T"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForStatus(t, store, job.ID, core.DownloadCompleted)
+
+	scanned := make(chan struct{})
+	go func() { clk.Advance(time.Second); close(scanned) }()
+	select {
+	case <-scanned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("rematch waited for a synchronous scan to start")
+	}
+	if got, _, _ := store.Get(context.Background(), job.ID); got.LibraryTrackID != "lib-1" {
+		t.Fatalf("library_track_id = %q, want lib-1", got.LibraryTrackID)
+	}
+}
+
 // A user cancel is still a cancel — the shutdown path must not swallow it.
 func TestCancelStillMarksCanceled(t *testing.T) {
 	dl := &fakeDL{name: "dl", canDownload: true, block: make(chan struct{})}

@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/uhhhm/reverb/internal/core"
@@ -59,6 +60,9 @@ func folderSubsonic(t *testing.T, musicDir string) *httptest.Server {
 		body["status"], body["version"] = "ok", "1.16.1"
 		_ = json.NewEncoder(w).Encode(map[string]any{"subsonic-response": body})
 	}
+	// Like Navidrome, a started scan is seen running once, then done, so the
+	// download manager's wait for it to begin ends at once.
+	var scanStarted atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		q := r.URL.Query()
@@ -101,8 +105,11 @@ func folderSubsonic(t *testing.T, musicDir string) *httptest.Server {
 			ok(w, map[string]any{"artists": map[string]any{"index": []any{}}})
 		case "getAlbumList2":
 			ok(w, map[string]any{"albumList2": map[string]any{"album": []any{}}})
-		case "getScanStatus", "startScan":
-			ok(w, map[string]any{"scanStatus": map[string]any{"scanning": false, "count": len(songs())}})
+		case "startScan":
+			scanStarted.Store(true)
+			ok(w, map[string]any{"scanStatus": map[string]any{"scanning": true, "count": len(songs())}})
+		case "getScanStatus":
+			ok(w, map[string]any{"scanStatus": map[string]any{"scanning": scanStarted.Swap(false), "count": len(songs())}})
 		default:
 			ok(w, map[string]any{})
 		}
