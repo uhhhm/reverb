@@ -68,7 +68,7 @@ func TestSectionedDownloadsGetTheirOwnCatalogIdentity(t *testing.T) {
 		Source: res.Source, ExternalID: res.ExternalID, Title: res.Title, Artist: res.Artist,
 		ManualURL: res.URL, PreferDownloader: "ytdlp",
 	}
-	planner := linkadd.New(nil, nil, chapterSource{chapters: []core.Chapter{
+	planner := linkadd.New(nil, chapterSource{chapters: []core.Chapter{
 		{Title: "Opening", StartSec: 0, EndSec: 241.5},
 		{Title: "Encore", StartSec: 241.5, EndSec: 530},
 	}})
@@ -112,6 +112,13 @@ func TestSectionedDownloadsGetTheirOwnCatalogIdentity(t *testing.T) {
 		wrapDownloaders(nil), jobs, nil, &fakeScanner{}, rematch, &fakeVersion{v: 1}, nil, nil, nil,
 	)
 	m.SetCanonicalMinter(cat)
+	linkID, err := cat.CanonicalFor(ctx, catalog.Identity{
+		Kind: res.Kind, Source: res.Source, ExternalID: res.ExternalID,
+		Title: res.Title, Artist: res.Artist,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	m.BackfillUnlinked()
 
 	ids := map[string]string{}
@@ -125,8 +132,10 @@ func TestSectionedDownloadsGetTheirOwnCatalogIdentity(t *testing.T) {
 		}
 		ids[id] = j.CanonicalID
 	}
-	linkID := linkadd.CatalogID(res.Source, res.Kind, res.ExternalID)
-	seen := map[string]string{linkID: "link-add entry"}
+	if ids["whole"] != linkID {
+		t.Errorf("whole download catalog id = %q, want link entry %q", ids["whole"], linkID)
+	}
+	seen := map[string]string{}
 	for _, id := range []string{"whole", "opening", "encore", "trim"} {
 		if other, dup := seen[ids[id]]; dup {
 			t.Errorf("%s shares catalog id %s with %s", id, ids[id], other)

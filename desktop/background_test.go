@@ -171,7 +171,7 @@ func TestWindowControlOpenActivatesWithoutStopping(t *testing.T) {
 }
 
 func TestSecondLaunchWaitsForStartingWindowControl(t *testing.T) {
-	dir := t.TempDir()
+	dir := socketTempDir(t)
 	release, err := AcquireSingleInstanceLock(dir)
 	if err != nil {
 		t.Fatal(err)

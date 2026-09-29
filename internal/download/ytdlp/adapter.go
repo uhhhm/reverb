@@ -459,7 +459,7 @@ func (a *Adapter) Start(ctx context.Context, req core.DownloadRequest, onProgres
 	report, reportErr := os.CreateTemp("", "ytdlp-file-*")
 	if reportErr == nil {
 		_ = report.Close()
-		defer os.Remove(report.Name())
+		defer func() { _ = os.Remove(report.Name()) }()
 		args = append(args, "--print-to-file", "after_move:filepath", report.Name())
 	}
 	args = append(args, "--output", a.outputTemplate(req), "--", query)

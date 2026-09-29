@@ -469,7 +469,7 @@ func (k *Keeper) Prune(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	protect, removed, err := k.settlePending(ctx, root, keep)
 	if err != nil {
 		return err
