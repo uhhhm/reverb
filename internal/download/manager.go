@@ -503,6 +503,31 @@ func (m *Manager) enrichISRC(ctx context.Context, req core.DownloadRequest) core
 	return req
 }
 
+// recordingOf describes the recording job j produced, for matching it to the
+// library and minting its catalog entity. A trimmed job (a time range, or one
+// chapter of a split) is a different recording from its source, so it drops
+// the source's external address and ISRC: both name the whole source, and
+// matching or minting by them would fold every section into one match-cache
+// row and one catalog entity. The section is told apart by its metadata instead,
+// with its own length as the duration. An open-ended trim of a source whose
+// length is unknown keeps the job's duration.
+func (m *Manager) recordingOf(ctx context.Context, j core.DownloadJob) core.ExternalResult {
+	rec := core.ExternalResult{
+		Source: j.Source, ExternalID: j.ExternalID, Type: core.EntityTrack,
+		Title: j.Title, Artist: j.Artist, Album: j.Album, ISRC: j.ISRC,
+		DurationMs: j.DurationMs,
+	}
+	req := m.requestForJob(ctx, j)
+	if !sectioned(req) {
+		return rec
+	}
+	rec.Source, rec.ExternalID, rec.ISRC = "", "", ""
+	if ms := sectionDurationMs(req, j.DurationMs); ms > 0 {
+		rec.DurationMs = ms
+	}
+	return rec
+}
+
 // mintAndStoreCanonicalID mints (or resolves) a catalog entity id for job j and
 // stores it on the row. Called ONLY at link time (linkJob) for
 // jobs that are newly matched — never for archived, unlinked, or already-minted jobs.
@@ -512,15 +537,16 @@ func (m *Manager) mintAndStoreCanonicalID(ctx context.Context, j core.DownloadJo
 	if m.canonicalMinter == nil {
 		return ""
 	}
+	rec := m.recordingOf(ctx, j)
 	id := catalog.Identity{
 		Kind:       "track",
-		Source:     j.Source,
-		ExternalID: j.ExternalID,
-		ISRC:       j.ISRC,
-		Title:      j.Title,
-		Artist:     j.Artist,
-		Album:      j.Album,
-		DurationMs: j.DurationMs,
+		Source:     rec.Source,
+		ExternalID: rec.ExternalID,
+		ISRC:       rec.ISRC,
+		Title:      rec.Title,
+		Artist:     rec.Artist,
+		Album:      rec.Album,
+		DurationMs: rec.DurationMs,
 	}
 	cid, err := m.canonicalMinter.CanonicalFor(ctx, id)
 	if err != nil {
@@ -639,11 +665,7 @@ func (m *Manager) BackfillUnlinked() {
 		if j.Status != core.DownloadCompleted || j.LibraryTrackID != "" {
 			continue
 		}
-		res, merr := m.rematcher.Match(ctx, core.ExternalResult{
-			Source: j.Source, ExternalID: j.ExternalID, Type: core.EntityTrack,
-			Title: j.Title, Artist: j.Artist, Album: j.Album, ISRC: j.ISRC,
-			DurationMs: j.DurationMs,
-		})
+		res, merr := m.rematcher.Match(ctx, m.recordingOf(ctx, j))
 		if merr != nil || res.Status != core.MatchInLibrary {
 			continue
 		}
@@ -1584,11 +1606,7 @@ func (m *Manager) runScan() {
 		}
 		// Forward all job metadata so the matcher can search the library by title/artist/ISRC.
 		// An empty Title would leave the matcher with no candidate query → no match ever found.
-		res, merr := m.rematcher.Match(ctx, core.ExternalResult{
-			Source: j.Source, ExternalID: j.ExternalID, Type: core.EntityTrack,
-			Title: j.Title, Artist: j.Artist, Album: j.Album, ISRC: j.ISRC,
-			DurationMs: j.DurationMs,
-		})
+		res, merr := m.rematcher.Match(ctx, m.recordingOf(ctx, j))
 		if merr != nil || res.Status != core.MatchInLibrary {
 			continue
 		}
