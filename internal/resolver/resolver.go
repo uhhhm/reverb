@@ -39,6 +39,7 @@ type Querier interface {
 	GetCatalogEntity(ctx context.Context, id string) (db.CatalogEntity, error)
 	GetBackendBinding(ctx context.Context, arg db.GetBackendBindingParams) (db.BackendBinding, error)
 	UpsertBackendBinding(ctx context.Context, arg db.UpsertBackendBindingParams) error
+	StaleBackendBinding(ctx context.Context, arg db.StaleBackendBindingParams) error
 	GetSetting(ctx context.Context, key string) (string, error)
 	UpsertSetting(ctx context.Context, arg db.UpsertSettingParams) error
 }
@@ -225,15 +226,17 @@ func (s *Service) RefreshLinked(ctx context.Context, catalogIDs []string) error 
 	curEpoch := s.epoch(ctx, identity)
 
 	for _, catalogID := range catalogIDs {
-		// Mark the binding as stale (epoch-1) so Resolve will re-match. A failed
-		// write must abort: otherwise a fresh-epoch row survives and the follow-up
-		// Resolve returns the STALE cached value, silently defeating RefreshLinked.
-		if werr := s.q.UpsertBackendBinding(ctx, db.UpsertBackendBindingParams{
+		// Mark the binding as stale (epoch-1) so Resolve will re-match. It keeps
+		// its backend id meanwhile: a rename or crop made now looks its catalog
+		// id up by that id. A failed write must abort: otherwise a fresh-epoch
+		// row survives and the follow-up Resolve returns the STALE cached value,
+		// silently defeating RefreshLinked. With no binding at all there is
+		// nothing to mark, and Resolve matches anyway.
+		if werr := s.q.StaleBackendBinding(ctx, db.StaleBackendBindingParams{
+			BindingEpoch:    curEpoch - 1,
+			ResolvedAt:      s.now().Unix(),
 			CatalogID:       catalogID,
 			LibraryIdentity: identity,
-			BindingEpoch:    curEpoch - 1,
-			KnownAbsent:     0,
-			ResolvedAt:      s.now().Unix(),
 		}); werr != nil {
 			return werr
 		}

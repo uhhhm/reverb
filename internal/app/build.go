@@ -360,7 +360,8 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	}
 	builder.SetDownloadCompletionHook(downloadCompletion)
 	// A download linked to its library track enters household browsing at once,
-	// including a track deleted earlier and downloaded again. That holds on a
+	// including a track deleted earlier and downloaded again: library deletion
+	// only sets libraryPresent false, which this sets back. That holds on a
 	// phone too: its Downloads are library, though its offline files are
 	// copies, which never pass through the download manager.
 	builder.SetDownloadLinkedHook(emitter.EnsureLibraryMembership)

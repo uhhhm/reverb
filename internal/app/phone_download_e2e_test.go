@@ -59,9 +59,15 @@ func newDownloadingPhone(t *testing.T) *syncDevice {
 // is stored a moment before the catalog id is minted.
 func (d *syncDevice) download(title string) core.DownloadJob {
 	d.t.Helper()
+	return d.downloadFrom("deezer", "dz-"+title, title)
+}
+
+// downloadFrom is download of a particular search result.
+func (d *syncDevice) downloadFrom(source, externalID, title string) core.DownloadJob {
+	d.t.Helper()
 	var job core.DownloadJob
 	d.must(http.MethodPost, "/downloads", map[string]any{
-		"source": "deezer", "externalId": "dz-" + title, "artist": "Band", "title": title, "album": "Record",
+		"source": source, "externalId": externalID, "artist": "Band", "title": title, "album": "Record",
 	}, &job, http.StatusOK)
 	var last core.DownloadJob
 	deadline := time.Now().Add(45 * time.Second)

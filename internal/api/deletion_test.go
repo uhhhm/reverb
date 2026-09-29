@@ -240,27 +240,3 @@ func TestDeletionRevisionMonotonic(t *testing.T) {
 		}
 	}
 }
-
-func TestDeletionTrackTombstone(t *testing.T) {
-	_, st := newDeletionServer(t)
-	ctx := context.Background()
-	ss := syncpkg.NewSyncStore(st.Q())
-	ds := syncpkg.NewDeletionService(ss, st.Q())
-	// ensure not deleted before
-	deleted, _ := ds.IsDeleted(ctx, "track", "trk_del_1")
-	if deleted {
-		t.Fatal("track should not be deleted initially")
-	}
-	rev, err := ds.DeleteTrack(ctx, "dev_server", "trk_del_1", time.Now().UnixMilli())
-	if err != nil || rev == 0 {
-		t.Fatalf("DeleteTrack err %v rev %d", err, rev)
-	}
-	deleted, _ = ds.IsDeleted(ctx, "track", "trk_del_1")
-	if !deleted {
-		t.Fatal("track IsDeleted false after")
-	}
-	ch, _ := ss.GetLatestForField(ctx, "track", "trk_del_1", "__deleted")
-	if ch == nil || ch.Field != "__deleted" {
-		t.Fatalf("track tombstone missing %+v", ch)
-	}
-}

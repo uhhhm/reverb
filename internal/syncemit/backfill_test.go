@@ -139,7 +139,7 @@ func TestLibraryMetadataPublishesWithoutAPlayOrPlaylist(t *testing.T) {
 	}
 }
 
-func TestLibraryBrowseIncludesExternallyMintedTrackAndExcludesDeletion(t *testing.T) {
+func TestLibraryBrowseIncludesExternallyMintedTrackAndFollowsMembership(t *testing.T) {
 	st, err := store.Open(t.TempDir() + "/reverb.db")
 	if err != nil {
 		t.Fatal(err)
@@ -203,12 +203,25 @@ func TestLibraryBrowseIncludesExternallyMintedTrackAndExcludesDeletion(t *testin
 	if rows := list(); len(rows) != 1 {
 		t.Fatalf("track returned to the library was missing: %+v", rows)
 	}
+
+	// Library deletion writes no track tombstone, but a log may hold one written
+	// by an earlier version. That track stays hidden for good: neither a
+	// publish nor a download linking it brings it back.
 	if _, err := log.AppendChange(ctx, "dev_local", reverbsync.SyncChange{
 		EntityType: reverbsync.EntityTrack, EntityID: cid, Field: reverbsync.FieldDeleted, UpdatedAt: time.Now().UnixMilli(),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if rows := list(); len(rows) != 0 {
-		t.Fatalf("deleted track still appeared in library: %+v", rows)
+		t.Fatalf("track under a legacy tombstone still appeared in library: %+v", rows)
+	}
+	before := changeCount(t, st)
+	emit.PublishLibrary(ctx, trackLibrary{{Title: "One", Artist: "Band", Album: "Record", DurationMs: 180000}}, cat)
+	emit.EnsureLibraryMembership(ctx, cid)
+	if rows := list(); len(rows) != 0 {
+		t.Fatalf("track under a legacy tombstone came back: %+v", rows)
+	}
+	if got := changeCount(t, st); got != before {
+		t.Fatalf("membership was appended under a legacy tombstone: %d changes, want %d", got, before)
 	}
 }

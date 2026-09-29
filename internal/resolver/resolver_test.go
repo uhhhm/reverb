@@ -299,3 +299,61 @@ func TestResolve_DetachesContextForFlight(t *testing.T) {
 		t.Fatalf("write-back did not persist; follow-up resolve = %+v err=%v", a2, err)
 	}
 }
+
+// lookupDuringMatch records what the backend id reverse lookup, the one a
+// rename or crop uses to find its catalog id, answers while a re-match runs.
+type lookupDuringMatch struct {
+	q      *db.Queries
+	seen   []string
+	result core.MatchResult
+}
+
+func (m *lookupDuringMatch) Match(ctx context.Context, _ core.ExternalResult) (core.MatchResult, error) {
+	id, _ := m.q.GetCatalogIDByBackendID(ctx, m.result.LibraryTrackID)
+	m.seen = append(m.seen, id)
+	return m.result, nil
+}
+
+// A refresh re-resolves a binding it believes stale, but the track stays
+// bound to its backend id while it does: a rename made in that moment still
+// finds the catalog id and replicates.
+func TestRefreshLinked_KeepsBackendIDReadableWhileRefreshing(t *testing.T) {
+	st := openStore(t)
+	q := st.Q()
+	cid := seedEntity(t, q, "trk_refresh", "Song", "Artist", "Album", 200000)
+	m := &lookupDuringMatch{q: q, result: core.MatchResult{Status: core.MatchInLibrary, LibraryTrackID: "nav-7"}}
+	svc := NewService(q, func() Rematcher { return m }, time.Now)
+	ctx := context.Background()
+	if a, err := svc.Resolve(ctx, cid); err != nil || a.BackendID != "nav-7" {
+		t.Fatalf("resolve = %+v, %v", a, err)
+	}
+
+	if err := svc.RefreshLinked(ctx, []string{cid}); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.seen) != 2 {
+		t.Fatalf("matcher ran %d times, want a first resolve and a refresh", len(m.seen))
+	}
+	if m.seen[1] != cid {
+		t.Fatalf("during the refresh nav-7 resolved to catalog id %q, want %q", m.seen[1], cid)
+	}
+	if id, _ := q.GetCatalogIDByBackendID(ctx, "nav-7"); id != cid {
+		t.Fatalf("after the refresh nav-7 resolves to %q, want %q", id, cid)
+	}
+}
+
+// Refreshing a catalog id that was never bound resolves it.
+func TestRefreshLinked_BindsAnUnboundTrack(t *testing.T) {
+	s, q, fm := newTestResolver(t)
+	ctx := context.Background()
+	cid := seedEntity(t, q, "trk_unbound", "Song", "Artist", "Album", 200000)
+	if err := s.RefreshLinked(ctx, []string{cid}); err != nil {
+		t.Fatal(err)
+	}
+	if fm.calls != 1 {
+		t.Fatalf("matcher ran %d times, want 1", fm.calls)
+	}
+	if id, _ := q.GetCatalogIDByBackendID(ctx, "nav-1"); id != cid {
+		t.Fatalf("nav-1 resolves to %q, want %q", id, cid)
+	}
+}

@@ -52,6 +52,9 @@ type syncDevice struct {
 	// bundled Navidrome, which never starts.
 	builtIn bool
 	env     map[string]string
+	// backend is the library server a built-in desktop's "Navidrome" is; nil
+	// is fakeSubsonic.
+	backend func(t *testing.T, musicDir string) *httptest.Server
 	rt      *Runtime
 	srv     *httptest.Server
 	stop    func()
@@ -97,21 +100,24 @@ func newSyncDevice(t *testing.T, name string, opts ...deviceOption) *syncDevice 
 	t.Helper()
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "reverb.db")
-	lib := fakeSubsonic(t)
-
 	d := &syncDevice{t: t, name: name, dbPath: dbPath, musicDir: filepath.Join(tmp, "music"), p2pPort: freeP2PPort(t)}
 	for _, o := range opts {
 		o(d)
+	}
+	lib := fakeSubsonic(t)
+	if d.backend != nil {
+		lib = d.backend(t, d.musicDir)
 	}
 	if d.builtIn {
 		u, err := url.Parse(lib.URL)
 		if err != nil {
 			t.Fatal(err)
 		}
-		d.env = map[string]string{
-			"REVERB_NAVIDROME_PORT": u.Port(),
-			"REVERB_NAVIDROME_BIN":  filepath.Join(tmp, "no-navidrome"),
+		if d.env == nil {
+			d.env = map[string]string{}
 		}
+		d.env["REVERB_NAVIDROME_PORT"] = u.Port()
+		d.env["REVERB_NAVIDROME_BIN"] = filepath.Join(tmp, "no-navidrome")
 	} else {
 		// An enabled library row makes wiring pick external mode and build the
 		// playlist service; the bundled spotDL downloader row is seeded by Build.

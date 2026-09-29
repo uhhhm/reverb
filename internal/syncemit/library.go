@@ -61,7 +61,8 @@ func (s *Service) PublishLibrary(ctx context.Context, library LibraryBrowser, ca
 // unless the log already says so. Catalog source describes how an identity was
 // first minted, not whether it later entered the library. Deleting the track
 // sets the marker false; the boot publish or a download linking the track
-// again sets it back.
+// again sets it back. Library deletion writes no track tombstone, but a track
+// tombstoned before it stopped stays hidden for good, so none is appended.
 func (s *Service) EnsureLibraryMembership(ctx context.Context, catalogID string) {
 	if !s.ready() || catalogID == "" {
 		return

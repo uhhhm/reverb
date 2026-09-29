@@ -41,28 +41,6 @@ func (s *DeletionService) DeletePlaylist(ctx context.Context, deviceID, playlist
 	})
 }
 
-// DeleteTrack appends a __deleted tombstone for catalogID (e.g. trk_…).
-func (s *DeletionService) DeleteTrack(ctx context.Context, deviceID, catalogID string, updatedAt int64) (int64, error) {
-	if updatedAt == 0 {
-		updatedAt = time.Now().UnixMilli()
-	}
-	if deviceID == "" {
-		if id, err := resolveServerDevice(ctx, s.q); err == nil {
-			deviceID = id
-		}
-	}
-	if deviceID == "" {
-		return 0, ErrNoServerDevice
-	}
-	return s.store.AppendChange(ctx, deviceID, SyncChange{
-		EntityType: "track",
-		EntityID:   catalogID,
-		Field:      "__deleted",
-		Value:      nil,
-		UpdatedAt:  updatedAt,
-	})
-}
-
 // IsDeleted reports whether entityType+entityID has a __deleted tombstone.
 func (s *DeletionService) IsDeleted(ctx context.Context, entityType, entityID string) (bool, error) {
 	ch, err := s.store.GetLatestForField(ctx, entityType, entityID, "__deleted")

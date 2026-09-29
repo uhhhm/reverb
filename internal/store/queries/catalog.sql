@@ -60,6 +60,12 @@ ON CONFLICT(catalog_id, library_identity) DO UPDATE SET
   backend_id=excluded.backend_id, cover_art_id=excluded.cover_art_id,
   known_absent=excluded.known_absent, binding_epoch=excluded.binding_epoch, resolved_at=excluded.resolved_at;
 
+-- name: StaleBackendBinding :exec
+-- Marks one binding for re-resolution and keeps what it points at, so the
+-- backend id still resolves to its catalog id until the re-match lands.
+UPDATE backend_binding SET binding_epoch = ?, resolved_at = ?
+WHERE catalog_id = ? AND library_identity = ?;
+
 -- name: DeleteBindingsForCatalog :exec
 DELETE FROM backend_binding WHERE catalog_id = ?;
 

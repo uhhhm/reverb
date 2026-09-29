@@ -390,6 +390,30 @@ func (q *Queries) RepointBindings(ctx context.Context, arg RepointBindingsParams
 	return err
 }
 
+const staleBackendBinding = `-- name: StaleBackendBinding :exec
+UPDATE backend_binding SET binding_epoch = ?, resolved_at = ?
+WHERE catalog_id = ? AND library_identity = ?
+`
+
+type StaleBackendBindingParams struct {
+	BindingEpoch    int64  `json:"binding_epoch"`
+	ResolvedAt      int64  `json:"resolved_at"`
+	CatalogID       string `json:"catalog_id"`
+	LibraryIdentity string `json:"library_identity"`
+}
+
+// Marks one binding for re-resolution and keeps what it points at, so the
+// backend id still resolves to its catalog id until the re-match lands.
+func (q *Queries) StaleBackendBinding(ctx context.Context, arg StaleBackendBindingParams) error {
+	_, err := q.db.ExecContext(ctx, staleBackendBinding,
+		arg.BindingEpoch,
+		arg.ResolvedAt,
+		arg.CatalogID,
+		arg.LibraryIdentity,
+	)
+	return err
+}
+
 const upsertBackendBinding = `-- name: UpsertBackendBinding :exec
 INSERT INTO backend_binding (catalog_id, library_identity, backend_id, cover_art_id, known_absent, binding_epoch, resolved_at)
 VALUES (?,?,?,?,?,?,?)

@@ -27,8 +27,10 @@ type localTrackPathProvider interface {
 }
 
 // handleRemoveLibraryTrack deletes an owned audio file, then asks the bundled
-// library to rescan. The sync tombstone uses the stable catalog id when one is
-// available, while the HTTP contract remains keyed by the backend id shown in
+// library to rescan. The file's content tombstone removes its copies on every
+// device. The track itself is only withdrawn from household browsing, under its
+// stable catalog id: its identity, plays and overrides stay, and downloading it
+// again returns it. The HTTP contract remains keyed by the backend id shown in
 // track payloads.
 func (s *Server) handleRemoveLibraryTrack(w http.ResponseWriter, r *http.Request) {
 	trackID := chi.URLParam(r, "id")
@@ -120,8 +122,9 @@ func (s *Server) handleRemoveLibraryTrack(w http.ResponseWriter, r *http.Request
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not persist track deletion"})
 			return
 		}
-		// Withdraw the track from household browsing; a later library publish
-		// sets it again if the track comes back.
+		// Withdraw the track from household browsing. This is not a track
+		// tombstone, which would hide it for good: a download linking it again,
+		// or a library publish that finds it, sets it back.
 		if catalogID != "" {
 			if _, err := s.deps.SyncStore.AppendChange(r.Context(), deviceID, reverbsync.SyncChange{
 				EntityType: reverbsync.EntityTrack, EntityID: catalogID, Field: reverbsync.FieldLibraryPresent, Value: false, UpdatedAt: time.Now().UnixMilli(),
@@ -141,7 +144,6 @@ func (s *Server) handleRemoveLibraryTrack(w http.ResponseWriter, r *http.Request
 		scanner.ScheduleScan()
 		scanning = true
 	}
-	s.emitTrackDeletion(r.Context(), catalogID)
 	writeJSON(w, http.StatusOK, map[string]any{"removed": true, "scanning": scanning})
 }
 
@@ -171,34 +173,6 @@ func (s *Server) emitPlaylistDeletion(ctx context.Context, playlistID string) {
 		UpdatedAt:  time.Now().UnixMilli(),
 	}); err != nil {
 		log.Printf("sync tombstone playlist %q: %v", playlistID, err)
-	}
-}
-
-// emitTrackDeletion emits a track __deleted tombstone via DeletionService.
-func (s *Server) emitTrackDeletion(ctx context.Context, catalogID string) {
-	if catalogID == "" {
-		return
-	}
-	if s.deps.Deletion != nil {
-		if _, err := s.deps.Deletion.DeleteTrack(ctx, "", catalogID, 0); err != nil {
-			log.Printf("sync tombstone track %q: %v", catalogID, err)
-		}
-		return
-	}
-	if s.deps.SyncStore == nil {
-		return
-	}
-	deviceID := s.resolveAuthorDeviceForSync(ctx)
-	if deviceID == "" {
-		return
-	}
-	if _, err := s.deps.SyncStore.AppendChange(ctx, deviceID, reverbsync.SyncChange{
-		EntityType: "track",
-		EntityID:   catalogID,
-		Field:      "__deleted",
-		UpdatedAt:  time.Now().UnixMilli(),
-	}); err != nil {
-		log.Printf("sync tombstone track %q: %v", catalogID, err)
 	}
 }
 

@@ -45,26 +45,6 @@ func TestDeletionDeletePlaylistEmitsTombstone(t *testing.T) {
 	}
 }
 
-func TestDeletionDeleteTrackEmitsTombstone(t *testing.T) {
-	st := newTestStoreSync(t)
-	ctx := context.Background()
-	q := st.Q()
-	ss := syncpkg.NewSyncStore(q)
-	createDevice(t, st, "dev_server", "server", 1)
-	ds := syncpkg.NewDeletionService(ss, q)
-	rev, err := ds.DeleteTrack(ctx, "dev_server", "trk_abc", 5678)
-	if err != nil {
-		t.Fatalf("DeleteTrack: %v", err)
-	}
-	if rev == 0 {
-		t.Fatal("rev 0")
-	}
-	ch, _ := ss.GetLatestForField(ctx, "track", "trk_abc", "__deleted")
-	if ch == nil || ch.EntityID != "trk_abc" || ch.EntityType != "track" {
-		t.Fatalf("track tombstone %+v", ch)
-	}
-}
-
 func TestDeletionIsDeleted(t *testing.T) {
 	st := newTestStoreSync(t)
 	ctx := context.Background()
