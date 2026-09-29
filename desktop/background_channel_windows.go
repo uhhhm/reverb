@@ -33,7 +33,16 @@ func backgroundSocket(dataDir string) string {
 
 // dialBackgroundControl connects to the running background runtime.
 func dialBackgroundControl(ctx context.Context, dataDir string) (net.Conn, error) {
-	return (&net.Dialer{}).DialContext(ctx, "unix", backgroundSocket(dataDir))
+	sock := backgroundSocket(dataDir)
+	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", sock)
+	// Windows can report WSAENETDOWN before the lock owner creates the socket.
+	// Confirm absence rather than treating every network failure as a retry.
+	if errors.Is(err, windows.WSAENETDOWN) {
+		if _, statErr := os.Stat(sock); errors.Is(statErr, os.ErrNotExist) {
+			return nil, statErr
+		}
+	}
+	return conn, err
 }
 
 // listenBackgroundControl publishes the control channel.
