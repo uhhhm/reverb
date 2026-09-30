@@ -197,8 +197,10 @@ func TestDelegatorCachesPlayableProbes(t *testing.T) {
 	d := NewDelegator(func() host.Host { return client }, func() *Guard { return clientGuard }, clientStore)
 	d.now = func() time.Time { return now }
 
-	if !d.Playable(ctx, "trk_song") || !d.Playable(ctx, "trk_song") {
-		t.Fatal("track not playable")
+	for i := 0; i < 2; i++ {
+		if !d.Playable(ctx, "trk_song") {
+			t.Fatal("track not playable")
+		}
 	}
 	if got := opens.Load(); got != 1 {
 		t.Fatalf("probes = %d, want 1 within the cache window", got)

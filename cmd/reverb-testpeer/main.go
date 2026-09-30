@@ -66,7 +66,7 @@ func run(ctx context.Context, addr string, p2pPort int, dir string, ready func(a
 		if err != nil {
 			return err
 		}
-		defer os.RemoveAll(d)
+		defer func() { _ = os.RemoveAll(d) }()
 		dir = d
 	}
 	// The phone profile keeps its library in <dir>/music and needs no

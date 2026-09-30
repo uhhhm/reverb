@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,4 +40,16 @@ func socketTempDir(t *testing.T) string {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	return dir
+}
+
+// Before the lock owner publishes its socket, a second launch must retry.
+func TestMissingBackgroundControlIsNotRunning(t *testing.T) {
+	conn, err := dialBackgroundControl(context.Background(), socketTempDir(t))
+	if conn != nil {
+		_ = conn.Close()
+		t.Fatal("connected to an unpublished control channel")
+	}
+	if !backgroundNotRunning(err) {
+		t.Fatalf("missing control channel was not classified as absent: %v", err)
+	}
 }

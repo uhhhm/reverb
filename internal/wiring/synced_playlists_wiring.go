@@ -226,6 +226,7 @@ func (b *Builder) BuildSyncService(
 	svc.WithEmitter(b.playlistEmitter)
 	svc.WithLibraryReader(lib)
 	svc.WithSettingsStore(settings)
+	svc.WithEditLocks(b.playlistLocks)
 	// Task 5: wire the canonical minter so AddTracks mints stable catalog ids for
 	// library-source tracks at persist time. Nil-safe: WithCanonicalMinter skips
 	// minting when nil. The minter is set via builder.SetCanonicalMinter before Build.

@@ -337,18 +337,27 @@ func (s *SyncStore) AppendChange(ctx context.Context, deviceID string, ch SyncCh
 	defer s.mu.Unlock()
 	// Author sequence and log row are one write. A failed insert must not
 	// consume a sequence that every downstream vector would wait for forever.
-	if conn, ok := s.q.UnderlyingDB().(*sql.DB); ok {
-		tx, err := conn.BeginTx(ctx, nil)
+	if pool, ok := s.q.UnderlyingDB().(*sql.DB); ok {
+		conn, err := pool.Conn(ctx)
 		if err != nil {
 			return 0, err
 		}
-		defer func() { _ = tx.Rollback() }()
-		txStore := &SyncStore{q: s.q.WithTx(tx), hlc: s.hlc, signer: s.signer, localDeviceID: s.localDeviceID}
+		defer func() { _ = conn.Close() }()
+		// Reserve the writer before reading the author vector. A deferred
+		// transaction can fail its read-to-write upgrade immediately with
+		// SQLITE_BUSY, bypassing busy_timeout when another writer is active.
+		if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+			return 0, err
+		}
+		// Roll back even if the caller was canceled, before returning this
+		// connection to the pool. After COMMIT this is a harmless no-op.
+		defer func() { _, _ = conn.ExecContext(context.Background(), "ROLLBACK") }()
+		txStore := &SyncStore{q: db.New(conn), hlc: s.hlc, signer: s.signer, localDeviceID: s.localDeviceID}
 		rev, err := txStore.appendLocal(ctx, deviceID, ch)
 		if err != nil {
 			return 0, err
 		}
-		if err := tx.Commit(); err != nil {
+		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 			return 0, err
 		}
 		return rev, nil

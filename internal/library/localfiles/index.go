@@ -394,7 +394,7 @@ func (a *Adapter) openRel(rel string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
+	defer func() { _ = root.Close() }()
 	f, err := root.Open(filepath.FromSlash(rel))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("localfiles: %s: %w", rel, core.ErrLibraryItemNotFound)

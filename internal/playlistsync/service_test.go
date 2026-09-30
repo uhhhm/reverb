@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -106,10 +107,13 @@ func (m fakeMatcher) Match(_ context.Context, ext core.ExternalResult) (core.Mat
 // ---------------------------------------------------------------------------
 
 type fakeDownloader struct {
+	mu    sync.Mutex
 	calls []core.DownloadRequest
 }
 
 func (d *fakeDownloader) Enqueue(_ context.Context, req core.DownloadRequest) (core.DownloadJob, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.calls = append(d.calls, req)
 	return core.DownloadJob{ID: "dl-" + req.ExternalID, Source: req.Source, ExternalID: req.ExternalID}, nil
 }

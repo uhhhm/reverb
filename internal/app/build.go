@@ -1002,7 +1002,7 @@ func (r *Runtime) spotifyCredentials(ctx context.Context) (p2p.SearchCredentials
 		cfg := map[string]any{}
 		if row.ConfigJson != "" {
 			if err := json.Unmarshal([]byte(row.ConfigJson), &cfg); err != nil {
-				return p2p.SearchCredentials{}, errors.New("Spotify source configuration is invalid")
+				return p2p.SearchCredentials{}, errors.New("spotify source configuration is invalid")
 			}
 		}
 		wiring.ApplySpotifyEnv(cfg, r.Getenv)

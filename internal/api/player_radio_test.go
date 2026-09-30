@@ -156,8 +156,8 @@ func TestPlayerRadioFromArtistStartsWithARecommendation(t *testing.T) {
 func TestPlayerRadioSteeringKeepsRadioBehindListenerQueue(t *testing.T) {
 	c := newPlayerClient(t, nil)
 	c.srv.deps.Recommend = radioRecs("B", "C", "D", "E", "F", "G")
-	st := c.settled("radio", map[string]any{"lead": []map[string]any{{"id": "lead", "title": "Lead", "artist": "A", "durationMs": 10000}}, "seeds": []recommend.Seed{{Artist: "A", Title: "Lead"}}})
-	st = c.settled("enqueue", map[string]any{"tracks": tracks("m1", "m2", "m3")})
+	c.settled("radio", map[string]any{"lead": []map[string]any{{"id": "lead", "title": "Lead", "artist": "A", "durationMs": 10000}}, "seeds": []recommend.Seed{{Artist: "A", Title: "Lead"}}})
+	st := c.settled("enqueue", map[string]any{"tracks": tracks("m1", "m2", "m3")})
 	radioAhead := func(st player.State) int {
 		n := 0
 		for _, i := range st.UpNext {

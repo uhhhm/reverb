@@ -188,7 +188,7 @@ func (u *Updater) Check(ctx context.Context, client *http.Client, base string) e
 	if err != nil {
 		return err
 	}
-	defer os.Remove(pending.Name())
+	defer func() { _ = os.Remove(pending.Name()) }()
 	if _, err = pending.Write(data); err == nil {
 		err = pending.Sync()
 	}
@@ -252,7 +252,7 @@ func atomicWrite(p string, b []byte) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	if _, err = f.Write(b); err == nil {
 		err = f.Sync()
 	}
