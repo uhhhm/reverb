@@ -1,3 +1,4 @@
+import { refreshLibrary } from './libraryQueries'
 import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { RealtimeConnection, type WebSocketLike } from './realtime'
@@ -17,22 +18,6 @@ export function useRealtime(makeSocket?: (url: string) => WebSocketLike): void {
   const qc = useQueryClient()
 
   useEffect(() => {
-    // Broad library invalidation is the MVP behavior; per-album/artist is a
-    // best-effort optimization applied only when the id is present (deferred:
-    // the backend may surface empty artistId/albumId on download.complete).
-    // Detail-page queries use separate root keys — invalidate them too so a
-    // completed download flips a missing row to playable without a hard reload.
-    function invalidateLibrary(ids?: { artistId?: string; albumId?: string }) {
-      void qc.invalidateQueries({ queryKey: ['library'] })
-      if (ids?.albumId) void qc.invalidateQueries({ queryKey: ['library', 'album', ids.albumId] })
-      if (ids?.artistId) void qc.invalidateQueries({ queryKey: ['library', 'artist', ids.artistId] })
-      void qc.invalidateQueries({ queryKey: ['album-detail'] })
-      void qc.invalidateQueries({ queryKey: ['artist-detail'] })
-      void qc.invalidateQueries({ queryKey: ['synced-playlist'] })
-      void qc.invalidateQueries({ queryKey: ['synced-playlists'] })
-      void qc.invalidateQueries({ queryKey: ['stats'] })
-    }
-
     function onEvent(frame: RealtimeEvent) {
       switch (frame.type) {
         case 'download.queued':
@@ -45,15 +30,14 @@ export function useRealtime(makeSocket?: (url: string) => WebSocketLike): void {
         case 'download.complete': {
           const ev = frame.payload
           useDownloads.getState().applyEvent(ev)
-          invalidateLibrary({ artistId: ev.artistId, albumId: ev.albumId })
+          void refreshLibrary(qc)
+          void qc.invalidateQueries({ queryKey: ['stats'] })
           useLibraryRevision.getState().bump()
           break
         }
         case 'library.updated': {
-          const ev = frame.payload
-          const albumId = ev.albumIds?.[0]
-          const artistId = ev.artistIds?.[0]
-          invalidateLibrary({ artistId, albumId })
+          void refreshLibrary(qc)
+          void qc.invalidateQueries({ queryKey: ['stats'] })
           // Bump the library revision so coverage streams re-open and chips flip.
           useLibraryRevision.getState().bump()
           break

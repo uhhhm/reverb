@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { refreshLibrary } from '../lib/libraryQueries'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button, Checkbox, Modal } from './ui'
 import { compileRule, previewChanges, EMPTY_RULE, type ReplaceRule } from '../lib/findReplace'
@@ -79,11 +80,13 @@ export function BatchRenameDialog({ subject, onClose, onApplied }: BatchRenameDi
     setBusy(true)
     setError(null)
     try {
-      await batchRename(buildRequest(subject, changes))
-      // Every list that can show these names re-reads from the library.
-      await qc.invalidateQueries({ queryKey: ['library'] })
-      await qc.invalidateQueries({ queryKey: ['album-detail'] })
-      await qc.invalidateQueries({ queryKey: ['synced-playlist'] })
+      const result = await batchRename(buildRequest(subject, changes))
+      if (result.applied > 0) await refreshLibrary(qc)
+      if (result.errors && Object.keys(result.errors).length > 0) {
+        setError(`${result.applied} saved. Failed renames: ${Object.entries(result.errors).map(([id, message]) => `${id}: ${message}`).join('; ')}`)
+        setBusy(false)
+        return
+      }
       onApplied?.()
       onClose()
     } catch (e) {

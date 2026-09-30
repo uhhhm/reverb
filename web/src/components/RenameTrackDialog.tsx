@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { refreshLibrary } from '../lib/libraryQueries'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button } from './ui/Button'
 import { renameTrack } from '../lib/libraryApi'
@@ -88,10 +89,7 @@ export function RenameTrackDialog({ track, onClose }: RenameTrackDialogProps) {
     setError(null)
     try {
       await renameTrack(trackId, { title: title.trim(), artist: artist.trim() })
-      // Every list that can show this track re-reads from the library.
-      await qc.invalidateQueries({ queryKey: ['library'] })
-      await qc.invalidateQueries({ queryKey: ['album-detail'] })
-      await qc.invalidateQueries({ queryKey: ['synced-playlist'] })
+      await refreshLibrary(qc)
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't rename this track")

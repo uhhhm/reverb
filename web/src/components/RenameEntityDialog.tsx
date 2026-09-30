@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { refreshLibrary } from '../lib/libraryQueries'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button, Modal } from './ui'
 import { renameAlbum, renameArtist } from '../lib/libraryEditApi'
@@ -29,8 +30,7 @@ export function RenameEntityDialog({ kind, id, currentName, onClose }: RenameEnt
     try {
       const rename = kind === 'album' ? renameAlbum : renameArtist
       await rename(id, name.trim())
-      await qc.invalidateQueries({ queryKey: ['library'] })
-      await qc.invalidateQueries({ queryKey: ['album-detail'] })
+      await refreshLibrary(qc)
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : `Couldn't rename this ${kind}`)

@@ -1,3 +1,4 @@
+import { libraryQueries } from './libraryQueries'
 import type { QueryClient } from '@tanstack/react-query'
 import { api } from './api'
 import type { Artist } from './types'
@@ -41,7 +42,7 @@ export async function artistPath(qc: QueryClient, track: ArtistRef): Promise<str
   if (!track.artist) return undefined
 
   const artists = await qc.fetchQuery({
-    queryKey: ['library', 'artists'],
+    queryKey: libraryQueries.artists,
     queryFn: () => api.get<Artist[]>('/library/artists'),
   })
   const want = norm(track.artist)

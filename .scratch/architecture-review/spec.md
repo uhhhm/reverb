@@ -23,12 +23,12 @@ locality) follows the `codebase-design` skill. Domain terms follow
 | 07 | [One listening judgement for play recording and Radio steering](issues/07-one-listening-judgement.md) | Strong | needs-triage |
 | 08 | [One module per replicated fact, from local edit to peer apply](issues/08-replicated-fact-modules.md) | Strong | needs-triage |
 | 09 | [Recommendation actions refresh every affected view](issues/09-recommendation-actions-refresh-every-view.md) | bug + Strong | done |
-| 10 | [Library renames refresh every affected view](issues/10-library-renames-refresh-every-view.md) | bug + Strong | ready-for-agent |
+| 10 | [Library renames refresh every affected view](issues/10-library-renames-refresh-every-view.md) | bug + Strong | done |
 | 11 | [Download completion survives recording failures and restart](issues/11-download-completion-survives-recording-failures.md) | Strong | ready-for-agent |
 | 12 | [Download controls follow one lifecycle](issues/12-download-controls-follow-one-lifecycle.md) | Strong | ready-for-agent |
 | 13 | [Every recommendation result honors current Not interested marks](issues/13-recommendation-results-honor-current-marks.md) | Worth doing | ready-for-agent |
 
-Among the remaining follow-ups, 10, 11 and 13 can start immediately. Ticket 12 is
+Among the remaining follow-ups, 11 and 13 can start immediately. Ticket 12 is
 blocked by 11. Priority does not add blocking edges between these workstreams.
 
 ## Candidates not ticketed yet

@@ -1,3 +1,4 @@
+import { libraryQueries } from './libraryQueries'
 import { useQuery } from '@tanstack/react-query'
 import { api } from './api'
 import { mediaBase } from './mediaBase'
@@ -14,7 +15,7 @@ export function getLibraryStatus(): Promise<LibraryStatus> {
 
 export function useLibraryStatus() {
   return useQuery({
-    queryKey: ['library', 'status'],
+    queryKey: libraryQueries.status,
     queryFn: getLibraryStatus,
     refetchInterval: (q) => (q.state.data?.state === 'starting' ? 3000 : false),
   })
@@ -91,7 +92,7 @@ export function trackCoverUrl(track: { albumId?: string; coverArtId?: string }, 
 
 export function useLibrarySearch(q: string) {
   return useQuery({
-    queryKey: ['library', 'search', q],
+    queryKey: libraryQueries.search(q),
     queryFn: () => api.get<SearchResults>(`/library/search?q=${encodeURIComponent(q)}`),
     enabled: q.trim().length > 0,
   })
@@ -99,7 +100,7 @@ export function useLibrarySearch(q: string) {
 
 export function useArtist(id: string) {
   return useQuery({
-    queryKey: ['library', 'artist', id],
+    queryKey: libraryQueries.artist(id),
     queryFn: () => api.get<Artist>(`/library/artist/${encodeURIComponent(id)}`),
     enabled: !!id,
   })
@@ -107,7 +108,7 @@ export function useArtist(id: string) {
 
 export function useAlbum(id: string) {
   return useQuery({
-    queryKey: ['library', 'album', id],
+    queryKey: libraryQueries.album(id),
     queryFn: () => api.get<Album>(`/library/album/${encodeURIComponent(id)}`),
     enabled: !!id,
   })
@@ -115,7 +116,7 @@ export function useAlbum(id: string) {
 
 export function useArtists() {
   return useQuery({
-    queryKey: ['library', 'artists'],
+    queryKey: libraryQueries.artists,
     queryFn: () => api.get<Artist[]>('/library/artists'),
   })
 }
@@ -124,7 +125,7 @@ export function useAlbums(type = 'newest', size?: number) {
   const params = new URLSearchParams({ type })
   if (size) params.set('size', String(size))
   return useQuery({
-    queryKey: ['library', 'albums', type, size ?? 0],
+    queryKey: libraryQueries.albums(type, size),
     queryFn: () => api.get<Album[]>(`/library/albums?${params.toString()}`),
   })
 }
@@ -135,7 +136,7 @@ export function useSongs(size?: number) {
   if (size) params.set('size', String(size))
   const qs = params.toString()
   return useQuery({
-    queryKey: ['library', 'songs', size ?? 0],
+    queryKey: libraryQueries.songs(size),
     queryFn: () => api.get<Track[]>(`/library/songs${qs ? `?${qs}` : ''}`),
   })
 }

@@ -1,3 +1,4 @@
+import { libraryQueries } from './libraryQueries'
 import { useQuery } from '@tanstack/react-query'
 import { api } from './api'
 import type { AlbumDetail, ArtistDetail } from './types'
@@ -20,7 +21,7 @@ export function useArtistProfile(source: string, id: string) {
 
 export function useArtistDetail(source: string, id: string) {
   return useQuery({
-    queryKey: ['artist-detail', source, id],
+    queryKey: libraryQueries.artistDetail(source, id),
     queryFn: () => api.get<ArtistDetail>(`/artist/${encodeURIComponent(source)}/${encodeURIComponent(id)}`),
     enabled: !!source && !!id,
   })
@@ -28,7 +29,7 @@ export function useArtistDetail(source: string, id: string) {
 
 export function useAlbumDetail(source: string, id: string) {
   return useQuery({
-    queryKey: ['album-detail', source, id],
+    queryKey: libraryQueries.albumDetail(source, id),
     queryFn: () => api.get<AlbumDetail>(`/album/${encodeURIComponent(source)}/${encodeURIComponent(id)}`),
     enabled: !!source && !!id,
   })
