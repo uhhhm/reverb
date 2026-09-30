@@ -6,14 +6,20 @@ Today the mutation handlers invalidate similar artists and tracks but omit the o
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Before implementation, enumerate the failure cases and write a failing regression for a successful Not interested mutation with already-populated recommendation caches.
-- [ ] All recommendation query identities and their mutation effects have one owner. Callers use that policy rather than reproducing lists of literal query keys.
-- [ ] Marking and undoing a track or artist refresh the marks list and every affected recommendation surface. Changing either recommendation setting refreshes every surface whose answer can change.
-- [ ] Active affected views refetch after a successful mutation; inactive cached views are invalidated so opening them cannot treat the old answer as current. Unrelated library and download queries are not refreshed by these actions.
-- [ ] Failed mutations retain the prior data and existing error feedback. Refreshing a result does not itself start Radio, alter the play queue, save a Mix as a playlist, or regenerate a period's Mix merely to refresh its presentation.
-- [ ] Preserve the current transport contract and polling behavior. Reuse generated transport types for documented responses touched by this work; no wholesale rewrite of request wrappers or uploads is required.
-- [ ] A browser scenario warms multiple recommendation surfaces, marks a track and an artist, revisits the cached surfaces, undoes a mark, and changes recommendation settings. Assert the visible results and captured requests without a hard reload, including a failed mutation. Use controlled responses to verify invalidation independently of recommendation ranking.
-- [ ] Keep the browser trace and a short record of the fixture and exact rerun command as the repeatable verification artifact.
-- [ ] Focused frontend checks and `make check` pass. Run `make check-full` if implementation changes behavior across modules; record any unavailable or failing check accurately.
+- [x] Before implementation, enumerate the failure cases and write a failing regression for a successful Not interested mutation with already-populated recommendation caches.
+- [x] All recommendation query identities and their mutation effects have one owner. Callers use that policy rather than reproducing lists of literal query keys.
+- [x] Marking and undoing a track or artist refresh the marks list and every affected recommendation surface. Changing either recommendation setting refreshes every surface whose answer can change.
+- [x] Active affected views refetch after a successful mutation; inactive cached views are invalidated so opening them cannot treat the old answer as current. Unrelated library and download queries are not refreshed by these actions.
+- [x] Failed mutations retain the prior data and existing error feedback. Refreshing a result does not itself start Radio, alter the play queue, save a Mix as a playlist, or regenerate a period's Mix merely to refresh its presentation.
+- [x] Preserve the current transport contract and polling behavior. Reuse generated transport types for documented responses touched by this work; no wholesale rewrite of request wrappers or uploads is required.
+- [x] A browser scenario warms multiple recommendation surfaces, marks a track and an artist, revisits the cached surfaces, undoes a mark, and changes recommendation settings. Assert the visible results and captured requests without a hard reload, including a failed mutation. Use controlled responses to verify invalidation independently of recommendation ranking.
+- [x] Keep the browser trace and a short record of the fixture and exact rerun command as the repeatable verification artifact.
+- [x] Focused frontend checks and `make check` pass. Run `make check-full` if implementation changes behavior across modules; record any unavailable or failing check accurately.
+
+## Comments
+
+Implemented with one frontend recommendation query policy. Baseline regression,
+browser fixture, retained trace, independent review and passing full gate are
+recorded in [verification-09.md](../verification-09.md).

@@ -3,6 +3,7 @@ import { api } from './api'
 import { externalTrackFromRef } from './externalTrack'
 import type { components } from './generated/api'
 import type { RecommendationOrigin, RecommendationReason, SyncedPlaylistDetail, Track } from './types'
+import { recommendationQueries, refreshRecommendations } from './recommendationQueries'
 
 export type SimilarArtists = components['schemas']['SimilarArtists']
 export type RecommendedTrack = components['schemas']['RecommendedTrack']
@@ -24,12 +25,11 @@ const STALE_MS = 60 * 60 * 1000
  * cached shows and is fetched again this often until the refresh lands.
  */
 const REFRESH_POLL_MS = 3000
-const SETTINGS_KEY = ['recommendation-settings']
 
 /** Home's "For you" shelves, from the server's cache at once. */
 export function useShelves() {
   return useQuery({
-    queryKey: ['shelves'],
+    queryKey: recommendationQueries.shelves,
     queryFn: () => api.get<HomeShelves>('/recommendations/shelves'),
     refetchInterval: (query) => (query.state.data?.refreshing ? REFRESH_POLL_MS : false),
     placeholderData: keepPreviousData,
@@ -39,7 +39,7 @@ export function useShelves() {
 /** Every Mix; an empty one is hidden by the caller. */
 export function useMixes() {
   return useQuery({
-    queryKey: ['mixes'],
+    queryKey: recommendationQueries.mixes,
     queryFn: () => api.get<MixList>('/recommendations/mixes'),
     refetchInterval: (query) => ((query.state.data?.mixes ?? []).some((m) => m.refreshing) ? REFRESH_POLL_MS : false),
     placeholderData: keepPreviousData,
@@ -49,7 +49,7 @@ export function useMixes() {
 /** A Mix by kind. A null kind names no Mix, so nothing is fetched. */
 export function useMix(kind: MixKind | null) {
   return useQuery({
-    queryKey: ['mix', kind],
+    queryKey: recommendationQueries.mix(kind),
     queryFn: () => {
       if (kind === null) throw new Error('no Mix kind')
       return api.get<Mix>(`/recommendations/mixes/${encodeURIComponent(kind)}`)
@@ -67,7 +67,7 @@ export function saveMixAsPlaylist(kind: MixKind, name?: string): Promise<SyncedP
 /** Suggested songs for a managed playlist; page asks for the next best. */
 export function usePlaylistSuggestions(playlistId: string, page: number, enabled: boolean) {
   return useQuery({
-    queryKey: ['playlist-suggestions', playlistId, page],
+    queryKey: recommendationQueries.playlistSuggestions(playlistId, page),
     queryFn: () =>
       api.get<SimilarTracksResult>(`/recommendations/playlists/${encodeURIComponent(playlistId)}/suggestions?page=${page}`),
     enabled: enabled && !!playlistId,
@@ -107,7 +107,7 @@ export function shelfTitle(shelf: Shelf): string {
  */
 export function useSimilarArtists(source: string, id: string) {
   return useQuery({
-    queryKey: ['similar-artists', source, id],
+    queryKey: recommendationQueries.similarArtists(source, id),
     queryFn: () =>
       api.get<SimilarArtists>(`/recommendations/artists/${encodeURIComponent(source)}/${encodeURIComponent(id)}`),
     enabled: !!source && !!id,
@@ -118,7 +118,7 @@ export function useSimilarArtists(source: string, id: string) {
 /** Playable tracks similar to a seed. Sources are merged by the server. */
 export function useSimilarTracks(artist: string, title: string, mbid?: string) {
   return useQuery({
-    queryKey: ['similar-tracks', artist, title, mbid],
+    queryKey: recommendationQueries.similarTracks(artist, title, mbid),
     queryFn: () =>
       api.get<SimilarTracksResult>(`/recommendations/similar-tracks?${new URLSearchParams({ artist, title, ...(mbid ? { mbid } : {}) })}`),
     enabled: !!artist && !!title,
@@ -157,7 +157,7 @@ export function reasonText(reason: RecommendationReason | undefined): string | u
 /** The household's Adventurousness and Online recommendations switch. */
 export function useRecommendationSettings() {
   return useQuery({
-    queryKey: SETTINGS_KEY,
+    queryKey: recommendationQueries.settings,
     queryFn: () => api.get<RecommendationSettings>('/recommendations/settings'),
   })
 }
@@ -168,11 +168,8 @@ export function useUpdateRecommendationSettings() {
   return useMutation({
     mutationFn: (patch: RecommendationSettingsPatch) => api.put<RecommendationSettings>('/recommendations/settings', patch),
     onSuccess: (settings) => {
-      qc.setQueryData(SETTINGS_KEY, settings)
-      // Either setting changes what every recommendation list holds.
-      for (const queryKey of [['similar-artists'], ['similar-tracks']]) {
-        void qc.invalidateQueries({ queryKey })
-      }
+      qc.setQueryData(recommendationQueries.settings, settings)
+      refreshRecommendations(qc, 'settings')
     },
   })
 }

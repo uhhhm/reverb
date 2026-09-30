@@ -4,6 +4,7 @@ import { Button, TrackRow } from './ui'
 import { usePlayer } from '../lib/playerStore'
 import { reasonText, recommendedTrackToTrack, usePlaylistSuggestions, type RecommendedTrack } from '../lib/recommendationsApi'
 import { addSyncedTrack } from '../lib/syncedPlaylistApi'
+import { recommendationQueries } from '../lib/recommendationQueries'
 
 const keyOf = (r: RecommendedTrack) => `${r.source}:${r.externalId}`
 
@@ -39,7 +40,7 @@ export function PlaylistSuggestions({ playlistId }: { playlistId: string }) {
       })
       setAdded((prev) => new Set(prev).add(key))
       void qc.invalidateQueries({ queryKey: ['synced-playlist', playlistId] })
-      void qc.invalidateQueries({ queryKey: ['playlist-suggestions', playlistId] })
+      void qc.invalidateQueries({ queryKey: recommendationQueries.playlistSuggestions(playlistId) })
     } catch {
       setAddError(true)
     } finally {
