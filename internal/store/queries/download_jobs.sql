@@ -8,13 +8,13 @@ INSERT INTO download_jobs (
 -- name: GetDownloadJob :one
 SELECT id, dedup_key, request_json, downloader_name, status, progress, error,
        output_path, library_track_id, cover_art_id, canonical_id, priority, requested_by, attempts,
-       downloader_ref, created_at, started_at, finished_at
+       downloader_ref, completion_pending, created_at, started_at, finished_at
 FROM download_jobs WHERE id = ?;
 
 -- name: GetActiveDownloadJobByDedup :one
 SELECT id, dedup_key, request_json, downloader_name, status, progress, error,
        output_path, library_track_id, cover_art_id, canonical_id, priority, requested_by, attempts,
-       downloader_ref, created_at, started_at, finished_at
+       downloader_ref, completion_pending, created_at, started_at, finished_at
 FROM download_jobs
 WHERE dedup_key = ? AND status IN ('queued', 'running')
 ORDER BY created_at ASC
@@ -23,7 +23,7 @@ LIMIT 1;
 -- name: GetDownloadJobByDedup :one
 SELECT id, dedup_key, request_json, downloader_name, status, progress, error,
        output_path, library_track_id, cover_art_id, canonical_id, priority, requested_by, attempts,
-       downloader_ref, created_at, started_at, finished_at
+       downloader_ref, completion_pending, created_at, started_at, finished_at
 FROM download_jobs
 WHERE dedup_key = ?
 ORDER BY created_at ASC
@@ -32,14 +32,14 @@ LIMIT 1;
 -- name: ListDownloadJobs :many
 SELECT id, dedup_key, request_json, downloader_name, status, progress, error,
        output_path, library_track_id, cover_art_id, canonical_id, priority, requested_by, attempts,
-       downloader_ref, created_at, started_at, finished_at
+       downloader_ref, completion_pending, created_at, started_at, finished_at
 FROM download_jobs
 ORDER BY created_at DESC;
 
 -- name: ListDownloadJobsByStatus :many
 SELECT id, dedup_key, request_json, downloader_name, status, progress, error,
        output_path, library_track_id, cover_art_id, canonical_id, priority, requested_by, attempts,
-       downloader_ref, created_at, started_at, finished_at
+       downloader_ref, completion_pending, created_at, started_at, finished_at
 FROM download_jobs
 WHERE status = ?
 ORDER BY created_at DESC;
@@ -91,3 +91,16 @@ UPDATE download_jobs SET canonical_id = @canonical_id WHERE id = @id;
 
 -- name: RepointDownloadJobs :exec
 UPDATE download_jobs SET canonical_id = @canonical_id WHERE canonical_id = @canonical_id_2;
+
+-- name: UpdateDownloadJob :exec
+UPDATE download_jobs SET
+    status = @status,
+    progress = @progress,
+    error = @error,
+    output_path = @output_path,
+    library_track_id = @library_track_id,
+    cover_art_id = @cover_art_id,
+    completion_pending = @completion_pending,
+    started_at = CASE WHEN @status = 'running' AND started_at IS NULL THEN unixepoch() ELSE started_at END,
+    finished_at = CASE WHEN @status = 'completed' OR @status = 'failed' OR @status = 'canceled' THEN unixepoch() ELSE NULL END
+WHERE id = @id;

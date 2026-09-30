@@ -24,12 +24,15 @@ const (
 
 // DownloadRequest is built from an ExternalResult when the user clicks download.
 type DownloadRequest struct {
-	Source     string `json:"source"`
-	ExternalID string `json:"externalId"`
-	Artist     string `json:"artist"`
-	Title      string `json:"title"`
-	Album      string `json:"album"`
-	ISRC       string `json:"isrc,omitempty"`
+	// CompletionID identifies the job to idempotent completion bookkeeping.
+	// The manager supplies it from the durable job, never from transport input.
+	CompletionID string `json:"-"`
+	Source       string `json:"source"`
+	ExternalID   string `json:"externalId"`
+	Artist       string `json:"artist"`
+	Title        string `json:"title"`
+	Album        string `json:"album"`
+	ISRC         string `json:"isrc,omitempty"`
 	// DurationMs from the originating search result; forwarded into the
 	// post-download re-match so the fuzzy rung can disambiguate by length.
 	DurationMs    int  `json:"durationMs,omitempty"`

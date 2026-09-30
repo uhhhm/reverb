@@ -1,0 +1,17 @@
+{
+  "downloaderInvocations": 1,
+  "fixture": "synthetic ID3 MP3 via stubDownloadingYtDlp",
+  "linked": true,
+  "outputExists": true,
+  "pendingUploadRecords": 1,
+  "recommendationAddRecords": 1,
+  "rerun": "CGO_CFLAGS='-O2 -g -DHAVE_STRCHRNUL' go test ./internal/app -run '^TestDeviceDownloadCompletionSurvivesRecordingAndTerminalWriteFailures$' -count=1 -v",
+  "status": "completed",
+  "transitions": [
+    "queued",
+    "output retained; recording failed",
+    "recorded; terminal write failed",
+    "device restarted with pending output",
+    "completed and linked after automatic recovery"
+  ]
+}

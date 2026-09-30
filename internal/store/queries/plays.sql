@@ -236,6 +236,9 @@ ORDER BY origins.origin;
 INSERT OR IGNORE INTO recommendation_add (id, user_id, origin, action, created_at)
 VALUES (?, ?, ?, ?, ?);
 
+-- name: GetRecommendationAdd :one
+SELECT * FROM recommendation_add WHERE id = ?;
+
 -- name: ListAllRecommendationAdds :many
 SELECT * FROM recommendation_add ORDER BY created_at, id;
 

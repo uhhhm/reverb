@@ -43,6 +43,8 @@ for (const [name, schema] of Object.entries(schemas)) {
     const omit = prop['x-go-omitempty'] ?? !schema.required?.includes(key)
     go += `${prop['x-go-name']} ${prop['x-go-type']} \`json:"${key}${omit ? ',omitempty' : ''}"\`\n`
   }
+  // DownloadJob also carries a private durable phase; it is never wire data.
+  if (name === 'DownloadJob') go += 'CompletionPending bool `json:"-"`\n'
   go += '}\n\n'
 }
 emit('internal/core/download_wire.gen.go', execFileSync('gofmt', { input: go, encoding: 'utf8' }))

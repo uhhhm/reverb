@@ -21,6 +21,7 @@ var ErrInvalid = errors.New("invalid recommendation attribution")
 
 type Store interface {
 	InsertRecommendationAddIfAbsent(context.Context, db.InsertRecommendationAddIfAbsentParams) error
+	GetRecommendationAdd(context.Context, string) (db.RecommendationAdd, error)
 }
 
 type Emitter interface {
@@ -43,17 +44,27 @@ func ValidOrigin(origin string) bool {
 }
 
 func (s *Service) Record(ctx context.Context, userID, origin, action string) error {
-	if !ValidOrigin(origin) || action != ActionLibrary && action != ActionPlaylist {
+	return s.RecordWithID(ctx, s.idgen(), userID, origin, action)
+}
+
+// RecordWithID retries one durable addition under the caller's stable identity.
+// Read the stored record after insert so repeated emissions retain its original
+// timestamp and attribution even when a completion's final job write failed.
+func (s *Service) RecordWithID(ctx context.Context, id, userID, origin, action string) error {
+	if id == "" || !ValidOrigin(origin) || action != ActionLibrary && action != ActionPlaylist {
 		return ErrInvalid
 	}
-	id, at := s.idgen(), s.now().Unix()
 	if err := s.q.InsertRecommendationAddIfAbsent(ctx, db.InsertRecommendationAddIfAbsentParams{
-		ID: id, UserID: userID, Origin: origin, Action: action, CreatedAt: at,
+		ID: id, UserID: userID, Origin: origin, Action: action, CreatedAt: s.now().Unix(),
 	}); err != nil {
 		return err
 	}
+	stored, err := s.q.GetRecommendationAdd(ctx, id)
+	if err != nil {
+		return err
+	}
 	if s.emitter != nil {
-		s.emitter.EmitRecommendationAdd(ctx, id, syncemit.RecommendationAdd{UserID: userID, Origin: origin, Action: action, CreatedAt: at})
+		s.emitter.EmitRecommendationAdd(ctx, id, syncemit.RecommendationAdd{UserID: stored.UserID, Origin: stored.Origin, Action: stored.Action, CreatedAt: stored.CreatedAt})
 	}
 	return nil
 }

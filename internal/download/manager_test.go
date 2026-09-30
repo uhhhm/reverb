@@ -474,7 +474,7 @@ func TestCompletionHookFailureRecoversAfterRestartWithoutRedownload(t *testing.T
 
 func TestCompletionHookFailureRetainsOutputWhenJobUpdateAlsoFails(t *testing.T) {
 	store := &completionWriteStore{memStore: newMemStore()}
-	dl := &fakeDL{name: "dl", canDownload: true}
+	dl := &fakeDL{name: "dl", canDownload: true, block: make(chan struct{})}
 	m := NewManager(Config{Workers: 1, DebounceWindow: time.Hour, ReconcileEvery: 10 * time.Millisecond},
 		wrapDownloaders([]Downloader{dl}), store, events.New(), &fakeScanner{},
 		&fakeRematcher{trackID: "t1"}, &fakeVersion{v: 1}, RealClock{}, nil, nil)
@@ -482,7 +482,6 @@ func TestCompletionHookFailureRetainsOutputWhenJobUpdateAlsoFails(t *testing.T) 
 	failHook.Store(true)
 	m.SetCompletionHook(func(context.Context, core.DownloadRequest, string) error {
 		if failHook.Load() {
-			store.failUpdate.Store(true)
 			return errors.New("pending upload database unavailable")
 		}
 		return nil
@@ -493,6 +492,9 @@ func TestCompletionHookFailureRetainsOutputWhenJobUpdateAlsoFails(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	waitForStatus(t, store, job.ID, core.DownloadRunning)
+	store.failUpdate.Store(true)
+	close(dl.block)
 	deadline := time.Now().Add(3 * time.Second)
 	pending := false
 	for time.Now().Before(deadline) {
@@ -527,7 +529,7 @@ func waitForCompletionError(t *testing.T, store JobStore, id string) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		job, ok, err := store.Get(context.Background(), id)
-		if err == nil && ok && strings.HasPrefix(job.Error, completionErrorPrefix) {
+		if err == nil && ok && job.CompletionPending && job.Error != "" {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)

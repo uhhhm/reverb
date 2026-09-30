@@ -22,23 +22,24 @@ func NewSQLStore(q *db.Queries) JobStore { return &sqlStore{q: q} }
 // three query row types (GetDownloadJobRow, GetActiveDownloadJobByDedupRow,
 // ListDownloadJobsRow) have the same shape; toCoreFlatRow converts from this.
 type rowFields struct {
-	id             string
-	dedupKey       string
-	requestJson    string
-	downloaderName string
-	status         string
-	progress       int64
-	errStr         string
-	outputPath     string
-	libraryTrackID sql.NullString
-	coverArtID     sql.NullString
-	canonicalID    string
-	priority       int64
-	attempts       int64
-	downloaderRef  string
-	createdAt      int64
-	startedAt      sql.NullInt64
-	finishedAt     sql.NullInt64
+	completionPending int64
+	id                string
+	dedupKey          string
+	requestJson       string
+	downloaderName    string
+	status            string
+	progress          int64
+	errStr            string
+	outputPath        string
+	libraryTrackID    sql.NullString
+	coverArtID        sql.NullString
+	canonicalID       string
+	priority          int64
+	attempts          int64
+	downloaderRef     string
+	createdAt         int64
+	startedAt         sql.NullInt64
+	finishedAt        sql.NullInt64
 }
 
 // toCoreFlatRow converts a rowFields to a core.DownloadJob, rehydrating all
@@ -47,17 +48,18 @@ type rowFields struct {
 // corrupted row must not silently yield a job with empty request fields.
 func toCoreFlatRow(r rowFields) (core.DownloadJob, error) {
 	j := core.DownloadJob{
-		ID:             r.id,
-		DedupKey:       r.dedupKey,
-		Status:         core.DownloadStatus(r.status),
-		Progress:       int(r.progress),
-		Error:          r.errStr,
-		OutputPath:     r.outputPath,
-		DownloaderName: r.downloaderName,
-		Priority:       int(r.priority),
-		Attempts:       int(r.attempts),
-		DownloaderRef:  r.downloaderRef,
-		CreatedAt:      r.createdAt,
+		CompletionPending: r.completionPending != 0,
+		ID:                r.id,
+		DedupKey:          r.dedupKey,
+		Status:            core.DownloadStatus(r.status),
+		Progress:          int(r.progress),
+		Error:             r.errStr,
+		OutputPath:        r.outputPath,
+		DownloaderName:    r.downloaderName,
+		Priority:          int(r.priority),
+		Attempts:          int(r.attempts),
+		DownloaderRef:     r.downloaderRef,
+		CreatedAt:         r.createdAt,
 	}
 	if r.libraryTrackID.Valid {
 		j.LibraryTrackID = r.libraryTrackID.String
@@ -96,7 +98,7 @@ func toCoreFlatRow(r rowFields) (core.DownloadJob, error) {
 
 func fromGetRow(r db.GetDownloadJobRow) rowFields {
 	return rowFields{
-		id: r.ID, dedupKey: r.DedupKey, requestJson: r.RequestJson,
+		completionPending: r.CompletionPending, id: r.ID, dedupKey: r.DedupKey, requestJson: r.RequestJson,
 		downloaderName: r.DownloaderName, status: r.Status, progress: r.Progress,
 		errStr: r.Error, outputPath: r.OutputPath,
 		libraryTrackID: r.LibraryTrackID, coverArtID: r.CoverArtID, canonicalID: r.CanonicalID,
@@ -107,7 +109,7 @@ func fromGetRow(r db.GetDownloadJobRow) rowFields {
 
 func fromGetDedupRow(r db.GetActiveDownloadJobByDedupRow) rowFields {
 	return rowFields{
-		id: r.ID, dedupKey: r.DedupKey, requestJson: r.RequestJson,
+		completionPending: r.CompletionPending, id: r.ID, dedupKey: r.DedupKey, requestJson: r.RequestJson,
 		downloaderName: r.DownloaderName, status: r.Status, progress: r.Progress,
 		errStr: r.Error, outputPath: r.OutputPath,
 		libraryTrackID: r.LibraryTrackID, coverArtID: r.CoverArtID, canonicalID: r.CanonicalID,
@@ -118,7 +120,7 @@ func fromGetDedupRow(r db.GetActiveDownloadJobByDedupRow) rowFields {
 
 func fromGetByDedupRow(r db.GetDownloadJobByDedupRow) rowFields {
 	return rowFields{
-		id: r.ID, dedupKey: r.DedupKey, requestJson: r.RequestJson,
+		completionPending: r.CompletionPending, id: r.ID, dedupKey: r.DedupKey, requestJson: r.RequestJson,
 		downloaderName: r.DownloaderName, status: r.Status, progress: r.Progress,
 		errStr: r.Error, outputPath: r.OutputPath,
 		libraryTrackID: r.LibraryTrackID, coverArtID: r.CoverArtID, canonicalID: r.CanonicalID,
@@ -129,7 +131,7 @@ func fromGetByDedupRow(r db.GetDownloadJobByDedupRow) rowFields {
 
 func fromListRow(r db.ListDownloadJobsRow) rowFields {
 	return rowFields{
-		id: r.ID, dedupKey: r.DedupKey, requestJson: r.RequestJson,
+		completionPending: r.CompletionPending, id: r.ID, dedupKey: r.DedupKey, requestJson: r.RequestJson,
 		downloaderName: r.DownloaderName, status: r.Status, progress: r.Progress,
 		errStr: r.Error, outputPath: r.OutputPath,
 		libraryTrackID: r.LibraryTrackID, coverArtID: r.CoverArtID, canonicalID: r.CanonicalID,
@@ -220,42 +222,17 @@ func (s *sqlStore) List(ctx context.Context) ([]core.DownloadJob, error) {
 	return out, nil
 }
 
-// Update persists all mutable fields of j by calling the appropriate sqlc queries.
-// NOTE: these statements are issued non-transactionally. A mid-Update crash can
-// leave the row internally inconsistent (e.g. status updated but progress not).
-// This is acceptable for M3 — cross-restart job recovery is deferred. Revisit
-// with a transaction when recovery lands.
-// Status drives started_at/finished_at via the SQL CASE expression in
-// UpdateDownloadJobStatus; progress/error/output_path/library_track_id/cover_art_id
-// each have a dedicated update so callers can set them independently.
+// Update atomically persists lifecycle and output. Completion must never become
+// terminal unless its output and phase change commit in the same statement.
 func (s *sqlStore) Update(ctx context.Context, j core.DownloadJob) error {
-	if err := s.q.UpdateDownloadJobStatus(ctx, db.UpdateDownloadJobStatusParams{
-		Status: string(j.Status), ID: j.ID,
-	}); err != nil {
-		return err
+	var pending int64
+	if j.CompletionPending {
+		pending = 1
 	}
-	if err := s.q.UpdateDownloadJobProgress(ctx, db.UpdateDownloadJobProgressParams{
-		Progress: int64(j.Progress), ID: j.ID,
-	}); err != nil {
-		return err
-	}
-	if err := s.q.UpdateDownloadJobError(ctx, db.UpdateDownloadJobErrorParams{
-		Error: j.Error, ID: j.ID,
-	}); err != nil {
-		return err
-	}
-	if err := s.q.UpdateDownloadJobOutputPath(ctx, db.UpdateDownloadJobOutputPathParams{
-		OutputPath: j.OutputPath, ID: j.ID,
-	}); err != nil {
-		return err
-	}
-	if err := s.q.UpdateDownloadJobLibraryTrackID(ctx, db.UpdateDownloadJobLibraryTrackIDParams{
-		LibraryTrackID: nullString(j.LibraryTrackID), ID: j.ID,
-	}); err != nil {
-		return err
-	}
-	return s.q.UpdateDownloadJobCoverArtID(ctx, db.UpdateDownloadJobCoverArtIDParams{
-		CoverArtID: nullString(j.CoverArtID), ID: j.ID,
+	return s.q.UpdateDownloadJob(ctx, db.UpdateDownloadJobParams{
+		ID: j.ID, Status: string(j.Status), Progress: int64(j.Progress), Error: j.Error,
+		OutputPath: j.OutputPath, LibraryTrackID: nullString(j.LibraryTrackID),
+		CoverArtID: nullString(j.CoverArtID), CompletionPending: pending,
 	})
 }
 

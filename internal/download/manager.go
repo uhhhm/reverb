@@ -367,13 +367,13 @@ func (m *Manager) notifyCompletion(ctx context.Context, req core.DownloadRequest
 	return nil
 }
 
-const completionErrorPrefix = "record completed download: "
-
 // deferCompletion keeps the output attached to an active job. A failed
 // pending-upload write must not turn the downloaded bytes into an untracked
 // terminal job that ClearFinished can remove before the write is retried.
 func (m *Manager) deferCompletion(ctx context.Context, job core.DownloadJob, cause error) {
-	job.Error = completionErrorPrefix + cause.Error()
+	job.CompletionPending = true
+	job.Status = core.DownloadRunning
+	job.Error = cause.Error()
 	m.mu.Lock()
 	m.unrecorded[job.ID] = job
 	m.mu.Unlock()
@@ -383,12 +383,36 @@ func (m *Manager) deferCompletion(ctx context.Context, job core.DownloadJob, cau
 	m.publishEvent(TopicProgress, job, job.Error)
 }
 
+// completeOutput takes ownership of bytes before invoking any completion hook.
+// Memory retains that ownership during a store outage; a successful pending-row
+// write makes it recoverable across restart. Only retryCompletion publishes.
+func (m *Manager) completeOutput(ctx context.Context, job core.DownloadJob) (core.DownloadJob, error) {
+	m.completionMu.Lock()
+	defer m.completionMu.Unlock()
+	return m.completeOutputLocked(ctx, job)
+}
+
+// completeOutputLocked is the handoff used when async polling already owns the
+// transition lock. No cancellation can interleave the poll and this handoff.
+func (m *Manager) completeOutputLocked(ctx context.Context, job core.DownloadJob) (core.DownloadJob, error) {
+	job.Status = core.DownloadRunning
+	job.CompletionPending = true
+	m.mu.Lock()
+	m.unrecorded[job.ID] = job
+	m.mu.Unlock()
+	return m.retryCompletionLocked(ctx, job)
+}
+
 // retryCompletion records an existing output without starting its downloader
 // again. The hook may have succeeded while the following job update failed, so
 // it must be safe to call more than once.
 func (m *Manager) retryCompletion(ctx context.Context, job core.DownloadJob) (core.DownloadJob, error) {
 	m.completionMu.Lock()
 	defer m.completionMu.Unlock()
+	return m.retryCompletionLocked(ctx, job)
+}
+
+func (m *Manager) retryCompletionLocked(ctx context.Context, job core.DownloadJob) (core.DownloadJob, error) {
 	current, ok, err := m.store.Get(ctx, job.ID)
 	if err != nil {
 		return job, err
@@ -406,24 +430,34 @@ func (m *Manager) retryCompletion(ctx context.Context, job core.DownloadJob) (co
 		job = current
 	}
 	m.mu.Unlock()
-	if job.Status != core.DownloadRunning || !strings.HasPrefix(job.Error, completionErrorPrefix) {
+	if job.Status != core.DownloadRunning || !job.CompletionPending {
 		return current, nil
 	}
 	// Persist the output path before the hook. If the store is temporarily
 	// unavailable, unrecorded retains it for another attempt in this process.
 	if err := m.store.Update(ctx, job); err != nil {
+		m.deferCompletion(ctx, job, err)
 		return job, err
 	}
-	req := m.requestForJob(ctx, job)
+	req, err := m.loadRequest(ctx, job)
+	if err != nil {
+		m.deferCompletion(ctx, job, err)
+		return job, err
+	}
+	req.CompletionID = job.ID
 	if err := m.notifyCompletion(ctx, req, job.OutputPath); err != nil {
 		m.deferCompletion(ctx, job, err)
 		return job, err
 	}
+	pendingJob := job
 	job.Status = core.DownloadCompleted
+	job.CompletionPending = false
 	job.Progress = 100
 	job.Error = ""
 	job.FinishedAt = m.clock.Now().Unix()
 	if err := m.store.Update(ctx, job); err != nil {
+		job = pendingJob
+		m.deferCompletion(ctx, job, err)
 		return job, err
 	}
 	m.mu.Lock()
@@ -439,7 +473,7 @@ func (m *Manager) joinExisting(ctx context.Context, job core.DownloadJob) (core.
 	m.mu.Lock()
 	_, inMemory := m.unrecorded[job.ID]
 	m.mu.Unlock()
-	if inMemory || (job.Status == core.DownloadRunning && strings.HasPrefix(job.Error, completionErrorPrefix)) {
+	if inMemory || (job.Status == core.DownloadRunning && job.CompletionPending) {
 		return m.retryCompletion(ctx, job)
 	}
 	return job, nil
@@ -450,7 +484,7 @@ func (m *Manager) retryIncompleteCompletions() {
 	jobs := map[string]core.DownloadJob{}
 	if stored, err := m.store.List(ctx); err == nil {
 		for _, job := range stored {
-			if job.Status == core.DownloadRunning && strings.HasPrefix(job.Error, completionErrorPrefix) {
+			if job.Status == core.DownloadRunning && job.CompletionPending {
 				jobs[job.ID] = job
 			}
 		}
@@ -592,7 +626,7 @@ func (m *Manager) recoverAfterRestart() {
 	for _, job := range jobs {
 		switch job.Status {
 		case core.DownloadRunning:
-			if strings.HasPrefix(job.Error, completionErrorPrefix) {
+			if job.CompletionPending {
 				continue // output exists; completionLoop retries its durable record
 			}
 			if job.DownloaderRef != "" {
@@ -868,70 +902,72 @@ func (m *Manager) reconcileOnce(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	now := m.clock.Now().Unix()
 	for _, j := range jobs {
-		if j.Status != core.DownloadRunning || j.DownloaderRef == "" {
-			continue
+		if j.Status == core.DownloadRunning && j.DownloaderRef != "" {
+			m.reconcileJob(ctx, j.ID)
 		}
-		if strings.HasPrefix(j.Error, completionErrorPrefix) {
-			continue // completionLoop owns this output
+	}
+}
+
+// reconcileJob holds the transition lock across Poll and output ownership.
+// Cancellation cannot commit a stale terminal row while a completed output is
+// being confirmed, which would let ClearFinished remove its recovery record.
+func (m *Manager) reconcileJob(ctx context.Context, id string) {
+	m.completionMu.Lock()
+	defer m.completionMu.Unlock()
+	j, ok, err := m.store.Get(ctx, id)
+	if err != nil || !ok {
+		return
+	}
+	now := m.clock.Now().Unix()
+	if j.Status != core.DownloadRunning || j.DownloaderRef == "" {
+		return
+	}
+	m.mu.Lock()
+	_, pending := m.unrecorded[j.ID]
+	m.mu.Unlock()
+	if pending || j.CompletionPending {
+		return // completionLoop owns this output
+	}
+	async := m.asyncFor(j.DownloaderName)
+	if async == nil {
+		return
+	}
+	if j.StartedAt > 0 && m.cfg.AsyncMaxAge > 0 && now-j.StartedAt > int64(m.cfg.AsyncMaxAge.Seconds()) {
+		j.Status = core.DownloadFailed
+		j.Error = "timed out waiting for the downloader to finish"
+		j.FinishedAt = now
+		_ = m.store.Update(ctx, j)
+		m.publishEvent(TopicFailed, j, j.Error)
+		m.mu.Lock()
+		delete(m.reqs, j.ID)
+		m.mu.Unlock()
+		return
+	}
+	st, perr := async.Poll(ctx, j.DownloaderRef)
+	if perr != nil {
+		return // transient — retry next tick
+	}
+	switch st.State {
+	case core.DownloadCompleted:
+		// Async output belongs to its durable external reference.
+		if _, err := m.completeOutputLocked(ctx, j); err != nil {
+			log.Printf("download completion: async job %s: %v", shortID(j.ID), err)
 		}
-		async := m.asyncFor(j.DownloaderName)
-		if async == nil {
-			continue
-		}
-		if j.StartedAt > 0 && m.cfg.AsyncMaxAge > 0 && now-j.StartedAt > int64(m.cfg.AsyncMaxAge.Seconds()) {
-			j.Status = core.DownloadFailed
-			j.Error = "timed out waiting for the downloader to finish"
-			j.FinishedAt = now
+	case core.DownloadFailed:
+		j.Status = core.DownloadFailed
+		j.Error = st.Error
+		j.FinishedAt = now
+		_ = m.store.Update(ctx, j)
+		m.publishEvent(TopicFailed, j, st.Error)
+		m.mu.Lock()
+		delete(m.reqs, j.ID)
+		m.mu.Unlock()
+	default: // still running — publish progress changes
+		if st.Progress != j.Progress {
+			j.Progress = st.Progress
 			_ = m.store.Update(ctx, j)
-			m.publishEvent(TopicFailed, j, j.Error)
-			m.mu.Lock()
-			delete(m.reqs, j.ID)
-			m.mu.Unlock()
-			continue
-		}
-		st, perr := async.Poll(ctx, j.DownloaderRef)
-		if perr != nil {
-			continue // transient — retry next tick
-		}
-		switch st.State {
-		case core.DownloadCompleted:
-			req, _, _ := m.store.GetRequest(ctx, j.ID)
-			// An async downloader places files itself and names none.
-			m.completionMu.Lock()
-			completionErr := m.notifyCompletion(ctx, req, "")
-			if completionErr != nil {
-				m.deferCompletion(ctx, j, completionErr)
-			}
-			m.completionMu.Unlock()
-			if completionErr != nil {
-				continue
-			}
-			j.Status = core.DownloadCompleted
-			j.Progress = 100
-			j.FinishedAt = now
-			_ = m.store.Update(ctx, j)
-			m.publishEvent(TopicComplete, j, "")
-			m.mu.Lock()
-			delete(m.reqs, j.ID)
-			m.mu.Unlock()
-			m.scheduleScan(j.ID) // reuse the normal scan + rematch path
-		case core.DownloadFailed:
-			j.Status = core.DownloadFailed
-			j.Error = st.Error
-			j.FinishedAt = now
-			_ = m.store.Update(ctx, j)
-			m.publishEvent(TopicFailed, j, st.Error)
-			m.mu.Lock()
-			delete(m.reqs, j.ID)
-			m.mu.Unlock()
-		default: // still running — publish progress changes
-			if st.Progress != j.Progress {
-				j.Progress = st.Progress
-				_ = m.store.Update(ctx, j)
-				m.publishEvent(TopicProgress, j, "")
-			}
+			m.publishEvent(TopicProgress, j, "")
 		}
 	}
 }
@@ -1184,27 +1220,31 @@ func (m *Manager) Enqueue(ctx context.Context, req core.DownloadRequest) (core.D
 // minimal reconstruction from the job's denormalized columns. Single rehydration
 // point so a new request field is added once, not four times.
 func (m *Manager) requestForJob(ctx context.Context, job core.DownloadJob) core.DownloadRequest {
+	req, _ := m.loadRequest(ctx, job)
+	return req
+}
+
+// loadRequest keeps completion pending when the durable request cannot be read.
+// Acquisition callers keep their legacy reconstruction on a transient error;
+// completion callers must propagate it so attribution cannot be skipped.
+func (m *Manager) loadRequest(ctx context.Context, job core.DownloadJob) (core.DownloadRequest, error) {
 	m.mu.Lock()
 	req, ok := m.reqs[job.ID]
 	m.mu.Unlock()
 	if ok {
-		return req
+		return req, nil
 	}
-	if stored, found, _ := m.store.GetRequest(ctx, job.ID); found {
-		return stored
+	stored, found, err := m.store.GetRequest(ctx, job.ID)
+	if found && err == nil {
+		return stored, nil
 	}
-	// Fallback for legacy rows with empty request_json (or transient GetRequest
-	// error). Granularity/Section*/ManualURL/ForceOverwrite/PreferDownloader/
-	// InitiatedBy are not denormalized on DownloadJob, so they cannot be
-	// recovered here and remain zero — the caller will get an untrimmed/track-
-	// granularity request. Modern jobs always hit the stored path above.
+	// Legacy rows with empty request_json lack fields not denormalized on the job.
+	// Return the reconstruction with the read error so completion fails closed.
 	return core.DownloadRequest{
 		Source: job.Source, ExternalID: job.ExternalID, Artist: job.Artist,
 		Title: job.Title, Album: job.Album, ISRC: job.ISRC, DurationMs: job.DurationMs,
 		PlayWhenReady: job.PlayWhenReady, AddToPlaylistID: job.AddToPlaylistID, Quality: job.Quality,
-		Granularity: "", SectionStart: "", SectionEnd: "", ManualURL: "", ForceOverwrite: false,
-		PreferDownloader: "", InitiatedBy: "",
-	}
+	}, err
 }
 
 // sameSectionRange reports whether an existing job was created for the same trim
@@ -1494,33 +1534,9 @@ func (m *Manager) process(id string) {
 		cur.Status = core.DownloadRunning
 	}
 	cur.OutputPath = outPath
-	m.completionMu.Lock()
-	completionErr := m.notifyCompletion(ctx, req, outPath)
-	if completionErr != nil {
-		m.deferCompletion(ctx, cur, completionErr)
+	if _, err := m.completeOutput(ctx, cur); err != nil {
+		log.Printf("download completion: job %s: %v", shortID(id), err)
 	}
-	m.completionMu.Unlock()
-	if completionErr != nil {
-		log.Printf("download output could not be recorded: %q (job %s) -> %s: %v", cur.Title, shortID(id), outPath, completionErr)
-		// The bytes exist while their pending-upload record is retried, so make
-		// them playable without declaring the job complete yet.
-		m.scheduleScan(id)
-		return
-	}
-	cur.Status = core.DownloadCompleted
-	cur.Progress = 100
-	cur.FinishedAt = m.clock.Now().Unix()
-	_ = m.store.Update(ctx, cur)
-	m.publishEvent(TopicComplete, cur, "")
-	log.Printf("download completed: %q (job %s) -> %s", cur.Title, shortID(id), outPath)
-
-	// Clear the rehydrated request now the download is done.
-	m.mu.Lock()
-	delete(m.reqs, id)
-	m.mu.Unlock()
-
-	// Coalesce this completion into the debounced scan window.
-	m.scheduleScan(id)
 }
 
 // ScheduleScan asks for a library rescan through the same debounced window a
@@ -1713,7 +1729,7 @@ func (m *Manager) Cancel(ctx context.Context, jobID string) error {
 	if !ok {
 		return fmt.Errorf("job %q not found", jobID)
 	}
-	if job.Status == core.DownloadRunning && strings.HasPrefix(job.Error, completionErrorPrefix) {
+	if job.Status == core.DownloadRunning && job.CompletionPending {
 		return fmt.Errorf("cannot cancel download %q while its output is being recorded", jobID)
 	}
 
@@ -1722,42 +1738,45 @@ func (m *Manager) Cancel(ctx context.Context, jobID string) error {
 		if async := m.asyncFor(job.DownloaderName); async != nil {
 			_ = async.CancelAsync(ctx, job.DownloaderRef)
 		}
-		job.Status = core.DownloadCanceled
-		job.FinishedAt = m.clock.Now().Unix()
-		if err := m.store.Update(ctx, job); err != nil {
-			return err
-		}
-		m.publishEvent(TopicFailed, job, "canceled")
-		m.mu.Lock()
-		delete(m.reqs, jobID)
-		m.mu.Unlock()
+		return m.cancelStoredJob(ctx, jobID)
+	}
+	if job.Status == core.DownloadQueued || job.Status == core.DownloadRunning {
+		return m.cancelStoredJob(ctx, jobID)
+	}
+	return nil
+}
+
+// cancelStoredJob rechecks ownership under the completion transition lock. An
+// external cancellation may return after its output was handed to completion;
+// its older snapshot must not overwrite the pending phase or terminal commit.
+func (m *Manager) cancelStoredJob(ctx context.Context, jobID string) error {
+	m.completionMu.Lock()
+	defer m.completionMu.Unlock()
+	job, ok, err := m.store.Get(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("job %q not found", jobID)
+	}
+	m.mu.Lock()
+	_, pending := m.unrecorded[jobID]
+	m.mu.Unlock()
+	if pending || job.CompletionPending {
+		return fmt.Errorf("cannot cancel download %q while its output is being recorded", jobID)
+	}
+	if job.Status != core.DownloadQueued && job.Status != core.DownloadRunning {
 		return nil
 	}
-
-	if job.Status == core.DownloadQueued {
-		job.Status = core.DownloadCanceled
-		job.FinishedAt = m.clock.Now().Unix()
-		if err := m.store.Update(ctx, job); err != nil {
-			return err
-		}
-		m.publishEvent(TopicFailed, job, "canceled")
-		return nil
+	job.Status = core.DownloadCanceled
+	job.FinishedAt = m.clock.Now().Unix()
+	if err := m.store.Update(ctx, job); err != nil {
+		return err
 	}
-
-	// A synchronous job that was running before a restart has no entry in
-	// m.cancels and no process left to signal. It must still be cancelable so it
-	// cannot remain active (and hold its dedup key) indefinitely.
-	if job.Status == core.DownloadRunning {
-		job.Status = core.DownloadCanceled
-		job.FinishedAt = m.clock.Now().Unix()
-		if err := m.store.Update(ctx, job); err != nil {
-			return err
-		}
-		m.publishEvent(TopicFailed, job, "canceled")
-		m.mu.Lock()
-		delete(m.reqs, jobID)
-		m.mu.Unlock()
-	}
+	m.publishEvent(TopicFailed, job, "canceled")
+	m.mu.Lock()
+	delete(m.reqs, jobID)
+	m.mu.Unlock()
 	return nil
 }
 
@@ -1778,7 +1797,10 @@ func (m *Manager) Retry(ctx context.Context, jobID string, manualURL string) (co
 	if !ok {
 		return core.DownloadJob{}, fmt.Errorf("job %q not found", jobID)
 	}
-	if job.Status == core.DownloadRunning && strings.HasPrefix(job.Error, completionErrorPrefix) {
+	m.mu.Lock()
+	_, pending := m.unrecorded[job.ID]
+	m.mu.Unlock()
+	if pending || job.CompletionPending {
 		return m.retryCompletion(ctx, job)
 	}
 	if job.Status != core.DownloadFailed && job.Status != core.DownloadCanceled {

@@ -353,8 +353,8 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		if req.RecommendationOrigin == "" {
 			return nil
 		}
-		if err := recommendationEvents.Record(ctx, req.InitiatedBy, string(req.RecommendationOrigin), recommendationevent.ActionLibrary); err != nil {
-			log.Printf("recommendation library attribution: %v", err)
+		if err := recommendationEvents.RecordWithID(ctx, "download:"+req.CompletionID, req.InitiatedBy, string(req.RecommendationOrigin), recommendationevent.ActionLibrary); err != nil {
+			return fmt.Errorf("record recommendation library attribution: %w", err)
 		}
 		return nil
 	}

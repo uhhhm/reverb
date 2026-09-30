@@ -112,6 +112,23 @@ func (q *Queries) GetPlay(ctx context.Context, id string) (Play, error) {
 	return i, err
 }
 
+const getRecommendationAdd = `-- name: GetRecommendationAdd :one
+SELECT id, user_id, origin, "action", created_at FROM recommendation_add WHERE id = ?
+`
+
+func (q *Queries) GetRecommendationAdd(ctx context.Context, id string) (RecommendationAdd, error) {
+	row := q.db.QueryRowContext(ctx, getRecommendationAdd, id)
+	var i RecommendationAdd
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Origin,
+		&i.Action,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const insertPlay = `-- name: InsertPlay :exec
 INSERT INTO plays (id, user_id, catalog_id, played_at, ms_played, completed, created_at, origin, session_id, qualified)
 VALUES (?,?,?,?,?,?,?,?,?,?)
