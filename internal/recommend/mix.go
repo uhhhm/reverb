@@ -194,11 +194,12 @@ func (s *Service) RunSchedule(ctx context.Context) {
 }
 
 // discoverWeekly finds tracks new to the library: neither owned nor played
-// before the period. Its seeds, recent-play exclusions and taste profile read
-// only plays, playlist tracks and marks dated before the period began, so a
-// device generating it late in the week, after more plays, makes the same
-// Mix. Not interested marks made since apply when the Mix is read, which is
-// why a few spare tracks are kept. Ownership is the library as it stands.
+// before the period. Its seeds, recent-play exclusions, taste profile and the
+// Not interested marks it leaves out read only plays, playlist tracks and
+// marks dated before the period began, so a device generating it late in the
+// week, after more plays or marks, makes the same Mix. Marks made since apply
+// when the Mix is read, which is why a few spare tracks are kept, and undoing
+// one brings its track back. Ownership is the library as it stands.
 //
 // A connected personal source (ListenBrainz) adds its recommendations for the
 // account as one more list. They come from the service rather than the
@@ -210,10 +211,10 @@ func (s *Service) discoverWeekly(ctx context.Context, start time.Time) Mix {
 	}
 	// Any failed read leaves the Mix unavailable, so it is retried rather than
 	// stored for the week without its taste, seeds or exclusions.
-	ctx, ok := s.withMarks(ctx)
-	if !ok {
+	if _, ok := s.withMarks(ctx); !ok {
 		return m
 	}
+	ctx = withoutMarkFilter(ctx)
 	profile, err := s.profileBefore(ctx, start)
 	if err != nil {
 		log.Printf("recommend: reading Discover Weekly's taste profile: %v", err)
@@ -238,7 +239,7 @@ func (s *Service) discoverWeekly(ctx context.Context, start time.Time) Mix {
 	m.Available = available
 	fresh := make([]core.ExternalResult, 0, len(tracks))
 	for _, t := range tracks {
-		if !known(t, profile) {
+		if !known(t, profile) && !profile.Marked(t.Title, t.Artist) {
 			fresh = append(fresh, t)
 		}
 	}

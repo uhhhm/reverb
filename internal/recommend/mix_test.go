@@ -78,6 +78,54 @@ func TestDiscoverWeeklyIsDeterministicForAPeriod(t *testing.T) {
 	}
 }
 
+// A mark made mid-week applies when the Mix is read, not when it is
+// generated: a device generating after the mark stores the same Mix as one
+// that generated on Monday, and undoing the mark brings the track back
+// without a regeneration. A mark from before the period is left out at
+// generation, so it never takes a stored slot.
+func TestDiscoverWeeklyAppliesMidWeekMarksOnlyWhenRead(t *testing.T) {
+	ctx := context.Background()
+	monday := time.Date(2026, 9, 7, 8, 0, 0, 0, time.UTC)
+	sunday := monday.Add(-20 * time.Hour)
+	preMark := recommend.TasteSignal{Kind: recommend.SignalNotInterested, Artist: "Yarn", Title: "Yone", At: sunday.Unix()}
+	midMark := recommend.TasteSignal{Kind: recommend.SignalNotInterested, Artist: "Xenon", Title: "Xone", At: wednesday.Unix()}
+
+	device := func(now time.Time, current *marks, signals ...recommend.TasteSignal) (*recommend.Service, *tasteInputs) {
+		l, taste, sim, deezer := discoverFixture()
+		taste.signals = signals
+		return homeService(&clock{t: now}, l, sim, libraryMatcher{"owned song": "lib-1"},
+			[]recommend.Option{recommend.WithTaste(taste), withMarks(current)}, deezer), taste
+	}
+	early, _ := device(monday, &marks{tracks: map[string]bool{"deezer:6": true}}, preMark)
+	onTime := early.RefreshMix(ctx, recommend.MixDiscoverWeekly)
+
+	lateMarks := &marks{tracks: map[string]bool{"deezer:6": true, "deezer:1": true}}
+	late, lateTaste := device(wednesday.Add(24*time.Hour), lateMarks, preMark, midMark)
+	generated := late.RefreshMix(ctx, recommend.MixDiscoverWeekly)
+
+	if want := []string{"Xone", "Xtwo"}; !reflect.DeepEqual(titles(onTime.Tracks), want) {
+		t.Fatalf("Monday's Mix %v, want %v: Yone was marked before the period", titles(onTime.Tracks), want)
+	}
+	if !reflect.DeepEqual(titles(generated.Tracks), titles(onTime.Tracks)) || generated.Period != onTime.Period {
+		t.Fatalf("Thursday's device stored %v (%s), Monday's %v (%s)",
+			titles(generated.Tracks), generated.Period, titles(onTime.Tracks), onTime.Period)
+	}
+	if got := late.Mix(ctx, recommend.MixDiscoverWeekly); !reflect.DeepEqual(titles(got.Tracks), []string{"Xtwo"}) {
+		t.Fatalf("read with Xone marked %v, want [Xtwo]", titles(got.Tracks))
+	}
+
+	// Undo the mid-week mark.
+	delete(lateMarks.tracks, "deezer:1")
+	lateTaste.signals = []recommend.TasteSignal{preMark}
+	got := late.Mix(ctx, recommend.MixDiscoverWeekly)
+	if got.UpdatedAt != generated.UpdatedAt {
+		t.Fatal("undoing a mark regenerated the Mix")
+	}
+	if !reflect.DeepEqual(titles(got.Tracks), titles(onTime.Tracks)) {
+		t.Fatalf("read after undo %v, want Monday's %v", titles(got.Tracks), titles(onTime.Tracks))
+	}
+}
+
 func TestMixRegeneratesOnlyWhenItsPeriodHasPassed(t *testing.T) {
 	c := &clock{t: wednesday}
 	svc := discoverService(c)

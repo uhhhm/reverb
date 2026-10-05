@@ -216,6 +216,13 @@ func (s *Service) withMarks(ctx context.Context) (context.Context, bool) {
 	return context.WithValue(ctx, marksKey{}, loadedMarks{ex: ex}), true
 }
 
+// withoutMarkFilter returns a context in which the current marks filter
+// nothing, for generation that excludes only marks dated before a cutoff and
+// leaves later ones to the read.
+func withoutMarkFilter(ctx context.Context) context.Context {
+	return context.WithValue(ctx, marksKey{}, loadedMarks{})
+}
+
 // excludeAll stands in for marks that could not be read, for a path that
 // filters without having checked them first.
 type excludeAll struct{}

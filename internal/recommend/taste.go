@@ -219,8 +219,32 @@ func floorDiv(a, b int64) int64 {
 // artist it has played, collected or rejected. A nil Profile knows nothing.
 type Profile struct {
 	plays, signals tally
+	// marked holds the track and artist keys of its Not interested marks.
+	marked map[string]bool
 	// today is the day of the newest input, which ages are measured from.
 	today int64
+}
+
+func (p *Profile) addSignal(sg TasteSignal) {
+	p.signals.addSignal(sg)
+	if sg.Kind != SignalNotInterested {
+		return
+	}
+	if p.marked == nil {
+		p.marked = map[string]bool{}
+	}
+	if sg.Title != "" {
+		p.marked[trackKey(sg.Title, sg.Artist)] = true
+	} else {
+		p.marked[artistKey(sg.Artist)] = true
+	}
+}
+
+// Marked reports whether a recording or its artist has a Not interested mark
+// among the profile's inputs. A profile from profileBefore holds only marks
+// made before its cutoff.
+func (p *Profile) Marked(title, artist string) bool {
+	return p != nil && (p.marked[artistKey(artist)] || p.marked[trackKey(title, artist)])
 }
 
 // TrackTaste is the household's affinity for a recording, from -1 to 1.
@@ -283,7 +307,7 @@ func (s *Service) profile(ctx context.Context) *Profile {
 	}
 	p := &Profile{plays: st.plays, signals: newTally()}
 	for _, sg := range signals {
-		p.signals.addSignal(sg)
+		p.addSignal(sg)
 	}
 	p.today = floorDiv(max(p.plays.latest, p.signals.latest), secondsPerDay)
 	return p
@@ -320,7 +344,7 @@ func (s *Service) profileBefore(ctx context.Context, t time.Time) (*Profile, err
 	}
 	for _, sg := range signals {
 		if sg.At < cutoff {
-			p.signals.addSignal(sg)
+			p.addSignal(sg)
 		}
 	}
 	p.today = floorDiv(max(p.plays.latest, p.signals.latest), secondsPerDay)
