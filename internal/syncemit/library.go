@@ -2,7 +2,6 @@ package syncemit
 
 import (
 	"context"
-	"errors"
 	"log"
 
 	"github.com/uhhhm/reverb/internal/catalog"
@@ -84,14 +83,6 @@ func (s *Service) EnsureLibraryMembership(ctx context.Context, catalogID string)
 		s.append(ctx, device, reverbsync.EntityTrack, catalogID, reverbsync.FieldLibraryPresent, true)
 	}
 }
-
-// ErrUnavailable means this device keeps no change log, so a removal has
-// nothing to tell peers. ErrNoIdentity means it keeps one but has no identity
-// to author changes under yet.
-var (
-	ErrUnavailable = errors.New("sync log unavailable")
-	ErrNoIdentity  = errors.New("sync identity unavailable")
-)
 
 // EmitLibraryRemoval publishes the deletion of a library file: a content
 // tombstone for its bytes, which removes them from every device, then the

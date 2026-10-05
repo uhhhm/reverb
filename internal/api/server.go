@@ -301,8 +301,9 @@ type Deps struct {
 	PortableMigration PortableNameMigrator
 }
 
-// TrackSyncEmitter publishes a per-track field to the sync log under a catalog
-// id, making sure the catalog entity that id names has been published first.
+// TrackSyncEmitter is how handlers publish library edits to the sync log:
+// per-track fields under a catalog id (publishing the entity it names first),
+// album- and artist-level fields, and library-file removal.
 // *syncemit.Service satisfies it.
 type TrackSyncEmitter interface {
 	EmitTrackField(ctx context.Context, catalogID, field string, value any)

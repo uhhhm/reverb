@@ -56,9 +56,6 @@ func TestRenamePreservesOmissionsAndLocalEditOnPublicationFailure(t *testing.T) 
 	if err != nil || got.Title != "" || got.Artist != "artist" || got.Album != "album" {
 		t.Fatalf("%+v %v", got, err)
 	}
-	// Only the field the patch names is published: re-sending the others
-	// would overwrite a peer's concurrent edit to them with this device's
-	// older values.
 	if len(log.changes) != 1 || log.changes[0].Field != reverbsync.FieldTitle || log.changes[0].Value != "" {
 		t.Fatalf("published %+v, want only the cleared title", log.changes)
 	}

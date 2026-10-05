@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -17,12 +18,6 @@ import (
 	"github.com/uhhhm/reverb/internal/core"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
-
-// trackEditFields are the per-track fields a rename or crop writes.
-var trackEditFields = map[string]bool{
-	reverbsync.FieldTitle: true, reverbsync.FieldArtist: true, reverbsync.FieldAlbum: true,
-	reverbsync.FieldCropStartMs: true, reverbsync.FieldCropEndMs: true,
-}
 
 // withPeerDesktop boots a built-in desktop that downloads nothing itself: its
 // library is what file sync copies into its folder, addressed by its own
@@ -93,8 +88,8 @@ func (d *syncDevice) deviceID() string {
 	return id
 }
 
-// trackEdits lists the rename and crop changes the device's log holds for
-// the given catalog ids.
+// trackEdits lists every per-track change the device's log holds for the
+// given catalog ids.
 func (d *syncDevice) trackEdits(catalogIDs ...string) []reverbsync.SyncChange {
 	d.t.Helper()
 	changes, err := d.rt.Deps.SyncStore.ListSince(context.Background(), 0, 100_000)
@@ -103,7 +98,7 @@ func (d *syncDevice) trackEdits(catalogIDs ...string) []reverbsync.SyncChange {
 	}
 	var out []reverbsync.SyncChange
 	for _, ch := range changes {
-		if ch.EntityType == reverbsync.EntityTrack && trackEditFields[ch.Field] && contains(catalogIDs, ch.EntityID) {
+		if ch.EntityType == reverbsync.EntityTrack && slices.Contains(catalogIDs, ch.EntityID) {
 			out = append(out, ch)
 		}
 	}
@@ -124,19 +119,11 @@ func (d *syncDevice) authoredEdits(catalogIDs ...string) []string {
 	return out
 }
 
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
-}
-
 // A rename made through one desktop's HTTP API reaches its peer through the
-// catalog id alone, and the peer's own later edits come back. Concurrent edits
-// to different fields of one track keep both, field by field: a rename sends
-// the fields it changed, not the ones it left alone.
+// catalog id alone, and the peer's own later edits come back. Concurrent
+// renames of one track converge field by field: a field both devices changed
+// takes the later edit, and a field only one changed keeps it, since a rename
+// sends the fields it changed, not the ones it left alone.
 func TestLibraryRenameOverHTTPReplicatesToPeer(t *testing.T) {
 	if testing.Short() {
 		t.Skip("boots two runtimes with real libp2p hosts")
@@ -195,18 +182,19 @@ func TestLibraryRenameOverHTTPReplicatesToPeer(t *testing.T) {
 	assertNoEcho(t, b, betaAuthored, ids)
 
 	// --- beta renames the track again, through its own binding; before that
-	// reaches alpha, alpha changes a different field of it ---
+	// reaches alpha, alpha renames the album beta just renamed, later, and an
+	// artist beta left alone ---
 	b.must(http.MethodPut, "/library/track/"+firstOnB.LocalTrackID+"/name", map[string]string{
 		"title": "First (B)", "album": "Record (B)",
 	}, nil, http.StatusOK)
 	time.Sleep(20 * time.Millisecond)
 	a.must(http.MethodPut, "/library/track/"+first.LibraryTrackID+"/name", map[string]string{
-		"artist": "Band & Friends",
+		"artist": "Band & Friends", "album": "Record (A, later)",
 	}, nil, http.StatusOK)
 	alphaAuthored = a.authoredEdits(ids...)
 	betaAuthored = b.authoredEdits(ids...)
 
-	final := trackView{Title: "First (B)", Artist: "Band & Friends", Album: "Record (B)"}
+	final := trackView{Title: "First (B)", Artist: "Band & Friends", Album: "Record (A, later)"}
 	last := map[string][2]trackView{}
 	t.Cleanup(func() {
 		if t.Failed() {
@@ -273,8 +261,8 @@ func TestLibraryRenameOverHTTPReplicatesToPeer(t *testing.T) {
 	writeE2EArtifact(t, "library-rename-replication.json", artifact)
 }
 
-// assertNoEcho fails if the device wrote a rename or crop change since before
-// was taken: everything it has received since was applied, not republished.
+// assertNoEcho fails if the device wrote a per-track change since before was
+// taken: everything it has received since was applied, not republished.
 func assertNoEcho(t *testing.T, d *syncDevice, before []string, ids []string) {
 	t.Helper()
 	if now := d.authoredEdits(ids...); !equalStrings(now, before) {

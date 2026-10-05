@@ -17,7 +17,7 @@ This is the mechanical part of ticket 08. It is split out so 08's design work st
 - [x] `internal/api` does not call `AppendChange`. The library-deletion writes go through `syncemit` (or `DeletionService` for the playlist tombstone), with the same entities, fields and values as today.
 - [x] A Go test fails if the SQL literals disagree with the constants. For example, it runs each affected query against a log written through the constants and checks the rows it returns. This makes a renamed constant with stale SQL a test failure instead of a silent miss.
 - [x] `docs/architecture.md` states where names live and who may append to the log, replacing the claims that are false today.
-- [x] `go test ./internal/api ./internal/sync ./internal/syncemit ./internal/materialize ./internal/app`, `make gen-check` and `make check` pass.
+- [ ] `go test ./internal/api ./internal/sync ./internal/syncemit ./internal/materialize ./internal/app`, `make gen-check` and `make check` pass. Everything passes except `make gen-check`, which needs a machine where sqlc builds (see below).
 
 ## Comments
 
@@ -25,3 +25,4 @@ This is the mechanical part of ticket 08. It is split out so 08's design work st
 - Library deletion goes through the new `syncemit.EmitLibraryRemoval`. It writes the file tombstone, then `libraryPresent = false`, and returns `ErrUnavailable` or `ErrNoIdentity` so the handler keeps its previous behaviour: skip, 503 or 500. The playlist-tombstone fallback is gone: `NewServer` builds a default `DeletionService` from the `SyncStore`, the same way it defaults `SyncEmit`. `internal/api` no longer calls `AppendChange`.
 - `TestQueriesReadTheLogInItsVocabulary` (`internal/sync`) runs `ListDeletedFileHashes`, `ListUnprojectedPlays`, `ListDeletedPlays` and `ListBrowsableCatalogTracks` against a log written through the constants. Renaming `FieldDeleted`, `FieldRecord` or `FieldLibraryPresent` makes it fail. The `kind = 'track'` filters read `catalog_entity.kind`, not the log, so the test leaves them alone.
 - `make gen-check` cannot run on this Mac: sqlc's bundled pg_query fails to compile against the current Xcode SDK (`strchrnul`), on a clean HEAD as well. No SQL or generated file changed. Every other `make check` target passes.
+- Library removal and the playlist tombstone are now authored under `syncemit`'s and `DeletionService`'s device resolvers rather than the handler's. All three resolve through `reverbsync.AuthorDeviceID` against the same database, so the author is the same device as before.

@@ -9,7 +9,7 @@ package syncemit
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log"
 	"time"
 
@@ -38,6 +38,14 @@ type Catalog interface {
 // DeviceResolver names the identity changes are authored under, or "" when this
 // device has no identity yet and nothing can be published.
 type DeviceResolver func(ctx context.Context) string
+
+// ErrUnavailable means this device keeps no change log, so a change has
+// nothing to tell peers. ErrNoIdentity means it keeps one but has no identity
+// to author changes under yet.
+var (
+	ErrUnavailable = errors.New("sync log unavailable")
+	ErrNoIdentity  = errors.New("sync identity unavailable")
+)
 
 type Service struct {
 	log    Log
@@ -136,11 +144,11 @@ const FieldRecord = reverbsync.FieldRecord
 // EmitPlayDeletion records a durable deletion before the history row goes away.
 func (s *Service) EmitPlayDeletion(ctx context.Context, playID string) error {
 	if !s.ready() {
-		return fmt.Errorf("sync emitter unavailable")
+		return ErrUnavailable
 	}
 	device := s.device(ctx)
 	if device == "" {
-		return fmt.Errorf("sync identity unavailable")
+		return ErrNoIdentity
 	}
 	_, err := s.log.AppendChange(ctx, device, reverbsync.SyncChange{
 		EntityType: reverbsync.EntityPlay, EntityID: playID, Field: reverbsync.FieldDeleted, UpdatedAt: s.now(),
