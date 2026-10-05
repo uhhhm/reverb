@@ -229,11 +229,28 @@ func (s *sqlStore) Update(ctx context.Context, j core.DownloadJob) error {
 	if j.CompletionPending {
 		pending = 1
 	}
-	return s.q.UpdateDownloadJob(ctx, db.UpdateDownloadJobParams{
+	n, err := s.q.UpdateDownloadJob(ctx, db.UpdateDownloadJobParams{
 		ID: j.ID, Status: string(j.Status), Progress: int64(j.Progress), Error: j.Error,
 		OutputPath: j.OutputPath, LibraryTrackID: nullString(j.LibraryTrackID),
 		CoverArtID: nullString(j.CoverArtID), CompletionPending: pending,
+		Attempts: int64(j.Attempts), DownloaderName: j.DownloaderName, DownloaderRef: j.DownloaderRef,
+		StartedAt: nullTime(j.StartedAt), FinishedAt: nullTime(j.FinishedAt),
 	})
+	if err == nil && n == 0 {
+		return ErrJobNotFound
+	}
+	return err
+}
+
+func nullTime(unix int64) sql.NullInt64 {
+	return sql.NullInt64{Int64: unix, Valid: unix != 0}
+}
+
+func (s *sqlStore) UpdateProgress(ctx context.Context, id string, attempt, progress int) (bool, error) {
+	n, err := s.q.UpdateDownloadJobProgress(ctx, db.UpdateDownloadJobProgressParams{
+		Progress: int64(progress), ID: id, Attempts: int64(attempt),
+	})
+	return n > 0, err
 }
 
 // UpdateRequest re-persists the originating DownloadRequest for the given job
@@ -246,16 +263,13 @@ func (s *sqlStore) UpdateRequest(ctx context.Context, id string, req core.Downlo
 	})
 }
 
-func (s *sqlStore) Delete(ctx context.Context, id string) error {
-	return s.q.DeleteDownloadJob(ctx, id)
+func (s *sqlStore) Delete(ctx context.Context, id string) (bool, error) {
+	n, err := s.q.DeleteDownloadJob(ctx, id)
+	return n > 0, err
 }
 
 func (s *sqlStore) DeleteFinished(ctx context.Context) ([]string, error) {
 	return s.q.DeleteFinishedDownloadJobs(ctx)
-}
-
-func (s *sqlStore) UpdateRef(ctx context.Context, id string, ref string) error {
-	return s.q.UpdateDownloadJobRef(ctx, db.UpdateDownloadJobRefParams{DownloaderRef: ref, ID: id})
 }
 
 func (s *sqlStore) UpdateCanonicalID(ctx context.Context, id string, canonicalID string) error {

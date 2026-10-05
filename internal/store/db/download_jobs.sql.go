@@ -19,13 +19,17 @@ func (q *Queries) ClearMatchedDownloadJobLibraryRefs(ctx context.Context) error 
 	return err
 }
 
-const deleteDownloadJob = `-- name: DeleteDownloadJob :exec
-DELETE FROM download_jobs WHERE id = ?
+const deleteDownloadJob = `-- name: DeleteDownloadJob :execrows
+DELETE FROM download_jobs WHERE id = ? AND status IN ('completed', 'failed', 'canceled') AND completion_pending = 0
 `
 
-func (q *Queries) DeleteDownloadJob(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, deleteDownloadJob, id)
-	return err
+// Only a finished job is removed: one retried in the meantime is active again.
+func (q *Queries) DeleteDownloadJob(ctx context.Context, id string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteDownloadJob, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteFinishedDownloadJobs = `-- name: DeleteFinishedDownloadJobs :many
@@ -446,7 +450,7 @@ func (q *Queries) RepointDownloadJobs(ctx context.Context, arg RepointDownloadJo
 	return err
 }
 
-const updateDownloadJob = `-- name: UpdateDownloadJob :exec
+const updateDownloadJob = `-- name: UpdateDownloadJob :execrows
 UPDATE download_jobs SET
     status = ?1,
     progress = ?2,
@@ -455,9 +459,12 @@ UPDATE download_jobs SET
     library_track_id = ?5,
     cover_art_id = ?6,
     completion_pending = ?7,
-    started_at = CASE WHEN ?1 = 'running' AND started_at IS NULL THEN unixepoch() ELSE started_at END,
-    finished_at = CASE WHEN ?1 = 'completed' OR ?1 = 'failed' OR ?1 = 'canceled' THEN unixepoch() ELSE NULL END
-WHERE id = ?8
+    attempts = ?8,
+    downloader_name = ?9,
+    downloader_ref = ?10,
+    started_at = ?11,
+    finished_at = ?12
+WHERE id = ?13
 `
 
 type UpdateDownloadJobParams struct {
@@ -468,11 +475,16 @@ type UpdateDownloadJobParams struct {
 	LibraryTrackID    sql.NullString `json:"library_track_id"`
 	CoverArtID        sql.NullString `json:"cover_art_id"`
 	CompletionPending int64          `json:"completion_pending"`
+	Attempts          int64          `json:"attempts"`
+	DownloaderName    string         `json:"downloader_name"`
+	DownloaderRef     string         `json:"downloader_ref"`
+	StartedAt         sql.NullInt64  `json:"started_at"`
+	FinishedAt        sql.NullInt64  `json:"finished_at"`
 	ID                string         `json:"id"`
 }
 
-func (q *Queries) UpdateDownloadJob(ctx context.Context, arg UpdateDownloadJobParams) error {
-	_, err := q.db.ExecContext(ctx, updateDownloadJob,
+func (q *Queries) UpdateDownloadJob(ctx context.Context, arg UpdateDownloadJobParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateDownloadJob,
 		arg.Status,
 		arg.Progress,
 		arg.Error,
@@ -480,9 +492,17 @@ func (q *Queries) UpdateDownloadJob(ctx context.Context, arg UpdateDownloadJobPa
 		arg.LibraryTrackID,
 		arg.CoverArtID,
 		arg.CompletionPending,
+		arg.Attempts,
+		arg.DownloaderName,
+		arg.DownloaderRef,
+		arg.StartedAt,
+		arg.FinishedAt,
 		arg.ID,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateDownloadJobCanonicalID = `-- name: UpdateDownloadJobCanonicalID :exec
@@ -555,32 +575,25 @@ func (q *Queries) UpdateDownloadJobOutputPath(ctx context.Context, arg UpdateDow
 	return err
 }
 
-const updateDownloadJobProgress = `-- name: UpdateDownloadJobProgress :exec
-UPDATE download_jobs SET progress = ? WHERE id = ?
+const updateDownloadJobProgress = `-- name: UpdateDownloadJobProgress :execrows
+UPDATE download_jobs SET progress = ?1
+WHERE id = ?2 AND status = 'running' AND completion_pending = 0 AND attempts = ?3
 `
 
 type UpdateDownloadJobProgressParams struct {
 	Progress int64  `json:"progress"`
 	ID       string `json:"id"`
+	Attempts int64  `json:"attempts"`
 }
 
-func (q *Queries) UpdateDownloadJobProgress(ctx context.Context, arg UpdateDownloadJobProgressParams) error {
-	_, err := q.db.ExecContext(ctx, updateDownloadJobProgress, arg.Progress, arg.ID)
-	return err
-}
-
-const updateDownloadJobRef = `-- name: UpdateDownloadJobRef :exec
-UPDATE download_jobs SET downloader_ref = ? WHERE id = ?
-`
-
-type UpdateDownloadJobRefParams struct {
-	DownloaderRef string `json:"downloader_ref"`
-	ID            string `json:"id"`
-}
-
-func (q *Queries) UpdateDownloadJobRef(ctx context.Context, arg UpdateDownloadJobRefParams) error {
-	_, err := q.db.ExecContext(ctx, updateDownloadJobRef, arg.DownloaderRef, arg.ID)
-	return err
+// A progress sample applies only to the attempt that produced it, while that
+// attempt is still running.
+func (q *Queries) UpdateDownloadJobProgress(ctx context.Context, arg UpdateDownloadJobProgressParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateDownloadJobProgress, arg.Progress, arg.ID, arg.Attempts)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const updateDownloadJobRequestJson = `-- name: UpdateDownloadJobRequestJson :exec

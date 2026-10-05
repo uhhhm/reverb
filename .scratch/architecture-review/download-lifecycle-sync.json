@@ -1,0 +1,88 @@
+{
+  "outcomes": [
+    {
+      "case": "cancel before output, then retry",
+      "lane": "synchronous (yt-dlp)",
+      "actions": [
+        "enqueue",
+        "downloader held after start",
+        "cancel",
+        "release",
+        "retry"
+      ],
+      "published": [
+        "queued",
+        "running",
+        "canceled",
+        "queued",
+        "running",
+        "completed"
+      ],
+      "stored": {
+        "status": "completed",
+        "attempts": 1,
+        "completionPending": false,
+        "present": true
+      },
+      "listed": "completed",
+      "listedAfterRestart": "completed",
+      "downloaderInvocations": 2
+    },
+    {
+      "case": "cancel after output reached completion",
+      "lane": "synchronous (yt-dlp)",
+      "actions": [
+        "enqueue",
+        "output written, record refused",
+        "cancel (refused)",
+        "clear (refused)",
+        "record restored",
+        "retry"
+      ],
+      "published": [
+        "queued",
+        "running",
+        "completed"
+      ],
+      "stored": {
+        "status": "completed",
+        "attempts": 0,
+        "completionPending": false,
+        "present": true
+      },
+      "listed": "completed",
+      "listedAfterRestart": "completed",
+      "downloaderInvocations": 1
+    },
+    {
+      "case": "retry with a manual URL across a restart",
+      "lane": "synchronous (yt-dlp)",
+      "actions": [
+        "enqueue",
+        "downloader fails",
+        "pause",
+        "retry with manual URL",
+        "restart",
+        "recovery dispatches"
+      ],
+      "published": [
+        "queued",
+        "running",
+        "failed",
+        "queued",
+        "running",
+        "completed"
+      ],
+      "stored": {
+        "status": "completed",
+        "attempts": 1,
+        "completionPending": false,
+        "present": true
+      },
+      "listed": "queued",
+      "listedAfterRestart": "completed",
+      "downloaderInvocations": 2
+    }
+  ],
+  "rerun": "REVERB_E2E_ARTIFACTS=\"$PWD/.scratch/architecture-review\" CGO_CFLAGS='-O2 -g -DHAVE_STRCHRNUL' go test ./internal/app -run 'TestDownloadControlsFollowOneLifecycle' -count=1 -v"
+}

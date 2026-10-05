@@ -233,6 +233,9 @@ func (s *memStore) List(_ context.Context) ([]core.DownloadJob, error) {
 func (s *memStore) Update(_ context.Context, j core.DownloadJob) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, ok := s.jobs[j.ID]; !ok {
+		return ErrJobNotFound
+	}
 	s.jobs[j.ID] = j
 	return nil
 }
@@ -244,12 +247,16 @@ func (s *memStore) UpdateRequest(_ context.Context, id string, req core.Download
 	return nil
 }
 
-func (s *memStore) Delete(_ context.Context, id string) error {
+func (s *memStore) Delete(_ context.Context, id string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	j, ok := s.jobs[id]
+	if !ok || j.CompletionPending || (j.Status != core.DownloadCompleted && j.Status != core.DownloadFailed && j.Status != core.DownloadCanceled) {
+		return false, nil
+	}
 	delete(s.jobs, id)
 	delete(s.reqs, id)
-	return nil
+	return true, nil
 }
 
 func (s *memStore) DeleteFinished(_ context.Context) ([]string, error) {
@@ -266,14 +273,16 @@ func (s *memStore) DeleteFinished(_ context.Context) ([]string, error) {
 	return ids, nil
 }
 
-func (s *memStore) UpdateRef(_ context.Context, id string, ref string) error {
+func (s *memStore) UpdateProgress(_ context.Context, id string, attempt, progress int) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if j, ok := s.jobs[id]; ok {
-		j.DownloaderRef = ref
-		s.jobs[id] = j
+	j, ok := s.jobs[id]
+	if !ok || j.Status != core.DownloadRunning || j.CompletionPending || j.Attempts != attempt {
+		return false, nil
 	}
-	return nil
+	j.Progress = progress
+	s.jobs[id] = j
+	return true, nil
 }
 
 func (s *memStore) UpdateCanonicalID(_ context.Context, id string, canonicalID string) error {

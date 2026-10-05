@@ -51,9 +51,6 @@ SET status     = @status,
     finished_at = CASE WHEN @status = 'completed' OR @status = 'failed' OR @status = 'canceled' THEN unixepoch() ELSE finished_at END
 WHERE id = @id;
 
--- name: UpdateDownloadJobProgress :exec
-UPDATE download_jobs SET progress = ? WHERE id = ?;
-
 -- name: UpdateDownloadJobError :exec
 UPDATE download_jobs SET error = ? WHERE id = ?;
 
@@ -72,11 +69,9 @@ UPDATE download_jobs SET request_json = ? WHERE id = ?;
 -- name: IncrementDownloadJobAttempts :exec
 UPDATE download_jobs SET attempts = attempts + 1 WHERE id = ?;
 
--- name: UpdateDownloadJobRef :exec
-UPDATE download_jobs SET downloader_ref = ? WHERE id = ?;
-
--- name: DeleteDownloadJob :exec
-DELETE FROM download_jobs WHERE id = ?;
+-- name: DeleteDownloadJob :execrows
+-- Only a finished job is removed: one retried in the meantime is active again.
+DELETE FROM download_jobs WHERE id = ? AND status IN ('completed', 'failed', 'canceled') AND completion_pending = 0;
 
 -- name: DeleteFinishedDownloadJobs :many
 DELETE FROM download_jobs
@@ -92,7 +87,7 @@ UPDATE download_jobs SET canonical_id = @canonical_id WHERE id = @id;
 -- name: RepointDownloadJobs :exec
 UPDATE download_jobs SET canonical_id = @canonical_id WHERE canonical_id = @canonical_id_2;
 
--- name: UpdateDownloadJob :exec
+-- name: UpdateDownloadJob :execrows
 UPDATE download_jobs SET
     status = @status,
     progress = @progress,
@@ -101,6 +96,15 @@ UPDATE download_jobs SET
     library_track_id = @library_track_id,
     cover_art_id = @cover_art_id,
     completion_pending = @completion_pending,
-    started_at = CASE WHEN @status = 'running' AND started_at IS NULL THEN unixepoch() ELSE started_at END,
-    finished_at = CASE WHEN @status = 'completed' OR @status = 'failed' OR @status = 'canceled' THEN unixepoch() ELSE NULL END
+    attempts = @attempts,
+    downloader_name = @downloader_name,
+    downloader_ref = @downloader_ref,
+    started_at = @started_at,
+    finished_at = @finished_at
 WHERE id = @id;
+
+-- name: UpdateDownloadJobProgress :execrows
+-- A progress sample applies only to the attempt that produced it, while that
+-- attempt is still running.
+UPDATE download_jobs SET progress = @progress
+WHERE id = @id AND status = 'running' AND completion_pending = 0 AND attempts = @attempts;

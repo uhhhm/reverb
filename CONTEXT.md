@@ -55,6 +55,12 @@ result always syncs to the canonical library. A Download made on a phone is
 on the phone, and afterwards it stays only if an offline playlist names it.
 _Avoid_: Import, fetch
 
+**Attempt**:
+One run of a Download. Retry, by hand or automatically, starts a new attempt;
+anything still running for an earlier one (a downloader, a submission, a poll)
+no longer changes the Download.
+_Avoid_: Try, run
+
 **Add from link**:
 The action of pasting a URL (Spotify, YouTube, ...), having Reverb resolve it to a
 track/album, and adding it to a playlist and/or the library.

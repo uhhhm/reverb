@@ -25,7 +25,7 @@ locality) follows the `codebase-design` skill. Domain terms follow
 | 09 | [Recommendation actions refresh every affected view](issues/09-recommendation-actions-refresh-every-view.md) | bug + Strong | done |
 | 10 | [Library renames refresh every affected view](issues/10-library-renames-refresh-every-view.md) | bug + Strong | done |
 | 11 | [Download completion survives recording failures and restart](issues/11-download-completion-survives-recording-failures.md) | Strong | done |
-| 12 | [Download controls follow one lifecycle](issues/12-download-controls-follow-one-lifecycle.md) | Strong | ready-for-agent |
+| 12 | [Download controls follow one lifecycle](issues/12-download-controls-follow-one-lifecycle.md) | Strong | done |
 | 13 | [Every recommendation result honors current Not interested marks](issues/13-recommendation-results-honor-current-marks.md) | Worth doing | done |
 
 Among the remaining follow-ups, 12 and 13 can start immediately. Ticket 12

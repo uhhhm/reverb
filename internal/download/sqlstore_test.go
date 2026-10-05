@@ -3,6 +3,7 @@ package download
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sort"
 	"testing"
 
@@ -55,6 +56,7 @@ func TestSQLStoreInsertGetUpdate(t *testing.T) {
 
 	got.Status = core.DownloadRunning
 	got.Progress = 60
+	got.StartedAt = 1_700_000_000
 	if err := s.Update(ctx, got); err != nil {
 		t.Fatal(err)
 	}
@@ -65,17 +67,18 @@ func TestSQLStoreInsertGetUpdate(t *testing.T) {
 	if active.Progress != 60 || active.Status != core.DownloadRunning {
 		t.Fatalf("active mismatch: %+v", active)
 	}
-	// Re-Get to confirm started_at was populated on the running transition.
+	// The Manager stamps the times; the store keeps what it was given.
 	running, _, err := s.Get(ctx, "j1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if running.StartedAt == 0 {
-		t.Fatalf("StartedAt must be non-zero after transitioning to running: %+v", running)
+	if running.StartedAt != 1_700_000_000 {
+		t.Fatalf("StartedAt not persisted on the running transition: %+v", running)
 	}
 
 	got.Status = core.DownloadCompleted
 	got.LibraryTrackID = "t9"
+	got.FinishedAt = 1_700_000_300
 	if err := s.Update(ctx, got); err != nil {
 		t.Fatal(err)
 	}
@@ -86,13 +89,12 @@ func TestSQLStoreInsertGetUpdate(t *testing.T) {
 	if fin.LibraryTrackID != "t9" {
 		t.Fatalf("library_track_id not persisted: %+v", fin)
 	}
-	// Re-Get to confirm finished_at was populated on the completed transition.
 	completed, _, err := s.Get(ctx, "j1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if completed.FinishedAt == 0 {
-		t.Fatalf("FinishedAt must be non-zero after transitioning to completed: %+v", completed)
+	if completed.FinishedAt != 1_700_000_300 || completed.StartedAt != 1_700_000_000 {
+		t.Fatalf("times not persisted on the completed transition: %+v", completed)
 	}
 
 	list, err := s.List(ctx)
@@ -157,25 +159,46 @@ func TestSQLStoreInsertPersistsInitiatedBy(t *testing.T) {
 	}
 }
 
-func TestSQLStoreDownloaderRefRoundTrip(t *testing.T) {
+// Update persists every lifecycle field the Manager changes, so a job read
+// back after a restart is the job that was written.
+func TestSQLStoreUpdatePersistsTheLifecycleRow(t *testing.T) {
 	s := newSQLStore(t)
 	ctx := context.Background()
-	job := core.DownloadJob{ID: "r1", DedupKey: "dk", Status: core.DownloadRunning, DownloaderName: "lidarr", Source: "spotify", ExternalID: "e1"}
+	job := core.DownloadJob{ID: "r1", DedupKey: "dk", Status: core.DownloadQueued, DownloaderName: "spotdl", Source: "spotify", ExternalID: "e1"}
 	if err := s.Insert(ctx, job, core.DownloadRequest{Source: "spotify", ExternalID: "e1", Album: "Discovery", Artist: "Daft Punk"}); err != nil {
 		t.Fatal(err)
 	}
-	if got, _, _ := s.Get(ctx, "r1"); got.DownloaderRef != "" {
-		t.Fatalf("new job should have empty ref, got %q", got.DownloaderRef)
+	if got, _, _ := s.Get(ctx, "r1"); got.DownloaderRef != "" || got.StartedAt != 0 {
+		t.Fatalf("new job %+v", got)
 	}
-	if err := s.UpdateRef(ctx, "r1", "lidarr-album-42"); err != nil {
+	job.Status, job.DownloaderName, job.DownloaderRef = core.DownloadRunning, "lidarr", "lidarr-album-42"
+	job.Attempts, job.StartedAt = 2, 1_700_000_000
+	if err := s.Update(ctx, job); err != nil {
 		t.Fatal(err)
 	}
 	got, ok, err := s.Get(ctx, "r1")
 	if err != nil || !ok {
 		t.Fatalf("get: %v ok=%v", err, ok)
 	}
-	if got.DownloaderRef != "lidarr-album-42" {
-		t.Fatalf("ref not persisted: %q", got.DownloaderRef)
+	if got.DownloaderRef != "lidarr-album-42" || got.DownloaderName != "lidarr" || got.Attempts != 2 || got.StartedAt != 1_700_000_000 || got.FinishedAt != 0 {
+		t.Fatalf("lifecycle row not persisted: %+v", got)
+	}
+	// A sample for another attempt, or once the attempt has ended, is refused.
+	if ok, err := s.UpdateProgress(ctx, "r1", 1, 40); ok || err != nil {
+		t.Fatalf("stale attempt's progress recorded: %v %v", ok, err)
+	}
+	if ok, err := s.UpdateProgress(ctx, "r1", 2, 40); !ok || err != nil {
+		t.Fatalf("current attempt's progress refused: %v %v", ok, err)
+	}
+	job.Progress, job.Status, job.FinishedAt = 40, core.DownloadCanceled, 1_700_000_100
+	if err := s.Update(ctx, job); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.UpdateProgress(ctx, "r1", 2, 90); ok || err != nil {
+		t.Fatalf("progress recorded on a canceled job: %v %v", ok, err)
+	}
+	if got, _, _ := s.Get(ctx, "r1"); got.Progress != 40 || got.FinishedAt != 1_700_000_100 {
+		t.Fatalf("canceled row %+v", got)
 	}
 }
 
@@ -199,12 +222,19 @@ func TestSQLStoreDeleteAndDeleteFinished(t *testing.T) {
 	mk("c", "queued")
 	mk("d", "canceled")
 
-	// Delete a single job.
-	if err := s.Delete(ctx, "a"); err != nil {
-		t.Fatal(err)
+	// Delete a single finished job; an active one is kept.
+	if removed, err := s.Delete(ctx, "a"); err != nil || !removed {
+		t.Fatalf("delete a: removed=%v err=%v", removed, err)
 	}
 	if _, ok, _ := s.Get(ctx, "a"); ok {
 		t.Fatal("job a should be deleted")
+	}
+	if removed, err := s.Delete(ctx, "c"); err != nil || removed {
+		t.Fatalf("delete queued c: removed=%v err=%v", removed, err)
+	}
+	// A removed row is never recreated by a late write.
+	if err := s.Update(ctx, core.DownloadJob{ID: "a", Status: core.DownloadRunning}); !errors.Is(err, ErrJobNotFound) {
+		t.Fatalf("update of a removed job: %v, want ErrJobNotFound", err)
 	}
 
 	// DeleteFinished removes terminal jobs (b failed, d canceled), keeps queued c.

@@ -1,0 +1,52 @@
+{
+  "outcomes": [
+    {
+      "case": "submission returns after cancel and clear",
+      "lane": "asynchronous (Lidarr)",
+      "actions": [
+        "queued row recovered at boot",
+        "Lidarr search held",
+        "cancel",
+        "clear",
+        "release search"
+      ],
+      "published": [
+        "canceled",
+        "removed"
+      ],
+      "stored": {
+        "status": "",
+        "attempts": 0,
+        "completionPending": false,
+        "present": false
+      },
+      "listed": "absent",
+      "listedAfterRestart": "absent",
+      "downloaderInvocations": 0
+    },
+    {
+      "case": "import finishes after cancel",
+      "lane": "asynchronous (Lidarr)",
+      "actions": [
+        "running at Lidarr",
+        "cancel",
+        "Lidarr reports the album imported",
+        "restart"
+      ],
+      "published": [
+        "canceled"
+      ],
+      "stored": {
+        "status": "canceled",
+        "attempts": 0,
+        "completionPending": false,
+        "downloaderRef": "78",
+        "present": true
+      },
+      "listed": "canceled",
+      "listedAfterRestart": "canceled",
+      "downloaderInvocations": 0
+    }
+  ],
+  "rerun": "REVERB_E2E_ARTIFACTS=\"$PWD/.scratch/architecture-review\" CGO_CFLAGS='-O2 -g -DHAVE_STRCHRNUL' go test ./internal/app -run 'TestDownloadControlsFollowOneLifecycle' -count=1 -v"
+}
