@@ -8,11 +8,21 @@ This is the harness ticket 08 asks every fact module to be tested through. It is
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Before writing the harness, list the ways a replication test can pass while replication is broken. Examples: syncing only one way; the peer re-emitting the applied change, so it echoes back; applying the change on the same store it came from; a materializer missing the service under test. The harness makes each of these fail loudly.
-- [ ] One harness lives in a test-support package importable from any `internal/...` test (for example `internal/synctest`). It is not compiled into the product binary.
-- [ ] A device is configured with the services it projects into, so no test repeats store setup, device rows or materializer wiring.
-- [ ] The harness has a helper asserting that, after a sync A → B, B's log holds no new change authored by B. This is the no-echo check.
-- [ ] The three existing copies are deleted, and their tests pass unchanged through the shared harness.
-- [ ] `go test ./internal/notinterested ./internal/tastesettings ./internal/playlistcrdt` passes.
+- [x] Before writing the harness, list the ways a replication test can pass while replication is broken. Examples: syncing only one way; the peer re-emitting the applied change, so it echoes back; applying the change on the same store it came from; a materializer missing the service under test. The harness makes each of these fail loudly.
+- [x] One harness lives in a test-support package importable from any `internal/...` test (for example `internal/synctest`). It is not compiled into the product binary.
+- [x] A device is configured with the services it projects into, so no test repeats store setup, device rows or materializer wiring.
+- [x] The harness has a helper asserting that, after a sync A → B, B's log holds no new change authored by B. This is the no-echo check.
+- [x] The three existing copies are deleted, and their tests pass unchanged through the shared harness.
+- [x] `go test ./internal/notinterested ./internal/tastesettings ./internal/playlistcrdt` passes.
+
+## Comments
+
+Implemented as `internal/sync/pairtest`. Failure modes it turns into test failures, each covered by `pairtest_test.go`:
+
+- syncing a device onto its own store (`SyncTo` refuses the same device, store or log);
+- calling a one-way sync convergence (`Converge` syncs both ways and `AssertConverged` compares both logs as sets);
+- a peer re-emitting what it applied (`SyncToWithoutEcho` fails on any new change authored by the receiver);
+- a materializer missing the service under test (`SyncToWithoutEcho` fails when the receiver's projected tables did not change, so the no-echo check cannot pass vacuously);
+- a peer the receiver does not know (`SyncTo` fails when a rejected change's author is not a known device).

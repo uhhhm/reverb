@@ -7,55 +7,30 @@ import (
 
 	"github.com/uhhhm/reverb/internal/catalog"
 	"github.com/uhhhm/reverb/internal/core"
+	"github.com/uhhhm/reverb/internal/materialize"
 	"github.com/uhhhm/reverb/internal/playlistcrdt"
 	"github.com/uhhhm/reverb/internal/playlistsync"
-	"github.com/uhhhm/reverb/internal/store"
-	"github.com/uhhhm/reverb/internal/store/db"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
+	"github.com/uhhhm/reverb/internal/sync/pairtest"
 	"github.com/uhhhm/reverb/internal/wiring"
 )
 
 // device is one Reverb install: its own database, change log and playlist store.
 type device struct {
-	id    string
-	st    *store.Store
-	log   *reverbsync.SyncStore
+	*pairtest.Device
 	store playlistsync.Store
 	crdt  *playlistcrdt.Service
 }
 
 func newDevice(t *testing.T, id string, peers ...string) *device {
 	t.Helper()
-	st, err := store.Open(t.TempDir() + "/reverb.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
-	if err := st.Migrate(); err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range append([]string{id}, peers...) {
-		if err := st.Q().CreateDevice(context.Background(), db.CreateDeviceParams{
-			ID: p, Name: p, TokenHash: "hash_" + p,
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	d := &device{id: id, st: st, log: reverbsync.NewSyncStore(st.Q()), store: wiring.NewSyncStore(st.Q())}
-	d.crdt = playlistcrdt.New(d.log, d.store, func(context.Context) string { return id })
-	d.log.SetMaterializer(materializer{d.crdt})
+	d := &device{}
+	d.Device = pairtest.NewDevice(t, id, func(sd *pairtest.Device, m *materialize.Service) {
+		d.store = wiring.NewSyncStore(sd.Store.Q())
+		d.crdt = playlistcrdt.New(sd.Log, d.store, sd.Resolve)
+		m.WithPlaylists(d.crdt)
+	}, peers...)
 	return d
-}
-
-// materializer routes playlist changes into the projection, which is all these
-// tests exercise.
-type materializer struct{ p *playlistcrdt.Service }
-
-func (m materializer) Apply(ctx context.Context, ch reverbsync.SyncChange) error {
-	if ch.EntityType != reverbsync.EntityPlaylist {
-		return nil
-	}
-	return m.p.Apply(ctx, ch.EntityID)
 }
 
 // save writes a playlist as a local edit would, then publishes it.
@@ -81,7 +56,7 @@ func (d *device) tracks(t *testing.T, id string) []string {
 	t.Helper()
 	row, err := d.store.Get(context.Background(), id)
 	if err != nil {
-		t.Fatalf("get playlist %q on %s: %v", id, d.id, err)
+		t.Fatalf("get playlist %q on %s: %v", id, d.ID, err)
 	}
 	var out []core.ExternalResult
 	if err := json.Unmarshal([]byte(row.TracksJSON), &out); err != nil {
@@ -94,18 +69,8 @@ func (d *device) tracks(t *testing.T, id string) []string {
 	return titles
 }
 
-// push replicates everything from has been logged on from onto to.
-func push(t *testing.T, from, to *device) {
-	t.Helper()
-	ctx := context.Background()
-	changes, err := from.log.ListSince(ctx, 0, 10000)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, _, err := to.log.Reconcile(ctx, from.id, 0, changes); err != nil {
-		t.Fatalf("reconcile onto %s: %v", to.id, err)
-	}
-}
+// push replicates everything from has logged onto to.
+func push(t *testing.T, from, to *device) { pairtest.SyncTo(t, from.Device, to.Device) }
 
 func track(title string) core.ExternalResult {
 	return core.ExternalResult{Source: "library", ExternalID: title, Title: title, Type: core.EntityTrack}
@@ -126,7 +91,7 @@ func equal(a []string, b ...string) bool {
 func TestPlaylistReachesTheOtherDevice(t *testing.T) {
 	a, b := newDevice(t, "dev_a", "dev_b"), newDevice(t, "dev_b", "dev_a")
 	a.save(t, "pl1", "Roadtrip", []core.ExternalResult{track("one"), track("two")})
-	push(t, a, b)
+	pairtest.SyncToWithoutEcho(t, a.Device, b.Device)
 
 	if got := b.tracks(t, "pl1"); !equal(got, "one", "two") {
 		t.Fatalf("tracks on B = %v, want [one two]", got)
@@ -147,20 +112,19 @@ func TestConcurrentAdditionsBothSurvive(t *testing.T) {
 
 	a.save(t, "pl1", "Roadtrip", []core.ExternalResult{track("one"), track("from-a")})
 	b.save(t, "pl1", "Roadtrip", []core.ExternalResult{track("one"), track("from-b")})
-	push(t, a, b)
-	push(t, b, a)
+	pairtest.Converge(t, a.Device, b.Device)
 
 	for _, d := range []*device{a, b} {
 		got := d.tracks(t, "pl1")
 		if len(got) != 3 {
-			t.Fatalf("tracks on %s = %v, want all three additions kept", d.id, got)
+			t.Fatalf("tracks on %s = %v, want all three additions kept", d.ID, got)
 		}
 		seen := map[string]bool{}
 		for _, tr := range got {
 			seen[tr] = true
 		}
 		if !seen["from-a"] || !seen["from-b"] {
-			t.Fatalf("tracks on %s = %v, want both additions", d.id, got)
+			t.Fatalf("tracks on %s = %v, want both additions", d.ID, got)
 		}
 	}
 	if !equal(a.tracks(t, "pl1"), b.tracks(t, "pl1")...) {
@@ -199,12 +163,12 @@ func TestReorderReplicates(t *testing.T) {
 func TestRepublishingAnUnchangedPlaylistIsSilent(t *testing.T) {
 	a := newDevice(t, "dev_a")
 	a.save(t, "pl1", "Roadtrip", []core.ExternalResult{track("one")})
-	before, err := a.log.ListSince(context.Background(), 0, 10000)
+	before, err := a.Log.ListSince(context.Background(), 0, 10000)
 	if err != nil {
 		t.Fatal(err)
 	}
 	a.crdt.Publish(context.Background(), "pl1")
-	after, err := a.log.ListSince(context.Background(), 0, 10000)
+	after, err := a.Log.ListSince(context.Background(), 0, 10000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +183,7 @@ func TestDeletionRemovesThePlaylistOnThePeer(t *testing.T) {
 	push(t, a, b)
 
 	ctx := context.Background()
-	if _, err := reverbsync.NewDeletionService(a.log, a.st.Q()).DeletePlaylist(ctx, "dev_a", "pl1", 9000); err != nil {
+	if _, err := reverbsync.NewDeletionService(a.Log, a.Store.Q()).DeletePlaylist(ctx, "dev_a", "pl1", 9000); err != nil {
 		t.Fatal(err)
 	}
 	push(t, a, b)
@@ -248,12 +212,11 @@ func TestSameLibraryTrackAddedOnBothDevicesIsOneTrack(t *testing.T) {
 
 	a.save(t, "pl1", "Roadtrip", []core.ExternalResult{libraryTrack("Song", "nav-a-1")})
 	b.save(t, "pl1", "Roadtrip", []core.ExternalResult{libraryTrack("Song", "nav-b-9")})
-	push(t, a, b)
-	push(t, b, a)
+	pairtest.Converge(t, a.Device, b.Device)
 
 	for _, d := range []*device{a, b} {
 		if got := d.tracks(t, "pl1"); len(got) != 1 {
-			t.Fatalf("tracks on %s = %v, want the one recording", d.id, got)
+			t.Fatalf("tracks on %s = %v, want the one recording", d.ID, got)
 		}
 	}
 }
@@ -329,7 +292,7 @@ func TestHalfDeliveredPlaylistIsNotCreated(t *testing.T) {
 	a.save(t, "pl1", "Roadtrip", []core.ExternalResult{track("one")})
 
 	ctx := context.Background()
-	all, err := a.log.ListSince(ctx, 0, 10000)
+	all, err := a.Log.ListSince(ctx, 0, 10000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,14 +307,14 @@ func TestHalfDeliveredPlaylistIsNotCreated(t *testing.T) {
 	if len(tail) != 1 {
 		t.Fatalf("expected exactly one source field, got %d", len(tail))
 	}
-	if _, _, _, err := b.log.Reconcile(ctx, "dev_a", 0, head); err != nil {
+	if _, _, _, err := b.Log.Reconcile(ctx, "dev_a", 0, head); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := b.store.Get(ctx, "pl1"); err == nil {
 		t.Fatal("a playlist was created before its identity arrived")
 	}
 
-	if _, _, _, err := b.log.Reconcile(ctx, "dev_a", 0, tail); err != nil {
+	if _, _, _, err := b.Log.Reconcile(ctx, "dev_a", 0, tail); err != nil {
 		t.Fatal(err)
 	}
 	row, err := b.store.Get(ctx, "pl1")

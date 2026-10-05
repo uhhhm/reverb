@@ -6,61 +6,28 @@ import (
 	"time"
 
 	"github.com/uhhhm/reverb/internal/core"
-	"github.com/uhhhm/reverb/internal/crop"
 	"github.com/uhhhm/reverb/internal/materialize"
 	"github.com/uhhhm/reverb/internal/notinterested"
-	"github.com/uhhhm/reverb/internal/override"
-	"github.com/uhhhm/reverb/internal/store"
-	"github.com/uhhhm/reverb/internal/store/db"
-	reverbsync "github.com/uhhhm/reverb/internal/sync"
-	"github.com/uhhhm/reverb/internal/syncemit"
+	"github.com/uhhhm/reverb/internal/sync/pairtest"
 )
 
 // device is one running Reverb: its own database, change log and marks.
 type device struct {
-	id    string
-	st    *store.Store
-	log   *reverbsync.SyncStore
+	*pairtest.Device
 	marks *notinterested.Service
 }
 
 func newDevice(t *testing.T, id string, peers ...string) *device {
 	t.Helper()
-	st, err := store.Open(t.TempDir() + "/reverb.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
-	if err := st.Migrate(); err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	for i, d := range append([]string{id}, peers...) {
-		isServer := int64(0)
-		if i == 0 {
-			isServer = 1
-		}
-		if err := st.Q().CreateDevice(ctx, db.CreateDeviceParams{ID: d, Name: d, TokenHash: "hash_" + d, IsServer: isServer}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	log := reverbsync.NewSyncStore(st.Q())
-	marks := notinterested.New(st.Q(), syncemit.New(log, nil, func(context.Context) string { return id }))
-	log.SetMaterializer(materialize.New(override.New(st.Q()), crop.New(st.Q())).WithNotInterested(marks))
-	return &device{id: id, st: st, log: log, marks: marks}
+	d := &device{}
+	d.Device = pairtest.NewDevice(t, id, func(sd *pairtest.Device, m *materialize.Service) {
+		d.marks = notinterested.New(sd.Store.Q(), sd.Emitter())
+		m.WithNotInterested(d.marks)
+	}, peers...)
+	return d
 }
 
-// syncTo sends every change in from's log to to, the way a sync round does.
-func syncTo(t *testing.T, from, to *device) {
-	t.Helper()
-	changes, err := from.log.ListSince(context.Background(), 0, 10000)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, _, err := to.log.Reconcile(context.Background(), from.id, 0, changes); err != nil {
-		t.Fatal(err)
-	}
-}
+func syncTo(t *testing.T, from, to *device) { pairtest.SyncTo(t, from.Device, to.Device) }
 
 func list(t *testing.T, d *device) []notinterested.Mark {
 	t.Helper()
@@ -144,20 +111,11 @@ func TestSetExcludesMarkedTracksAndArtists(t *testing.T) {
 func TestMarkReplicatesWithoutReemitting(t *testing.T) {
 	a, b := newDevice(t, "dev_a", "dev_b"), newDevice(t, "dev_b", "dev_a")
 	m := mark(t, a, notinterested.ArtistMark("Stardust"))
-	syncTo(t, a, b)
+	pairtest.SyncToWithoutEcho(t, a.Device, b.Device)
 
 	marks := list(t, b)
 	if len(marks) != 1 || marks[0].Key != m.Key || marks[0].Artist != "Stardust" {
 		t.Fatalf("peer marks = %+v", marks)
-	}
-	changes, err := b.log.ListSince(context.Background(), 0, 10000)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, ch := range changes {
-		if ch.DeviceID == "dev_b" {
-			t.Fatalf("applying a peer's mark emitted %+v", ch)
-		}
 	}
 }
 
@@ -188,8 +146,7 @@ func TestConcurrentMarkAndUndoConverge(t *testing.T) {
 	// tie-break instead of showing which write came later.
 	time.Sleep(5 * time.Millisecond)
 	mark(t, b, notinterested.TrackMark("deezer", "1", "D.A.N.C.E.", "Justice"))
-	syncTo(t, a, b)
-	syncTo(t, b, a)
+	pairtest.Converge(t, a.Device, b.Device)
 
 	onA, onB := list(t, a), list(t, b)
 	if len(onA) != len(onB) {

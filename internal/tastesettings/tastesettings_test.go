@@ -5,59 +5,28 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/uhhhm/reverb/internal/crop"
 	"github.com/uhhhm/reverb/internal/materialize"
-	"github.com/uhhhm/reverb/internal/override"
-	"github.com/uhhhm/reverb/internal/store"
-	"github.com/uhhhm/reverb/internal/store/db"
-	reverbsync "github.com/uhhhm/reverb/internal/sync"
-	"github.com/uhhhm/reverb/internal/syncemit"
+	"github.com/uhhhm/reverb/internal/sync/pairtest"
 	"github.com/uhhhm/reverb/internal/tastesettings"
 )
 
 // device is one running Reverb: its own database, change log and settings.
 type device struct {
-	id       string
-	log      *reverbsync.SyncStore
+	*pairtest.Device
 	settings *tastesettings.Service
 }
 
 func newDevice(t *testing.T, id string, peers ...string) *device {
 	t.Helper()
-	st, err := store.Open(t.TempDir() + "/reverb.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
-	if err := st.Migrate(); err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	for i, d := range append([]string{id}, peers...) {
-		isServer := int64(0)
-		if i == 0 {
-			isServer = 1
-		}
-		if err := st.Q().CreateDevice(ctx, db.CreateDeviceParams{ID: d, Name: d, TokenHash: "hash_" + d, IsServer: isServer}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	log := reverbsync.NewSyncStore(st.Q())
-	settings := tastesettings.New(st.Q(), syncemit.New(log, nil, func(context.Context) string { return id }))
-	log.SetMaterializer(materialize.New(override.New(st.Q()), crop.New(st.Q())).WithTasteSettings(settings))
-	return &device{id: id, log: log, settings: settings}
+	d := &device{}
+	d.Device = pairtest.NewDevice(t, id, func(sd *pairtest.Device, m *materialize.Service) {
+		d.settings = tastesettings.New(sd.Store.Q(), sd.Emitter())
+		m.WithTasteSettings(d.settings)
+	}, peers...)
+	return d
 }
 
-func syncTo(t *testing.T, from, to *device) {
-	t.Helper()
-	changes, err := from.log.ListSince(context.Background(), 0, 10000)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, _, err := to.log.Reconcile(context.Background(), from.id, 0, changes); err != nil {
-		t.Fatal(err)
-	}
-}
+func syncTo(t *testing.T, from, to *device) { pairtest.SyncTo(t, from.Device, to.Device) }
 
 func get(t *testing.T, d *device) tastesettings.Settings {
 	t.Helper()
@@ -106,7 +75,7 @@ func TestSettingsReachPairedDevices(t *testing.T) {
 	if _, err := a.settings.Update(context.Background(), tastesettings.Patch{Adventurousness: &n, OnlineRecommendations: &off}); err != nil {
 		t.Fatal(err)
 	}
-	syncTo(t, a, b)
+	pairtest.SyncToWithoutEcho(t, a.Device, b.Device)
 	if got, want := get(t, b), (tastesettings.Settings{Adventurousness: 20, OnlineRecommendations: false}); got != want {
 		t.Fatalf("peer has %+v, want %+v", got, want)
 	}
