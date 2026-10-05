@@ -56,8 +56,11 @@ func TestRenamePreservesOmissionsAndLocalEditOnPublicationFailure(t *testing.T) 
 	if err != nil || got.Title != "" || got.Artist != "artist" || got.Album != "album" {
 		t.Fatalf("%+v %v", got, err)
 	}
-	if len(log.changes) != 3 {
-		t.Fatalf("published %d fields", len(log.changes))
+	// Only the field the patch names is published: re-sending the others
+	// would overwrite a peer's concurrent edit to them with this device's
+	// older values.
+	if len(log.changes) != 1 || log.changes[0].Field != reverbsync.FieldTitle || log.changes[0].Value != "" {
+		t.Fatalf("published %+v, want only the cleared title", log.changes)
 	}
 	for _, ch := range log.changes {
 		if ch.EntityID != "trk_catalog" {
@@ -66,7 +69,7 @@ func TestRenamePreservesOmissionsAndLocalEditOnPublicationFailure(t *testing.T) 
 	}
 	names.fail = errors.New("local write failed")
 	_, err = edits.Rename(context.Background(), BackendID("backend"), NamePatch{})
-	if !errors.Is(err, names.fail) || len(log.changes) != 3 {
+	if !errors.Is(err, names.fail) || len(log.changes) != 1 {
 		t.Fatal("failed local edit must not publish")
 	}
 }

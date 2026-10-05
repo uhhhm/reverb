@@ -27,6 +27,14 @@ import (
 // same name comes back under the same backend id.
 func folderSubsonic(t *testing.T, musicDir string) *httptest.Server {
 	t.Helper()
+	return folderSubsonicIDs(t, musicDir, "f-")
+}
+
+// folderSubsonicIDs is folderSubsonic whose backend ids start with prefix, so
+// two devices holding the same file address it by different ids, as two real
+// Navidromes do.
+func folderSubsonicIDs(t *testing.T, musicDir, prefix string) *httptest.Server {
+	t.Helper()
 	type song struct {
 		ID       string `json:"id"`
 		Title    string `json:"title"`
@@ -50,7 +58,7 @@ func folderSubsonic(t *testing.T, musicDir string) *httptest.Server {
 			}
 			sum := sha1.Sum([]byte(rel))
 			out = append(out, song{
-				ID: "f-" + hex.EncodeToString(sum[:6]), Title: title, Artist: artist, Album: "Record",
+				ID: prefix + hex.EncodeToString(sum[:6]), Title: title, Artist: artist, Album: "Record",
 				Duration: 180, Suffix: "mp3", Path: rel,
 			})
 			return nil

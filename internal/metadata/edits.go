@@ -64,10 +64,19 @@ func (e *Edits) Rename(ctx context.Context, id BackendID, p NamePatch) (override
 	if err != nil {
 		return override.Name{}, err
 	}
+	// Only the fields the patch names are published. Re-sending the others
+	// would stamp this device's values with a newer clock and overwrite a
+	// peer's concurrent edit to them.
 	cid := e.names.CatalogIDForTrack(ctx, string(id))
-	e.publish(ctx, cid, reverbsync.FieldTitle, name.Title)
-	e.publish(ctx, cid, reverbsync.FieldArtist, name.Artist)
-	e.publish(ctx, cid, reverbsync.FieldAlbum, name.Album)
+	if p.Title != nil {
+		e.publish(ctx, cid, reverbsync.FieldTitle, name.Title)
+	}
+	if p.Artist != nil {
+		e.publish(ctx, cid, reverbsync.FieldArtist, name.Artist)
+	}
+	if p.Album != nil {
+		e.publish(ctx, cid, reverbsync.FieldAlbum, name.Album)
+	}
 	return name, nil
 }
 func (e *Edits) SetCrop(ctx context.Context, id BackendID, p crop.Points) error {
