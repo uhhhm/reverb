@@ -226,8 +226,8 @@ make desktop-windows # -> ./dist/reverb-desktop.exe (cross-compiled from macOS o
 Desktop (Wails) runs the same Go monolith on `127.0.0.1:0` on macOS, Linux and Windows (amd64; ARM64 Windows is out of scope). For a first install, use the capitalized release asset:
 
 - Linux: extract `Reverb-<version>-linux-<arch>.tar.gz`, then run `Reverb/install.sh`.
-- macOS: extract the matching `Reverb-<version>-macOS-<arch>.zip`, drag `Reverb.app` to Applications, then right-click **Open** on first launch.
-- Windows: extract `Reverb-<version>-windows-amd64.zip` somewhere writable, then run `install-shortcut.ps1` and open Reverb from Start search.
+- macOS: open the matching `Reverb-<version>-macOS-<arch>.dmg`, drag `Reverb.app` to Applications, then right-click **Open** on first launch. The `.zip` holds the same app.
+- Windows: run `Reverb-<version>-windows-amd64-setup.exe`. It installs per user without administrator rights and adds Reverb to the Start Menu. `Reverb-<version>-windows-amd64.zip` is the portable alternative: extract it somewhere writable and run `install-shortcut.ps1`.
 
 Reverb offers later updates in the app. Lowercase `reverb-desktop-<version>-<os>-<arch>.zip` files are updater payloads, not install archives. Each bundle includes its removal path without deleting app data; see [the complete install and uninstall steps](desktop/README.md#installing-a-release). The DB and `reverb.log` live under `~/Library/Application Support/Reverb` (macOS), `~/.config/reverb` (Linux, XDG), or `%AppData%\reverb` (Windows), with downloads in `~/Music/Reverb` (`%USERPROFILE%\Music\Reverb`). See also [the deployment reference](docs/deployment.md#desktop-wails).
 

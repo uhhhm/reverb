@@ -244,3 +244,53 @@ func TestReleaseWorkflowAssetCountsMatch(t *testing.T) {
 		t.Error("the publish job no longer puts install bundles first in the release notes")
 	}
 }
+
+// The first-install installers: a disk image per Mac arch and one Windows
+// setup program. Each is verified as installed before upload, counted by the
+// publish job, and never mistaken for an update payload.
+func TestReleaseWorkflowPublishesInstallers(t *testing.T) {
+	source := workflowSource(t)
+	for _, want := range []string{
+		`disk_image="Reverb-${TAG#v}-macOS-${PACKAGE_ARCH}.dmg"`,
+		`installer="Reverb-${TAG#v}-windows-amd64-setup.exe"`,
+		// The image is mounted and the app inside it verified as shipped.
+		`hdiutil attach`,
+		// The installer is run silently and the installed app booted.
+		`/VERYSILENT`,
+		`REVERB_BUNDLE_EXE="$installed/reverb-desktop.exe"`,
+		`gh release upload "$TAG" dist/*.zip dist/*.tar.gz dist/*.dmg dist/*-setup.exe`,
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("the release workflow lacks %s", want)
+		}
+	}
+	count := func(glob string) string {
+		m := regexp.MustCompile(`-name '` + regexp.QuoteMeta(glob) + `' \| wc -l\)" -eq (\d+)`).FindStringSubmatch(source)
+		if m == nil {
+			return "unchecked"
+		}
+		return m[1]
+	}
+	if got := count("*.dmg"); got != "2" {
+		t.Errorf("the publish job expects %s disk images, want 2", got)
+	}
+	if got := count("*-setup.exe"); got != "1" {
+		t.Errorf("the publish job expects %s Windows installers, want 1", got)
+	}
+
+	payloads := artifactNames(t, source, "v1.2.3")
+	for platform, installer := range map[string]string{
+		"darwin/arm64":  "Reverb-1.2.3-macOS-arm64.dmg",
+		"darwin/amd64":  "Reverb-1.2.3-macOS-x86_64.dmg",
+		"windows/amd64": "Reverb-1.2.3-windows-amd64-setup.exe",
+	} {
+		goos, goarch, _ := strings.Cut(platform, "/")
+		rel := &Release{Tag: "v1.2.3", Assets: []Asset{
+			{Name: installer, URL: "https://example.com/installer"},
+			{Name: payloads[platform], URL: "https://example.com/payload"},
+		}}
+		if got := PickAsset(rel, goos, goarch); got == nil || got.Name != payloads[platform] {
+			t.Errorf("PickAsset(%s) with %s present = %+v, want the update payload", platform, installer, got)
+		}
+	}
+}

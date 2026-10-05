@@ -240,18 +240,21 @@ installed or unpacked manually.
   in the desktop app menu. Launch it there. Run
   `~/.local/share/reverb-app/uninstall.sh` to remove the app and launcher entry;
   the database and music remain.
-- **macOS:** download `Reverb-<version>-macOS-arm64.zip` for Apple Silicon or
-  `Reverb-<version>-macOS-x86_64.zip` for Intel. Extract the complete
-  `Reverb.app`, drag it to Applications, then right-click it and choose
-  **Open** → **Open** on first launch because the ad-hoc signature is not
-  notarized. Quit Reverb and move the app to Trash to uninstall; the database
-  and music remain.
-- **Windows:** download `Reverb-<version>-windows-amd64.zip`, extract the whole
-  `Reverb` folder to a writable location, and run `install-shortcut.ps1`. It
-  creates or updates one per-user Start Menu shortcut without elevation. Open
-  Reverb from Windows search; for the unsigned build, choose **More info** →
-  **Run anyway** if SmartScreen appears. Run `uninstall-shortcut.ps1` and then
-  delete the extracted folder to uninstall; the database and music remain.
+- **macOS:** download `Reverb-<version>-macOS-arm64.dmg` for Apple Silicon or
+  `Reverb-<version>-macOS-x86_64.dmg` for Intel, open it, and drag
+  `Reverb.app` onto Applications. The matching `.zip` holds the same app. On
+  first launch right-click it and choose **Open** → **Open** because the
+  ad-hoc signature is not notarized. Quit Reverb and move the app to Trash to
+  uninstall; the database and music remain.
+- **Windows:** download and run `Reverb-<version>-windows-amd64-setup.exe`;
+  for the unsigned build, choose **More info** → **Run anyway** if SmartScreen
+  appears. It installs per user without elevation into
+  `%LOCALAPPDATA%\Programs\Reverb`, where the updater can replace the
+  executable, and adds a Start Menu entry. Uninstall it from **Settings** →
+  **Apps**; the database and music remain. For a portable install, extract the
+  whole `Reverb` folder from `Reverb-<version>-windows-amd64.zip` to a
+  writable location and run `install-shortcut.ps1`; run
+  `uninstall-shortcut.ps1` and delete the folder to remove it.
 
 After first install, Reverb checks for stable releases and offers
 **Restart now** when an update is ready. It swaps only the app executable; the

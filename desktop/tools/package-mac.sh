@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a distributable Reverb.app + zip for macOS.
+# Build a distributable Reverb.app, as a zip and a disk image, for macOS.
 #
 # The app ships its own Python: the venv from setup-python-venv.sh symlinks into
 # whichever python3 built it and hardcodes absolute shebangs, so it only ever
@@ -70,7 +70,18 @@ ZIP="$ROOT/dist/Reverb-macOS-$ZIP_ARCH.zip"
 rm -f "$ZIP"
 (cd "$STAGE" && ditto -c -k --sequesterRsrc --keepParent Reverb.app "$ZIP")
 
+# The disk image opens to the app beside an Applications link to drag it onto.
+DMG="$ROOT/dist/Reverb-macOS-$ZIP_ARCH.dmg"
+DMG_STAGE="$ROOT/dist/stage-dmg"
+rm -rf "$DMG_STAGE" "$DMG"
+mkdir -p "$DMG_STAGE"
+ditto "$APP" "$DMG_STAGE/Reverb.app"
+ln -s /Applications "$DMG_STAGE/Applications"
+hdiutil create -volname Reverb -srcfolder "$DMG_STAGE" -fs HFS+ -format UDZO -ov "$DMG" >/dev/null
+rm -rf "$DMG_STAGE"
+
 echo
 echo "app: $APP"
 echo "zip: $ZIP ($(du -h "$ZIP" | cut -f1))"
+echo "dmg: $DMG ($(du -h "$DMG" | cut -f1))"
 echo "Recipient: drag to /Applications, then right-click -> Open the first time."

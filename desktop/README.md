@@ -74,19 +74,23 @@ payloads:
   extract it, and run `Reverb/install.sh`. Launch Reverb from the desktop app
   menu. To uninstall, run the installed
   `~/.local/share/reverb-app/uninstall.sh`; app data and music are retained.
-- **macOS:** download `Reverb-<version>-macOS-arm64.zip` on Apple Silicon or
-  `Reverb-<version>-macOS-x86_64.zip` on Intel, extract it, and drag
-  `Reverb.app` to Applications. Because the app is ad-hoc signed rather than
+- **macOS:** download `Reverb-<version>-macOS-arm64.dmg` on Apple Silicon or
+  `Reverb-<version>-macOS-x86_64.dmg` on Intel, open it, and drag
+  `Reverb.app` onto Applications (the matching `.zip` holds the same app).
+  Because the app is ad-hoc signed rather than
   notarized, first launch is right-click **Reverb** → **Open** → **Open**. To
   uninstall, quit Reverb and move it from Applications to Trash; app data and
   music are retained.
-- **Windows:** download `Reverb-<version>-windows-amd64.zip`, extract the whole
-  `Reverb` folder somewhere writable, and run `install-shortcut.ps1` once. It
-  creates a per-user Start Menu shortcut without administrator rights; running
-  it again updates the same shortcut. Start Reverb from Windows search and use
-  **More info** → **Run anyway** if SmartScreen warns about the unsigned app.
-  To uninstall, run `uninstall-shortcut.ps1`, then delete the extracted folder;
-  app data and music are retained.
+- **Windows:** download and run `Reverb-<version>-windows-amd64-setup.exe`,
+  using **More info** → **Run anyway** if SmartScreen warns about the unsigned
+  app. It installs per user without administrator rights into
+  `%LOCALAPPDATA%\Programs\Reverb` and adds a Start Menu entry. To uninstall,
+  use **Settings** → **Apps**; app data and music are retained. The portable
+  alternative is `Reverb-<version>-windows-amd64.zip`: extract the whole
+  `Reverb` folder somewhere writable and run `install-shortcut.ps1` once (again
+  to update the shortcut); to remove it, run `uninstall-shortcut.ps1` and
+  delete the folder. The setup program is built from that same folder by
+  `desktop/build/windows/installer.iss`.
 
 Reverb checks for stable updates itself and offers **Restart now** when one is
 ready. Files named `reverb-desktop-<version>-<os>-<arch>.zip` are the

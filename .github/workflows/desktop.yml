@@ -143,16 +143,27 @@ jobs:
           app_bundle="Reverb-${TAG#v}-macOS-${PACKAGE_ARCH}.zip"
           mv "dist/Reverb-macOS-${PACKAGE_ARCH}.zip" "dist/$app_bundle"
           check="$(mktemp -d)"
-          trap 'rm -rf "$check"' EXIT
+          mount="$(mktemp -d)"
+          trap 'hdiutil detach "$mount" >/dev/null 2>&1 || true; rm -rf "$check"' EXIT
           ditto -x -k "dist/$app_bundle" "$check"
           desktop/tools/verify-bundle.sh "$check/Reverb.app/Contents/MacOS/reverb-desktop"
           codesign --verify --deep --strict "$check/Reverb.app"
+          # The disk image carries the same sealed app, beside the
+          # Applications link it is dragged onto.
+          disk_image="Reverb-${TAG#v}-macOS-${PACKAGE_ARCH}.dmg"
+          mv "dist/Reverb-macOS-${PACKAGE_ARCH}.dmg" "dist/$disk_image"
+          hdiutil verify "dist/$disk_image"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount" "dist/$disk_image"
+          codesign --verify --deep --strict "$mount/Reverb.app"
+          test "$(readlink "$mount/Applications")" = /Applications
+          hdiutil detach "$mount"
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.goos }}-${{ matrix.arch }}
           path: |
             dist/*.zip
             dist/*.tar.gz
+            dist/*.dmg
           if-no-files-found: error
 
   # Windows is a separate job rather than a matrix row: the build, the GUI and
@@ -242,10 +253,52 @@ jobs:
           test "$(find "$shortcut_dir" -name 'Reverb.lnk' | wc -l)" -eq 1
           REVERB_START_MENU_DIR="$shortcut_dir" powershell -NoProfile -File "$check/Reverb/uninstall-shortcut.ps1"
           test ! -e "$shortcut_dir/Reverb.lnk"
+      # The setup program most people install from: a per-user install of the
+      # verified bundle above, under %LOCALAPPDATA%\Programs where the updater
+      # can replace the executable. It is installed silently, the installed app
+      # booted with every tool resolving, and uninstalled again.
+      - name: Build and verify the Windows installer
+        shell: bash
+        env:
+          TAG: ${{ needs.verify.outputs.tag }}
+          MSYS_NO_PATHCONV: '1'
+        run: |
+          install_bundle="Reverb-${TAG#v}-windows-amd64.zip"
+          installer="Reverb-${TAG#v}-windows-amd64-setup.exe"
+          iscc="C:/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          if [ ! -f "$iscc" ]; then
+            choco install innosetup --no-progress -y
+          fi
+          source="$(cygpath -m "$RUNNER_TEMP")/installer-source"
+          rm -rf "$source"
+          powershell -NoProfile -Command "Expand-Archive -Path 'dist/$install_bundle' -DestinationPath '$source'"
+          "$iscc" /Q "/DAppVersion=${TAG#v}" "/DSourceDir=$source/Reverb" \
+            "/DOutputDir=$(cygpath -m "$PWD/dist")" "/DOutputBaseFilename=${installer%.exe}" \
+            desktop/build/windows/installer.iss
+          test -f "dist/$installer"
+
+          installed="$(cygpath -m "$RUNNER_TEMP")/reverb-installed"
+          "dist/$installer" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "/DIR=$installed" \
+            "/LOG=$(cygpath -m "$RUNNER_TEMP")/reverb-install.log"
+          REVERB_BUNDLE_EXE="$installed/reverb-desktop.exe" \
+            go test -count=1 -v -run '^TestInstalledBundle$' ./desktop
+          go run ./desktop/tools/verify-windows-artifact -exe "$installed/reverb-desktop.exe"
+          shortcut="$(cygpath -u "$APPDATA")/Microsoft/Windows/Start Menu/Programs/Reverb.lnk"
+          test -f "$shortcut"
+          # The uninstaller hands off to a copy of itself and returns at once.
+          "$installed/unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+          for _ in $(seq 60); do
+            [ -e "$installed" ] || break
+            sleep 1
+          done
+          test ! -e "$installed"
+          test ! -e "$shortcut"
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-windows-amd64
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*-setup.exe
           if-no-files-found: error
 
   publish:
@@ -262,7 +315,7 @@ jobs:
           pattern: desktop-*
           path: dist
           merge-multiple: true
-      - name: Attach update payloads and first-install bundles
+      - name: Attach update payloads, installers and first-install bundles
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -270,5 +323,7 @@ jobs:
         run: |
           test "$(find dist -name '*.zip' | wc -l)" -eq 8
           test "$(find dist -name '*.tar.gz' | wc -l)" -eq 2
-          gh release upload "$TAG" dist/*.zip dist/*.tar.gz --clobber
+          test "$(find dist -name '*.dmg' | wc -l)" -eq 2
+          test "$(find dist -name '*-setup.exe' | wc -l)" -eq 1
+          gh release upload "$TAG" dist/*.zip dist/*.tar.gz dist/*.dmg dist/*-setup.exe --clobber
           desktop/tools/update-release-notes.sh "$TAG"
