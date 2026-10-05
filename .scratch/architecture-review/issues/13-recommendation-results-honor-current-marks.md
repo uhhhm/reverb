@@ -6,7 +6,7 @@ The filtering helpers already exist, but individual return paths must remember t
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
 - [ ] Before implementation, enumerate fresh, cached, stale/offline and refresh-fallback paths and write failing regressions for any path that bypasses current exclusions. Exercise the recommendation module through its caller-facing interface.
 - [ ] Similar artists, similar tracks, Radio, Home shelves, individual/listed Mixes and playlist suggestions apply the shared final exclusion policy on every returned result, including early returns and retained results after failed refreshes. There is no separate exclusion implementation in HTTP handlers.

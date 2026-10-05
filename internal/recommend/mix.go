@@ -107,20 +107,20 @@ func periodSeed(kind MixKind, start time.Time) string {
 // until it lands. While Not interested marks cannot be read, the Mix is
 // unavailable rather than shown without them.
 func (s *Service) Mix(ctx context.Context, kind MixKind) Mix {
-	ctx, ok := s.withMarks(ctx)
-	if !ok {
-		return Mix{Kind: kind, Tracks: []core.ExternalResult{}}
-	}
-	var m Mix
-	if !s.load(ctx, mixKey(kind), &m) {
-		m = Mix{Kind: kind}
-	}
-	if m.Period != periodStart(kind, s.now()).Format(periodLayout) {
-		s.startRefresh(ctx, mixKey(kind), func(ctx context.Context) { s.RefreshMix(ctx, kind) })
-	}
-	m.Refreshing = s.isRefreshing(mixKey(kind))
-	m.Tracks = firstN(s.withoutDisconnectedPersonal(ctx, s.withoutMarkedTracks(ctx, m.Tracks)), mixSize)
-	return m
+	return serve(ctx, s, Mix{Kind: kind, Tracks: []core.ExternalResult{}}, func(ctx context.Context) Mix {
+		var m Mix
+		if !s.load(ctx, mixKey(kind), &m) {
+			m = Mix{Kind: kind}
+		}
+		if m.Period != periodStart(kind, s.now()).Format(periodLayout) {
+			s.startRefresh(ctx, mixKey(kind), func(ctx context.Context) { s.RefreshMix(ctx, kind) })
+		}
+		m.Refreshing = s.isRefreshing(mixKey(kind))
+		// Marks made since generation use the stored spares, so the Mix is
+		// filled before it is cut to size.
+		m.Tracks = firstN(s.withoutDisconnectedPersonal(ctx, s.withoutMarkedTracks(ctx, m.Tracks)), mixSize)
+		return m
+	}, excludeFromMix)
 }
 
 // withoutDisconnectedPersonal drops tracks a personal source recommended once
@@ -144,8 +144,19 @@ func (s *Service) withoutDisconnectedPersonal(ctx context.Context, tracks []core
 // RefreshMix generates a Mix for the current period and replaces the stored
 // one. When it cannot be generated (see Mix.Available), the last Mix stays,
 // marked offline, if it has tracks; otherwise nothing is stored for the
-// period. Either way the old period makes the next check try again.
+// period. Either way the old period makes the next check try again. While
+// Not interested marks cannot be read, nothing is generated or stored and the
+// returned Mix is unavailable.
 func (s *Service) RefreshMix(ctx context.Context, kind MixKind) Mix {
+	if !kind.Valid() {
+		return Mix{Kind: kind, Tracks: []core.ExternalResult{}}
+	}
+	return serve(ctx, s, Mix{Kind: kind, Tracks: []core.ExternalResult{}}, func(ctx context.Context) Mix {
+		return s.refreshMix(ctx, kind)
+	}, excludeFromMix)
+}
+
+func (s *Service) refreshMix(ctx context.Context, kind MixKind) Mix {
 	start := periodStart(kind, s.now())
 	var m Mix
 	switch kind {
@@ -209,11 +220,7 @@ func (s *Service) discoverWeekly(ctx context.Context, start time.Time) Mix {
 		return m
 	}
 	// Any failed read leaves the Mix unavailable, so it is retried rather than
-	// stored for the week without its taste, seeds or exclusions.
-	ctx, ok := s.withMarks(ctx)
-	if !ok {
-		return m
-	}
+	// stored for the week without its taste or seeds.
 	profile, err := s.profileBefore(ctx, start)
 	if err != nil {
 		log.Printf("recommend: reading Discover Weekly's taste profile: %v", err)

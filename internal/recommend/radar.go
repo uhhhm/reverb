@@ -90,10 +90,6 @@ func (s *Service) releaseRadar(ctx context.Context, start time.Time) Mix {
 	}
 	// A failed read leaves the Mix unavailable, so it is retried rather than
 	// stored empty until next Friday.
-	ctx, ok := s.withMarks(ctx)
-	if !ok {
-		return m
-	}
 	ex, _ := s.excluded(ctx)
 	plays, err := s.listening.TopArtists(ctx, start.Add(-trackedPlayWindow), start, trackedCandidates)
 	if err != nil {

@@ -56,6 +56,9 @@ type syncDevice struct {
 	// backend is the library server a built-in desktop's "Navidrome" is; nil
 	// is fakeSubsonic.
 	backend func(t *testing.T, musicDir string) *httptest.Server
+	// prepare writes to the device's database before its first boot, for
+	// history a scenario needs to exist when background work first runs.
+	prepare func(st *store.Store)
 	rt      *Runtime
 	srv     *httptest.Server
 	stop    func()
@@ -141,6 +144,17 @@ func newSyncDevice(t *testing.T, name string, opts ...deviceOption) *syncDevice 
 		}); err != nil {
 			t.Fatal(err)
 		}
+		_ = st.Close()
+	}
+	if d.prepare != nil {
+		st, err := store.Open(dbPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.Migrate(); err != nil {
+			t.Fatal(err)
+		}
+		d.prepare(st)
 		_ = st.Close()
 	}
 	d.boot()

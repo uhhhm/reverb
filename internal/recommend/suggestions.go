@@ -21,15 +21,17 @@ const (
 // next best candidates and wraps round when they run out. Owned tracks stay:
 // adding one costs no download.
 func (s *Service) PlaylistSuggestions(ctx context.Context, playlist []Seed, page int) TrackResult {
-	result := TrackResult{Tracks: []core.ExternalResult{}}
 	lookup := spreadSeeds(playlist, suggestionSeeds)
 	if len(lookup) == 0 {
-		return result
+		return TrackResult{Tracks: []core.ExternalResult{}}
 	}
-	ctx, ok := s.withMarks(ctx)
-	if !ok {
-		return result
-	}
+	return serve(ctx, s, TrackResult{Tracks: []core.ExternalResult{}}, func(ctx context.Context) TrackResult {
+		return s.playlistSuggestions(ctx, playlist, lookup, page)
+	}, excludeFromTrackResult)
+}
+
+func (s *Service) playlistSuggestions(ctx context.Context, playlist, lookup []Seed, page int) TrackResult {
+	result := TrackResult{Tracks: []core.ExternalResult{}}
 	var tracks []core.ExternalResult
 	if s.settings(ctx).Online && len(s.tracks) > 0 {
 		tracks, result.Available = s.fromSeeds(ctx, lookup, playlist, similarTracksSurface, nil, s.profile(ctx))

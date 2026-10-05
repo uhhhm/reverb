@@ -68,17 +68,14 @@ type Shelves struct {
 // marks apply to what was cached before they were made; while they cannot be
 // read, no shelves show.
 func (s *Service) Shelves(ctx context.Context) Shelves {
-	ctx, ok := s.withMarks(ctx)
-	if !ok {
-		return Shelves{Shelves: []Shelf{}}
-	}
-	var cached Shelves
-	if !s.load(ctx, shelvesKey, &cached) || s.now().Sub(time.Unix(cached.UpdatedAt, 0)) >= shelfRefreshAfter {
-		s.startRefresh(ctx, shelvesKey, func(ctx context.Context) { s.RefreshShelves(ctx) })
-	}
-	cached.Refreshing = s.isRefreshing(shelvesKey)
-	cached.Shelves = s.withoutMarkedShelves(ctx, cached.Shelves)
-	return cached
+	return serve(ctx, s, Shelves{Shelves: []Shelf{}}, func(ctx context.Context) Shelves {
+		var cached Shelves
+		if !s.load(ctx, shelvesKey, &cached) || s.now().Sub(time.Unix(cached.UpdatedAt, 0)) >= shelfRefreshAfter {
+			s.startRefresh(ctx, shelvesKey, func(ctx context.Context) { s.RefreshShelves(ctx) })
+		}
+		cached.Refreshing = s.isRefreshing(shelvesKey)
+		return cached
+	}, excludeFromShelves)
 }
 
 // RefreshShelves regenerates the shelves and stores them. When nothing can be
@@ -86,36 +83,18 @@ func (s *Service) Shelves(ctx context.Context) Shelves {
 // offline only if this refresh was, and a later read tries again. Nothing is
 // stored while Not interested marks cannot be read.
 func (s *Service) RefreshShelves(ctx context.Context) Shelves {
-	ctx, ok := s.withMarks(ctx)
-	if !ok {
-		return Shelves{Shelves: []Shelf{}}
-	}
-	fresh := s.buildShelves(ctx)
-	var prev Shelves
-	if len(fresh.Shelves) == 0 && s.load(ctx, shelvesKey, &prev) && len(prev.Shelves) > 0 {
-		prev.Offline = fresh.Offline
-		prev.Refreshing = false
-		s.save(ctx, shelvesKey, prev)
-		return prev
-	}
-	s.save(ctx, shelvesKey, fresh)
-	return fresh
-}
-
-func (s *Service) withoutMarkedShelves(ctx context.Context, shelves []Shelf) []Shelf {
-	ex, _ := s.excluded(ctx)
-	out := make([]Shelf, 0, len(shelves))
-	for _, sh := range shelves {
-		if sh.Seed != nil && markedSeed(ex, sh.Seed.Artist, sh.Seed.Title) {
-			continue
+	return serve(ctx, s, Shelves{Shelves: []Shelf{}}, func(ctx context.Context) Shelves {
+		fresh := s.buildShelves(ctx)
+		var prev Shelves
+		if len(fresh.Shelves) == 0 && s.load(ctx, shelvesKey, &prev) && len(prev.Shelves) > 0 {
+			prev.Offline = fresh.Offline
+			prev.Refreshing = false
+			s.save(ctx, shelvesKey, prev)
+			return prev
 		}
-		sh.Tracks = s.withoutMarkedTracks(ctx, sh.Tracks)
-		sh.Artists = s.withoutMarkedArtists(ctx, sh.Artists)
-		if len(sh.Tracks)+len(sh.Artists) > 0 {
-			out = append(out, sh)
-		}
-	}
-	return out
+		s.save(ctx, shelvesKey, fresh)
+		return fresh
+	}, excludeFromShelves)
 }
 
 func (s *Service) buildShelves(ctx context.Context) Shelves {
@@ -155,7 +134,8 @@ func (s *Service) buildShelves(ctx context.Context) Shelves {
 		out.Shelves = append(out.Shelves, Shelf{Kind: ShelfMoreFromArtists, Tracks: tracks, Artists: []core.ExternalArtist{}})
 		out.Offline = out.Offline || offline
 	}
-	out.Shelves = s.withoutMarkedShelves(ctx, out.Shelves)
+	ex, _ := s.excluded(ctx)
+	out.Shelves = excludeShelves(ex, out.Shelves)
 	return out
 }
 

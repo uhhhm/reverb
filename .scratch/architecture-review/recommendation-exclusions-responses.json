@@ -1,0 +1,3536 @@
+[
+  {
+    "mix/discoverWeekly": {
+      "kind": "discoverWeekly",
+      "period": "2026-10-05",
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2001",
+          "title": "Iambic 9 Poetry",
+          "artist": "Squarepusher",
+          "album": "Iambic 9 Poetry EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52001",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2005",
+          "title": "Kiara",
+          "artist": "Bonobo",
+          "album": "Kiara EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "106",
+          "albumExternalId": "52005",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2004",
+          "title": "Eyen",
+          "artist": "Plaid",
+          "album": "Eyen EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "105",
+          "albumExternalId": "52004",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2002",
+          "title": "My Red Hot Car",
+          "artist": "Squarepusher",
+          "album": "My Red Hot Car EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52002",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ],
+      "updatedAt": 1791178152,
+      "available": true,
+      "refreshing": false
+    },
+    "mixes": {
+      "mixes": [
+        {
+          "kind": "discoverWeekly",
+          "period": "2026-10-05",
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2001",
+              "title": "Iambic 9 Poetry",
+              "artist": "Squarepusher",
+              "album": "Iambic 9 Poetry EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "103",
+              "albumExternalId": "52001",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2005",
+              "title": "Kiara",
+              "artist": "Bonobo",
+              "album": "Kiara EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "106",
+              "albumExternalId": "52005",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2004",
+              "title": "Eyen",
+              "artist": "Plaid",
+              "album": "Eyen EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "105",
+              "albumExternalId": "52004",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2003",
+              "title": "Bike",
+              "artist": "Autechre",
+              "album": "Bike EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "104",
+              "albumExternalId": "52003",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2002",
+              "title": "My Red Hot Car",
+              "artist": "Squarepusher",
+              "album": "My Red Hot Car EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "103",
+              "albumExternalId": "52002",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2006",
+              "title": "Glink",
+              "artist": "Bola",
+              "album": "Glink EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "107",
+              "albumExternalId": "52006",
+              "type": "track"
+            }
+          ],
+          "updatedAt": 1791178152,
+          "available": true,
+          "refreshing": false
+        },
+        {
+          "kind": "releaseRadar",
+          "period": "2026-10-02",
+          "tracks": [],
+          "updatedAt": 1791178151,
+          "available": true,
+          "refreshing": false
+        }
+      ]
+    },
+    "playlistSuggestions": {
+      "available": true,
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2001",
+          "title": "Iambic 9 Poetry",
+          "artist": "Squarepusher",
+          "album": "Iambic 9 Poetry EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52001",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2005",
+          "title": "Kiara",
+          "artist": "Bonobo",
+          "album": "Kiara EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "106",
+          "albumExternalId": "52005",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2004",
+          "title": "Eyen",
+          "artist": "Plaid",
+          "album": "Eyen EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "105",
+          "albumExternalId": "52004",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2002",
+          "title": "My Red Hot Car",
+          "artist": "Squarepusher",
+          "album": "My Red Hot Car EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52002",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ]
+    },
+    "radio": {
+      "available": true,
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2001",
+          "title": "Iambic 9 Poetry",
+          "artist": "Squarepusher",
+          "album": "Iambic 9 Poetry EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52001",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2005",
+          "title": "Kiara",
+          "artist": "Bonobo",
+          "album": "Kiara EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "106",
+          "albumExternalId": "52005",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2004",
+          "title": "Eyen",
+          "artist": "Plaid",
+          "album": "Eyen EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "105",
+          "albumExternalId": "52004",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2002",
+          "title": "My Red Hot Car",
+          "artist": "Squarepusher",
+          "album": "My Red Hot Car EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52002",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ]
+    },
+    "shelves": {
+      "shelves": [
+        {
+          "kind": "becauseYouPlayed",
+          "seed": {
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2001",
+              "title": "Iambic 9 Poetry",
+              "artist": "Squarepusher",
+              "album": "Iambic 9 Poetry EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "103",
+              "albumExternalId": "52001",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2003",
+              "title": "Bike",
+              "artist": "Autechre",
+              "album": "Bike EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "104",
+              "albumExternalId": "52003",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2004",
+              "title": "Eyen",
+              "artist": "Plaid",
+              "album": "Eyen EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "105",
+              "albumExternalId": "52004",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2006",
+              "title": "Glink",
+              "artist": "Bola",
+              "album": "Glink EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "107",
+              "albumExternalId": "52006",
+              "type": "track"
+            }
+          ],
+          "artists": []
+        },
+        {
+          "kind": "becauseYouPlayed",
+          "seed": {
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2005",
+              "title": "Kiara",
+              "artist": "Bonobo",
+              "album": "Kiara EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "106",
+              "albumExternalId": "52005",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2002",
+              "title": "My Red Hot Car",
+              "artist": "Squarepusher",
+              "album": "My Red Hot Car EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "103",
+              "albumExternalId": "52002",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2004",
+              "title": "Eyen",
+              "artist": "Plaid",
+              "album": "Eyen EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "105",
+              "albumExternalId": "52004",
+              "type": "track"
+            }
+          ],
+          "artists": []
+        },
+        {
+          "kind": "artistsYouMightLike",
+          "tracks": [],
+          "artists": [
+            {
+              "source": "deezer",
+              "externalId": "103",
+              "name": "Squarepusher",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Aphex Twin"
+              }
+            },
+            {
+              "source": "deezer",
+              "externalId": "106",
+              "name": "Bonobo",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Boards of Canada"
+              }
+            },
+            {
+              "source": "deezer",
+              "externalId": "104",
+              "name": "Autechre",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Aphex Twin"
+              }
+            },
+            {
+              "source": "deezer",
+              "externalId": "105",
+              "name": "Plaid",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Boards of Canada"
+              }
+            }
+          ]
+        }
+      ],
+      "updatedAt": 1791178151,
+      "refreshing": false
+    },
+    "similarArtists": {
+      "available": true,
+      "artists": [
+        {
+          "source": "deezer",
+          "externalId": "103",
+          "name": "Squarepusher",
+          "recommendationSources": [
+            "deezer"
+          ],
+          "reason": {
+            "kind": "fansAlsoLike",
+            "artist": "Aphex Twin"
+          }
+        },
+        {
+          "source": "deezer",
+          "externalId": "104",
+          "name": "Autechre",
+          "recommendationSources": [
+            "deezer"
+          ],
+          "reason": {
+            "kind": "fansAlsoLike",
+            "artist": "Aphex Twin"
+          }
+        },
+        {
+          "source": "deezer",
+          "externalId": "105",
+          "name": "Plaid",
+          "recommendationSources": [
+            "deezer"
+          ],
+          "reason": {
+            "kind": "fansAlsoLike",
+            "artist": "Aphex Twin"
+          }
+        }
+      ]
+    },
+    "similarTracks": {
+      "available": true,
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2001",
+          "title": "Iambic 9 Poetry",
+          "artist": "Squarepusher",
+          "album": "Iambic 9 Poetry EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52001",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2004",
+          "title": "Eyen",
+          "artist": "Plaid",
+          "album": "Eyen EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "105",
+          "albumExternalId": "52004",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ]
+    }
+  },
+  {
+    "mix/discoverWeekly": {
+      "kind": "discoverWeekly",
+      "period": "2026-10-05",
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2005",
+          "title": "Kiara",
+          "artist": "Bonobo",
+          "album": "Kiara EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "106",
+          "albumExternalId": "52005",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ],
+      "updatedAt": 1791178152,
+      "available": true,
+      "refreshing": false
+    },
+    "mixes": {
+      "mixes": [
+        {
+          "kind": "discoverWeekly",
+          "period": "2026-10-05",
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2005",
+              "title": "Kiara",
+              "artist": "Bonobo",
+              "album": "Kiara EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "106",
+              "albumExternalId": "52005",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2003",
+              "title": "Bike",
+              "artist": "Autechre",
+              "album": "Bike EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "104",
+              "albumExternalId": "52003",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2006",
+              "title": "Glink",
+              "artist": "Bola",
+              "album": "Glink EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "107",
+              "albumExternalId": "52006",
+              "type": "track"
+            }
+          ],
+          "updatedAt": 1791178152,
+          "available": true,
+          "refreshing": false
+        },
+        {
+          "kind": "releaseRadar",
+          "period": "2026-10-02",
+          "tracks": [],
+          "updatedAt": 1791178151,
+          "available": true,
+          "refreshing": false
+        }
+      ]
+    },
+    "playlistSuggestions": {
+      "available": true,
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2005",
+          "title": "Kiara",
+          "artist": "Bonobo",
+          "album": "Kiara EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "106",
+          "albumExternalId": "52005",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ]
+    },
+    "radio": {
+      "available": true,
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2005",
+          "title": "Kiara",
+          "artist": "Bonobo",
+          "album": "Kiara EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "106",
+          "albumExternalId": "52005",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ]
+    },
+    "shelves": {
+      "shelves": [
+        {
+          "kind": "becauseYouPlayed",
+          "seed": {
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2003",
+              "title": "Bike",
+              "artist": "Autechre",
+              "album": "Bike EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "104",
+              "albumExternalId": "52003",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2006",
+              "title": "Glink",
+              "artist": "Bola",
+              "album": "Glink EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "107",
+              "albumExternalId": "52006",
+              "type": "track"
+            }
+          ],
+          "artists": []
+        },
+        {
+          "kind": "becauseYouPlayed",
+          "seed": {
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2005",
+              "title": "Kiara",
+              "artist": "Bonobo",
+              "album": "Kiara EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "106",
+              "albumExternalId": "52005",
+              "type": "track"
+            }
+          ],
+          "artists": []
+        },
+        {
+          "kind": "artistsYouMightLike",
+          "tracks": [],
+          "artists": [
+            {
+              "source": "deezer",
+              "externalId": "106",
+              "name": "Bonobo",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Boards of Canada"
+              }
+            },
+            {
+              "source": "deezer",
+              "externalId": "104",
+              "name": "Autechre",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Aphex Twin"
+              }
+            },
+            {
+              "source": "deezer",
+              "externalId": "105",
+              "name": "Plaid",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Boards of Canada"
+              }
+            }
+          ]
+        }
+      ],
+      "updatedAt": 1791178151,
+      "refreshing": false
+    },
+    "similarArtists": {
+      "available": true,
+      "artists": [
+        {
+          "source": "deezer",
+          "externalId": "104",
+          "name": "Autechre",
+          "recommendationSources": [
+            "deezer"
+          ],
+          "reason": {
+            "kind": "fansAlsoLike",
+            "artist": "Aphex Twin"
+          }
+        },
+        {
+          "source": "deezer",
+          "externalId": "105",
+          "name": "Plaid",
+          "recommendationSources": [
+            "deezer"
+          ],
+          "reason": {
+            "kind": "fansAlsoLike",
+            "artist": "Aphex Twin"
+          }
+        }
+      ]
+    },
+    "similarTracks": {
+      "available": true,
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ]
+    }
+  },
+  {
+    "mix/discoverWeekly": {
+      "kind": "discoverWeekly",
+      "period": "2026-10-05",
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2005",
+          "title": "Kiara",
+          "artist": "Bonobo",
+          "album": "Kiara EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "106",
+          "albumExternalId": "52005",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ],
+      "updatedAt": 1791178152,
+      "available": true,
+      "refreshing": false
+    },
+    "mixes": {
+      "mixes": [
+        {
+          "kind": "discoverWeekly",
+          "period": "2026-10-05",
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2005",
+              "title": "Kiara",
+              "artist": "Bonobo",
+              "album": "Kiara EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "106",
+              "albumExternalId": "52005",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2003",
+              "title": "Bike",
+              "artist": "Autechre",
+              "album": "Bike EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "104",
+              "albumExternalId": "52003",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2006",
+              "title": "Glink",
+              "artist": "Bola",
+              "album": "Glink EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "107",
+              "albumExternalId": "52006",
+              "type": "track"
+            }
+          ],
+          "updatedAt": 1791178152,
+          "available": true,
+          "refreshing": false
+        },
+        {
+          "kind": "releaseRadar",
+          "period": "2026-10-02",
+          "tracks": [],
+          "updatedAt": 1791178151,
+          "available": true,
+          "refreshing": false
+        }
+      ]
+    },
+    "playlistSuggestions": {
+      "available": true,
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2005",
+          "title": "Kiara",
+          "artist": "Bonobo",
+          "album": "Kiara EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "106",
+          "albumExternalId": "52005",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ]
+    },
+    "radio": {
+      "available": true,
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2005",
+          "title": "Kiara",
+          "artist": "Bonobo",
+          "album": "Kiara EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "106",
+          "albumExternalId": "52005",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ]
+    },
+    "shelves": {
+      "shelves": [
+        {
+          "kind": "becauseYouPlayed",
+          "seed": {
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2003",
+              "title": "Bike",
+              "artist": "Autechre",
+              "album": "Bike EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "104",
+              "albumExternalId": "52003",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2006",
+              "title": "Glink",
+              "artist": "Bola",
+              "album": "Glink EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "107",
+              "albumExternalId": "52006",
+              "type": "track"
+            }
+          ],
+          "artists": []
+        },
+        {
+          "kind": "becauseYouPlayed",
+          "seed": {
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2005",
+              "title": "Kiara",
+              "artist": "Bonobo",
+              "album": "Kiara EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "106",
+              "albumExternalId": "52005",
+              "type": "track"
+            }
+          ],
+          "artists": []
+        },
+        {
+          "kind": "artistsYouMightLike",
+          "tracks": [],
+          "artists": [
+            {
+              "source": "deezer",
+              "externalId": "106",
+              "name": "Bonobo",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Boards of Canada"
+              }
+            },
+            {
+              "source": "deezer",
+              "externalId": "104",
+              "name": "Autechre",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Aphex Twin"
+              }
+            },
+            {
+              "source": "deezer",
+              "externalId": "105",
+              "name": "Plaid",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Boards of Canada"
+              }
+            }
+          ]
+        }
+      ],
+      "updatedAt": 1791178151,
+      "refreshing": false
+    },
+    "similarArtists": {
+      "available": true,
+      "artists": [
+        {
+          "source": "deezer",
+          "externalId": "104",
+          "name": "Autechre",
+          "recommendationSources": [
+            "deezer"
+          ],
+          "reason": {
+            "kind": "fansAlsoLike",
+            "artist": "Aphex Twin"
+          }
+        },
+        {
+          "source": "deezer",
+          "externalId": "105",
+          "name": "Plaid",
+          "recommendationSources": [
+            "deezer"
+          ],
+          "reason": {
+            "kind": "fansAlsoLike",
+            "artist": "Aphex Twin"
+          }
+        }
+      ]
+    },
+    "similarTracks": {
+      "available": true,
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ]
+    }
+  },
+  {
+    "mix/discoverWeekly": {
+      "kind": "discoverWeekly",
+      "period": "2026-10-05",
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2005",
+          "title": "Kiara",
+          "artist": "Bonobo",
+          "album": "Kiara EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "106",
+          "albumExternalId": "52005",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ],
+      "updatedAt": 1791178152,
+      "available": true,
+      "refreshing": false
+    },
+    "mixes": {
+      "mixes": [
+        {
+          "kind": "discoverWeekly",
+          "period": "2026-10-05",
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2005",
+              "title": "Kiara",
+              "artist": "Bonobo",
+              "album": "Kiara EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "106",
+              "albumExternalId": "52005",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2003",
+              "title": "Bike",
+              "artist": "Autechre",
+              "album": "Bike EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "104",
+              "albumExternalId": "52003",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2006",
+              "title": "Glink",
+              "artist": "Bola",
+              "album": "Glink EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "107",
+              "albumExternalId": "52006",
+              "type": "track"
+            }
+          ],
+          "updatedAt": 1791178152,
+          "available": true,
+          "refreshing": false
+        },
+        {
+          "kind": "releaseRadar",
+          "period": "2026-10-02",
+          "tracks": [],
+          "updatedAt": 1791178151,
+          "available": true,
+          "refreshing": false
+        }
+      ]
+    },
+    "playlistSuggestions": {
+      "available": true,
+      "tracks": [],
+      "offline": true,
+      "updatedAt": 1791178154
+    },
+    "radio": {
+      "available": true,
+      "tracks": [],
+      "offline": true,
+      "updatedAt": 1791178154
+    },
+    "shelves": {
+      "shelves": [
+        {
+          "kind": "becauseYouPlayed",
+          "seed": {
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2003",
+              "title": "Bike",
+              "artist": "Autechre",
+              "album": "Bike EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "104",
+              "albumExternalId": "52003",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2006",
+              "title": "Glink",
+              "artist": "Bola",
+              "album": "Glink EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "107",
+              "albumExternalId": "52006",
+              "type": "track"
+            }
+          ],
+          "artists": []
+        },
+        {
+          "kind": "becauseYouPlayed",
+          "seed": {
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2005",
+              "title": "Kiara",
+              "artist": "Bonobo",
+              "album": "Kiara EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "106",
+              "albumExternalId": "52005",
+              "type": "track"
+            }
+          ],
+          "artists": []
+        },
+        {
+          "kind": "artistsYouMightLike",
+          "tracks": [],
+          "artists": [
+            {
+              "source": "deezer",
+              "externalId": "106",
+              "name": "Bonobo",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Boards of Canada"
+              }
+            },
+            {
+              "source": "deezer",
+              "externalId": "104",
+              "name": "Autechre",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Aphex Twin"
+              }
+            },
+            {
+              "source": "deezer",
+              "externalId": "105",
+              "name": "Plaid",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Boards of Canada"
+              }
+            }
+          ]
+        }
+      ],
+      "updatedAt": 1791178151,
+      "refreshing": false
+    },
+    "similarArtists": {
+      "available": true,
+      "artists": [
+        {
+          "source": "deezer",
+          "externalId": "104",
+          "name": "Autechre",
+          "recommendationSources": [
+            "deezer"
+          ],
+          "reason": {
+            "kind": "fansAlsoLike",
+            "artist": "Aphex Twin"
+          }
+        },
+        {
+          "source": "deezer",
+          "externalId": "105",
+          "name": "Plaid",
+          "recommendationSources": [
+            "deezer"
+          ],
+          "reason": {
+            "kind": "fansAlsoLike",
+            "artist": "Aphex Twin"
+          }
+        }
+      ],
+      "offline": true,
+      "updatedAt": 1791178152
+    },
+    "similarTracks": {
+      "available": true,
+      "tracks": [],
+      "offline": true,
+      "updatedAt": 1791178154
+    }
+  },
+  {
+    "mix/discoverWeekly": {
+      "kind": "discoverWeekly",
+      "period": "2026-10-05",
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2001",
+          "title": "Iambic 9 Poetry",
+          "artist": "Squarepusher",
+          "album": "Iambic 9 Poetry EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52001",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2005",
+          "title": "Kiara",
+          "artist": "Bonobo",
+          "album": "Kiara EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "106",
+          "albumExternalId": "52005",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2002",
+          "title": "My Red Hot Car",
+          "artist": "Squarepusher",
+          "album": "My Red Hot Car EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52002",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ],
+      "updatedAt": 1791178152,
+      "available": true,
+      "refreshing": false
+    },
+    "mixes": {
+      "mixes": [
+        {
+          "kind": "discoverWeekly",
+          "period": "2026-10-05",
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2001",
+              "title": "Iambic 9 Poetry",
+              "artist": "Squarepusher",
+              "album": "Iambic 9 Poetry EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "103",
+              "albumExternalId": "52001",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2005",
+              "title": "Kiara",
+              "artist": "Bonobo",
+              "album": "Kiara EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "106",
+              "albumExternalId": "52005",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2003",
+              "title": "Bike",
+              "artist": "Autechre",
+              "album": "Bike EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "104",
+              "albumExternalId": "52003",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2002",
+              "title": "My Red Hot Car",
+              "artist": "Squarepusher",
+              "album": "My Red Hot Car EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "103",
+              "albumExternalId": "52002",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2006",
+              "title": "Glink",
+              "artist": "Bola",
+              "album": "Glink EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "107",
+              "albumExternalId": "52006",
+              "type": "track"
+            }
+          ],
+          "updatedAt": 1791178152,
+          "available": true,
+          "refreshing": false
+        },
+        {
+          "kind": "releaseRadar",
+          "period": "2026-10-02",
+          "tracks": [],
+          "updatedAt": 1791178151,
+          "available": true,
+          "refreshing": false
+        }
+      ]
+    },
+    "playlistSuggestions": {
+      "available": true,
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2001",
+          "title": "Iambic 9 Poetry",
+          "artist": "Squarepusher",
+          "album": "Iambic 9 Poetry EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52001",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2005",
+          "title": "Kiara",
+          "artist": "Bonobo",
+          "album": "Kiara EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "106",
+          "albumExternalId": "52005",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2002",
+          "title": "My Red Hot Car",
+          "artist": "Squarepusher",
+          "album": "My Red Hot Car EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52002",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ]
+    },
+    "radio": {
+      "available": true,
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2001",
+          "title": "Iambic 9 Poetry",
+          "artist": "Squarepusher",
+          "album": "Iambic 9 Poetry EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52001",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2005",
+          "title": "Kiara",
+          "artist": "Bonobo",
+          "album": "Kiara EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "106",
+          "albumExternalId": "52005",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2002",
+          "title": "My Red Hot Car",
+          "artist": "Squarepusher",
+          "album": "My Red Hot Car EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52002",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ]
+    },
+    "shelves": {
+      "shelves": [
+        {
+          "kind": "becauseYouPlayed",
+          "seed": {
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2001",
+              "title": "Iambic 9 Poetry",
+              "artist": "Squarepusher",
+              "album": "Iambic 9 Poetry EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "103",
+              "albumExternalId": "52001",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2003",
+              "title": "Bike",
+              "artist": "Autechre",
+              "album": "Bike EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "104",
+              "albumExternalId": "52003",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2006",
+              "title": "Glink",
+              "artist": "Bola",
+              "album": "Glink EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "107",
+              "albumExternalId": "52006",
+              "type": "track"
+            }
+          ],
+          "artists": []
+        },
+        {
+          "kind": "becauseYouPlayed",
+          "seed": {
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2005",
+              "title": "Kiara",
+              "artist": "Bonobo",
+              "album": "Kiara EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "106",
+              "albumExternalId": "52005",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2002",
+              "title": "My Red Hot Car",
+              "artist": "Squarepusher",
+              "album": "My Red Hot Car EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "103",
+              "albumExternalId": "52002",
+              "type": "track"
+            }
+          ],
+          "artists": []
+        },
+        {
+          "kind": "artistsYouMightLike",
+          "tracks": [],
+          "artists": [
+            {
+              "source": "deezer",
+              "externalId": "103",
+              "name": "Squarepusher",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Aphex Twin"
+              }
+            },
+            {
+              "source": "deezer",
+              "externalId": "106",
+              "name": "Bonobo",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Boards of Canada"
+              }
+            },
+            {
+              "source": "deezer",
+              "externalId": "104",
+              "name": "Autechre",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Aphex Twin"
+              }
+            },
+            {
+              "source": "deezer",
+              "externalId": "105",
+              "name": "Plaid",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Boards of Canada"
+              }
+            }
+          ]
+        }
+      ],
+      "updatedAt": 1791178151,
+      "refreshing": false
+    },
+    "similarArtists": {
+      "available": true,
+      "artists": [
+        {
+          "source": "deezer",
+          "externalId": "103",
+          "name": "Squarepusher",
+          "recommendationSources": [
+            "deezer"
+          ],
+          "reason": {
+            "kind": "fansAlsoLike",
+            "artist": "Aphex Twin"
+          }
+        },
+        {
+          "source": "deezer",
+          "externalId": "104",
+          "name": "Autechre",
+          "recommendationSources": [
+            "deezer"
+          ],
+          "reason": {
+            "kind": "fansAlsoLike",
+            "artist": "Aphex Twin"
+          }
+        },
+        {
+          "source": "deezer",
+          "externalId": "105",
+          "name": "Plaid",
+          "recommendationSources": [
+            "deezer"
+          ],
+          "reason": {
+            "kind": "fansAlsoLike",
+            "artist": "Aphex Twin"
+          }
+        }
+      ]
+    },
+    "similarTracks": {
+      "available": true,
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2001",
+          "title": "Iambic 9 Poetry",
+          "artist": "Squarepusher",
+          "album": "Iambic 9 Poetry EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52001",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ]
+    }
+  },
+  {
+    "mix/discoverWeekly": {
+      "kind": "discoverWeekly",
+      "period": "",
+      "tracks": [],
+      "available": false,
+      "refreshing": false
+    },
+    "mixes": {
+      "mixes": [
+        {
+          "kind": "discoverWeekly",
+          "period": "",
+          "tracks": [],
+          "available": false,
+          "refreshing": false
+        },
+        {
+          "kind": "releaseRadar",
+          "period": "",
+          "tracks": [],
+          "available": false,
+          "refreshing": false
+        }
+      ]
+    },
+    "playlistSuggestions": {
+      "available": false,
+      "tracks": []
+    },
+    "radio": {
+      "available": false,
+      "tracks": []
+    },
+    "shelves": {
+      "shelves": [],
+      "refreshing": false
+    },
+    "similarArtists": {
+      "available": false,
+      "artists": []
+    },
+    "similarTracks": {
+      "available": false,
+      "tracks": []
+    }
+  },
+  {
+    "mix/discoverWeekly": {
+      "kind": "discoverWeekly",
+      "period": "2026-10-05",
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2001",
+          "title": "Iambic 9 Poetry",
+          "artist": "Squarepusher",
+          "album": "Iambic 9 Poetry EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52001",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2005",
+          "title": "Kiara",
+          "artist": "Bonobo",
+          "album": "Kiara EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "106",
+          "albumExternalId": "52005",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2002",
+          "title": "My Red Hot Car",
+          "artist": "Squarepusher",
+          "album": "My Red Hot Car EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52002",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ],
+      "updatedAt": 1791178152,
+      "available": true,
+      "refreshing": false
+    },
+    "mixes": {
+      "mixes": [
+        {
+          "kind": "discoverWeekly",
+          "period": "2026-10-05",
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2001",
+              "title": "Iambic 9 Poetry",
+              "artist": "Squarepusher",
+              "album": "Iambic 9 Poetry EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "103",
+              "albumExternalId": "52001",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2005",
+              "title": "Kiara",
+              "artist": "Bonobo",
+              "album": "Kiara EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "106",
+              "albumExternalId": "52005",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2003",
+              "title": "Bike",
+              "artist": "Autechre",
+              "album": "Bike EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "104",
+              "albumExternalId": "52003",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2002",
+              "title": "My Red Hot Car",
+              "artist": "Squarepusher",
+              "album": "My Red Hot Car EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "103",
+              "albumExternalId": "52002",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2006",
+              "title": "Glink",
+              "artist": "Bola",
+              "album": "Glink EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "107",
+              "albumExternalId": "52006",
+              "type": "track"
+            }
+          ],
+          "updatedAt": 1791178152,
+          "available": true,
+          "refreshing": false
+        },
+        {
+          "kind": "releaseRadar",
+          "period": "2026-10-02",
+          "tracks": [],
+          "updatedAt": 1791178151,
+          "available": true,
+          "refreshing": false
+        }
+      ]
+    },
+    "playlistSuggestions": {
+      "available": true,
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2001",
+          "title": "Iambic 9 Poetry",
+          "artist": "Squarepusher",
+          "album": "Iambic 9 Poetry EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52001",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2005",
+          "title": "Kiara",
+          "artist": "Bonobo",
+          "album": "Kiara EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "106",
+          "albumExternalId": "52005",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2002",
+          "title": "My Red Hot Car",
+          "artist": "Squarepusher",
+          "album": "My Red Hot Car EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52002",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ]
+    },
+    "radio": {
+      "available": true,
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2001",
+          "title": "Iambic 9 Poetry",
+          "artist": "Squarepusher",
+          "album": "Iambic 9 Poetry EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52001",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2005",
+          "title": "Kiara",
+          "artist": "Bonobo",
+          "album": "Kiara EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "106",
+          "albumExternalId": "52005",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2002",
+          "title": "My Red Hot Car",
+          "artist": "Squarepusher",
+          "album": "My Red Hot Car EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52002",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ]
+    },
+    "shelves": {
+      "shelves": [
+        {
+          "kind": "becauseYouPlayed",
+          "seed": {
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2001",
+              "title": "Iambic 9 Poetry",
+              "artist": "Squarepusher",
+              "album": "Iambic 9 Poetry EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "103",
+              "albumExternalId": "52001",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2003",
+              "title": "Bike",
+              "artist": "Autechre",
+              "album": "Bike EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "104",
+              "albumExternalId": "52003",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2006",
+              "title": "Glink",
+              "artist": "Bola",
+              "album": "Glink EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Aphex Twin",
+                "title": "Xtal"
+              },
+              "artistExternalId": "107",
+              "albumExternalId": "52006",
+              "type": "track"
+            }
+          ],
+          "artists": []
+        },
+        {
+          "kind": "becauseYouPlayed",
+          "seed": {
+            "artist": "Boards of Canada",
+            "title": "Roygbiv"
+          },
+          "tracks": [
+            {
+              "source": "deezer",
+              "externalId": "2005",
+              "title": "Kiara",
+              "artist": "Bonobo",
+              "album": "Kiara EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "106",
+              "albumExternalId": "52005",
+              "type": "track"
+            },
+            {
+              "source": "deezer",
+              "externalId": "2002",
+              "title": "My Red Hot Car",
+              "artist": "Squarepusher",
+              "album": "My Red Hot Car EP",
+              "durationMs": 200000,
+              "recommendationSources": [
+                "lastfm"
+              ],
+              "reason": {
+                "kind": "played",
+                "artist": "Boards of Canada",
+                "title": "Roygbiv"
+              },
+              "artistExternalId": "103",
+              "albumExternalId": "52002",
+              "type": "track"
+            }
+          ],
+          "artists": []
+        },
+        {
+          "kind": "artistsYouMightLike",
+          "tracks": [],
+          "artists": [
+            {
+              "source": "deezer",
+              "externalId": "103",
+              "name": "Squarepusher",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Aphex Twin"
+              }
+            },
+            {
+              "source": "deezer",
+              "externalId": "106",
+              "name": "Bonobo",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Boards of Canada"
+              }
+            },
+            {
+              "source": "deezer",
+              "externalId": "104",
+              "name": "Autechre",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Aphex Twin"
+              }
+            },
+            {
+              "source": "deezer",
+              "externalId": "105",
+              "name": "Plaid",
+              "recommendationSources": [
+                "deezer"
+              ],
+              "reason": {
+                "kind": "fansAlsoLike",
+                "artist": "Boards of Canada"
+              }
+            }
+          ]
+        }
+      ],
+      "updatedAt": 1791178151,
+      "refreshing": false
+    },
+    "similarArtists": {
+      "available": true,
+      "artists": [
+        {
+          "source": "deezer",
+          "externalId": "103",
+          "name": "Squarepusher",
+          "recommendationSources": [
+            "deezer"
+          ],
+          "reason": {
+            "kind": "fansAlsoLike",
+            "artist": "Aphex Twin"
+          }
+        },
+        {
+          "source": "deezer",
+          "externalId": "104",
+          "name": "Autechre",
+          "recommendationSources": [
+            "deezer"
+          ],
+          "reason": {
+            "kind": "fansAlsoLike",
+            "artist": "Aphex Twin"
+          }
+        },
+        {
+          "source": "deezer",
+          "externalId": "105",
+          "name": "Plaid",
+          "recommendationSources": [
+            "deezer"
+          ],
+          "reason": {
+            "kind": "fansAlsoLike",
+            "artist": "Aphex Twin"
+          }
+        }
+      ]
+    },
+    "similarTracks": {
+      "available": true,
+      "tracks": [
+        {
+          "source": "deezer",
+          "externalId": "2001",
+          "title": "Iambic 9 Poetry",
+          "artist": "Squarepusher",
+          "album": "Iambic 9 Poetry EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "103",
+          "albumExternalId": "52001",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2003",
+          "title": "Bike",
+          "artist": "Autechre",
+          "album": "Bike EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "104",
+          "albumExternalId": "52003",
+          "type": "track"
+        },
+        {
+          "source": "deezer",
+          "externalId": "2006",
+          "title": "Glink",
+          "artist": "Bola",
+          "album": "Glink EP",
+          "durationMs": 200000,
+          "recommendationSources": [
+            "lastfm"
+          ],
+          "reason": {
+            "kind": "played",
+            "artist": "Aphex Twin",
+            "title": "Xtal"
+          },
+          "artistExternalId": "107",
+          "albumExternalId": "52006",
+          "type": "track"
+        }
+      ]
+    }
+  }
+]

@@ -64,17 +64,19 @@ type similarArtistSource struct {
 // dedicated source, then ranks them by agreement and the taste profile. With
 // online recommendations off, it uses local-library similarity or stale cache.
 func (s *Service) SimilarArtists(ctx context.Context, source, id string) ArtistResult {
-	ctx, ok := s.withMarks(ctx)
-	if !ok {
-		return ArtistResult{Artists: []core.ExternalArtist{}}
-	}
+	return serve(ctx, s, ArtistResult{Artists: []core.ExternalArtist{}}, func(ctx context.Context) ArtistResult {
+		return s.similarArtistsResult(ctx, source, id)
+	}, excludeFromArtistResult)
+}
+
+func (s *Service) similarArtistsResult(ctx context.Context, source, id string) ArtistResult {
 	if !s.settings(ctx).Online {
 		if source == "library" {
 			return s.localArtists(ctx, s.artistSeed(ctx, source, id))
 		}
 		key := "artists\x1f" + source + "\x1f" + id
 		if cached, at, ok := s.cache.stale(key); ok {
-			return ArtistResult{Available: true, Artists: s.withoutMarkedArtists(ctx, cached.([]core.ExternalArtist)), Offline: true, UpdatedAt: at.Unix()}
+			return ArtistResult{Available: true, Artists: cached.([]core.ExternalArtist), Offline: true, UpdatedAt: at.Unix()}
 		}
 		return ArtistResult{Artists: []core.ExternalArtist{}, Offline: true, UpdatedAt: s.now().Unix()}
 	}
@@ -89,7 +91,7 @@ func (s *Service) SimilarArtists(ctx context.Context, source, id string) ArtistR
 		}
 		key := "artists\x1f" + source + "\x1f" + id
 		if cached, at, ok := s.cache.stale(key); ok {
-			return ArtistResult{Available: true, Artists: s.withoutMarkedArtists(ctx, cached.([]core.ExternalArtist)), Offline: true, UpdatedAt: at.Unix()}
+			return ArtistResult{Available: true, Artists: cached.([]core.ExternalArtist), Offline: true, UpdatedAt: at.Unix()}
 		}
 		return local
 	}

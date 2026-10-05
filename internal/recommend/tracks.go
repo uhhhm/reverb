@@ -82,10 +82,12 @@ func (s *Service) SimilarTracks(ctx context.Context, artist, title string) Track
 // They are ranked by the taste profile and carry a reason. With online
 // recommendations off, only the local-library similarity source is queried.
 func (s *Service) SimilarTracksFor(ctx context.Context, seed TrackSeed) TrackResult {
-	ctx, ok := s.withMarks(ctx)
-	if !ok {
-		return TrackResult{Tracks: []core.ExternalResult{}}
-	}
+	return serve(ctx, s, TrackResult{Tracks: []core.ExternalResult{}}, func(ctx context.Context) TrackResult {
+		return s.similarTracksResult(ctx, seed)
+	}, excludeFromTrackResult)
+}
+
+func (s *Service) similarTracksResult(ctx context.Context, seed TrackSeed) TrackResult {
 	if !s.settings(ctx).Online {
 		return s.localTracks(ctx, seed)
 	}
@@ -127,7 +129,7 @@ func (s *Service) localTracksOrStale(ctx context.Context, seed TrackSeed, key st
 		return local
 	}
 	if cached, at, ok := s.cache.stale(key); ok {
-		return TrackResult{Available: true, Tracks: s.withoutMarkedTracks(ctx, cached.([]core.ExternalResult)), Offline: true, UpdatedAt: at.Unix()}
+		return TrackResult{Available: true, Tracks: cached.([]core.ExternalResult), Offline: true, UpdatedAt: at.Unix()}
 	}
 	return local
 }

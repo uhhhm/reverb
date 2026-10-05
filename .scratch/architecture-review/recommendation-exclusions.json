@@ -1,0 +1,594 @@
+{
+  "externalRequests": {
+    "answered": 39,
+    "refusedWhileDown": 0
+  },
+  "fixture": {
+    "currentExclusions": {
+      "artist": "Squarepusher",
+      "readFailure": "not_interested table renamed away and back",
+      "track": "Plaid - Eyen (deezer:2004)",
+      "undo": "artist mark only"
+    },
+    "historicalGeneration": {
+      "marksAtGeneration": [],
+      "plays": "Aphex Twin - Xtal x4, Boards of Canada - Roygbiv x3, nine days before the run",
+      "sources": "Last.fm track.getSimilar and Deezer search/related artists; ListenBrainz answers 503"
+    }
+  },
+  "phases": [
+    {
+      "name": "warm",
+      "marks": null,
+      "internet": "up",
+      "surfaces": {
+        "mix/discoverWeekly": {
+          "available": true,
+          "updatedAt": 1791178152,
+          "period": "2026-10-05",
+          "items": [
+            "Squarepusher - Iambic 9 Poetry",
+            "Bonobo - Kiara",
+            "Plaid - Eyen",
+            "Autechre - Bike",
+            "Squarepusher - My Red Hot Car",
+            "Bola - Glink"
+          ]
+        },
+        "mixes/discoverWeekly": {
+          "available": true,
+          "updatedAt": 1791178152,
+          "period": "2026-10-05",
+          "items": [
+            "Squarepusher - Iambic 9 Poetry",
+            "Bonobo - Kiara",
+            "Plaid - Eyen",
+            "Autechre - Bike",
+            "Squarepusher - My Red Hot Car",
+            "Bola - Glink"
+          ]
+        },
+        "mixes/releaseRadar": {
+          "available": true,
+          "updatedAt": 1791178151,
+          "period": "2026-10-02",
+          "items": []
+        },
+        "playlistSuggestions": {
+          "available": true,
+          "items": [
+            "Squarepusher - Iambic 9 Poetry",
+            "Bonobo - Kiara",
+            "Plaid - Eyen",
+            "Autechre - Bike",
+            "Squarepusher - My Red Hot Car",
+            "Bola - Glink"
+          ]
+        },
+        "radio": {
+          "available": true,
+          "items": [
+            "Squarepusher - Iambic 9 Poetry",
+            "Bonobo - Kiara",
+            "Plaid - Eyen",
+            "Autechre - Bike",
+            "Squarepusher - My Red Hot Car",
+            "Bola - Glink"
+          ]
+        },
+        "shelves": {
+          "available": true,
+          "updatedAt": 1791178151,
+          "items": [
+            "becauseYouPlayed(Xtal): Squarepusher - Iambic 9 Poetry",
+            "becauseYouPlayed(Xtal): Autechre - Bike",
+            "becauseYouPlayed(Xtal): Plaid - Eyen",
+            "becauseYouPlayed(Xtal): Bola - Glink",
+            "becauseYouPlayed(Roygbiv): Bonobo - Kiara",
+            "becauseYouPlayed(Roygbiv): Squarepusher - My Red Hot Car",
+            "becauseYouPlayed(Roygbiv): Plaid - Eyen",
+            "artistsYouMightLike: Squarepusher",
+            "artistsYouMightLike: Bonobo",
+            "artistsYouMightLike: Autechre",
+            "artistsYouMightLike: Plaid"
+          ]
+        },
+        "similarArtists": {
+          "available": true,
+          "items": [
+            "Squarepusher",
+            "Autechre",
+            "Plaid"
+          ]
+        },
+        "similarTracks": {
+          "available": true,
+          "items": [
+            "Squarepusher - Iambic 9 Poetry",
+            "Autechre - Bike",
+            "Plaid - Eyen",
+            "Bola - Glink"
+          ]
+        }
+      },
+      "checks": [
+        "every surface holds Squarepusher and Eyen"
+      ]
+    },
+    {
+      "name": "marked",
+      "marks": [
+        "artist:Squarepusher",
+        "track:deezer:2004"
+      ],
+      "internet": "up",
+      "surfaces": {
+        "mix/discoverWeekly": {
+          "available": true,
+          "updatedAt": 1791178152,
+          "period": "2026-10-05",
+          "items": [
+            "Bonobo - Kiara",
+            "Autechre - Bike",
+            "Bola - Glink"
+          ]
+        },
+        "mixes/discoverWeekly": {
+          "available": true,
+          "updatedAt": 1791178152,
+          "period": "2026-10-05",
+          "items": [
+            "Bonobo - Kiara",
+            "Autechre - Bike",
+            "Bola - Glink"
+          ]
+        },
+        "mixes/releaseRadar": {
+          "available": true,
+          "updatedAt": 1791178151,
+          "period": "2026-10-02",
+          "items": []
+        },
+        "playlistSuggestions": {
+          "available": true,
+          "items": [
+            "Autechre - Bike",
+            "Bonobo - Kiara",
+            "Bola - Glink"
+          ]
+        },
+        "radio": {
+          "available": true,
+          "items": [
+            "Autechre - Bike",
+            "Bonobo - Kiara",
+            "Bola - Glink"
+          ]
+        },
+        "shelves": {
+          "available": true,
+          "updatedAt": 1791178151,
+          "items": [
+            "becauseYouPlayed(Xtal): Autechre - Bike",
+            "becauseYouPlayed(Xtal): Bola - Glink",
+            "becauseYouPlayed(Roygbiv): Bonobo - Kiara",
+            "artistsYouMightLike: Bonobo",
+            "artistsYouMightLike: Autechre",
+            "artistsYouMightLike: Plaid"
+          ]
+        },
+        "similarArtists": {
+          "available": true,
+          "items": [
+            "Autechre",
+            "Plaid"
+          ]
+        },
+        "similarTracks": {
+          "available": true,
+          "items": [
+            "Autechre - Bike",
+            "Bola - Glink"
+          ]
+        }
+      },
+      "checks": [
+        "no surface shows Squarepusher or Eyen",
+        "stored shelves and Mix were not regenerated"
+      ]
+    },
+    {
+      "name": "offline",
+      "marks": [
+        "artist:Squarepusher",
+        "track:deezer:2004"
+      ],
+      "internet": "down",
+      "surfaces": {
+        "mix/discoverWeekly": {
+          "available": true,
+          "updatedAt": 1791178152,
+          "period": "2026-10-05",
+          "items": [
+            "Bonobo - Kiara",
+            "Autechre - Bike",
+            "Bola - Glink"
+          ]
+        },
+        "mixes/discoverWeekly": {
+          "available": true,
+          "updatedAt": 1791178152,
+          "period": "2026-10-05",
+          "items": [
+            "Bonobo - Kiara",
+            "Autechre - Bike",
+            "Bola - Glink"
+          ]
+        },
+        "mixes/releaseRadar": {
+          "available": true,
+          "updatedAt": 1791178151,
+          "period": "2026-10-02",
+          "items": []
+        },
+        "playlistSuggestions": {
+          "available": true,
+          "items": [
+            "Autechre - Bike",
+            "Bonobo - Kiara",
+            "Bola - Glink"
+          ]
+        },
+        "radio": {
+          "available": true,
+          "items": [
+            "Autechre - Bike",
+            "Bonobo - Kiara",
+            "Bola - Glink"
+          ]
+        },
+        "shelves": {
+          "available": true,
+          "updatedAt": 1791178151,
+          "items": [
+            "becauseYouPlayed(Xtal): Autechre - Bike",
+            "becauseYouPlayed(Xtal): Bola - Glink",
+            "becauseYouPlayed(Roygbiv): Bonobo - Kiara",
+            "artistsYouMightLike: Bonobo",
+            "artistsYouMightLike: Autechre",
+            "artistsYouMightLike: Plaid"
+          ]
+        },
+        "similarArtists": {
+          "available": true,
+          "items": [
+            "Autechre",
+            "Plaid"
+          ]
+        },
+        "similarTracks": {
+          "available": true,
+          "items": [
+            "Autechre - Bike",
+            "Bola - Glink"
+          ]
+        }
+      },
+      "checks": [
+        "no surface shows Squarepusher or Eyen with every source unreachable"
+      ]
+    },
+    {
+      "name": "online off",
+      "marks": [
+        "artist:Squarepusher",
+        "track:deezer:2004"
+      ],
+      "internet": "down",
+      "surfaces": {
+        "mix/discoverWeekly": {
+          "available": true,
+          "updatedAt": 1791178152,
+          "period": "2026-10-05",
+          "items": [
+            "Bonobo - Kiara",
+            "Autechre - Bike",
+            "Bola - Glink"
+          ]
+        },
+        "mixes/discoverWeekly": {
+          "available": true,
+          "updatedAt": 1791178152,
+          "period": "2026-10-05",
+          "items": [
+            "Bonobo - Kiara",
+            "Autechre - Bike",
+            "Bola - Glink"
+          ]
+        },
+        "mixes/releaseRadar": {
+          "available": true,
+          "updatedAt": 1791178151,
+          "period": "2026-10-02",
+          "items": []
+        },
+        "playlistSuggestions": {
+          "available": true,
+          "offline": true,
+          "updatedAt": 1791178154,
+          "items": []
+        },
+        "radio": {
+          "available": true,
+          "offline": true,
+          "updatedAt": 1791178154,
+          "items": []
+        },
+        "shelves": {
+          "available": true,
+          "updatedAt": 1791178151,
+          "items": [
+            "becauseYouPlayed(Xtal): Autechre - Bike",
+            "becauseYouPlayed(Xtal): Bola - Glink",
+            "becauseYouPlayed(Roygbiv): Bonobo - Kiara",
+            "artistsYouMightLike: Bonobo",
+            "artistsYouMightLike: Autechre",
+            "artistsYouMightLike: Plaid"
+          ]
+        },
+        "similarArtists": {
+          "available": true,
+          "offline": true,
+          "updatedAt": 1791178152,
+          "items": [
+            "Autechre",
+            "Plaid"
+          ]
+        },
+        "similarTracks": {
+          "available": true,
+          "offline": true,
+          "updatedAt": 1791178154,
+          "items": []
+        }
+      },
+      "checks": [
+        "similar artists served from the stale cache without Squarepusher",
+        "stored shelves and Mix still hide Squarepusher and Eyen"
+      ]
+    },
+    {
+      "name": "undone",
+      "marks": [
+        "track:deezer:2004"
+      ],
+      "internet": "down",
+      "surfaces": {
+        "mix/discoverWeekly": {
+          "available": true,
+          "updatedAt": 1791178152,
+          "period": "2026-10-05",
+          "items": [
+            "Squarepusher - Iambic 9 Poetry",
+            "Bonobo - Kiara",
+            "Autechre - Bike",
+            "Squarepusher - My Red Hot Car",
+            "Bola - Glink"
+          ]
+        },
+        "mixes/discoverWeekly": {
+          "available": true,
+          "updatedAt": 1791178152,
+          "period": "2026-10-05",
+          "items": [
+            "Squarepusher - Iambic 9 Poetry",
+            "Bonobo - Kiara",
+            "Autechre - Bike",
+            "Squarepusher - My Red Hot Car",
+            "Bola - Glink"
+          ]
+        },
+        "mixes/releaseRadar": {
+          "available": true,
+          "updatedAt": 1791178151,
+          "period": "2026-10-02",
+          "items": []
+        },
+        "playlistSuggestions": {
+          "available": true,
+          "items": [
+            "Squarepusher - Iambic 9 Poetry",
+            "Bonobo - Kiara",
+            "Autechre - Bike",
+            "Squarepusher - My Red Hot Car",
+            "Bola - Glink"
+          ]
+        },
+        "radio": {
+          "available": true,
+          "items": [
+            "Squarepusher - Iambic 9 Poetry",
+            "Bonobo - Kiara",
+            "Autechre - Bike",
+            "Squarepusher - My Red Hot Car",
+            "Bola - Glink"
+          ]
+        },
+        "shelves": {
+          "available": true,
+          "updatedAt": 1791178151,
+          "items": [
+            "becauseYouPlayed(Xtal): Squarepusher - Iambic 9 Poetry",
+            "becauseYouPlayed(Xtal): Autechre - Bike",
+            "becauseYouPlayed(Xtal): Bola - Glink",
+            "becauseYouPlayed(Roygbiv): Bonobo - Kiara",
+            "becauseYouPlayed(Roygbiv): Squarepusher - My Red Hot Car",
+            "artistsYouMightLike: Squarepusher",
+            "artistsYouMightLike: Bonobo",
+            "artistsYouMightLike: Autechre",
+            "artistsYouMightLike: Plaid"
+          ]
+        },
+        "similarArtists": {
+          "available": true,
+          "items": [
+            "Squarepusher",
+            "Autechre",
+            "Plaid"
+          ]
+        },
+        "similarTracks": {
+          "available": true,
+          "items": [
+            "Squarepusher - Iambic 9 Poetry",
+            "Autechre - Bike",
+            "Bola - Glink"
+          ]
+        }
+      },
+      "checks": [
+        "Squarepusher is back on every surface",
+        "Eyen is still hidden",
+        "nothing was regenerated"
+      ]
+    },
+    {
+      "name": "marks unreadable",
+      "marks": [
+        "track:deezer:2004"
+      ],
+      "internet": "down",
+      "surfaces": {
+        "mix/discoverWeekly": {
+          "available": false,
+          "items": []
+        },
+        "mixes/discoverWeekly": {
+          "available": false,
+          "items": []
+        },
+        "mixes/releaseRadar": {
+          "available": false,
+          "items": []
+        },
+        "playlistSuggestions": {
+          "available": false,
+          "items": []
+        },
+        "radio": {
+          "available": false,
+          "items": []
+        },
+        "shelves": {
+          "available": false,
+          "items": []
+        },
+        "similarArtists": {
+          "available": false,
+          "items": []
+        },
+        "similarTracks": {
+          "available": false,
+          "items": []
+        }
+      },
+      "checks": [
+        "every surface is unavailable and empty"
+      ]
+    },
+    {
+      "name": "recovered",
+      "marks": [
+        "track:deezer:2004"
+      ],
+      "internet": "down",
+      "surfaces": {
+        "mix/discoverWeekly": {
+          "available": true,
+          "updatedAt": 1791178152,
+          "period": "2026-10-05",
+          "items": [
+            "Squarepusher - Iambic 9 Poetry",
+            "Bonobo - Kiara",
+            "Autechre - Bike",
+            "Squarepusher - My Red Hot Car",
+            "Bola - Glink"
+          ]
+        },
+        "mixes/discoverWeekly": {
+          "available": true,
+          "updatedAt": 1791178152,
+          "period": "2026-10-05",
+          "items": [
+            "Squarepusher - Iambic 9 Poetry",
+            "Bonobo - Kiara",
+            "Autechre - Bike",
+            "Squarepusher - My Red Hot Car",
+            "Bola - Glink"
+          ]
+        },
+        "mixes/releaseRadar": {
+          "available": true,
+          "updatedAt": 1791178151,
+          "period": "2026-10-02",
+          "items": []
+        },
+        "playlistSuggestions": {
+          "available": true,
+          "items": [
+            "Squarepusher - Iambic 9 Poetry",
+            "Bonobo - Kiara",
+            "Autechre - Bike",
+            "Squarepusher - My Red Hot Car",
+            "Bola - Glink"
+          ]
+        },
+        "radio": {
+          "available": true,
+          "items": [
+            "Squarepusher - Iambic 9 Poetry",
+            "Bonobo - Kiara",
+            "Autechre - Bike",
+            "Squarepusher - My Red Hot Car",
+            "Bola - Glink"
+          ]
+        },
+        "shelves": {
+          "available": true,
+          "updatedAt": 1791178151,
+          "items": [
+            "becauseYouPlayed(Xtal): Squarepusher - Iambic 9 Poetry",
+            "becauseYouPlayed(Xtal): Autechre - Bike",
+            "becauseYouPlayed(Xtal): Bola - Glink",
+            "becauseYouPlayed(Roygbiv): Bonobo - Kiara",
+            "becauseYouPlayed(Roygbiv): Squarepusher - My Red Hot Car",
+            "artistsYouMightLike: Squarepusher",
+            "artistsYouMightLike: Bonobo",
+            "artistsYouMightLike: Autechre",
+            "artistsYouMightLike: Plaid"
+          ]
+        },
+        "similarArtists": {
+          "available": true,
+          "items": [
+            "Squarepusher",
+            "Autechre",
+            "Plaid"
+          ]
+        },
+        "similarTracks": {
+          "available": true,
+          "items": [
+            "Squarepusher - Iambic 9 Poetry",
+            "Autechre - Bike",
+            "Bola - Glink"
+          ]
+        }
+      },
+      "checks": [
+        "every surface matches its result from before the failure"
+      ]
+    }
+  ],
+  "rerun": "REVERB_E2E_ARTIFACTS=\"$PWD/.scratch/architecture-review\" go test ./internal/app -run '^TestRecommendationSurfacesHonorCurrentMarks$' -count=1 -v"
+}

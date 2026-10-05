@@ -32,10 +32,12 @@ type Seed struct {
 // owned tracks stay, but other versions and duplicate recordings are dropped.
 // With online recommendations off, only local-library similarity is queried.
 func (s *Service) Radio(ctx context.Context, seeds []Seed) TrackResult {
-	ctx, ok := s.withMarks(ctx)
-	if !ok {
-		return TrackResult{Tracks: []core.ExternalResult{}}
-	}
+	return serve(ctx, s, TrackResult{Tracks: []core.ExternalResult{}}, func(ctx context.Context) TrackResult {
+		return s.radio(ctx, seeds)
+	}, excludeFromTrackResult)
+}
+
+func (s *Service) radio(ctx context.Context, seeds []Seed) TrackResult {
 	settings := s.settings(ctx)
 	if !settings.Online || len(s.tracks) == 0 {
 		return s.localRadio(ctx, seeds)

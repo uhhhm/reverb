@@ -223,9 +223,59 @@ type excludeAll struct{}
 func (excludeAll) Track(core.ExternalResult) bool { return true }
 func (excludeAll) Artist(string) bool             { return true }
 
-// withoutMarkedArtists filters into a new slice: artists may be a cached list.
-func (s *Service) withoutMarkedArtists(ctx context.Context, artists []core.ExternalArtist) []core.ExternalArtist {
+// serve is the final exclusion policy every exported result crosses. It reads
+// the marks once for the request, produces the result under them and removes
+// whatever they exclude from it, so no return path — fresh, cached, stale or
+// a refresh's fallback — can hand a caller something the household marked.
+// While the marks cannot be read, produce does not run and the surface is
+// unavailable.
+//
+// Producers still filter early where it changes the result: choosing seeds,
+// ranking, and filling a surface to its size. This is the guarantee, not a
+// replacement for those.
+func serve[R any](ctx context.Context, s *Service, unavailable R, produce func(context.Context) R, exclude func(Exclusions, R) R) R {
+	ctx, ok := s.withMarks(ctx)
+	if !ok {
+		return unavailable
+	}
 	ex, _ := s.excluded(ctx)
+	return exclude(ex, produce(ctx))
+}
+
+func excludeFromTrackResult(ex Exclusions, r TrackResult) TrackResult {
+	r.Tracks = excludeTracks(ex, r.Tracks)
+	return r
+}
+
+func excludeFromArtistResult(ex Exclusions, r ArtistResult) ArtistResult {
+	r.Artists = excludeArtists(ex, r.Artists)
+	return r
+}
+
+func excludeFromMix(ex Exclusions, m Mix) Mix {
+	m.Tracks = excludeTracks(ex, m.Tracks)
+	return m
+}
+
+func excludeFromShelves(ex Exclusions, sh Shelves) Shelves {
+	sh.Shelves = excludeShelves(ex, sh.Shelves)
+	return sh
+}
+
+// excludeTracks filters into a new slice: tracks may be a cached list or a
+// stored Mix. A nil ex excludes nothing.
+func excludeTracks(ex Exclusions, tracks []core.ExternalResult) []core.ExternalResult {
+	out := make([]core.ExternalResult, 0, len(tracks))
+	for _, t := range tracks {
+		if ex == nil || !ex.Track(t) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// excludeArtists filters into a new slice: artists may be a cached list.
+func excludeArtists(ex Exclusions, artists []core.ExternalArtist) []core.ExternalArtist {
 	out := make([]core.ExternalArtist, 0, len(artists))
 	for _, a := range artists {
 		if ex == nil || !ex.Artist(a.Name) {
@@ -235,16 +285,35 @@ func (s *Service) withoutMarkedArtists(ctx context.Context, artists []core.Exter
 	return out
 }
 
-// withoutMarkedTracks filters into a new slice: tracks may be a cached list.
-func (s *Service) withoutMarkedTracks(ctx context.Context, tracks []core.ExternalResult) []core.ExternalResult {
-	ex, _ := s.excluded(ctx)
-	out := make([]core.ExternalResult, 0, len(tracks))
-	for _, t := range tracks {
-		if ex == nil || !ex.Track(t) {
-			out = append(out, t)
+// excludeShelves drops a shelf whose seed is marked and one left empty, and
+// filters the rest into new slices: shelves may be the stored ones.
+func excludeShelves(ex Exclusions, shelves []Shelf) []Shelf {
+	out := make([]Shelf, 0, len(shelves))
+	for _, sh := range shelves {
+		if sh.Seed != nil && markedSeed(ex, sh.Seed.Artist, sh.Seed.Title) {
+			continue
+		}
+		sh.Tracks = excludeTracks(ex, sh.Tracks)
+		sh.Artists = excludeArtists(ex, sh.Artists)
+		if len(sh.Tracks)+len(sh.Artists) > 0 {
+			out = append(out, sh)
 		}
 	}
 	return out
+}
+
+// withoutMarkedArtists filters by the request's marks ahead of the final
+// policy, where filling a list depends on it.
+func (s *Service) withoutMarkedArtists(ctx context.Context, artists []core.ExternalArtist) []core.ExternalArtist {
+	ex, _ := s.excluded(ctx)
+	return excludeArtists(ex, artists)
+}
+
+// withoutMarkedTracks filters by the request's marks ahead of the final
+// policy, where filling a list depends on it.
+func (s *Service) withoutMarkedTracks(ctx context.Context, tracks []core.ExternalResult) []core.ExternalResult {
+	ex, _ := s.excluded(ctx)
+	return excludeTracks(ex, tracks)
 }
 
 func (s *Service) liveMatcher() Matcher {
