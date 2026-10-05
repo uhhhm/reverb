@@ -641,10 +641,30 @@ func (m *Manager) Start() {
 		go m.reconcileLoop()
 		log.Printf("download manager: async reconciler started (every %s)", m.cfg.ReconcileEvery)
 	}
-	go m.BackfillUnlinked()
 	// Converge legacy completed+linked jobs (canonical_id=='') onto the canonical
 	// path so retiring the clear-dance doesn't rot their covers on a backend swap.
-	go m.BackfillCanonicalIDs()
+	// Both read the store, so Stop waits for them like the workers.
+	for _, backfill := range []func(){m.BackfillUnlinked, m.BackfillCanonicalIDs} {
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			backfill()
+		}()
+	}
+}
+
+// stopContext returns a context that ends when Stop is called, for one-shot
+// passes that must not outlive the manager.
+func (m *Manager) stopContext() (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-m.stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, cancel
 }
 
 // recoverAfterRestart repairs jobs that were in flight when this process stopped
@@ -699,7 +719,8 @@ func (m *Manager) BackfillUnlinked() {
 	if m.rematcher == nil {
 		return
 	}
-	ctx := context.Background()
+	ctx, cancel := m.stopContext()
+	defer cancel()
 	jobs, err := m.store.List(ctx)
 	if err != nil {
 		log.Printf("download backfill: list jobs failed: %v", err)
@@ -778,7 +799,8 @@ func (m *Manager) BackfillCanonicalIDs() {
 	if m.canonicalMinter == nil {
 		return // nothing to mint into; nil-safe no-op
 	}
-	ctx := context.Background()
+	ctx, cancel := m.stopContext()
+	defer cancel()
 	jobs, err := m.store.List(ctx)
 	if err != nil {
 		log.Printf("download canonical backfill: list jobs failed: %v", err)

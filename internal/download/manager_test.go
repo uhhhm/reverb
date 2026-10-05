@@ -2776,3 +2776,51 @@ func waitForStatus(t *testing.T, store JobStore, id string, want core.DownloadSt
 		}
 	}
 }
+
+// blockingRematcher holds every Match until its context ends, as a library
+// lookup against a slow backend does, and counts the calls still in flight.
+type blockingRematcher struct {
+	entered  chan struct{}
+	inFlight atomic.Int32
+}
+
+func (r *blockingRematcher) Match(ctx context.Context, _ core.ExternalResult) (core.MatchResult, error) {
+	r.inFlight.Add(1)
+	defer r.inFlight.Add(-1)
+	select {
+	case r.entered <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return core.MatchResult{}, ctx.Err()
+}
+
+// The boot backfills read the job store, which the caller closes once Stop
+// returns: Stop cancels them and returns only after they have stopped.
+func TestStopEndsBootBackfillsBeforeReturning(t *testing.T) {
+	store := newMemStore()
+	_ = store.Insert(context.Background(), core.DownloadJob{
+		ID: "unlinked", DedupKey: "dk-unlinked", Status: core.DownloadCompleted,
+		DownloaderName: "dl", Source: "spotify", ExternalID: "ext-unlinked", Artist: "Bach", Title: "Aria", Progress: 100,
+	}, core.DownloadRequest{Source: "spotify", ExternalID: "ext-unlinked", Artist: "Bach", Title: "Aria"})
+	rematcher := &blockingRematcher{entered: make(chan struct{}, 1)}
+	m := NewManager(Config{Workers: 1, DebounceWindow: time.Hour}, wrapDownloaders([]Downloader{&fakeDL{name: "dl", canDownload: true}}),
+		store, events.New(), &fakeScanner{}, rematcher, &fakeVersion{v: 1}, RealClock{}, nil, nil)
+	m.Start()
+	select {
+	case <-rematcher.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the unlinked backfill never ran")
+	}
+
+	stopped := make(chan struct{})
+	go func() { m.Stop(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(stopGrace / 2):
+		t.Fatal("Stop waited out its grace period instead of cancelling the backfill")
+	}
+	if n := rematcher.inFlight.Load(); n != 0 {
+		t.Fatalf("Stop returned with %d backfill lookup(s) still running", n)
+	}
+}

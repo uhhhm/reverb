@@ -1056,6 +1056,11 @@ func (r *Runtime) Close() {
 		// them so none is still reading the store below.
 		waitBounded("recommendation refreshes", backgroundStopGrace, r.Recommend.Close)
 	}
+	if r.Deps.SyncStore != nil {
+		// Projection of accepted batches runs off the sync round; a batch
+		// cancelled here stays queued and is projected on the next start.
+		waitBounded("sync projection", backgroundStopGrace, r.Deps.SyncStore.Close)
+	}
 	if r.Reloader != nil {
 		r.Reloader.Close()
 	}

@@ -3,6 +3,7 @@ package sync_test
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -113,4 +114,66 @@ func TestReconcileBatchedAsyncReturnsBeforeProjectionFinishes(t *testing.T) {
 		t.Fatal("ReconcileBatchedAsync waited for the projection to finish")
 	}
 	close(blocker.release)
+}
+
+// ctxMaterializer holds each Apply until its context ends, as a projection
+// waiting on a busy database does, and counts the calls still in flight.
+type ctxMaterializer struct {
+	entered  chan struct{}
+	inFlight atomic.Int32
+}
+
+func (m *ctxMaterializer) Apply(ctx context.Context, _ syncpkg.SyncChange) error {
+	m.inFlight.Add(1)
+	defer m.inFlight.Add(-1)
+	select {
+	case m.entered <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// The background projector writes through the database the caller closes once
+// Close returns: Close cancels a running projection and waits for it, and a
+// batch accepted afterwards is left to the durable queue rather than started.
+func TestCloseStopsTheBackgroundProjector(t *testing.T) {
+	st := newTestStoreSync(t)
+	ctx := context.Background()
+	createDevice(t, st, "dev_local", "local", 1)
+	createDevice(t, st, "dev_peer", "peer", 0)
+	m := &ctxMaterializer{entered: make(chan struct{}, 1)}
+	ss := syncpkg.NewSyncStore(st.Q())
+	ss.SetMaterializer(m)
+
+	change := func(id string) []syncpkg.SyncChange {
+		return []syncpkg.SyncChange{{EntityType: "track", EntityID: id, Field: "title", Value: "Peer Title", UpdatedAt: 2000, DeviceID: "dev_peer"}}
+	}
+	if _, _, _, err := ss.ReconcileBatchedAsync(ctx, "dev_peer", syncpkg.NoOutbound, change("cat_1")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-m.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("projection never started")
+	}
+	closed := make(chan struct{})
+	go func() { ss.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not stop the running projection")
+	}
+	if n := m.inFlight.Load(); n != 0 {
+		t.Fatalf("Close returned with %d projection(s) still writing", n)
+	}
+
+	if _, _, _, err := ss.ReconcileBatchedAsync(ctx, "dev_peer", syncpkg.NoOutbound, change("cat_2")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-m.entered:
+		t.Fatal("a batch accepted after Close started a projection")
+	case <-time.After(200 * time.Millisecond):
+	}
 }

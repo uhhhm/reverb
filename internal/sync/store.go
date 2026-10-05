@@ -40,8 +40,16 @@ type SyncStore struct {
 	// the network reconcile paths. It is FIFO and single-consumer, so batches
 	// project in the order their rounds committed.
 	projections  chan []SyncChange
-	projectOnce  sync.Once
 	projectionMu sync.Mutex
+
+	// The projector's lifetime: Close ends it, cancelling any projection and
+	// stopping the background projector. projMu guards these fields and
+	// projections; it is never held while projecting.
+	projMu     sync.Mutex
+	projClosed bool
+	projLife   context.Context
+	projEnd    context.CancelFunc
+	projDone   chan struct{}
 }
 
 // Materializer applies a change that has been accepted into the log onto the
@@ -848,24 +856,75 @@ func (s *SyncStore) reconcile(ctx context.Context, deviceID string, sinceRev int
 // enqueueProjection hands an accepted batch to the background projector,
 // starting it on first use. The send blocks when the projector is behind: a
 // dropped batch would never be resent, since the log has already committed and
-// the vector has already advanced.
+// the vector has already advanced. After Close the batch is left to the
+// durable pending queue, which RunProjectionRecovery replays on the next start.
 func (s *SyncStore) enqueueProjection(accepted []SyncChange) {
 	if len(accepted) == 0 {
 		return
 	}
-	s.projectOnce.Do(func() {
+	s.projMu.Lock()
+	if s.projClosed {
+		s.projMu.Unlock()
+		return
+	}
+	life := s.lifeLocked()
+	if s.projections == nil {
 		s.projections = make(chan []SyncChange, 32)
-		go func() {
-			for batch := range s.projections {
-				// Same contract as the inline path: the queue keeps the batch
-				// for RunProjectionRecovery, so this only needs reporting.
-				if err := s.materialize(context.Background(), batch); err != nil {
-					log.Printf("sync: project accepted changes: %v", err)
-				}
+		s.projDone = make(chan struct{})
+		go s.runProjector(life, s.projections, s.projDone)
+	}
+	projections := s.projections
+	s.projMu.Unlock()
+	select {
+	case projections <- accepted:
+	case <-life.Done():
+	}
+}
+
+func (s *SyncStore) runProjector(life context.Context, projections <-chan []SyncChange, done chan<- struct{}) {
+	defer close(done)
+	for {
+		select {
+		case <-life.Done():
+			return
+		case batch := <-projections:
+			// Same contract as the inline path: the queue keeps the batch
+			// for RunProjectionRecovery, so this only needs reporting.
+			if err := s.materialize(context.Background(), batch); err != nil {
+				log.Printf("sync: project accepted changes: %v", err)
 			}
-		}()
-	})
-	s.projections <- accepted
+		}
+	}
+}
+
+// Close ends the projector's lifetime: a running projection is cancelled, the
+// background projector stops, and Close returns once it has, so the database
+// it writes can be closed after. Cancelled and later batches stay in the
+// durable pending queue.
+func (s *SyncStore) Close() {
+	s.projMu.Lock()
+	s.projClosed = true
+	s.lifeLocked()
+	end, done := s.projEnd, s.projDone
+	s.projMu.Unlock()
+	end()
+	if done != nil {
+		<-done
+	}
+}
+
+// lifetime is the context Close ends.
+func (s *SyncStore) lifetime() context.Context {
+	s.projMu.Lock()
+	defer s.projMu.Unlock()
+	return s.lifeLocked()
+}
+
+func (s *SyncStore) lifeLocked() context.Context {
+	if s.projLife == nil {
+		s.projLife, s.projEnd = context.WithCancel(context.Background())
+	}
+	return s.projLife
 }
 
 func (s *SyncStore) reconcileLocked(ctx context.Context, deviceID string, sinceRev int64, inbound []SyncChange) (outbound []SyncChange, newRev int64, rejected []SyncChange, accepted []SyncChange, err error) {
@@ -915,9 +974,11 @@ func (s *SyncStore) materialize(ctx context.Context, accepted []SyncChange) erro
 	// with the round's context error -- which is exactly what a first sync
 	// after BackfillHistory does, committing thousands of plays with the
 	// deadline already spent -- those changes would be permanently invisible
-	// on this device. Cancellation of the round must not reach here.
+	// on this device. Cancellation of the round must not reach here; only
+	// Close, which leaves the batch queued for recovery, does.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), materializeTimeout)
 	defer cancel()
+	defer context.AfterFunc(s.lifetime(), cancel)()
 	// Catalog entities first: a play or a rename names a track by its catalog
 	// id, so the entity has to exist before the row that points at it.
 	var first error

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -250,6 +251,17 @@ func (d *syncDevice) boot() {
 		cancel()
 		srv.Close()
 		rt.Close()
+		// A connection still open here belongs to work that outlived Close.
+		// Windows then refuses to delete or reopen the database file, so this
+		// catches on every platform what would otherwise fail only there. The
+		// grace matches the retries TempDir's cleanup makes on Windows.
+		deadline := time.Now().Add(time.Second)
+		for rt.Store.DB().Stats().OpenConnections > 0 && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if n := rt.Store.DB().Stats().OpenConnections; n > 0 {
+			d.t.Errorf("%s: %d database connection(s) still open after Close, held by:\n%s", d.name, n, databaseHolders())
+		}
 	}
 	if rt.P2P == nil || rt.P2PSyncer == nil {
 		d.t.Fatalf("%s: p2p did not start", d.name)
@@ -850,4 +862,18 @@ func TestPhonePairsFromQRPayloadWithoutDiscovery(t *testing.T) {
 		"title": "Scanned Song", "artist": "Band", "album": "Record", "durationMs": 100000, "msPlayed": 100000, "completed": true,
 	}, nil, http.StatusNoContent)
 	converge(t, desktop, phone, "a play reaches the phone paired by QR", func() bool { return phone.hasPlayTitled("Scanned Song") })
+}
+
+// databaseHolders is the stack of every goroutine inside database/sql, to name
+// the work a leaked connection belongs to.
+func databaseHolders() string {
+	buf := make([]byte, 1<<22)
+	buf = buf[:goruntime.Stack(buf, true)]
+	var held []string
+	for _, g := range strings.Split(string(buf), "\n\n") {
+		if strings.Contains(g, "database/sql.") {
+			held = append(held, g)
+		}
+	}
+	return strings.Join(held, "\n\n")
 }
