@@ -11,10 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
+	"github.com/uhhhm/reverb/internal/syncemit"
 )
 
 var errTrackRemovalUnavailable = errors.New("track removal needs the built-in library")
@@ -110,29 +110,15 @@ func (s *Server) handleRemoveLibraryTrack(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not hash track"})
 		return
 	}
-	if s.deps.SyncStore != nil {
-		deviceID := s.resolveAuthorDeviceForSync(r.Context())
-		if deviceID == "" {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "sync identity unavailable"})
-			return
-		}
-		if _, err := s.deps.SyncStore.AppendChange(r.Context(), deviceID, reverbsync.SyncChange{
-			EntityType: reverbsync.EntityFile, EntityID: hex.EncodeToString(hash.Sum(nil)), Field: reverbsync.FieldDeleted, UpdatedAt: time.Now().UnixMilli(),
-		}); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not persist track deletion"})
-			return
-		}
-		// Withdraw the track from household browsing. This is not a track
-		// tombstone, which would hide it for good: a download linking it again,
-		// or a library publish that finds it, sets it back.
-		if catalogID != "" {
-			if _, err := s.deps.SyncStore.AppendChange(r.Context(), deviceID, reverbsync.SyncChange{
-				EntityType: reverbsync.EntityTrack, EntityID: catalogID, Field: reverbsync.FieldLibraryPresent, Value: false, UpdatedAt: time.Now().UnixMilli(),
-			}); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not persist track deletion"})
-				return
-			}
-		}
+	// The deletion reaches the log before the file goes, or not at all.
+	switch err := s.deps.SyncEmit.EmitLibraryRemoval(r.Context(), hex.EncodeToString(hash.Sum(nil)), catalogID); {
+	case err == nil, errors.Is(err, syncemit.ErrUnavailable):
+	case errors.Is(err, syncemit.ErrNoIdentity):
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "sync identity unavailable"})
+		return
+	default:
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not persist track deletion"})
+		return
 	}
 	if err := managed.Remove(rel); err != nil && !errors.Is(err, os.ErrNotExist) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not remove the track file"})
@@ -147,31 +133,13 @@ func (s *Server) handleRemoveLibraryTrack(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"removed": true, "scanning": scanning})
 }
 
-// emitPlaylistDeletion emits a playlist __deleted tombstone via DeletionService
-// (or SyncStore fallback). Best-effort: logs on error and never fails the caller.
+// emitPlaylistDeletion emits a playlist tombstone through DeletionService.
+// Best-effort: logs on error and never fails the caller.
 func (s *Server) emitPlaylistDeletion(ctx context.Context, playlistID string) {
-	if playlistID == "" {
+	if playlistID == "" || s.deps.Deletion == nil {
 		return
 	}
-	if s.deps.Deletion != nil {
-		if _, err := s.deps.Deletion.DeletePlaylist(ctx, "", playlistID, 0); err != nil {
-			log.Printf("sync tombstone playlist %q: %v", playlistID, err)
-		}
-		return
-	}
-	if s.deps.SyncStore == nil {
-		return
-	}
-	deviceID := s.resolveAuthorDeviceForSync(ctx)
-	if deviceID == "" {
-		return
-	}
-	if _, err := s.deps.SyncStore.AppendChange(ctx, deviceID, reverbsync.SyncChange{
-		EntityType: "playlist",
-		EntityID:   playlistID,
-		Field:      "__deleted",
-		UpdatedAt:  time.Now().UnixMilli(),
-	}); err != nil {
+	if _, err := s.deps.Deletion.DeletePlaylist(ctx, "", playlistID, 0); err != nil {
 		log.Printf("sync tombstone playlist %q: %v", playlistID, err)
 	}
 }

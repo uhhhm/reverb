@@ -19,7 +19,7 @@ func NewDeletionService(store *SyncStore, q ServerDeviceQuerier) *DeletionServic
 	return &DeletionService{store: store, q: q}
 }
 
-// DeletePlaylist appends a __deleted tombstone for playlistID.
+// DeletePlaylist appends a FieldDeleted tombstone for playlistID.
 func (s *DeletionService) DeletePlaylist(ctx context.Context, deviceID, playlistID string, updatedAt int64) (int64, error) {
 	if updatedAt == 0 {
 		updatedAt = time.Now().UnixMilli()
@@ -33,17 +33,17 @@ func (s *DeletionService) DeletePlaylist(ctx context.Context, deviceID, playlist
 		return 0, ErrNoServerDevice
 	}
 	return s.store.AppendChange(ctx, deviceID, SyncChange{
-		EntityType: "playlist",
+		EntityType: EntityPlaylist,
 		EntityID:   playlistID,
-		Field:      "__deleted",
+		Field:      FieldDeleted,
 		Value:      nil,
 		UpdatedAt:  updatedAt,
 	})
 }
 
-// IsDeleted reports whether entityType+entityID has a __deleted tombstone.
+// IsDeleted reports whether entityType+entityID has a FieldDeleted tombstone.
 func (s *DeletionService) IsDeleted(ctx context.Context, entityType, entityID string) (bool, error) {
-	ch, err := s.store.GetLatestForField(ctx, entityType, entityID, "__deleted")
+	ch, err := s.store.GetLatestForField(ctx, entityType, entityID, FieldDeleted)
 	if err != nil {
 		return false, err
 	}

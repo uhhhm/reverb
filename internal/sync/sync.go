@@ -123,6 +123,9 @@ const (
 // Field names carried by the change log. They are the wire format — renaming
 // one renames it for every paired device — and both the emitters and the
 // projection have to agree on them, so they live here rather than in either.
+// The queries in internal/store/queries that read the log spell some of them
+// out, since sqlc cannot take constants; TestQueriesReadTheLogInItsVocabulary
+// fails when the two disagree.
 const (
 	// FieldDeleted is the tombstone sentinel: the field name that means "this
 	// entity is gone", rather than a value of some field.
@@ -147,8 +150,8 @@ const (
 	// title: renaming the album itself travels on EntityAlbum instead.
 	FieldAlbum = "album"
 
-	// FieldName is the display name of an album or artist, on EntityAlbum and
-	// EntityArtist.
+	// FieldName is the display name of an album, artist or managed playlist,
+	// on EntityAlbum, EntityArtist and EntityPlaylist.
 	FieldName = "name"
 	// FieldCover is an uploaded cover, as "<sha256>.<ext>", on EntityAlbum and
 	// EntityTrack. Empty means the upload was removed and the library backend's
@@ -165,4 +168,20 @@ const (
 	// integer from 0 to 100, and the Online recommendations switch as a bool.
 	FieldAdventurousness       = "adventurousness"
 	FieldOnlineRecommendations = "onlineRecommendations"
+
+	// Managed-playlist fields, on EntityPlaylist, beside FieldName. Each is
+	// independently last-writer-wins, so renaming a playlist on one device and
+	// re-covering it on another keeps both edits.
+	FieldCoverURL        = "coverUrl"
+	FieldMode            = "mode"
+	FieldSource          = "source"
+	FieldExternalID      = "externalId"
+	FieldSyncEnabled     = "syncEnabled"
+	FieldSyncIntervalSec = "syncIntervalSec"
+	FieldAutoDownload    = "autoDownload"
+	FieldCreatedAt       = "createdAt"
+	// FieldPlaylistMemberPrefix starts the field that carries one track's
+	// membership of a playlist, on EntityPlaylist. The rest of the field name
+	// is a digest of the track's identity.
+	FieldPlaylistMemberPrefix = "track:"
 )

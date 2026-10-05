@@ -27,25 +27,26 @@ import (
 	reverbsync "github.com/uhhhm/reverb/internal/sync"
 )
 
-// Playlist-level fields. Each is independently last-writer-wins, so renaming a
-// playlist on one device and re-covering it on another keeps both edits.
+// Playlist-level fields, named in the change log's vocabulary. Each is
+// independently last-writer-wins, so renaming a playlist on one device and
+// re-covering it on another keeps both edits.
 const (
-	FieldName            = "name"
-	FieldCoverURL        = "coverUrl"
-	FieldMode            = "mode"
-	FieldSource          = "source"
-	FieldExternalID      = "externalId"
-	FieldSyncEnabled     = "syncEnabled"
-	FieldSyncIntervalSec = "syncIntervalSec"
-	FieldAutoDownload    = "autoDownload"
-	FieldCreatedAt       = "createdAt"
+	FieldName            = reverbsync.FieldName
+	FieldCoverURL        = reverbsync.FieldCoverURL
+	FieldMode            = reverbsync.FieldMode
+	FieldSource          = reverbsync.FieldSource
+	FieldExternalID      = reverbsync.FieldExternalID
+	FieldSyncEnabled     = reverbsync.FieldSyncEnabled
+	FieldSyncIntervalSec = reverbsync.FieldSyncIntervalSec
+	FieldAutoDownload    = reverbsync.FieldAutoDownload
+	FieldCreatedAt       = reverbsync.FieldCreatedAt
 )
 
 // memberPrefix marks the fields that carry one track's membership. The rest of
 // the field name is a digest of the track's identity, so the same track always
 // lands on the same field and two devices adding it independently converge
 // instead of duplicating it.
-const memberPrefix = "track:"
+const memberPrefix = reverbsync.FieldPlaylistMemberPrefix
 
 // member is the value of one membership field. A removal keeps the field and
 // clears Present rather than dropping it: the log has no way to express "this

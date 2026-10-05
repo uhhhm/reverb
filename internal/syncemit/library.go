@@ -2,6 +2,7 @@ package syncemit
 
 import (
 	"context"
+	"errors"
 	"log"
 
 	"github.com/uhhhm/reverb/internal/catalog"
@@ -82,4 +83,40 @@ func (s *Service) EnsureLibraryMembership(ctx context.Context, catalogID string)
 	if device := s.device(ctx); device != "" {
 		s.append(ctx, device, reverbsync.EntityTrack, catalogID, reverbsync.FieldLibraryPresent, true)
 	}
+}
+
+// ErrUnavailable means this device keeps no change log, so a removal has
+// nothing to tell peers. ErrNoIdentity means it keeps one but has no identity
+// to author changes under yet.
+var (
+	ErrUnavailable = errors.New("sync log unavailable")
+	ErrNoIdentity  = errors.New("sync identity unavailable")
+)
+
+// EmitLibraryRemoval publishes the deletion of a library file: a content
+// tombstone for its bytes, which removes them from every device, then the
+// catalog track's withdrawal from household browsing. It writes no track
+// tombstone, so the identity, its plays and its overrides stay, and a download
+// linking the track again returns it. The caller deletes the file only once
+// this returns nil.
+func (s *Service) EmitLibraryRemoval(ctx context.Context, fileHash, catalogID string) error {
+	if !s.ready() {
+		return ErrUnavailable
+	}
+	device := s.device(ctx)
+	if device == "" {
+		return ErrNoIdentity
+	}
+	if _, err := s.log.AppendChange(ctx, device, reverbsync.SyncChange{
+		EntityType: reverbsync.EntityFile, EntityID: fileHash, Field: reverbsync.FieldDeleted, UpdatedAt: s.now(),
+	}); err != nil {
+		return err
+	}
+	if catalogID == "" {
+		return nil
+	}
+	_, err := s.log.AppendChange(ctx, device, reverbsync.SyncChange{
+		EntityType: reverbsync.EntityTrack, EntityID: catalogID, Field: reverbsync.FieldLibraryPresent, Value: false, UpdatedAt: s.now(),
+	})
+	return err
 }

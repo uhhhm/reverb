@@ -132,7 +132,7 @@ func marshalValue(ch SyncChange) (string, error) {
 	if ch.ValueJSON != "" {
 		return ch.ValueJSON, nil
 	}
-	if ch.Field == "__deleted" {
+	if ch.Field == FieldDeleted {
 		return "true", nil
 	}
 	if ch.Value == nil {
@@ -146,7 +146,7 @@ func marshalValue(ch SyncChange) (string, error) {
 }
 
 func unmarshalValue(field, valueJSON string) any {
-	if field == "__deleted" {
+	if field == FieldDeleted {
 		return nil
 	}
 	if valueJSON == "" || valueJSON == "null" {
@@ -1263,8 +1263,8 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 			}
 		}
 
-		if inc.Field != "__deleted" {
-			tomb, terr := s.GetLatestForField(ctx, inc.EntityType, inc.EntityID, "__deleted")
+		if inc.Field != FieldDeleted {
+			tomb, terr := s.GetLatestForField(ctx, inc.EntityType, inc.EntityID, FieldDeleted)
 			if terr != nil {
 				return nil, 0, nil, nil, terr
 			}
@@ -1289,8 +1289,8 @@ func (s *SyncStore) reconcileInternal(ctx context.Context, deviceID string, sinc
 			continue
 		}
 
-		isExistingDeleted := existing.Field == "__deleted"
-		isIncomingDeleted := inc.Field == "__deleted"
+		isExistingDeleted := existing.Field == FieldDeleted
+		isIncomingDeleted := inc.Field == FieldDeleted
 
 		if isExistingDeleted && !isIncomingDeleted {
 			rejected = append(rejected, inc)

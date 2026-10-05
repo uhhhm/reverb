@@ -309,6 +309,9 @@ type TrackSyncEmitter interface {
 	// EmitEntityField publishes album- and artist-level changes, which are
 	// keyed on a stable name-derived key rather than a catalog id.
 	EmitEntityField(ctx context.Context, entityType, key, field string, value any)
+	// EmitLibraryRemoval publishes a deleted library file and withdraws its
+	// catalog track from household browsing.
+	EmitLibraryRemoval(ctx context.Context, fileHash, catalogID string) error
 }
 
 // TrackQualityStore persists per-track download-quality overrides.
@@ -390,6 +393,9 @@ func NewServer(deps Deps) *Server {
 			log = deps.SyncStore
 		}
 		s.deps.SyncEmit = syncemit.New(log, nil, s.resolveAuthorDeviceForSync)
+	}
+	if s.deps.Deletion == nil && deps.SyncStore != nil {
+		s.deps.Deletion = reverbsync.NewDeletionService(deps.SyncStore, nil)
 	}
 	s.edits = metadata.New(deps.Overrides, deps.Crop, s.deps.SyncEmit)
 	// Ensure the playlist-covers directory exists when a data dir is configured.

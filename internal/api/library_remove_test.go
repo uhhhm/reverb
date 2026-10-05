@@ -14,6 +14,7 @@ import (
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/store"
 	syncpkg "github.com/uhhhm/reverb/internal/sync"
+	"github.com/uhhhm/reverb/internal/syncemit"
 )
 
 type localPathLibrary struct {
@@ -92,6 +93,7 @@ func TestRemoveLibraryTrackPublishesContentDeletion(t *testing.T) {
 	}
 	srv.deps.SyncStore = syncpkg.NewSyncStore(st.Q())
 	srv.deps.PairingStore = st.Q()
+	srv.deps.SyncEmit = syncemit.New(srv.deps.SyncStore, nil, srv.resolveAuthorDeviceForSync)
 	rec := doAuthed(t, srv, http.MethodDelete, "/api/v1/library/track/t1", &http.Cookie{Name: sessionCookie})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body.String())
