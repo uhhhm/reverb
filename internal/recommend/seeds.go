@@ -147,20 +147,24 @@ func seededOrder[T any](items []T, seed string, key func(T) string) {
 
 // startRefresh runs fn in the background unless a refresh under key is
 // running or was started within refreshRetry. The refresh outlives the
-// request that started it, and reads Not interested marks afresh rather than
-// reusing the request's.
+// request that started it but not the Service (see Close), and reads Not
+// interested marks afresh rather than reusing the request's.
 func (s *Service) startRefresh(ctx context.Context, key string, fn func(context.Context)) {
 	s.refreshMu.Lock()
 	last, tried := s.attempts[key]
-	if s.refreshing[key] || tried && s.now().Sub(last) < refreshRetry {
+	if s.closed || s.refreshing[key] || tried && s.now().Sub(last) < refreshRetry {
 		s.refreshMu.Unlock()
 		return
 	}
 	s.refreshing[key] = true
 	s.attempts[key] = s.now()
+	s.refreshes.Add(1)
 	s.refreshMu.Unlock()
 	s.background(func() {
-		ctx := context.WithValue(context.WithoutCancel(ctx), marksKey{}, nil)
+		defer s.refreshes.Done()
+		ctx, cancel := context.WithCancel(context.WithValue(context.WithoutCancel(ctx), marksKey{}, nil))
+		defer cancel()
+		defer context.AfterFunc(s.life, cancel)()
 		for {
 			// Each run gets its own time limit, so a rerun asked for late
 			// in a slow run still has all of it.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -314,5 +315,65 @@ func TestDisconnectingHidesPersonalTracksFromAMixKeptOffline(t *testing.T) {
 	src.connected = false
 	if got := titles(svc.Mix(ctx, recommend.MixDiscoverWeekly).Tracks); contains(got, "Zed") || len(got) == 0 {
 		t.Fatalf("after disconnecting %v, want the rest without Zed", got)
+	}
+}
+
+// blockingSimilarity holds every call until its context ends, as a slow
+// network source does, and counts the calls still in flight.
+type blockingSimilarity struct {
+	entered  chan struct{}
+	inFlight atomic.Int32
+}
+
+func (*blockingSimilarity) Name() string { return "lastfm" }
+func (b *blockingSimilarity) SimilarTracks(ctx context.Context, _ recommend.TrackSeed, _ int) ([]recommend.TrackCandidate, error) {
+	b.inFlight.Add(1)
+	defer b.inFlight.Add(-1)
+	select {
+	case b.entered <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// A refresh outlives the request that started it but not the Service: Close
+// cancels it and returns only once it has stopped, so the store it reads can
+// be closed after. A read after Close starts nothing.
+func TestCloseStopsBackgroundRefreshes(t *testing.T) {
+	l, taste, _, deezer := discoverFixture()
+	sim := &blockingSimilarity{entered: make(chan struct{}, 1)}
+	svc := homeService(&clock{t: wednesday}, l, sim, libraryMatcher{}, []recommend.Option{
+		recommend.WithTaste(taste),
+		recommend.WithTimeout(time.Hour),
+		recommend.WithBackground(func(run func()) { go run() }),
+	}, deezer)
+
+	svc.Mix(context.Background(), recommend.MixDiscoverWeekly)
+	select {
+	case <-sim.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stale Mix started no refresh")
+	}
+	closed := make(chan struct{})
+	go func() { svc.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not stop the running refresh")
+	}
+	if n := sim.inFlight.Load(); n != 0 {
+		t.Fatalf("Close returned with %d source call(s) still running", n)
+	}
+	select {
+	case <-sim.entered:
+	default:
+	}
+
+	svc.Mix(context.Background(), recommend.MixDiscoverWeekly)
+	select {
+	case <-sim.entered:
+		t.Fatal("a read after Close started a refresh")
+	case <-time.After(200 * time.Millisecond):
 	}
 }

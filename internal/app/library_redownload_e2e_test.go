@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -125,13 +127,7 @@ func withDownloadingDesktop(d *syncDevice) {
 	d.builtIn = true
 	d.backend = folderSubsonic
 	dir := d.t.TempDir()
-	write := func(name, body string) string {
-		p := filepath.Join(dir, name)
-		if err := os.WriteFile(p, []byte("#!/usr/bin/env python3\n"+body), 0o755); err != nil {
-			d.t.Fatal(err)
-		}
-		return p
-	}
+	write := func(name, body string) string { return pythonTool(d.t, dir, name, body) }
 	// Each download is a fresh encode, so the same track downloaded twice is
 	// not byte-identical: yt-dlp embeds a new thumbnail and metadata.
 	ytdlp := strings.Replace(stubDownloadingYtDlp, `f.write(tag + b"\xff\xfb\x90\x00" * 1024)`,
@@ -144,6 +140,60 @@ func withDownloadingDesktop(d *syncDevice) {
 		"REVERB_SPOTDL_PATH": write("spotdl", "import sys\nsys.exit(1)\n"),
 	}
 }
+
+// pythonTool writes an executable named name in dir that runs body with the
+// host's python3. Windows runs no shebang script, so there the executable is a
+// compiled launcher that runs name.py beside it.
+func pythonTool(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("#!/usr/bin/env python3\n"+body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not installed")
+	}
+	if err := os.WriteFile(filepath.Join(dir, name+".py"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(dir, name+"-launcher.go")
+	if err := os.WriteFile(src, []byte(pythonLauncher), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(dir, name+".exe")
+	if out, err := exec.Command("go", "build", "-o", exe, src).CombinedOutput(); err != nil {
+		t.Fatalf("build %s launcher: %v\n%s", name, err, out)
+	}
+	return exe
+}
+
+const pythonLauncher = `package main
+
+import (
+	"errors"
+	"os"
+	"os/exec"
+	"strings"
+)
+
+func main() {
+	self, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+	cmd := exec.Command("python3", append([]string{strings.TrimSuffix(self, ".exe") + ".py"}, os.Args[1:]...)...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	var exit *exec.ExitError
+	if err := cmd.Run(); errors.As(err, &exit) {
+		os.Exit(exit.ExitCode())
+	} else if err != nil {
+		panic(err)
+	}
+}
+`
 
 // browsable is the device's household browsing: title by catalog id.
 func (d *syncDevice) browsable() map[string]string {

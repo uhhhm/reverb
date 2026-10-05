@@ -21,7 +21,7 @@ func TestDeviceDownloadCompletionSurvivesRecordingAndTerminalWriteFailures(t *te
 	if testing.Short() {
 		t.Skip("boots a phone runtime")
 	}
-	stub := strings.Replace(stubDownloadingYtDlp, "with open(path, \"wb\") as f:", "with open(path + '.calls', 'a') as counter:\n    counter.write('download\\n')\nwith open(path, \"wb\") as f:", 1)
+	stub := strings.Replace(stubDownloadingYtDlp, "with open(path, \"wb\") as f:", "with open(path + '.calls', 'a', newline='') as counter:\n    counter.write('download\\n')\nwith open(path, \"wb\") as f:", 1)
 	py := pyruntest.Host(t, map[string]string{"yt_dlp": stub, "spotdl": "import sys\nsys.exit(1)\n"})
 	d := newPhoneDevice(t, "completion-phone", func(d *syncDevice) { d.python = py })
 	sql := func(q string) {

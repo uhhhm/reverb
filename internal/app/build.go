@@ -1051,6 +1051,11 @@ func (r *Runtime) Close() {
 		_ = r.P2P.Close()
 	}
 	r.waitForBackground(backgroundStopGrace)
+	if r.Recommend != nil {
+		// Its refreshes outlive the requests that start them; Close cancels
+		// them so none is still reading the store below.
+		waitBounded("recommendation refreshes", backgroundStopGrace, r.Recommend.Close)
+	}
 	if r.Reloader != nil {
 		r.Reloader.Close()
 	}
@@ -1065,15 +1070,21 @@ func (r *Runtime) Close() {
 const backgroundStopGrace = 10 * time.Second
 
 func (r *Runtime) waitForBackground(grace time.Duration) {
+	waitBounded("background loops", grace, r.bg.Wait)
+}
+
+// waitBounded runs wait and returns when it does or after grace, whichever is
+// first.
+func waitBounded(what string, grace time.Duration, wait func()) {
 	done := make(chan struct{})
 	go func() {
-		r.bg.Wait()
+		wait()
 		close(done)
 	}()
 	select {
 	case <-done:
 	case <-time.After(grace):
-		logf("WARNING: background loops did not stop within %s; closing anyway", grace)
+		logf("WARNING: %s did not stop within %s; closing anyway", what, grace)
 	}
 }
 

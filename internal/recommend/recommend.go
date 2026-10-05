@@ -147,6 +147,11 @@ type Service struct {
 	refreshing   map[string]bool
 	rerun        map[string]bool
 	attempts     map[string]time.Time
+	// life ends at Close; refreshes run under it and enrol in refreshes.
+	life      context.Context
+	endLife   context.CancelFunc
+	refreshes sync.WaitGroup
+	closed    bool
 }
 
 // WithBackground replaces how a background refresh is started (test seam).
@@ -159,6 +164,7 @@ func New(sources func() []search.SearchSource, opts ...Option) *Service {
 	s := &Service{sources: sources, timeout: defaultTimeout, now: time.Now, sleep: sleepContext,
 		background: func(run func()) { go run() },
 		refreshing: map[string]bool{}, rerun: map[string]bool{}, attempts: map[string]time.Time{}}
+	s.life, s.endLife = context.WithCancel(context.Background())
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -373,4 +379,14 @@ func (c *cache) stale(key string) (any, time.Time, bool) {
 	defer c.mu.Unlock()
 	e, ok := c.entries[key]
 	return e.value, e.updated, ok
+}
+
+// Close cancels the background refreshes and waits for them to return, so the
+// store they read can be closed after. A read after Close starts none.
+func (s *Service) Close() {
+	s.refreshMu.Lock()
+	s.closed = true
+	s.refreshMu.Unlock()
+	s.endLife()
+	s.refreshes.Wait()
 }
