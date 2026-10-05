@@ -54,11 +54,12 @@ DELETE FROM catalog_entity WHERE id = ?;
 SELECT * FROM backend_binding WHERE catalog_id = ? AND library_identity = ?;
 
 -- name: UpsertBackendBinding :exec
-INSERT INTO backend_binding (catalog_id, library_identity, backend_id, cover_art_id, known_absent, binding_epoch, resolved_at)
-VALUES (?,?,?,?,?,?,?)
+INSERT INTO backend_binding (catalog_id, library_identity, backend_id, cover_art_id, known_absent, binding_epoch, resolved_at, library_version)
+VALUES (?,?,?,?,?,?,?,?)
 ON CONFLICT(catalog_id, library_identity) DO UPDATE SET
   backend_id=excluded.backend_id, cover_art_id=excluded.cover_art_id,
-  known_absent=excluded.known_absent, binding_epoch=excluded.binding_epoch, resolved_at=excluded.resolved_at;
+  known_absent=excluded.known_absent, binding_epoch=excluded.binding_epoch, resolved_at=excluded.resolved_at,
+  library_version=excluded.library_version;
 
 -- name: StaleBackendBinding :exec
 -- Marks one binding for re-resolution and keeps what it points at, so the

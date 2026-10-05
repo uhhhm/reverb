@@ -45,7 +45,7 @@ func (q *Queries) GetAliasCatalogID(ctx context.Context, arg GetAliasCatalogIDPa
 }
 
 const getBackendBinding = `-- name: GetBackendBinding :one
-SELECT catalog_id, library_identity, backend_id, cover_art_id, known_absent, binding_epoch, resolved_at FROM backend_binding WHERE catalog_id = ? AND library_identity = ?
+SELECT catalog_id, library_identity, backend_id, cover_art_id, known_absent, binding_epoch, resolved_at, library_version FROM backend_binding WHERE catalog_id = ? AND library_identity = ?
 `
 
 type GetBackendBindingParams struct {
@@ -64,6 +64,7 @@ func (q *Queries) GetBackendBinding(ctx context.Context, arg GetBackendBindingPa
 		&i.KnownAbsent,
 		&i.BindingEpoch,
 		&i.ResolvedAt,
+		&i.LibraryVersion,
 	)
 	return i, err
 }
@@ -415,11 +416,12 @@ func (q *Queries) StaleBackendBinding(ctx context.Context, arg StaleBackendBindi
 }
 
 const upsertBackendBinding = `-- name: UpsertBackendBinding :exec
-INSERT INTO backend_binding (catalog_id, library_identity, backend_id, cover_art_id, known_absent, binding_epoch, resolved_at)
-VALUES (?,?,?,?,?,?,?)
+INSERT INTO backend_binding (catalog_id, library_identity, backend_id, cover_art_id, known_absent, binding_epoch, resolved_at, library_version)
+VALUES (?,?,?,?,?,?,?,?)
 ON CONFLICT(catalog_id, library_identity) DO UPDATE SET
   backend_id=excluded.backend_id, cover_art_id=excluded.cover_art_id,
-  known_absent=excluded.known_absent, binding_epoch=excluded.binding_epoch, resolved_at=excluded.resolved_at
+  known_absent=excluded.known_absent, binding_epoch=excluded.binding_epoch, resolved_at=excluded.resolved_at,
+  library_version=excluded.library_version
 `
 
 type UpsertBackendBindingParams struct {
@@ -430,6 +432,7 @@ type UpsertBackendBindingParams struct {
 	KnownAbsent     int64  `json:"known_absent"`
 	BindingEpoch    int64  `json:"binding_epoch"`
 	ResolvedAt      int64  `json:"resolved_at"`
+	LibraryVersion  int64  `json:"library_version"`
 }
 
 func (q *Queries) UpsertBackendBinding(ctx context.Context, arg UpsertBackendBindingParams) error {
@@ -441,6 +444,7 @@ func (q *Queries) UpsertBackendBinding(ctx context.Context, arg UpsertBackendBin
 		arg.KnownAbsent,
 		arg.BindingEpoch,
 		arg.ResolvedAt,
+		arg.LibraryVersion,
 	)
 	return err
 }

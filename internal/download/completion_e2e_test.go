@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pressly/goose/v3"
+
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/events"
 	"github.com/uhhhm/reverb/internal/store"
@@ -181,10 +183,8 @@ func TestLegacyCompletionUpgradeE2E(t *testing.T) {
 	if err := st.Migrate(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().Exec(`ALTER TABLE download_jobs DROP COLUMN completion_pending`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.DB().Exec(`DELETE FROM goose_db_version WHERE version_id = 53`); err != nil {
+	// Migrate configured goose for the embedded migrations; roll back to 52.
+	if err := goose.DownTo(st.DB(), "migrations", 52); err != nil {
 		t.Fatal(err)
 	}
 	req := core.DownloadRequest{Source: "spotify", ExternalID: "legacy", Title: "Fixture", InitiatedBy: "local", RecommendationOrigin: core.RecommendationRadio, Granularity: core.GranularityAlbum, AddToPlaylistID: "playlist-fixture"}

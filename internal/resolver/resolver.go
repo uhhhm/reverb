@@ -86,10 +86,28 @@ func (s *Service) epoch(ctx context.Context, identity string) int64 {
 	return n
 }
 
+// libraryVersion is the current library_version setting, which a scan bumps
+// when the library's contents change. Defaults to 1 when absent or
+// unparseable, as store.LibraryVersion does.
+func (s *Service) libraryVersion(ctx context.Context) int64 {
+	v, err := s.q.GetSetting(ctx, "library_version")
+	if err != nil {
+		return 1
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return 1
+	}
+	return n
+}
+
 // Resolve returns the current backend addressing for catalogID.
 //
 //   - Cache HIT  (binding_epoch >= curEpoch AND backend_id != ""):  return stored addressing.
-//   - Negative cache (binding_epoch >= curEpoch AND known_absent=1): return Found:false without re-matching.
+//   - Negative cache (binding_epoch >= curEpoch AND known_absent=1, resolved
+//     against the current library_version): return Found:false without
+//     re-matching. A file that arrives later bumps library_version, so the
+//     track is matched again.
 //   - Miss/stale: re-match under singleflight, write result back.
 func (s *Service) Resolve(ctx context.Context, catalogID string) (Addressing, error) {
 	identity, err := s.identity(ctx)
@@ -97,6 +115,7 @@ func (s *Service) Resolve(ctx context.Context, catalogID string) (Addressing, er
 		return Addressing{}, err
 	}
 	curEpoch := s.epoch(ctx, identity)
+	libVersion := s.libraryVersion(ctx)
 
 	b, err := s.q.GetBackendBinding(ctx, db.GetBackendBindingParams{
 		CatalogID:       catalogID,
@@ -104,7 +123,7 @@ func (s *Service) Resolve(ctx context.Context, catalogID string) (Addressing, er
 	})
 	if err == nil && b.BindingEpoch >= curEpoch {
 		// Negative cache short-circuit.
-		if b.KnownAbsent == 1 {
+		if b.KnownAbsent == 1 && b.LibraryVersion >= libVersion {
 			return Addressing{Found: false}, nil
 		}
 		// Positive cache hit.
@@ -124,7 +143,7 @@ func (s *Service) Resolve(ctx context.Context, catalogID string) (Addressing, er
 	// severing cancellation so the shared work + write-back always complete.
 	detached := context.WithoutCancel(ctx)
 	v, sfErr, _ := s.sf.Do(catalogID, func() (any, error) {
-		return s.rematchAndStore(detached, catalogID, identity, curEpoch)
+		return s.rematchAndStore(detached, catalogID, identity, curEpoch, libVersion)
 	})
 	if sfErr != nil {
 		return Addressing{}, sfErr
@@ -134,8 +153,9 @@ func (s *Service) Resolve(ctx context.Context, catalogID string) (Addressing, er
 
 // rematchAndStore calls the current matcher and writes the result back to
 // backend_binding. On a miss it writes known_absent=1 stamped at the current
-// epoch so subsequent Resolve calls short-circuit.
-func (s *Service) rematchAndStore(ctx context.Context, catalogID, identity string, epoch int64) (Addressing, error) {
+// epoch and library_version so subsequent Resolve calls short-circuit until
+// either changes.
+func (s *Service) rematchAndStore(ctx context.Context, catalogID, identity string, epoch, libVersion int64) (Addressing, error) {
 	e, err := s.q.GetCatalogEntity(ctx, catalogID)
 	if err != nil {
 		// Unknown canonical id (entity never minted, or deleted): there is no
@@ -175,6 +195,7 @@ func (s *Service) rematchAndStore(ctx context.Context, catalogID, identity strin
 		LibraryIdentity: identity,
 		BindingEpoch:    epoch,
 		ResolvedAt:      s.now().Unix(),
+		LibraryVersion:  libVersion,
 	}
 
 	if res.Status == core.MatchInLibrary && res.LibraryTrackID != "" {

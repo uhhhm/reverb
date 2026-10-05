@@ -121,6 +121,31 @@ func TestResolve_NegativeCacheBoundsRematch(t *testing.T) {
 	}
 }
 
+// A track known absent is matched again once the library has changed: a file
+// that file sync delivers after the track was first browsed must bind.
+func TestResolve_NegativeCacheEndsWhenTheLibraryChanges(t *testing.T) {
+	st := openStore(t)
+	fm := &fakeMatcher{result: core.MatchResult{Status: core.MatchNotInLibrary}}
+	s := NewService(st.Q(), func() Rematcher { return fm }, time.Now)
+	ctx := context.Background()
+	cid := seedEntity(t, st.Q(), "trk_late", "Late", "Artist", "Album", 200000)
+
+	if a, _ := s.Resolve(ctx, cid); a.Found {
+		t.Fatal("resolved before the file arrived")
+	}
+	fm.result = core.MatchResult{Status: core.MatchInLibrary, LibraryTrackID: "nav-late"}
+	v, err := st.LibraryVersion(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetLibraryVersion(ctx, v+1); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := s.Resolve(ctx, cid); !a.Found || a.BackendID != "nav-late" {
+		t.Fatalf("after the library changed: %+v, want nav-late", a)
+	}
+}
+
 func TestResolve_UnknownCatalogIDIsNotFound(t *testing.T) {
 	s, _, fm := newTestResolver(t)
 	ctx := context.Background()

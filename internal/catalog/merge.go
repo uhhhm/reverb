@@ -181,6 +181,7 @@ func (s *Service) repointBindingForLibID(ctx context.Context, loser, winner, lib
 			KnownAbsent:     loserB.KnownAbsent,
 			BindingEpoch:    loserB.BindingEpoch,
 			ResolvedAt:      loserB.ResolvedAt,
+			LibraryVersion:  loserB.LibraryVersion,
 		})
 	}
 	if winnerErr != nil {
@@ -199,6 +200,7 @@ func (s *Service) repointBindingForLibID(ctx context.Context, loser, winner, lib
 			KnownAbsent:     loserB.KnownAbsent,
 			BindingEpoch:    loserB.BindingEpoch,
 			ResolvedAt:      loserB.ResolvedAt,
+			LibraryVersion:  loserB.LibraryVersion,
 		}); err != nil {
 			return err
 		}

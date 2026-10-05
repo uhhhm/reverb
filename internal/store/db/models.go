@@ -52,6 +52,7 @@ type BackendBinding struct {
 	KnownAbsent     int64  `json:"known_absent"`
 	BindingEpoch    int64  `json:"binding_epoch"`
 	ResolvedAt      int64  `json:"resolved_at"`
+	LibraryVersion  int64  `json:"library_version"`
 }
 
 type CatalogAlias struct {
