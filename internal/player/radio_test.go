@@ -116,6 +116,22 @@ func TestRadioSteersByTheSameJudgementThatRecordsTheListen(t *testing.T) {
 			l.listen(0, 60_000)
 			l.listen(0, 60_000)
 		}, []verdict{{true, true}, {true, true}}, steeredUp},
+		{"restarted before qualifying, then heard enough to qualify", 60_000, "radio", func(l *listening) {
+			l.listen(0, 20_000)
+			l.do(func(q *player.Queue) error { q.Jump(0); return nil })
+			if len(l.listens) != 0 {
+				l.t.Errorf("restart recorded an unfinished attempt: %+v", l.listens)
+			}
+			l.listen(0, 15_000)
+		}, []verdict{{true, false}}, steeredNone},
+		{"restarted before qualifying, then left early", 60_000, "radio", func(l *listening) {
+			l.listen(0, 10_000)
+			l.do(func(q *player.Queue) error { q.Previous(); return nil })
+			if len(l.listens) != 0 {
+				l.t.Errorf("restart recorded an unfinished attempt: %+v", l.listens)
+			}
+			l.listen(0, 10_000)
+		}, []verdict{{false, false}}, steeredDown},
 		{"an ordinary track restarted after it qualified, then left early", 60_000, "", func(l *listening) {
 			l.listen(0, 30_000)
 			l.listen(0, 10_000)

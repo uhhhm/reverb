@@ -113,6 +113,14 @@ func (l *listening) settle(q *Queue) {
 	if playing && l.entry == q.Current() && l.playID == q.playID {
 		return
 	}
+	if playing && l.entry == q.Current() && !l.qualified() && !l.completed {
+		// Restarting an unfinished attempt does not leave it. Keep its heard
+		// time, as a seek back does, rather than recording a skip for Stats
+		// while telling Radio that nothing was skipped.
+		l.playID = q.playID
+		l.last = 0
+		return
+	}
 	if l.entry != "" {
 		// The same entry starting over is a replay, not a move away from it.
 		l.leave(playing && l.entry == q.Current())
