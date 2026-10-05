@@ -123,6 +123,21 @@ func (s *Service) Mix(ctx context.Context, kind MixKind) Mix {
 	}, excludeFromMix)
 }
 
+// Mixes returns every Mix, in MixKinds order, filtered by one read of the
+// Not interested marks so the Mixes shown together agree.
+func (s *Service) Mixes(ctx context.Context) []Mix {
+	out := make([]Mix, 0, len(MixKinds))
+	ctx, ok := s.withMarks(ctx)
+	for _, kind := range MixKinds {
+		if !ok {
+			out = append(out, Mix{Kind: kind, Tracks: []core.ExternalResult{}})
+			continue
+		}
+		out = append(out, s.Mix(ctx, kind))
+	}
+	return out
+}
+
 // withoutDisconnectedPersonal drops tracks a personal source recommended once
 // no personal account is connected, as when a Mix kept offline outlives the
 // account's link.

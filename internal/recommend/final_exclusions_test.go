@@ -149,3 +149,26 @@ func TestUndoRestoresFromRetainedCandidatesWithSourcesDown(t *testing.T) {
 		t.Fatalf("after undo %+v, want Cassius back from the stale cache", got.Tracks)
 	}
 }
+
+// The Mixes listed together are filtered by one read of the marks.
+func TestListedMixesReadMarksOnce(t *testing.T) {
+	l, taste, sim, deezer := discoverFixture()
+	reads := 0
+	count := recommend.WithExclusions(func(context.Context) (recommend.Exclusions, error) {
+		reads++
+		return &marks{artists: map[string]bool{}}, nil
+	})
+	// A regeneration a read starts is separate work with its own read of the
+	// marks; it is held back so only the request's reads are counted.
+	var deferred []func()
+	later := recommend.WithBackground(func(run func()) { deferred = append(deferred, run) })
+	svc := homeService(&clock{t: wednesday}, l, sim, libraryMatcher{"owned song": "lib-1"}, []recommend.Option{recommend.WithTaste(taste), count, later}, deezer)
+	svc.RefreshMix(context.Background(), recommend.MixDiscoverWeekly)
+	reads = 0
+	if got := svc.Mixes(context.Background()); len(got) != len(recommend.MixKinds) {
+		t.Fatalf("got %d mixes", len(got))
+	}
+	if reads != 1 {
+		t.Fatalf("listing Mixes read the marks %d times, want once", reads)
+	}
+}

@@ -24,6 +24,14 @@ func (f *fakeRecommendations) Mix(_ context.Context, kind recommend.MixKind) rec
 	return m
 }
 
+func (f *fakeRecommendations) Mixes(ctx context.Context) []recommend.Mix {
+	var out []recommend.Mix
+	for _, kind := range recommend.MixKinds {
+		out = append(out, f.Mix(ctx, kind))
+	}
+	return out
+}
+
 func (f *fakeRecommendations) PlaylistSuggestions(_ context.Context, playlist []recommend.Seed, page int) recommend.TrackResult {
 	f.gotSeeds, f.gotPage = playlist, page
 	f.suggestionCalls++

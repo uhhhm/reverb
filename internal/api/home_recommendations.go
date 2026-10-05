@@ -30,9 +30,7 @@ func (s *Server) handleShelves(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleMixes(w http.ResponseWriter, r *http.Request) {
 	out := mixList{Mixes: []recommend.Mix{}}
 	if s.deps.Recommend != nil {
-		for _, kind := range recommend.MixKinds {
-			out.Mixes = append(out.Mixes, s.deps.Recommend.Mix(r.Context(), kind))
-		}
+		out.Mixes = s.deps.Recommend.Mixes(r.Context())
 	}
 	writeJSON(w, http.StatusOK, out)
 }

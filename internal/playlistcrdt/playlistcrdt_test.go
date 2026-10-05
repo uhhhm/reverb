@@ -27,7 +27,7 @@ func newDevice(t *testing.T, id string, peers ...string) *device {
 	d := &device{}
 	d.Device = pairtest.NewDevice(t, id, func(sd *pairtest.Device, m *materialize.Service) {
 		d.store = wiring.NewSyncStore(sd.Store.Q())
-		d.crdt = playlistcrdt.New(sd.Log, d.store, sd.Resolve)
+		d.crdt = playlistcrdt.New(sd.Log, d.store, sd.AuthorID)
 		m.WithPlaylists(d.crdt)
 	}, peers...)
 	return d

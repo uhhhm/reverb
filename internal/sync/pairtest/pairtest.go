@@ -81,11 +81,11 @@ func NewDevice(t testing.TB, id string, project Projector, peers ...string) *Dev
 
 // Emitter publishes local edits into this device's log, authored by it.
 func (d *Device) Emitter() *syncemit.Service {
-	return syncemit.New(d.Log, nil, d.Resolve)
+	return syncemit.New(d.Log, nil, d.AuthorID)
 }
 
-// Resolve names this device as the author of its edits.
-func (d *Device) Resolve(context.Context) string { return d.ID }
+// AuthorID names this device as the author of its edits.
+func (d *Device) AuthorID(context.Context) string { return d.ID }
 
 // Changes returns every change in the device's log.
 func (d *Device) Changes(t testing.TB) []reverbsync.SyncChange {

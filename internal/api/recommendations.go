@@ -22,6 +22,7 @@ type Recommendations interface {
 	// the background, so Home never waits on a source.
 	Shelves(ctx context.Context) recommend.Shelves
 	Mix(ctx context.Context, kind recommend.MixKind) recommend.Mix
+	Mixes(ctx context.Context) []recommend.Mix
 	PlaylistSuggestions(ctx context.Context, playlist []recommend.Seed, page int) recommend.TrackResult
 }
 
