@@ -231,7 +231,10 @@ func (d *syncDevice) boot() {
 		P2PNoDiscovery: true,
 		FreeSpace:      d.freeSpace,
 		Python:         d.python,
-		Getenv:         func(k string) string { return env[k] },
+		// Nothing here depends on downloads sharing a rescan, and the
+		// default window would hold every download five seconds.
+		ScanDebounce: 50 * time.Millisecond,
+		Getenv:       func(k string) string { return env[k] },
 	})
 	if err != nil {
 		d.t.Fatalf("%s: Build: %v", d.name, err)

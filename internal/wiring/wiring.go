@@ -579,8 +579,11 @@ type Builder struct {
 	// localLibraryDir, when set, makes the library a plain folder read by the
 	// localfiles adapter; see SetLocalLibrary.
 	localLibraryDir string
-	supervisorOnce  sync.Once
-	supervisor      *embedded.Supervisor
+	// scanDebounce is the download manager's rescan window; zero keeps the
+	// manager's default. See SetScanDebounce.
+	scanDebounce   time.Duration
+	supervisorOnce sync.Once
+	supervisor     *embedded.Supervisor
 }
 
 // SetLocalLibrary builds the library from a plain folder of files rather than
@@ -593,6 +596,13 @@ type Builder struct {
 // localfiles adapter.
 func (b *Builder) SetLocalLibrary(dir string) {
 	b.localLibraryDir = dir
+}
+
+// SetScanDebounce sets how long every download manager this builder creates
+// waits after a completed download before rescanning the library, so
+// completions within the window share one scan. Zero keeps the default.
+func (b *Builder) SetScanDebounce(d time.Duration) {
+	b.scanDebounce = d
 }
 
 // SetResolverProvider injects the resolver provider into the Builder. Call this
@@ -854,7 +864,7 @@ func (b *Builder) buildServices(
 			}
 		}
 		bundle.Manager = download.NewManager(
-			download.Config{Workers: downloadWorkers(b.getenv), DebounceWindow: 5 * time.Second},
+			download.Config{Workers: downloadWorkers(b.getenv), DebounceWindow: b.scanDebounce},
 			downloaders,
 			download.NewSQLStore(b.queries),
 			b.bus,

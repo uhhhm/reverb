@@ -152,8 +152,15 @@ func TestPhoneDownloadStaysUntilTheDesktopHoldsIt(t *testing.T) {
 		t.Fatalf("streamed %d bytes, want the downloaded file", len(got))
 	}
 
-	// With the desktop gone it stays, pending upload, round after round.
-	if p := phone.pendingUploads(); len(p) != 1 || p[0].RelPath != rel || p[0].Title != "Found" {
+	// With the desktop gone it stays, pending upload, round after round. Its
+	// tags show once file sync has read the file.
+	var p []offlineset.PendingUpload
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if p = phone.pendingUploads(); len(p) == 1 && p[0].Title == "Found" {
+			break
+		}
+	}
+	if len(p) != 1 || p[0].RelPath != rel || p[0].Title != "Found" || p[0].Artist != "Band" {
 		t.Fatalf("pending uploads = %+v", p)
 	}
 	for i := 0; i < 3; i++ {

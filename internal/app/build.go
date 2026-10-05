@@ -123,6 +123,9 @@ type Options struct {
 	// phone stops fetching its offline set before the disk fills. Nil asks the
 	// operating system. The desktop ignores it.
 	FreeSpace func(dir string) (int64, error)
+	// ScanDebounce is how long a completed download waits for others before
+	// the library rescans; zero is the download manager's default.
+	ScanDebounce time.Duration
 }
 
 // Runtime is the built application: everything an entry point needs to serve
@@ -302,6 +305,7 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 		st.Q(), st, bus, download.RealClock{}, opts.Getenv,
 		dataDir,
 	)
+	builder.SetScanDebounce(opts.ScanDebounce)
 	if phone {
 		builder.SetLocalLibrary(musicDir)
 	}
