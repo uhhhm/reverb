@@ -1485,11 +1485,8 @@ func (m *Manager) process(id string) {
 	var outPath string
 	var lastErr error
 	succeeded := false
-	for {
-		if jctx.Err() != nil {
-			// Canceled before the downloader ran: nothing to abort.
-			break
-		}
+	// A cancel before the downloader runs ends the loop with nothing to abort.
+	for jctx.Err() == nil {
 		log.Printf("download attempting: %q (job %s via %s)", job.Title, shortID(id), dl.Name())
 
 		// Heartbeat: while the download runs, log every 30s so a long-running or stuck

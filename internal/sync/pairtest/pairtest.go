@@ -198,9 +198,9 @@ func projection(t testing.TB, d *Device) [sha256.Size]byte {
 	}
 	h := sha256.New()
 	for _, table := range tables {
-		fmt.Fprintf(h, "%s\n", table)
+		_, _ = fmt.Fprintf(h, "%s\n", table)
 		for _, row := range tableRows(t, conn, table) {
-			fmt.Fprintf(h, "%s\n", row)
+			_, _ = fmt.Fprintf(h, "%s\n", row)
 		}
 	}
 	var sum [sha256.Size]byte
@@ -214,7 +214,7 @@ func tableRows(t testing.TB, conn *sql.DB, table string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	cols, err := rows.Columns()
 	if err != nil {
 		t.Fatal(err)
