@@ -1035,6 +1035,54 @@ paths:
           description: invalid session or request
         "503":
           description: player unavailable
+  /player/{session}/shuffle:
+    post:
+      operationId: setQueueShuffle
+      summary: Turn shuffle on or off
+      description: |
+        Turning it on draws a new order led by the current entry.
+      parameters:
+        - $ref: "#/components/parameters/PlayerSession"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlayerShuffleRequest"
+      responses:
+        "200":
+          description: queue after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueState"
+        "400":
+          description: invalid session or request
+        "503":
+          description: player unavailable
+  /player/{session}/repeat:
+    post:
+      operationId: setQueueRepeat
+      summary: Set the repeat mode
+      parameters:
+        - $ref: "#/components/parameters/PlayerSession"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlayerRepeatRequest"
+      responses:
+        "200":
+          description: queue after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QueueState"
+        "400":
+          description: invalid session or request
+        "503":
+          description: player unavailable
   /plays:
     post:
       operationId: recordPlay
@@ -2024,6 +2072,24 @@ components:
           maxItems: 5
           items:
             $ref: "#/components/schemas/RadioSeed"
+    PlayerRepeatRequest:
+      type: object
+      required:
+        - mode
+      properties:
+        mode:
+          type: string
+          enum:
+            - off
+            - all
+            - one
+    PlayerShuffleRequest:
+      type: object
+      required:
+        - on
+      properties:
+        on:
+          type: boolean
     PlayerTrack:
       type: object
       additionalProperties: true

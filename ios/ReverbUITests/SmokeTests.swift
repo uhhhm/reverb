@@ -34,13 +34,16 @@ final class SmokeTests: XCTestCase {
         XCTAssertTrue(waitForDisappearance(app.navigationBars["Pair a device"], timeout: 60))
 
         app.tabBars.buttons["Library"].tap()
-        app.segmentedControls.buttons["Tracks"].tap()
+        app.buttons["library.filter.Tracks"].tap()
         let remote = app.descendants(matching: .any)["catalog.track.\(pairing.track)"]
         XCTAssertTrue(remote.waitForExistence(timeout: 60), "The synced desktop track did not appear in Library")
         remote.tap()
         let title = app.staticTexts["nowPlaying.title"]
         XCTAssertTrue(title.waitForExistence(timeout: 20))
         XCTAssertEqual(title.label, pairing.track)
+        // The mini player opens Now Playing, which has the clock.
+        title.tap()
+        XCTAssertEqual(app.staticTexts["fullPlayer.title"].label, pairing.track)
         let elapsed = app.staticTexts["nowPlaying.elapsed"]
         wait(for: [expectation(for: NSPredicate(format: "label IN {'0:01', '0:02', '0:03', '0:04', '0:05'}"), evaluatedWith: elapsed)], timeout: 12)
     }
@@ -104,6 +107,7 @@ final class SmokeTests: XCTestCase {
         let track = app.descendants(matching: .any)["track.\(pairing.track)"]
         XCTAssertTrue(track.waitForExistence(timeout: 20))
         wait(for: [expectation(for: NSPredicate(format: "value == 'ready'"), evaluatedWith: track)], timeout: 120)
+        keepScreenshot(app, "Playlist")
         // The track now plays from the phone alone.
         try testPeer("stop")
         track.tap()
@@ -111,8 +115,14 @@ final class SmokeTests: XCTestCase {
         let title = app.staticTexts["nowPlaying.title"]
         XCTAssertTrue(title.waitForExistence(timeout: 20))
         XCTAssertEqual(title.label, pairing.track)
-        let playPause = app.buttons["nowPlaying.playPause"]
-        wait(for: [expectation(for: NSPredicate(format: "value == 'playing'"), evaluatedWith: playPause)], timeout: 20)
+        wait(for: [expectation(for: NSPredicate(format: "value == 'playing'"), evaluatedWith: app.buttons["nowPlaying.playPause"])], timeout: 20)
+        keepScreenshot(app, "Mini player")
+
+        // The rest happens in Now Playing, opened from the mini player.
+        title.tap()
+        let playPause = app.buttons["fullPlayer.playPause"]
+        XCTAssertTrue(playPause.waitForExistence(timeout: 5))
+        XCTAssertEqual(playPause.value as? String, "playing")
 
         // Sound must actually advance; a play request alone also succeeds
         // when a decoder is stuck waiting or has failed. Each query takes
@@ -120,6 +130,7 @@ final class SmokeTests: XCTestCase {
         let elapsed = app.staticTexts["nowPlaying.elapsed"]
         wait(for: [expectation(for: NSPredicate(format: "label IN {'0:01', '0:02', '0:03', '0:04', '0:05', '0:06', '0:07', '0:08'}"), evaluatedWith: elapsed)], timeout: 10)
         XCTAssertEqual(app.staticTexts["nowPlaying.duration"].label, "0:20")
+        keepScreenshot(app, "Now Playing")
 
         playPause.tap()
         wait(for: [expectation(for: NSPredicate(format: "value == 'paused'"), evaluatedWith: playPause)], timeout: 5)
@@ -134,10 +145,21 @@ final class SmokeTests: XCTestCase {
 
         playPause.tap()
         wait(for: [expectation(for: NSPredicate(format: "value == 'playing'"), evaluatedWith: playPause)], timeout: 5)
-        XCTAssertTrue(waitForDisappearance(title, timeout: 15), "the final track did not finish its queue")
+        // Now Playing closes when the queue finishes, and the mini player goes with it.
+        XCTAssertTrue(waitForDisappearance(app.staticTexts["fullPlayer.title"], timeout: 15), "the final track did not finish its queue")
+        XCTAssertFalse(title.exists)
     }
 
     // MARK: Helpers
+
+    /// Keeps a screenshot in the result bundle, passing or not, so each run
+    /// leaves a record of how the screens looked.
+    private func keepScreenshot(_ app: XCUIApplication, _ name: String) {
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
 
     /// Asks the test runtime for a fresh code and the address to dial it on.
     private func testPeerPairing() throws -> Pairing {

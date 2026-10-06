@@ -46,39 +46,53 @@ struct SearchView: View {
     var body: some View {
         List {
             if let local, !local.tracks.isEmpty {
-                Section("Your library") {
+                Section {
                     ForEach(Array(local.tracks.enumerated()), id: \.element.id) { index, track in
                         LibraryTrackRow(track: track)
                             .contentShape(Rectangle())
                             .onTapGesture { Task { await player.play(local.tracks, startAt: index) } }
+                            .darkRow()
                     }
-                }
+                } header: { SearchSectionHeader(title: "Your library") }
             }
             let remote = catalog.filter { $0.playback != .local }
             if !remote.isEmpty {
-                Section("Household library") {
-                    ForEach(remote, id: \.id) { track in CatalogTrackRow(track: track) }
-                }
+                Section {
+                    ForEach(remote, id: \.id) { track in CatalogTrackRow(track: track).darkRow() }
+                } header: { SearchSectionHeader(title: "Household library") }
             }
             ForEach(sources) { source in
-                Section(source.source.capitalized) {
+                Section {
                     if source.status != "ok" {
                         Label(source.error ?? "This source could not be searched.", systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.secondary)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.secondaryText)
+                            .darkRow()
                     }
                     ForEach(source.results) { result in
                         SearchResultRow(result: result)
                             .contentShape(Rectangle())
                             .onTapGesture { Task { await play(result, among: source.results) } }
+                            .darkRow()
                     }
-                }
+                } header: { SearchSectionHeader(title: source.source.capitalized) }
             }
         }
+        .darkList()
         .navigationTitle("Search")
         .searchable(text: $query, prompt: "Songs, albums, or artists")
         .overlay {
             if query.isEmpty {
-                ContentUnavailableView("Search Reverb", systemImage: "magnifyingglass", description: Text("Results come from this iPhone's library, Deezer, and Spotify."))
+                VStack(spacing: 10) {
+                    Text("Play what you love")
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(.white)
+                    Text("Search this iPhone's library, Deezer, and Spotify.")
+                        .font(.subheadline)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                .multilineTextAlignment(.center)
+                .padding()
             }
         }
         .task(id: query) {
@@ -101,19 +115,27 @@ struct SearchView: View {
     }
 }
 
+private struct SearchSectionHeader: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(.headline.weight(.bold))
+            .foregroundStyle(.white)
+            .textCase(nil)
+    }
+}
+
 struct SearchResultRow: View {
     @EnvironmentObject private var player: Player
     let result: SearchResult
     @EnvironmentObject private var core: CoreHost
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text(result.title)
-                Text("\(result.artist) · \(result.source.capitalized)").font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
+        TrackLine(title: result.title, subtitle: "Song · \(result.artist)",
+                  art: .init(coverArtID: result.match?.coverArtId ?? result.coverArtId, coverURL: result.coverUrl, seed: result.album),
+                  isCurrent: player.current?.title == result.title && player.current?.artist == result.artist,
+                  downloaded: result.match?.status == "in_library")
         .contextMenu {
             Button("Start Radio", systemImage: "dot.radiowaves.left.and.right") { Task { await player.startRadio(tracks: [result.playerTrack]) } }
             if result.match?.status != "in_library" {

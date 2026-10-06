@@ -97,6 +97,8 @@ const iosOperations = {
   '/player/{session}/next': { post: 'nextInQueue' },
   '/player/{session}/previous': { post: 'previousInQueue' },
   '/player/{session}/ended': { post: 'endedInQueue' },
+  '/player/{session}/shuffle': { post: 'setQueueShuffle' },
+  '/player/{session}/repeat': { post: 'setQueueRepeat' },
   '/plays': { post: 'recordPlay' },
   '/recommendations/shelves': { get: 'getHomeShelves' },
   '/recommendations/mixes': { get: 'listMixes' },

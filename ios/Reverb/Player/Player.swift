@@ -56,6 +56,8 @@ final class Player: ObservableObject {
     private var lastProgress = Date.distantPast
     private var reportingProgress = false
     private var artworkTask: Task<Void, Never>?
+    /// The current track's cover, shown by the player screens and the lock screen.
+    @Published private(set) var artworkImage: UIImage?
 
     init(
         core: CoreHost,
@@ -196,6 +198,24 @@ final class Player: ObservableObject {
         }
     }
 
+    func setShuffle(_ on: Bool) async {
+        await change { client, session in
+            try await client.setQueueShuffle(path: .init(session: session), body: .json(.init(on: on))).ok.body.json
+        }
+    }
+
+    /// Steps repeat off, then all, then one, as the player's button does.
+    func cycleRepeat() async {
+        let mode: Components.Schemas.PlayerRepeatRequest.modePayload = switch queue?._repeat {
+        case .all: .one
+        case .one: .off
+        default: .all
+        }
+        await change { client, session in
+            try await client.setQueueRepeat(path: .init(session: session), body: .json(.init(mode: mode))).ok.body.json
+        }
+    }
+
     func seek(to seconds: Double) {
         guard seconds.isFinite, let item = avPlayer.currentItem else { return }
         let target = max(0, duration > 0 ? min(seconds, duration) : seconds)
@@ -257,6 +277,7 @@ final class Player: ObservableObject {
             cropEnd = 0
             artworkTask?.cancel()
             artwork = nil
+            artworkImage = nil
             updateNowPlaying()
             return
         }
@@ -580,6 +601,7 @@ final class Player: ObservableObject {
 
     private func loadArtwork(for track: PlayerTrack) {
         artwork = nil
+        artworkImage = nil
         artworkTask?.cancel()
         let request: URLRequest
         if let id = Self.coverArtID(track), let local = core.core, let url = local.coverURL(id: id) {
@@ -594,6 +616,7 @@ final class Player: ObservableObject {
             guard let (data, _) = try? await URLSession.shared.data(for: request),
                   let image = UIImage(data: data), !Task.isCancelled else { return }
             artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+            artworkImage = image
             updateNowPlaying()
         }
     }

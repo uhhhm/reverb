@@ -16,11 +16,13 @@ struct ReverbApp: App {
         _player = StateObject(wrappedValue: player)
         _sync = StateObject(wrappedValue: SyncManager(core: core))
         core.start()
+        Theme.applyAppearance()
     }
 
     var body: some Scene {
         WindowGroup {
             RootView()
+                .preferredColorScheme(.dark)
                 .environmentObject(core)
                 .environmentObject(player)
                 .environmentObject(sync)
@@ -52,6 +54,12 @@ struct RootView: View {
     @EnvironmentObject private var core: CoreHost
 
     var body: some View {
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.background)
+    }
+
+    @ViewBuilder private var content: some View {
         switch core.state {
         case .starting:
             ProgressView("Starting Reverb…")
@@ -62,6 +70,8 @@ struct RootView: View {
                 Text(message)
             } actions: {
                 Button("Try again") { core.start() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.green)
             }
         case .running:
             MainView()
@@ -81,7 +91,13 @@ struct MainView: View {
                 HomeView()
             }
             .safeAreaInset(edge: .bottom) { NowPlayingBar() }
-            .tabItem { Label("Home", systemImage: "house") }
+            .tabItem { Label("Home", systemImage: "house.fill") }
+
+            NavigationStack {
+                SearchView()
+            }
+            .safeAreaInset(edge: .bottom) { NowPlayingBar() }
+            .tabItem { Label("Search", systemImage: "magnifyingglass") }
 
             NavigationStack {
                 PlaylistsView()
@@ -93,13 +109,7 @@ struct MainView: View {
                 LibraryView()
             }
             .safeAreaInset(edge: .bottom) { NowPlayingBar() }
-            .tabItem { Label("Library", systemImage: "music.note") }
-
-            NavigationStack {
-                SearchView()
-            }
-            .safeAreaInset(edge: .bottom) { NowPlayingBar() }
-            .tabItem { Label("Search", systemImage: "magnifyingglass") }
+            .tabItem { Label("Library", systemImage: "books.vertical.fill") }
 
             NavigationStack {
                 DevicesView()
@@ -107,6 +117,7 @@ struct MainView: View {
             .safeAreaInset(edge: .bottom) { NowPlayingBar() }
             .tabItem { Label("Devices", systemImage: "laptopcomputer.and.iphone") }
         }
+        .tint(.white)
         .safeAreaInset(edge: .top) { VersionBanner() }
         // The core checks for a release at most hourly; peers' versions change
         // as they are reached.

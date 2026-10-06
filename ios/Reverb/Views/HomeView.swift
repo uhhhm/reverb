@@ -7,56 +7,85 @@ struct HomeView: View {
     @EnvironmentObject private var core: CoreHost
     @State private var shelves: Components.Schemas.HomeShelves?
     @State private var mixes: [Components.Schemas.Mix] = []
+    @State private var playlists: [Components.Schemas.SyncedPlaylist] = []
 
     var body: some View {
-        List {
-            if shelves?.offline == true || mixes.contains(where: { $0.offline == true }) {
-                Label("Offline — showing the last recommendations saved on this iPhone.", systemImage: "wifi.slash")
-                    .font(.callout).foregroundStyle(.secondary)
-                    .accessibilityIdentifier("home.offline")
-            }
-            if !mixes.isEmpty {
-                Section("Mixes") {
-                    ForEach(mixes, id: \.kind.rawValue) { mix in
-                        NavigationLink { MixView(kind: mix.kind) } label: {
-                            Label(mix.kind.title, systemImage: "sparkles")
-                        }
-                    }
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 28) {
+                if shelves?.offline == true || mixes.contains(where: { $0.offline == true }) {
+                    Label("Offline — showing the last recommendations saved on this iPhone.", systemImage: "wifi.slash")
+                        .font(.footnote).foregroundStyle(Theme.secondaryText)
+                        .accessibilityIdentifier("home.offline")
                 }
-            }
-            ForEach(Array((shelves?.shelves ?? []).enumerated()), id: \.offset) { _, shelf in
-                Section(shelf.title) {
-                    ForEach(shelf.tracks, id: \.externalId) { track in
-                        RecommendedTrackRow(track: track, queue: shelf.tracks) { await load() }
-                    }
-                    ForEach(shelf.artists, id: \.externalId) { artist in
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(artist.name)
-                                Text(artist.source.capitalized).font(.caption).foregroundStyle(.secondary)
+                if !mixes.isEmpty || !playlists.isEmpty {
+                    quickPicks
+                }
+                if !mixes.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ShelfHeader(title: "Made for you")
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(alignment: .top, spacing: 14) {
+                                ForEach(mixes, id: \.kind.rawValue) { mix in
+                                    NavigationLink { MixView(kind: mix.kind) } label: { MixCard(mix: mix) }
+                                        .buttonStyle(PressableStyle())
+                                }
                             }
-                            Spacer()
-                            Button { Task { await markArtist(artist) } } label: { Image(systemName: "hand.thumbsdown") }
-                                .buttonStyle(.borderless).accessibilityLabel("Not interested")
                         }
+                        .scrollClipDisabled()
+                    }
+                }
+                ForEach(Array((shelves?.shelves ?? []).enumerated()), id: \.offset) { _, shelf in
+                    VStack(alignment: .leading, spacing: 12) {
+                        ShelfHeader(title: shelf.title)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(alignment: .top, spacing: 14) {
+                                ForEach(shelf.tracks, id: \.externalId) { track in
+                                    RecommendedTrackCard(track: track, queue: shelf.tracks) { await load() }
+                                }
+                                ForEach(shelf.artists, id: \.externalId) { artist in
+                                    ArtistCard(artist: artist) { await markArtist(artist) }
+                                }
+                            }
+                        }
+                        .scrollClipDisabled()
                     }
                 }
             }
-            Section {
-                NavigationLink("Playlists") { PlaylistsView() }
-            }
+            .padding(.horizontal)
+            .padding(.bottom, 24)
         }
-        .navigationTitle("Home")
+        .background(Theme.background)
+        .navigationTitle(greeting())
         .refreshable { await load() }
         .task { await load() }
+    }
+
+    /// The two-column grid of shortcuts at the top, as Spotify's Home opens with.
+    private var quickPicks: some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+            ForEach(mixes, id: \.kind.rawValue) { mix in
+                NavigationLink { MixView(kind: mix.kind) } label: {
+                    QuickPickTile(title: mix.kind.title, art: .init(seed: mix.kind.title), symbol: "sparkles")
+                }
+            }
+            ForEach(playlists.prefix(max(0, 8 - mixes.count)), id: \.id) { playlist in
+                NavigationLink { PlaylistView(playlistID: playlist.id) } label: {
+                    QuickPickTile(title: playlist.name, art: .init(coverURL: playlist.coverUrl, seed: playlist.name), symbol: "music.note.list")
+                }
+            }
+        }
+        .buttonStyle(PressableStyle())
     }
 
     private func load() async {
         guard let client = core.client else { return }
         async let home = try? client.getHomeShelves().ok.body.json
         async let mixList = try? client.listMixes().ok.body.json
+        async let playlistList = try? client.listPlaylists().ok.body.json
         shelves = await home
         mixes = await mixList?.mixes ?? []
+        // Recently synced first, as the shortcuts are what was last in use.
+        playlists = (await playlistList ?? []).sorted { $0.lastSyncedAt > $1.lastSyncedAt }
     }
 
     private func markArtist(_ artist: Components.Schemas.ExternalArtist) async {
@@ -67,25 +96,153 @@ struct HomeView: View {
     }
 }
 
+private struct QuickPickTile: View {
+    let title: String
+    let art: ArtworkSource
+    let symbol: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Artwork(source: art, size: 56, cornerRadius: 0, symbol: symbol)
+            Text(title)
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .background(Theme.elevated)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+}
+
+private struct MixCard: View {
+    let mix: Components.Schemas.Mix
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack(alignment: .bottomLeading) {
+                Artwork(source: .init(seed: mix.kind.title), size: 150, cornerRadius: 6, symbol: "sparkles")
+                Text(mix.kind.title)
+                    .font(.headline.weight(.heavy))
+                    .foregroundStyle(.white)
+                    .shadow(radius: 4)
+                    .padding(10)
+            }
+            Text(mix.tracks.prefix(3).map(\.artist).joined(separator: ", "))
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .frame(width: 150, alignment: .leading)
+        }
+    }
+}
+
+/// A recommended track as a card in a Home shelf.
+struct RecommendedTrackCard: View {
+    let track: RecommendedTrack
+    var queue: [RecommendedTrack] = []
+    var onMarked: (() async -> Void)? = nil
+    @EnvironmentObject private var core: CoreHost
+    @EnvironmentObject private var player: Player
+
+    var body: some View {
+        Button { Task { await track.play(in: queue, player: player) } } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                Artwork(source: .init(coverArtID: track.coverArtId, coverURL: track.coverUrl, seed: track.album), size: 140)
+                Text(track.title)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(nowPlaying ? Theme.green : .white)
+                    .lineLimit(1)
+                Text(track.artist)
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+                    .lineLimit(1)
+            }
+            .frame(width: 140, alignment: .leading)
+        }
+        .buttonStyle(PressableStyle())
+        .modifier(RecommendedTrackMenu(track: track, onMarked: onMarked))
+    }
+
+    private var nowPlaying: Bool { player.current?.title == track.title && player.current?.artist == track.artist }
+}
+
+private struct ArtistCard: View {
+    let artist: Components.Schemas.ExternalArtist
+    let onNotInterested: () async -> Void
+    @EnvironmentObject private var player: Player
+
+    var body: some View {
+        Button { Task { await player.startRadio(artist: artist.name) } } label: {
+            VStack(spacing: 8) {
+                Artwork(source: .init(coverArtID: artist.coverArtId, coverURL: artist.coverUrl, seed: artist.name),
+                        size: 140, cornerRadius: 70, symbol: "person.fill")
+                Text(artist.name)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text("Artist")
+                    .font(.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .frame(width: 140)
+        }
+        .buttonStyle(PressableStyle())
+        .contextMenu {
+            Button("Start Radio", systemImage: "dot.radiowaves.left.and.right") { Task { await player.startRadio(artist: artist.name) } }
+            Button("Not interested", systemImage: "hand.thumbsdown", role: .destructive) { Task { await onNotInterested() } }
+        }
+    }
+}
+
 struct MixView: View {
     let kind: Components.Schemas.MixKind
     @EnvironmentObject private var core: CoreHost
+    @EnvironmentObject private var player: Player
     @State private var mix: Components.Schemas.Mix?
     @State private var saved = false
 
+    private var tracks: [RecommendedTrack] { mix?.tracks ?? [] }
+
     var body: some View {
         List {
-            if mix?.offline == true {
-                Label("Offline — showing the last saved Mix.", systemImage: "wifi.slash").foregroundStyle(.secondary)
+            CollectionHeader(
+                title: kind.title, subtitle: "Made for you",
+                detail: mix?.offline == true ? "Offline — showing the last saved Mix." : songsLabel(tracks.count),
+                tint: Theme.color(for: kind.title)
+            ) {
+                Artwork(source: .init(seed: kind.title), cornerRadius: 4, symbol: "sparkles")
+            } actions: {
+                HStack(spacing: 20) {
+                    Button { Task { await save() } } label: {
+                        Image(systemName: saved ? "checkmark.circle.fill" : "plus.circle")
+                            .font(.title2)
+                            .foregroundStyle(saved ? Theme.green : Theme.secondaryText)
+                    }
+                    .disabled(saved || tracks.isEmpty)
+                    .accessibilityLabel(saved ? "Saved" : "Save as playlist")
+                    Spacer()
+                    Button { Task { await player.play(tracks.shuffled().map(\.playerTrack), startAt: 0) } } label: {
+                        Image(systemName: "shuffle").font(.title2).foregroundStyle(Theme.secondaryText)
+                    }
+                    .accessibilityLabel("Shuffle play")
+                    .disabled(tracks.isEmpty)
+                    PlayCircleButton { Task { await player.play(tracks.map(\.playerTrack), startAt: 0) } }
+                        .disabled(tracks.isEmpty)
+                }
+                .buttonStyle(.plain)
             }
-            ForEach(mix?.tracks ?? [], id: \.externalId) { track in
-                RecommendedTrackRow(track: track, queue: mix?.tracks ?? []) { await load() }
+            .listRowInsets(EdgeInsets())
+            .darkRow()
+            ForEach(tracks, id: \.externalId) { track in
+                RecommendedTrackRow(track: track, queue: tracks) { await load() }
+                    .darkRow()
             }
         }
-        .navigationTitle(kind.title)
-        .toolbar {
-            Button(saved ? "Saved" : "Save as playlist") { Task { await save() } }.disabled(saved || mix?.tracks.isEmpty != false)
-        }
+        .darkList()
+        .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
     }
 
@@ -108,38 +265,62 @@ struct RecommendedTrackRow: View {
     /// through the rest of it.
     var queue: [RecommendedTrack] = []
     var onMarked: (() async -> Void)? = nil
+    @EnvironmentObject private var player: Player
+
+    var body: some View {
+        TrackLine(
+            title: track.title, subtitle: track.artist,
+            art: .init(coverArtID: track.coverArtId, coverURL: track.coverUrl, seed: track.album),
+            isCurrent: player.current?.title == track.title && player.current?.artist == track.artist
+        ) {
+            RecommendedTrackMenuButton(track: track, onMarked: onMarked)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { Task { await track.play(in: queue, player: player) } }
+        .modifier(RecommendedTrackMenu(track: track, onMarked: onMarked))
+    }
+}
+
+/// Radio, Download and Not interested, for a long press on a recommendation.
+private struct RecommendedTrackMenu: ViewModifier {
+    let track: RecommendedTrack
+    var onMarked: (() async -> Void)?
+    @EnvironmentObject private var core: CoreHost
+    @EnvironmentObject private var player: Player
+
+    func body(content: Content) -> some View {
+        content.contextMenu { RecommendedTrackActions(track: track, onMarked: onMarked) }
+    }
+}
+
+/// The same actions behind a row's "…" button.
+private struct RecommendedTrackMenuButton: View {
+    let track: RecommendedTrack
+    var onMarked: (() async -> Void)?
+
+    var body: some View {
+        Menu { RecommendedTrackActions(track: track, onMarked: onMarked) } label: { MoreGlyph() }
+            .accessibilityLabel("More")
+    }
+}
+
+private struct RecommendedTrackActions: View {
+    let track: RecommendedTrack
+    var onMarked: (() async -> Void)?
     @EnvironmentObject private var core: CoreHost
     @EnvironmentObject private var player: Player
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text(track.title)
-                Text(track.artist).font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button { Task { await mark() } } label: { Image(systemName: "hand.thumbsdown") }
-                .buttonStyle(.borderless).accessibilityLabel("Not interested")
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { Task { await play() } }
-        .contextMenu {
-            Button("Start Radio", systemImage: "dot.radiowaves.left.and.right") { Task { await player.startRadio(tracks: [track.playerTrack]) } }
-            if track.source != "library" && track.match?.status != .in_library {
-                Button("Download", systemImage: "arrow.down.circle") {
-                    Task {
-                        await Downloads.enqueue(core: core, source: track.source, externalId: track.externalId,
-                                                title: track.title, artist: track.artist, album: track.album, isrc: track.isrc)
-                    }
+        Button("Start Radio", systemImage: "dot.radiowaves.left.and.right") { Task { await player.startRadio(tracks: [track.playerTrack]) } }
+        if track.source != "library" && track.match?.status != .in_library {
+            Button("Download", systemImage: "arrow.down.circle") {
+                Task {
+                    await Downloads.enqueue(core: core, source: track.source, externalId: track.externalId,
+                                            title: track.title, artist: track.artist, album: track.album, isrc: track.isrc)
                 }
             }
         }
-    }
-
-    private func play() async {
-        let tracks = queue.isEmpty ? [track] : queue
-        let start = tracks.firstIndex { $0.source == track.source && $0.externalId == track.externalId } ?? 0
-        await player.play(tracks.map(\.playerTrack), startAt: start)
+        Button("Not interested", systemImage: "hand.thumbsdown", role: .destructive) { Task { await mark() } }
     }
 
     private func mark() async {
@@ -155,6 +336,14 @@ struct RecommendedTrackRow: View {
 }
 
 extension RecommendedTrack {
+    /// Plays this track and on through the rest of its shelf or Mix.
+    @MainActor
+    func play(in queue: [RecommendedTrack], player: Player) async {
+        let tracks = queue.isEmpty ? [self] : queue
+        let start = tracks.firstIndex { $0.source == source && $0.externalId == externalId } ?? 0
+        await player.play(tracks.map(\.playerTrack), startAt: start)
+    }
+
     /// A library track plays from the library; anything else streams from its
     /// source through the core's yt-dlp.
     var playerTrack: PlayerTrack {

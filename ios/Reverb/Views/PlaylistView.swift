@@ -21,45 +21,84 @@ struct PlaylistView: View {
 
     var body: some View {
         List {
-            Section {
-                Toggle("Keep on this iPhone", isOn: Binding(get: { isOffline }, set: { on in
-                    Task { await setOffline(on) }
-                }))
-                .accessibilityIdentifier("playlist.offlineToggle")
-                if isOffline, let status = offlineStatus {
-                    VStack(alignment: .leading, spacing: 4) {
+            CollectionHeader(
+                title: detail?.value1.name ?? "Playlist",
+                subtitle: "",
+                detail: songsLabel(tracks.count) + (detail.map { $0.value1.source == "local" ? "" : " · from \($0.value1.source.capitalized)" } ?? ""),
+                tint: Theme.color(for: detail?.value1.name ?? playlistID)
+            ) {
+                MosaicArtwork(cover: detail?.value1.coverUrl, tracks: tracks.map(\.artwork), seed: detail?.value1.name ?? playlistID)
+            } actions: {
+                VStack(alignment: .leading, spacing: 10) {
+                    Toggle(isOn: Binding(get: { isOffline }, set: { on in Task { await setOffline(on) } })) {
+                        Label("Keep on this iPhone", systemImage: isOffline ? "arrow.down.circle.fill" : "arrow.down.circle")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(isOffline ? Theme.green : .white)
+                    }
+                    .tint(Theme.green)
+                    .accessibilityIdentifier("playlist.offlineToggle")
+                    if isOffline, let status = offlineStatus {
                         Text("\(status.readyCount) of \(status.trackCount) on this iPhone · \(formatBytes(status.bytes))")
-                            .font(.callout)
+                            .font(.caption)
+                            .foregroundStyle(Theme.secondaryText)
                             .accessibilityIdentifier("playlist.offlineProgress")
                         if storageFull {
                             StorageFullNotice()
                         }
                     }
-                }
-            } footer: {
-                Text("Offline playlists play with no connection. Each device chooses its own.")
-            }
-            Section {
-                ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
-                    TrackRow(track: track, offline: isOffline ? trackStatus(at: index, track) : nil)
-                        .contentShape(Rectangle())
-                        .onTapGesture { Task { await play(track) } }
-                        .disabled(track.playback == .unavailable)
-                        .swipeActions {
-                            Button("Remove", role: .destructive) { Task { await remove(track) } }
+                    HStack(spacing: 20) {
+                        Menu {
+                            Button("Start Radio", systemImage: "dot.radiowaves.left.and.right") { Task { await player.startRadio(tracks: playable) } }
+                                .disabled(playable.isEmpty)
+                        } label: { MoreGlyph() }
+                        .accessibilityLabel("More")
+                        Spacer()
+                        Button { Task { await player.play(playable.shuffled(), startAt: 0) } } label: {
+                            Image(systemName: "shuffle").font(.title2).foregroundStyle(Theme.secondaryText)
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Shuffle play")
+                        .disabled(playable.isEmpty)
+                        PlayCircleButton(isPlaying: playingHere && player.wantsToPlay) {
+                            if playingHere { player.togglePlayPause() } else { Task { await player.play(playable, startAt: 0) } }
+                        }
+                        .disabled(playable.isEmpty)
+                    }
                 }
-                .onMove { from, to in Task { await reorder(from: from, to: to) } }
             }
+            .listRowInsets(EdgeInsets())
+            .darkRow()
+            ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
+                TrackRow(track: track, offline: isOffline ? trackStatus(at: index, track) : nil,
+                         isCurrent: Self.playerTrack(track).map { $0.id == player.current?.id } ?? false)
+                    .contentShape(Rectangle())
+                    .onTapGesture { Task { await play(track) } }
+                    .disabled(track.playback == .unavailable)
+                    .darkRow()
+                    .swipeActions {
+                        Button("Remove", role: .destructive) { Task { await remove(track) } }
+                    }
+                    .contextMenu {
+                        if let item = Self.playerTrack(track) {
+                            Button("Start Radio", systemImage: "dot.radiowaves.left.and.right") { Task { await player.startRadio(tracks: [item]) } }
+                        }
+                        Button("Remove from this playlist", systemImage: "minus.circle", role: .destructive) { Task { await remove(track) } }
+                    }
+            }
+            .onMove { from, to in Task { await reorder(from: from, to: to) } }
             if let error {
-                Text(error).foregroundStyle(.red)
+                Text(error).foregroundStyle(.red).darkRow()
             }
+            Text("Offline playlists play with no connection. Each device chooses its own.")
+                .font(.caption)
+                .foregroundStyle(Theme.secondaryText)
+                .padding(.top, 12)
+                .darkRow()
         }
+        .darkList()
         .navigationTitle(detail?.value1.name ?? "Playlist")
-        .toolbar {
-            EditButton()
-            Button("Start Radio", systemImage: "dot.radiowaves.left.and.right") { Task { await player.startRadio(tracks: playable) } }.disabled(playable.isEmpty)
-        }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { EditButton() }
         .task {
             while !Task.isCancelled {
                 await load()
@@ -68,6 +107,12 @@ struct PlaylistView: View {
                 try? await Task.sleep(for: .seconds(isOffline && fetching ? 1 : 5))
             }
         }
+    }
+
+    /// Whether what is playing came from this playlist.
+    private var playingHere: Bool {
+        guard let current = player.current?.id else { return false }
+        return playable.contains { $0.id == current }
     }
 
     private func trackStatus(at index: Int, _ track: PlaylistTrack) -> OfflineTrackStatus? {
@@ -145,6 +190,7 @@ struct PlaylistView: View {
 struct TrackRow: View {
     let track: PlaylistTrack
     let offline: OfflineTrackStatus?
+    var isCurrent = false
 
     /// A file counts as on this iPhone once it lands, but it plays only after
     /// the library's next scan indexes it; until then it still shows as copying.
@@ -155,23 +201,19 @@ struct TrackRow: View {
     }
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text(track.title)
-                Text(track.artist)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if let offline = shownOffline {
+        TrackLine(
+            title: track.title, subtitle: track.artist, art: track.artwork,
+            isCurrent: isCurrent, downloaded: shownOffline?.state == .ready
+        ) {
+            if let offline = shownOffline, offline.state != .ready {
                 OfflineBadge(status: offline)
-            } else if track.playback == .delegated {
+            } else if shownOffline == nil, track.playback == .delegated {
                 Image(systemName: "wifi")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryText)
                     .accessibilityLabel("Streams from a paired device")
-            } else if track.playback == .unavailable {
+            } else if shownOffline == nil, track.playback == .unavailable {
                 Image(systemName: "icloud.slash")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryText)
                     .accessibilityLabel("Not on this iPhone")
             }
         }
@@ -183,18 +225,50 @@ struct TrackRow: View {
     }
 }
 
+extension PlaylistTrack {
+    var artwork: ArtworkSource {
+        .init(coverArtID: libraryTrack?.coverArtId, coverURL: coverUrl, seed: album ?? title)
+    }
+}
+
+/// A playlist's cover: its own art, else four of its tracks' covers, as Spotify tiles them.
+struct MosaicArtwork: View {
+    let cover: String?
+    let tracks: [ArtworkSource]
+    let seed: String
+
+    var body: some View {
+        let distinct = tracks.filter { ($0.coverArtID ?? "").isEmpty == false || ($0.coverURL ?? "").isEmpty == false }
+            .reduce(into: [ArtworkSource]()) { seen, art in if !seen.contains(art) { seen.append(art) } }
+        if let cover, !cover.isEmpty {
+            Artwork(source: .init(coverURL: cover, seed: seed), symbol: "music.note.list")
+        } else if distinct.count >= 4 {
+            Grid(horizontalSpacing: 0, verticalSpacing: 0) {
+                GridRow { Artwork(source: distinct[0], cornerRadius: 0); Artwork(source: distinct[1], cornerRadius: 0) }
+                GridRow { Artwork(source: distinct[2], cornerRadius: 0); Artwork(source: distinct[3], cornerRadius: 0) }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+        } else if let first = distinct.first {
+            Artwork(source: first)
+        } else {
+            Artwork(source: .init(seed: seed), symbol: "music.note.list")
+        }
+    }
+}
+
 struct OfflineBadge: View {
     let status: OfflineTrackStatus
 
     var body: some View {
         switch status.state {
         case .ready:
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Image(systemName: "arrow.down.circle.fill").foregroundStyle(Theme.green)
                 .accessibilityLabel("On this iPhone")
         case .fetching:
             if status.sizeBytes > 0 {
                 ProgressView(value: Double(status.fetchedBytes), total: Double(status.sizeBytes))
                     .frame(width: 48)
+                    .tint(Theme.green)
                     .accessibilityLabel("Copying to this iPhone")
             } else {
                 ProgressView().accessibilityLabel("Copying to this iPhone")

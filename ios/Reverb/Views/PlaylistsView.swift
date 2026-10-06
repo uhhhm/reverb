@@ -18,39 +18,36 @@ struct PlaylistsView: View {
     var body: some View {
         List {
             if let storage, !offline.isEmpty {
-                Section {
-                    StorageSummary(status: storage)
-                }
+                StorageSummary(status: storage)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.elevated, in: RoundedRectangle(cornerRadius: 8))
+                    .darkRow()
             }
-            Section {
-                ForEach(playlists, id: \.id) { playlist in
-                    NavigationLink(value: playlist.id) {
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(playlist.name)
-                                Text("\(playlist.trackCount) tracks")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if offline.contains(playlist.id) {
-                                Image(systemName: "arrow.down.circle.fill")
-                                    .foregroundStyle(.tint)
-                                    .accessibilityLabel("Kept on this iPhone")
-                            }
-                        }
-                    }
-                    .accessibilityIdentifier("playlist.\(playlist.name)")
-                    .swipeActions {
-                        Button("Delete", role: .destructive) { Task { await delete(playlist) } }
-                        Button("Rename") {
-                            draftName = playlist.name
-                            renaming = playlist
-                        }.tint(.blue)
-                    }
+            ForEach(playlists, id: \.id) { playlist in
+                NavigationLink(value: playlist.id) {
+                    TrackLine(
+                        title: playlist.name,
+                        subtitle: "Playlist · " + songsLabel(playlist.trackCount),
+                        art: .init(coverURL: playlist.coverUrl, seed: playlist.name),
+                        artSize: 64, artSymbol: "music.note.list",
+                        downloaded: offline.contains(playlist.id)
+                    )
+                    .accessibilityElement(children: .combine)
+                    .accessibilityValue(offline.contains(playlist.id) ? "Kept on this iPhone" : "")
+                }
+                .accessibilityIdentifier("playlist.\(playlist.name)")
+                .darkRow()
+                .swipeActions {
+                    Button("Delete", role: .destructive) { Task { await delete(playlist) } }
+                    Button("Rename") {
+                        draftName = playlist.name
+                        renaming = playlist
+                    }.tint(.blue)
                 }
             }
         }
+        .darkList()
         .overlay {
             if loaded && playlists.isEmpty {
                 ContentUnavailableView {
@@ -59,6 +56,9 @@ struct PlaylistsView: View {
                     Text("Pair this iPhone with Reverb on your computer and its playlists appear here.")
                 } actions: {
                     Button("Pair a device") { pairing.isPresented = true }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.green)
+                        .foregroundStyle(.black)
                 }
             }
         }
@@ -143,6 +143,7 @@ struct StorageSummary: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("On this iPhone: \(formatBytes(status.usedBytes))")
+                .font(.subheadline.weight(.semibold))
                 .accessibilityIdentifier("storage.used")
             if status.full {
                 StorageFullNotice()
@@ -153,7 +154,7 @@ struct StorageSummary: View {
             } else {
                 Text("\(formatBytes(status.availableBytes)) free for offline playlists")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.secondaryText)
             }
         }
     }
