@@ -1,11 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { useFocusTrap } from '../lib/useFocusTrap'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Button } from './ui/Button'
 import { Toggle } from './ui/Toggle'
 import { Segmented } from './ui/Segmented'
 import { importPlaylist } from '../lib/syncedPlaylistApi'
 import { importPlaylistOnce } from '../lib/libraryApi'
+import { ApiError } from '../lib/api'
+
+// The server's error text when no Spotify search source is configured.
+const SPOTIFY_NOT_CONFIGURED = 'spotify is not configured'
+
+function importErrorMessage(e: unknown): string {
+  if (e instanceof ApiError && typeof e.body?.error === 'string') return e.body.error
+  return e instanceof Error ? e.message : "Couldn't import — is the playlist public?"
+}
 
 interface ImportPlaylistDialogProps {
   open: boolean
@@ -56,7 +65,7 @@ export function ImportPlaylistDialog({ open, onClose, initialURL = '' }: ImportP
         navigate(`/playlist/${detail.id}`)
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't import — is the playlist public?")
+      setError(importErrorMessage(e))
       setBusy(false)
     }
   }
@@ -142,7 +151,17 @@ export function ImportPlaylistDialog({ open, onClose, initialURL = '' }: ImportP
             {/* Inline error */}
             {error && (
               <p role="alert" className="text-sm text-error">
-                {error}
+                {error === SPOTIFY_NOT_CONFIGURED ? (
+                  <>
+                    Spotify isn't connected. Add a Spotify search provider with your client ID and secret in{' '}
+                    <Link to="/admin" onClick={onClose} className="underline">
+                      Admin → Search providers
+                    </Link>
+                    .
+                  </>
+                ) : (
+                  error
+                )}
               </p>
             )}
 

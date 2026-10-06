@@ -4,6 +4,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ImportPlaylistDialog } from './ImportPlaylistDialog'
 import type { SyncedPlaylistDetail } from '../lib/types'
+import { ApiError } from '../lib/api'
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -187,6 +188,50 @@ describe('ImportPlaylistDialog', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/playlist not found or private/i)
     expect(mockNavigate).not.toHaveBeenCalled()
     expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['sync', () => vi.mocked(importPlaylist)],
+    ['one-time', () => vi.mocked(importPlaylistOnce)],
+  ] as const)('explains a missing Spotify source in %s mode and links to the search providers', async (mode, call) => {
+    call().mockRejectedValue(
+      new ApiError('POST', '/playlists/import-synced', 503, { error: 'spotify is not configured' }),
+    )
+    const onClose = vi.fn()
+
+    render(wrap(<ImportPlaylistDialog open onClose={onClose} />))
+
+    if (mode === 'one-time') fireEvent.click(screen.getByRole('tab', { name: /one-time/i }))
+    fireEvent.change(screen.getByLabelText(/playlist url/i), {
+      target: { value: 'https://open.spotify.com/playlist/0NRK5JvEg44fPmZSSIb5' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^import$/i }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/spotify isn't connected/i)
+    expect(alert).not.toHaveTextContent(/503/)
+    const link = screen.getByRole('link', { name: /search providers/i })
+    expect(link).toHaveAttribute('href', '/admin')
+    fireEvent.click(link)
+    expect(onClose).toHaveBeenCalled()
+    expect(mockNavigate).not.toHaveBeenCalledWith(expect.stringMatching(/^\/playlist\//))
+  })
+
+  it('shows the server error text instead of the request line', async () => {
+    vi.mocked(importPlaylist).mockRejectedValue(
+      new ApiError('POST', '/playlists/import-synced', 422, { error: 'spotify: playlist not found' }),
+    )
+
+    render(wrap(<ImportPlaylistDialog open onClose={vi.fn()} />))
+
+    fireEvent.change(screen.getByLabelText(/playlist url/i), {
+      target: { value: 'https://open.spotify.com/playlist/gone' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /^import$/i }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/playlist not found/i)
+    expect(alert).not.toHaveTextContent(/->/)
   })
 
   it('shows busy state while request is in-flight and disables Import', async () => {
