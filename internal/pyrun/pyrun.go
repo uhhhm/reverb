@@ -67,6 +67,19 @@ func (h Host) RunModule(ctx context.Context, module string, args []string, onLin
 	return childproc.RunLines(cmd, onLine)
 }
 
+// ScriptRunner is a Runner that can also run Python source given inline, as
+// `python -c src args` would, for a tool's Python API rather than its command
+// line. The phone's embedded interpreter runs modules only.
+type ScriptRunner interface {
+	RunScript(ctx context.Context, src string, args []string, onLine func(string)) error
+}
+
+func (h Host) RunScript(ctx context.Context, src string, args []string, onLine func(string)) error {
+	cmd := childproc.CommandContext(ctx, h.Python, append([]string{"-c", src}, args...)...)
+	cmd.Env = append(append(os.Environ(), "PYTHONUNBUFFERED=1"), h.Env...)
+	return childproc.RunLines(cmd, onLine)
+}
+
 // ModuleRunner runs one module where a caller expects an executable: it has
 // the Run shape the yt-dlp and spotDL adapters and extstream take, and ignores
 // the binary name they pass.

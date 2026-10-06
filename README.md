@@ -57,6 +57,8 @@ _The web player — queue, shuffle, repeat, seek, and keyboard shortcuts._
   fullscreen view, synchronized scrolling, and click-to-seek.
 - "Search Everywhere" with live per-source streaming (SSE) and library matching
   — Deezer works keyless out of the box; add Spotify credentials for its catalog.
+- Spotify playlist import and live sync, keyless through the bundled spotDL, or
+  through your own Spotify credentials when configured.
 - One-click spotDL downloads with live progress and auto play-when-ready, plus
   optional authenticated YouTube cookies and automatic cooldown/retry pacing for
   rate limits and bot challenges.

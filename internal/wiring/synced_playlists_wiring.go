@@ -3,11 +3,15 @@ package wiring
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/download"
+	"github.com/uhhhm/reverb/internal/download/spotdl"
 	"github.com/uhhhm/reverb/internal/library"
 	"github.com/uhhhm/reverb/internal/matching"
 	"github.com/uhhhm/reverb/internal/playlistsync"
@@ -167,7 +171,12 @@ func (s spotifyPlaylistSource) ParsePlaylistID(url string) (string, bool) {
 }
 
 func (s spotifyPlaylistSource) GetPlaylist(ctx context.Context, externalID string) (core.ExternalPlaylist, error) {
-	return s.p.GetPlaylist(ctx, externalID)
+	pl, err := s.p.GetPlaylist(ctx, externalID)
+	// With no spotDL either, nothing can read Spotify: Spotify is not configured.
+	if errors.Is(err, spotdl.ErrNotInstalled) {
+		return pl, fmt.Errorf("%w: %w", playlistsync.ErrSpotifyNotConfigured, err)
+	}
+	return pl, err
 }
 
 // dbSettingsStore adapts *db.Queries to playlistsync.SettingsStore.
@@ -187,7 +196,8 @@ func (s *dbSettingsStore) UpsertSetting(ctx context.Context, key, value string) 
 // managed-playlist operations (CreateManaged, List, Detail, AddTracks, RemoveTrack)
 // that work without any Spotify source. Returns nil only when the library or
 // Manager is absent. When a search source implementing search.PlaylistProvider
-// (spotify) is present it is wired in as src; otherwise src is nil and the
+// (spotify) is present it is wired in as src; otherwise the spotDL fallback
+// set by SetSpotifyPlaylistFallback is. With neither, src is nil and the
 // Spotify-only methods (Import, ImportOnce, Sync) return ErrSpotifyNotConfigured
 // while all managed-playlist operations continue to work normally.
 func (b *Builder) BuildSyncService(
@@ -204,6 +214,10 @@ func (b *Builder) BuildSyncService(
 			src = spotifyPlaylistSource{p: pp}
 			break
 		}
+	}
+	if src == nil && b.spotifyPlaylistFallback != nil {
+		src = spotifyPlaylistSource{p: b.spotifyPlaylistFallback}
+		log.Printf("no Spotify search provider: Spotify playlists are read through spotDL")
 	}
 	matcher := matching.NewService(lib, b.queries, b.version.LibraryVersion)
 	store := NewSyncStore(b.queries)

@@ -117,7 +117,9 @@ type Options struct {
 	// Python runs yt-dlp and spotDL on a phone, which has no executables to
 	// spawn: the platform's embedded interpreter. Nil uses the host's Python
 	// (REVERB_PYTHON, else python3), which is how the phone profile runs on
-	// Linux. The desktop ignores it.
+	// Linux. The desktop downloads with executables and uses it only to read
+	// Spotify playlists through spotDL; nil there is the bundled interpreter
+	// (REVERB_YTDLP_PYTHON), else the host's.
 	Python pyrun.Runner
 	// FreeSpace reports the bytes free on the disk holding a directory; a
 	// phone stops fetching its offline set before the disk fills. Nil asks the
@@ -308,6 +310,9 @@ func build(ctx context.Context, opts Options, st *store.Store) (*Runtime, error)
 	builder.SetScanDebounce(opts.ScanDebounce)
 	if phone {
 		builder.SetLocalLibrary(musicDir)
+	}
+	if reader := spotifyPlaylistReader(phone, python, opts.Getenv); reader != nil {
+		builder.SetSpotifyPlaylistFallback(reader)
 	}
 
 	// Construction order: reloader → resolver → SetResolverProvider → Build.
@@ -1113,4 +1118,22 @@ func listenPlay(l player.Listen) play.PlayInput {
 		SessionID:      l.Run,
 		Qualified:      &qualified,
 	}
+}
+
+// spotifyPlaylistReader is the spotDL playlist reader for a device with no
+// Spotify search provider, or nil when its Python cannot run spotDL's API: the
+// iPhone's embedded interpreter runs modules only, and bundles no spotDL.
+func spotifyPlaylistReader(phone bool, python pyrun.Runner, getenv func(string) string) *spotdl.PlaylistReader {
+	if python == nil && !phone {
+		if bundled := getenv("REVERB_YTDLP_PYTHON"); bundled != "" {
+			python = pyrun.Host{Python: bundled}
+		} else {
+			python = pyrun.HostFromEnv(getenv)
+		}
+	}
+	sr, ok := python.(pyrun.ScriptRunner)
+	if !ok || !pyrun.Has(python, pyrun.SpotDL) {
+		return nil
+	}
+	return spotdl.NewPlaylistReader(sr)
 }

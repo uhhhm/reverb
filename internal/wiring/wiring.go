@@ -567,6 +567,9 @@ type Builder struct {
 	// canonicalMinter is shared by downloads and managed playlists. Nil-safe.
 	canonicalMinter playlistsync.CanonicalMinter
 	playlistEmitter playlistsync.Emitter
+	// spotifyPlaylistFallback reads Spotify playlists when no Spotify search
+	// provider is configured. Nil leaves them unreadable then.
+	spotifyPlaylistFallback search.PlaylistProvider
 	// playlistLocks is shared by every playlistsync.Service Build creates, so an
 	// edit on the Service a reload replaced cannot overwrite one on its successor.
 	playlistLocks *playlistsync.EditLocks
@@ -622,6 +625,13 @@ func (b *Builder) SetCanonicalMinter(m playlistsync.CanonicalMinter) {
 // SetPlaylistEmitter supplies replication to every managed-playlist service.
 func (b *Builder) SetPlaylistEmitter(e playlistsync.Emitter) {
 	b.playlistEmitter = e
+}
+
+// SetSpotifyPlaylistFallback supplies the playlist reader every playlist
+// service uses while no Spotify search provider is configured: spotDL's
+// credential-free client. A configured provider always wins.
+func (b *Builder) SetSpotifyPlaylistFallback(p search.PlaylistProvider) {
+	b.spotifyPlaylistFallback = p
 }
 
 // SetDownloadCompletionHook installs the completion gate on every manager.
