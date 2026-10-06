@@ -10,10 +10,6 @@ import (
 	"github.com/uhhhm/reverb/internal/sync"
 )
 
-type syncDeviceKey int
-
-const syncDeviceIDKey syncDeviceKey = iota
-
 func (s *Server) authenticateSync(r *http.Request) (string, error) {
 	hdr := r.Header.Get("Authorization")
 	if strings.HasPrefix(hdr, "Bearer ") {
@@ -86,13 +82,4 @@ func (s *Server) syncServerDeviceID(ctx context.Context) (string, error) {
 		}
 	}
 	return "", sql.ErrNoRows
-}
-
-func syncDeviceIDFromContext(ctx context.Context) (string, bool) {
-	v, ok := ctx.Value(syncDeviceIDKey).(string)
-	return v, ok
-}
-
-func withSyncDeviceID(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, syncDeviceIDKey, id)
 }

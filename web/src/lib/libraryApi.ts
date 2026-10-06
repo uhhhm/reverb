@@ -106,14 +106,6 @@ export function useArtist(id: string) {
   })
 }
 
-export function useAlbum(id: string) {
-  return useQuery({
-    queryKey: libraryQueries.album(id),
-    queryFn: () => api.get<Album>(`/library/album/${encodeURIComponent(id)}`),
-    enabled: !!id,
-  })
-}
-
 export function useArtists() {
   return useQuery({
     queryKey: libraryQueries.artists,

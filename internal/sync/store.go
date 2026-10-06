@@ -99,14 +99,6 @@ func NewSyncStore(q SyncQuerier) *SyncStore {
 	return &SyncStore{q: q, policy: LWWPolicy{}, hlc: NewHLC()}
 }
 
-// NewSyncStoreWithPolicy creates a store with a custom merge policy (for tests).
-func NewSyncStoreWithPolicy(q SyncQuerier, p MergePolicy) *SyncStore {
-	if p == nil {
-		p = LWWPolicy{}
-	}
-	return &SyncStore{q: q, policy: p, hlc: NewHLC()}
-}
-
 // ErrMalformedValue means a change carried a value_json that is not valid
 // JSON. The log is read back as JSON -- by the projector, and by SQL that calls
 // json_extract on value_json -- so a row like this is not merely useless: it

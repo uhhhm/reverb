@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useFocusTrap } from '../lib/useFocusTrap'
 import { useNavigate } from 'react-router-dom'
 import { Button } from './ui/Button'
 import { Toggle } from './ui/Toggle'
@@ -11,8 +12,6 @@ interface ImportPlaylistDialogProps {
   onClose: () => void
   initialURL?: string
 }
-
-const FOCUSABLE = 'button, [href], input, [tabindex]:not([tabindex="-1"])'
 
 export function ImportPlaylistDialog({ open, onClose, initialURL = '' }: ImportPlaylistDialogProps) {
   const navigate = useNavigate()
@@ -37,47 +36,7 @@ export function ImportPlaylistDialog({ open, onClose, initialURL = '' }: ImportP
     }
   }, [open, initialURL])
 
-  // Focus trap + Esc close
-  useEffect(() => {
-    if (!open) return
-    const previouslyFocused = document.activeElement as HTMLElement | null
-
-    const panel = panelRef.current
-    if (panel) {
-      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE))
-      focusable[0]?.focus()
-    }
-
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        onClose()
-        return
-      }
-      if (e.key === 'Tab' && panelRef.current) {
-        const focusable = Array.from(
-          panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE),
-        ).filter((el) => !el.hasAttribute('disabled'))
-        if (focusable.length === 0) return
-        const first = focusable[0]
-        const last = focusable[focusable.length - 1]
-        if (e.shiftKey) {
-          if (document.activeElement === first) {
-            e.preventDefault()
-            last.focus()
-          }
-        } else if (document.activeElement === last) {
-          e.preventDefault()
-          first.focus()
-        }
-      }
-    }
-
-    document.addEventListener('keydown', handleKey)
-    return () => {
-      document.removeEventListener('keydown', handleKey)
-      previouslyFocused?.focus()
-    }
-  }, [open, onClose])
+  useFocusTrap(open, panelRef, onClose)
 
   if (!open) return null
 

@@ -274,13 +274,6 @@ func fractionFloat(numerator, denominator float64) float64 {
 	return numerator / denominator
 }
 
-func playKey(play Play) string {
-	if play.MBID != "" {
-		return "mbid:" + play.MBID
-	}
-	return nameKey(play.Artist, play.Title)
-}
-
 func resultKey(result core.ExternalResult) string {
 	if result.MBID != "" {
 		return "mbid:" + result.MBID

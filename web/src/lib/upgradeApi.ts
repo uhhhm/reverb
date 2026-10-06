@@ -32,18 +32,6 @@ export function upgradeDownload(body: UpgradeRequest): Promise<unknown> {
   return api.post('/downloads/upgrade', body)
 }
 
-export function listUpgradable(quality?: AudioQuality): Promise<UpgradableTrack[]> {
-  const qs = quality ? `?quality=${encodeURIComponent(quality)}` : ''
-  return api.get<UpgradableTrack[]>(`/downloads/upgradable${qs}`)
-}
-
-export function useUpgradable(quality?: AudioQuality) {
-  return useQuery({
-    queryKey: ['upgradable', quality ?? ''],
-    queryFn: () => listUpgradable(quality),
-  })
-}
-
 /**
  * Every track Reverb can re-fetch, without the tier filter. The per-track
  * quality picker needs these: a track already at the target tier is not

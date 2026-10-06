@@ -85,15 +85,6 @@ func Read(p, rel string) Info {
 	return info
 }
 
-// Picture returns the embedded picture of the file at p, or nil.
-func Picture(p string) *tag.Picture {
-	m, ok := readTags(p)
-	if !ok {
-		return nil
-	}
-	return m.Picture()
-}
-
 func readTags(p string) (tag.Metadata, bool) {
 	f, err := os.Open(p)
 	if err != nil {

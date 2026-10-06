@@ -1,6 +1,5 @@
-import { useEffect, useRef, type ReactNode } from 'react'
-
-const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+import { useRef, type ReactNode } from 'react'
+import { useFocusTrap } from '../../lib/useFocusTrap'
 
 interface ModalProps {
   open: boolean
@@ -21,40 +20,7 @@ interface ModalProps {
 export function Modal({ open, onClose, title, size = 'md', children, footer, testId }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    if (!open) return
-    const previouslyFocused = document.activeElement as HTMLElement | null
-    panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE)[0]?.focus()
-
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        onClose()
-        return
-      }
-      if (e.key !== 'Tab' || !panelRef.current) return
-      const focusable = Array.from(
-        panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE),
-      ).filter((el) => !el.hasAttribute('disabled'))
-      if (focusable.length === 0) return
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      if (e.shiftKey) {
-        if (document.activeElement === first) {
-          e.preventDefault()
-          last.focus()
-        }
-      } else if (document.activeElement === last) {
-        e.preventDefault()
-        first.focus()
-      }
-    }
-
-    document.addEventListener('keydown', handleKey)
-    return () => {
-      document.removeEventListener('keydown', handleKey)
-      previouslyFocused?.focus()
-    }
-  }, [open, onClose])
+  useFocusTrap(open, panelRef, onClose)
 
   if (!open) return null
 

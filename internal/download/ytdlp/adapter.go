@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/uhhhm/reverb/internal/childproc"
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/download"
 	"github.com/uhhhm/reverb/internal/portablename"
@@ -66,7 +67,7 @@ type Adapter struct {
 const phoneFormat = "bestaudio[ext=m4a]/bestaudio"
 
 func New() *Adapter {
-	return &Adapter{runner: ExecRunner{}, binary: defaultBinary}
+	return &Adapter{runner: childproc.LineRunner{}, binary: defaultBinary}
 }
 
 // NewInProcess is the adapter for a device without the yt-dlp executable (the
@@ -147,7 +148,7 @@ func (a *Adapter) Init(cfg map[string]any) error {
 		a.cookiesFile = path
 	}
 	if a.runner == nil {
-		a.runner = ExecRunner{}
+		a.runner = childproc.LineRunner{}
 	}
 	return nil
 }

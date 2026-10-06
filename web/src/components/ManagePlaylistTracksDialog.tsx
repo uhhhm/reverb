@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import { useFocusTrap } from '../lib/useFocusTrap'
 import { useQueryClient } from '@tanstack/react-query'
 import { Button, Cover, Icon } from './ui'
 import { useSongs, coverUrl, trackCoverUrl } from '../lib/libraryApi'
@@ -13,8 +14,6 @@ interface ManagePlaylistTracksDialogProps {
   tracks: AlbumDetailTrack[]
   onClose: () => void
 }
-
-const FOCUSABLE = 'button, [href], input, [tabindex]:not([tabindex="-1"])'
 
 /** Library entries are keyed by the library track id; imported entries from
  *  Spotify/Deezer are not selectable here and are left untouched on save. */
@@ -63,41 +62,7 @@ export function ManagePlaylistTracksDialog({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Focus trap + Esc close (mirrors RenameTrackDialog).
-  useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null
-    panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE)[0]?.focus()
-
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        onClose()
-        return
-      }
-      if (e.key === 'Tab' && panelRef.current) {
-        const focusable = Array.from(
-          panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE),
-        ).filter((el) => !el.hasAttribute('disabled'))
-        if (focusable.length === 0) return
-        const first = focusable[0]
-        const last = focusable[focusable.length - 1]
-        if (e.shiftKey) {
-          if (document.activeElement === first) {
-            e.preventDefault()
-            last.focus()
-          }
-        } else if (document.activeElement === last) {
-          e.preventDefault()
-          first.focus()
-        }
-      }
-    }
-
-    document.addEventListener('keydown', handleKey)
-    return () => {
-      document.removeEventListener('keydown', handleKey)
-      previouslyFocused?.focus()
-    }
-  }, [onClose])
+  useFocusTrap(true, panelRef, onClose)
 
   const needle = query.trim().toLowerCase()
   const visible = useMemo(() => {

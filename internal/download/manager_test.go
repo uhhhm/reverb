@@ -748,12 +748,6 @@ func (c *fakeClock) AfterFunc(d time.Duration, f func()) func() bool {
 	}
 }
 
-func (c *fakeClock) scheduledCount() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return len(c.fns)
-}
-
 // Advance moves time forward and fires all timers now due (in order).
 func (c *fakeClock) Advance(d time.Duration) {
 	c.mu.Lock()

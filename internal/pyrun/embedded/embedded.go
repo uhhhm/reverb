@@ -20,7 +20,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/uhhhm/reverb/internal/pyrun"
+	"github.com/uhhhm/reverb/internal/childproc"
 )
 
 //go:embed launcher.py
@@ -142,7 +142,7 @@ func (r *Runner) RunModule(ctx context.Context, module string, args []string, on
 	}
 	scanned := make(chan error, 1)
 	go func() {
-		scanned <- pyrun.ScanLines(pr, emit)
+		scanned <- childproc.ScanLines(pr, emit)
 		_ = pr.Close()
 	}()
 

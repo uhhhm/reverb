@@ -11,11 +11,6 @@ import (
 	"github.com/uhhhm/reverb/internal/store"
 )
 
-func newRec() *httptest.ResponseRecorder { return httptest.NewRecorder() }
-func newReq(method, path, body string) *http.Request {
-	return httptest.NewRequest(method, path, bytes.NewBufferString(body))
-}
-
 func TestGetSettingsDefaults(t *testing.T) {
 	srv, cookie := adapterTestServer(t, adapterServerOpts{dirty: &testDirty{}})
 	rec := do(t, srv, cookie, http.MethodGet, "/api/v1/settings", "")

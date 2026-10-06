@@ -99,10 +99,6 @@ func (a *Adapter) TestConnection(ctx context.Context) error {
 	return err
 }
 
-// Factory is the registry.Factory for the "lastfm" scrobbler adapter.
-// Task 4 passes this to the scrobbler registry.
-func Factory() registry.Plugin { return New() }
-
 // ----------------------------------------------------------------------------
 // Scrobbler interface
 // ----------------------------------------------------------------------------

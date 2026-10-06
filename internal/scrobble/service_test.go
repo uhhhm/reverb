@@ -230,32 +230,6 @@ func insertQueueRowTitled(t *testing.T, q Querier, id, userID, title string, nex
 	}
 }
 
-// queueRowStatus fetches a row's status+attempts directly via raw DB.
-// Because Querier only exposes the sqlc methods, we need to reach db.Queries
-// which implements the real *db.Queries — cast it.
-func queueRow(t *testing.T, q *db.Queries, id string) db.ScrobbleQueue {
-	t.Helper()
-	// SelectDueScrobbles won't return done/failed rows, so query via a
-	// trick: select with a very far future cutoff and filter.
-	rows, err := q.SelectDueScrobbles(context.Background(), db.SelectDueScrobblesParams{
-		NextAttemptAt: 999_999_999_999,
-		Limit:         1000,
-	})
-	if err != nil {
-		t.Fatalf("queueRow select: %v", err)
-	}
-	for _, r := range rows {
-		if r.ID == id {
-			return r
-		}
-	}
-	// Row not pending — check status via link status trick by fetching
-	// a fresh scrobble link approach. Actually we need raw SQL access.
-	// Since we control the test, cast q (db.Queries) directly.
-	t.Fatalf("queueRow %q not found in due scrobbles (may be done/failed — use rawQueueRow)", id)
-	return db.ScrobbleQueue{}
-}
-
 // newTestService returns a *Service backed by a real in-memory store and fake Scrobbler.
 // nowFn defaults to fixedNow if nil.
 func newTestService(t *testing.T, q *db.Queries, sc *fakeScrobbler, nowFn func() time.Time) *Service {

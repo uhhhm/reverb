@@ -7,10 +7,7 @@
 package pyrun
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"io"
 	"os"
 
 	"github.com/uhhhm/reverb/internal/childproc"
@@ -67,38 +64,7 @@ func (h Host) RunModule(ctx context.Context, module string, args []string, onLin
 	cmd := childproc.CommandContext(ctx, h.Python, append([]string{"-m", module}, args...)...)
 	// Unbuffered, or progress arrives in one lump when the module exits.
 	cmd.Env = append(append(os.Environ(), "PYTHONUNBUFFERED=1"), h.Env...)
-	pr, pw := io.Pipe()
-	cmd.Stdout = pw
-	cmd.Stderr = pw
-	if err := cmd.Start(); err != nil {
-		_ = pw.Close()
-		return err
-	}
-	waitErr := make(chan error, 1)
-	go func() {
-		err := cmd.Wait()
-		_ = pw.CloseWithError(err)
-		waitErr <- err
-	}()
-	scanErr := ScanLines(pr, onLine)
-	if err := <-waitErr; err != nil {
-		return err
-	}
-	return scanErr
-}
-
-// ScanLines calls onLine for each line r yields, ending a line at '\n' or
-// '\r', until r is exhausted. A line past the scanner's buffer stops the
-// calls, but r is still drained, so a writer blocked on it can finish.
-func ScanLines(r io.Reader, onLine func(string)) error {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	sc.Split(scanLinesCR)
-	for sc.Scan() {
-		onLine(sc.Text())
-	}
-	_, _ = io.Copy(io.Discard, r)
-	return sc.Err()
+	return childproc.RunLines(cmd, onLine)
 }
 
 // ModuleRunner runs one module where a caller expects an executable: it has
@@ -116,18 +82,4 @@ func Module(r Runner, module string) ModuleRunner {
 
 func (m ModuleRunner) Run(ctx context.Context, _ string, args []string, onLine func(string)) error {
 	return m.runner.RunModule(ctx, m.module, args, onLine)
-}
-
-// scanLinesCR splits on either '\n' or '\r'.
-func scanLinesCR(data []byte, atEOF bool) (advance int, token []byte, err error) {
-	if atEOF && len(data) == 0 {
-		return 0, nil, nil
-	}
-	if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
-		return i + 1, data[:i], nil
-	}
-	if atEOF {
-		return len(data), data, nil
-	}
-	return 0, nil, nil
 }

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
+import { useFocusTrap } from '../lib/useFocusTrap'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
@@ -12,8 +13,6 @@ interface AddToPlaylistMenuProps {
   track: Track
   onClose: () => void
 }
-
-const FOCUSABLE = 'button, [href], input, [tabindex]:not([tabindex="-1"])'
 
 /**
  * AddToPlaylistMenu — small popover that adds the given track to one of the
@@ -30,45 +29,7 @@ export function AddToPlaylistMenu({ track, onClose }: AddToPlaylistMenuProps) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Focus trap + Esc close (mirrors DownloadPopover).
-  useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null
-    const panel = panelRef.current
-    if (panel) {
-      const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE))
-      focusable[0]?.focus()
-    }
-
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        onClose()
-        return
-      }
-      if (e.key === 'Tab' && panelRef.current) {
-        const focusable = Array.from(
-          panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE),
-        ).filter((el) => !el.hasAttribute('disabled'))
-        if (focusable.length === 0) return
-        const first = focusable[0]
-        const last = focusable[focusable.length - 1]
-        if (e.shiftKey) {
-          if (document.activeElement === first) {
-            e.preventDefault()
-            last.focus()
-          }
-        } else if (document.activeElement === last) {
-          e.preventDefault()
-          first.focus()
-        }
-      }
-    }
-
-    document.addEventListener('keydown', handleKey)
-    return () => {
-      document.removeEventListener('keydown', handleKey)
-      previouslyFocused?.focus()
-    }
-  }, [onClose])
+  useFocusTrap(true, panelRef, onClose)
 
   function buildEntry(): SyncedTrackEntry {
     return {

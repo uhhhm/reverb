@@ -127,7 +127,6 @@ func WithDownloaderProvider(get func() Downloader) Option {
 }
 
 func WithTrackLookup(l TrackLookup) Option { return func(s *Service) { s.lookup = l } }
-func WithNow(fn func() time.Time) Option   { return func(s *Service) { s.now = fn } }
 
 // WithCollections expands album and playlist links into their tracks: each
 // track is catalogued, joins the playlist, and is downloaded on its own. A

@@ -12,7 +12,6 @@ vi.mock('../lib/offlineSetApi', () => ({
   useOfflineSet: (...args: unknown[]) => mockUseOfflineSet(...args),
   setOfflineSet: (...args: unknown[]) => mockSetOfflineSet(...args),
   listOfflineSet: vi.fn(),
-  removeOfflineSet: vi.fn(),
 }))
 
 vi.mock('../lib/syncApi', () => ({

@@ -784,7 +784,7 @@ func (r *Runtime) StartBackground(ctx context.Context) {
 		priv, kerr := p2p.LoadOrCreateIdentity(ctx, r.Store.Q())
 		if kerr != nil {
 			logf("WARNING: p2p identity: %v", kerr)
-		} else if h, err := p2p.NewHostWith(ctx, priv, r.P2PPort, p2p.HostOptions{NoDiscovery: r.noDiscovery, Version: r.Deps.Version}); err != nil {
+		} else if h, err := p2p.NewHost(ctx, priv, r.P2PPort, p2p.HostOptions{NoDiscovery: r.noDiscovery, Version: r.Deps.Version}); err != nil {
 			logf("WARNING: p2p host: %v", err)
 		} else {
 			r.P2P = h

@@ -43,7 +43,3 @@ func (s *Server) requireCapability(cap string) func(http.Handler) http.Handler {
 		})
 	}
 }
-
-func (s *Server) requireAdmin(next http.Handler) http.Handler {
-	return s.requireCapability(auth.CapAdmin)(next)
-}

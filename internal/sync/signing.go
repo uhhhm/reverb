@@ -10,7 +10,7 @@ import (
 // Signing binds a change to the device that authored it, so any peer can verify
 // authorship without trusting whoever relayed it. Keys are Ed25519 and are the
 // same keys as the libp2p host identity, so a device's peer ID *is* its
-// verification key (see p2p.PublicKeyForPeer) and needs no separate exchange.
+// verification key (see peer.ID.ExtractPublicKey) and needs no separate exchange.
 
 var (
 	// ErrBadSignature means the change did not verify against the author's key.

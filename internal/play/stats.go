@@ -164,80 +164,44 @@ func (s *Stats) Summary(ctx context.Context, userID string, from, to int64) (Sum
 // TopTracks returns the top-played tracks for userID in [from, to), limited to
 // limit rows ordered by play count descending. CatalogID is always populated.
 func (s *Stats) TopTracks(ctx context.Context, userID string, from, to int64, limit int) ([]TopRow, error) {
-	rows, err := s.q.StatsTopTracks(ctx, db.StatsTopTracksParams{
-		UserID:     userID,
-		PlayedAt:   from,
-		PlayedAt_2: to,
-		Limit:      int64(limit),
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]TopRow, len(rows))
-	for i, r := range rows {
-		out[i] = TopRow{
-			CatalogID:  r.CatalogID,
-			Title:      r.Title,
-			Artist:     r.Artist,
-			Album:      r.Album,
-			Source:     r.Source,
-			ExternalID: r.ExternalID,
-			Plays:      int(r.Plays),
-			MsPlayed:   nullFloat64Int64(r.MsPlayed),
-		}
-	}
-	return out, nil
+	return topRows(s.q.StatsTopTracks(ctx, db.StatsTopTracksParams(topParams(userID, from, to, limit))))
 }
 
 // TopArtists returns the top-played artists for userID in [from, to), limited
 // to limit rows. CatalogID, Title, and Album carry a representative track for
 // provider-backed artwork and navigation.
 func (s *Stats) TopArtists(ctx context.Context, userID string, from, to int64, limit int) ([]TopRow, error) {
-	rows, err := s.q.StatsTopArtists(ctx, db.StatsTopArtistsParams{
-		UserID:     userID,
-		PlayedAt:   from,
-		PlayedAt_2: to,
-		Limit:      int64(limit),
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]TopRow, len(rows))
-	for i, r := range rows {
-		out[i] = TopRow{
-			CatalogID:  r.CatalogID,
-			Title:      r.Title,
-			Artist:     r.Artist,
-			Album:      r.Album,
-			Source:     r.Source,
-			ExternalID: r.ExternalID,
-			Plays:      int(r.Plays),
-			MsPlayed:   nullFloat64Int64(r.MsPlayed),
-		}
-	}
-	return out, nil
+	return topRows(s.q.StatsTopArtists(ctx, db.StatsTopArtistsParams(topParams(userID, from, to, limit))))
 }
 
 // TopAlbums returns the top-played albums for userID in [from, to), limited to
 // limit rows. CatalogID and Title carry a representative track; Artist is the
 // album artist.
 func (s *Stats) TopAlbums(ctx context.Context, userID string, from, to int64, limit int) ([]TopRow, error) {
-	rows, err := s.q.StatsTopAlbums(ctx, db.StatsTopAlbumsParams{
-		UserID:     userID,
-		PlayedAt:   from,
-		PlayedAt_2: to,
-		Limit:      int64(limit),
-	})
+	return topRows(s.q.StatsTopAlbums(ctx, db.StatsTopAlbumsParams(topParams(userID, from, to, limit))))
+}
+
+func topParams(userID string, from, to int64, limit int) db.StatsTopTracksParams {
+	return db.StatsTopTracksParams{UserID: userID, PlayedAt: from, PlayedAt_2: to, Limit: int64(limit)}
+}
+
+// topStatsRow is the row of every top-N query; the three share one shape.
+type topStatsRow interface {
+	db.StatsTopTracksRow | db.StatsTopArtistsRow | db.StatsTopAlbumsRow
+}
+
+func topRows[R topStatsRow](rows []R, err error) ([]TopRow, error) {
 	if err != nil {
 		return nil, err
 	}
 	out := make([]TopRow, len(rows))
-	for i, r := range rows {
+	for i, row := range rows {
+		r := db.StatsTopTracksRow(row)
 		out[i] = TopRow{
 			CatalogID:  r.CatalogID,
 			Title:      r.Title,
-			Album:      r.Album,
 			Artist:     r.Artist,
+			Album:      r.Album,
 			Source:     r.Source,
 			ExternalID: r.ExternalID,
 			Plays:      int(r.Plays),

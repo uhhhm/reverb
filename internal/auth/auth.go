@@ -84,6 +84,3 @@ func (s *Service) EnsureSeed(ctx context.Context) error {
 	}
 	return s.q.CreateUser(ctx, db.CreateUserParams{ID: OwnerID, Username: "local"})
 }
-
-// IsSetupRequired is always false: there is no setup step.
-func (s *Service) IsSetupRequired(context.Context) (bool, error) { return false, nil }

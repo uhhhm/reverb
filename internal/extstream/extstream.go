@@ -22,6 +22,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/uhhhm/reverb/internal/childproc"
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/download/ytdlp"
 	"github.com/uhhhm/reverb/internal/store/db"
@@ -173,7 +174,7 @@ func existingPath(path string) string {
 func New(lookup TrackLookup, opts ...Option) *Service {
 	s := &Service{
 		lookup: lookup,
-		runner: ExecRunner{},
+		runner: childproc.LineRunner{},
 		binary: DefaultBinary,
 		format: DefaultFormat,
 		ttl:    DefaultTTL,

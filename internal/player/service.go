@@ -83,14 +83,9 @@ func (s *Service) State(id string) (State, error) {
 	return NewQueue(nil).State(), nil
 }
 
-// Update applies change to a session's queue, creating it if need be, and
-// returns the result. A change that alters the queue is published.
-func (s *Service) Update(id string, change func(*Queue) error) (State, error) {
-	return s.UpdateRadio(context.Background(), id, change, nil)
-}
-
-// UpdateRadio is Update for a player that can run Radio: fetch looks up
-// recommendations when the session's Radio needs more. Each session is
+// UpdateRadio applies change to a session's queue, creating it if need be, and
+// returns the result. A change that alters the queue is published. fetch looks
+// up recommendations when the session's Radio needs more. Each session is
 // serialised on its own, so one player's change never waits on another's.
 func (s *Service) UpdateRadio(ctx context.Context, id string, change func(*Queue) error, fetch RadioFetch) (State, error) {
 	if !sessionRe.MatchString(id) {

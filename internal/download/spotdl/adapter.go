@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/uhhhm/reverb/internal/childproc"
 	"github.com/uhhhm/reverb/internal/core"
 	"github.com/uhhhm/reverb/internal/download"
 	"github.com/uhhhm/reverb/internal/pyrun"
@@ -101,7 +102,7 @@ type Adapter struct {
 }
 
 func New() *Adapter {
-	return &Adapter{runner: ExecRunner{}, binary: "spotdl"}
+	return &Adapter{runner: childproc.LineRunner{}, binary: "spotdl"}
 }
 
 // NewInProcess is the adapter for a device without the spotDL executable (the
@@ -175,7 +176,7 @@ func (a *Adapter) Init(cfg map[string]any) error {
 		}
 	}
 	if a.runner == nil {
-		a.runner = ExecRunner{}
+		a.runner = childproc.LineRunner{}
 	}
 	return nil
 }

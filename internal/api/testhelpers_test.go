@@ -144,30 +144,6 @@ func doPOST(t *testing.T, srv *Server, path, token, body string) *httptest.Respo
 	return rec
 }
 
-// doPATCH issues a PATCH with an optional session token and a JSON body.
-func doPATCH(t *testing.T, srv *Server, path, token, body string) *httptest.ResponseRecorder {
-	t.Helper()
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, path, bytes.NewBufferString(body))
-	if token != "" {
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
-	}
-	srv.Handler().ServeHTTP(rec, req)
-	return rec
-}
-
-// doDELETE issues a DELETE with an optional session token.
-func doDELETE(t *testing.T, srv *Server, path, token string) *httptest.ResponseRecorder {
-	t.Helper()
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, path, nil)
-	if token != "" {
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
-	}
-	srv.Handler().ServeHTTP(rec, req)
-	return rec
-}
-
 func contains(s []string, v string) bool {
 	for _, x := range s {
 		if x == v {

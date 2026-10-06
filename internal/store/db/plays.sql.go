@@ -997,8 +997,8 @@ WITH aggregated AS (
 SELECT
     CAST(a.catalog_id AS TEXT) AS catalog_id,
     e.title,
-    a.album,
     a.artist,
+    a.album,
     CAST(e.source AS TEXT) AS source,
     CAST(e.external_id AS TEXT) AS external_id,
     a.plays,
@@ -1018,8 +1018,8 @@ type StatsTopAlbumsParams struct {
 type StatsTopAlbumsRow struct {
 	CatalogID  string          `json:"catalog_id"`
 	Title      string          `json:"title"`
-	Album      string          `json:"album"`
 	Artist     string          `json:"artist"`
+	Album      string          `json:"album"`
 	Source     string          `json:"source"`
 	ExternalID string          `json:"external_id"`
 	Plays      int64           `json:"plays"`
@@ -1043,8 +1043,8 @@ func (q *Queries) StatsTopAlbums(ctx context.Context, arg StatsTopAlbumsParams) 
 		if err := rows.Scan(
 			&i.CatalogID,
 			&i.Title,
-			&i.Album,
 			&i.Artist,
+			&i.Album,
 			&i.Source,
 			&i.ExternalID,
 			&i.Plays,

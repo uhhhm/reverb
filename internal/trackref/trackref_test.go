@@ -45,20 +45,6 @@ func TestEncodeDecodeExternalID(t *testing.T) {
 	}
 }
 
-func stringsTrim(s string) string {
-	// local helper mirroring what Encode does, avoid importing strings in test helper? but we already have it.
-	// use the same trim that Encode uses: TrimSpace
-	// inline to avoid import cycle confusion
-	trimmed := s
-	for len(trimmed) > 0 && (trimmed[0] == ' ' || trimmed[0] == '\t' || trimmed[0] == '\n') {
-		trimmed = trimmed[1:]
-	}
-	for len(trimmed) > 0 && (trimmed[len(trimmed)-1] == ' ' || trimmed[len(trimmed)-1] == '\t' || trimmed[len(trimmed)-1] == '\n') {
-		trimmed = trimmed[:len(trimmed)-1]
-	}
-	return trimmed
-}
-
 func TestEncodeExternalID_Empty(t *testing.T) {
 	if got := EncodeExternalID("", "123"); got != "" {
 		t.Errorf("empty source should give empty, got %q", got)

@@ -393,15 +393,6 @@ func (m *Manager) deferCompletion(ctx context.Context, job core.DownloadJob, cau
 	m.publishEvent(TopicProgress, job, job.Error)
 }
 
-// completeOutput takes ownership of bytes before invoking any completion hook.
-// Memory retains that ownership during a store outage; a successful pending-row
-// write makes it recoverable across restart. Only retryCompletion publishes.
-func (m *Manager) completeOutput(ctx context.Context, job core.DownloadJob) (core.DownloadJob, error) {
-	m.transitionMu.Lock()
-	defer m.transitionMu.Unlock()
-	return m.completeOutputLocked(ctx, job)
-}
-
 // completeOutputLocked is the handoff used when async polling already owns the
 // transition lock. No cancellation can interleave the poll and this handoff.
 func (m *Manager) completeOutputLocked(ctx context.Context, job core.DownloadJob) (core.DownloadJob, error) {

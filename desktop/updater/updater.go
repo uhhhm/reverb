@@ -112,22 +112,6 @@ func IsNewer(current, latest string) bool {
 	return semver.IsValid(current) && semver.IsValid(latest) && semver.Compare(latest, current) > 0
 }
 
-func pollYtDlp(ctx context.Context) {
-	// Immediate attempt best-effort (log only).
-	_ = UpgradeYtDlp(ctx, "")
-
-	ticker := time.NewTicker(24 * time.Hour)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			_ = UpgradeYtDlp(ctx, "")
-		}
-	}
-}
-
 // assetRedirectHosts are the domains a release asset may be redirected to.
 // GitHub answers a browser_download_url with a redirect to its object storage,
 // so redirects cannot simply be refused -- but they must stay on GitHub. The

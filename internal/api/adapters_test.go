@@ -11,7 +11,6 @@ import (
 	"github.com/uhhhm/reverb/internal/download/spotdl"
 	"github.com/uhhhm/reverb/internal/registry"
 	"github.com/uhhhm/reverb/internal/store"
-	"github.com/uhhhm/reverb/internal/store/db"
 )
 
 var errFakeConn = errors.New("connection refused")
@@ -42,15 +41,6 @@ func downloaderTestServer(t *testing.T) (*Server, *http.Cookie) {
 		Lib:        registry.NewRegistry("library"),
 	})
 	return srv, &http.Cookie{Name: sessionCookie, Value: tok}
-}
-
-// insertAdapterInstance inserts a raw adapter_instance row directly into the store
-// and returns its ID (for DTO retrieval).
-func insertAdapterInstance(t *testing.T, srv *Server, params db.CreateAdapterInstanceParams) {
-	t.Helper()
-	if err := srv.deps.Adapters.CreateAdapterInstance(context.Background(), params); err != nil {
-		t.Fatalf("insert adapter instance: %v", err)
-	}
 }
 
 // TestAdapterDTOGranularitiesSpotDLNoConfig: spotDL with no granularities config →

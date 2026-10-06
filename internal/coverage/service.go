@@ -386,14 +386,6 @@ func (s *Service) StreamCoverage(ctx context.Context, source, id string) <-chan 
 	return out
 }
 
-func (s *Service) coverageForAlbum(ctx context.Context, source, extAlbumID string) (core.AlbumCoverage, error) {
-	curVer, err := s.version(ctx)
-	if err != nil {
-		return core.AlbumCoverage{}, err
-	}
-	return s.coverageForAlbumWithVersion(ctx, source, extAlbumID, curVer)
-}
-
 func (s *Service) coverageForAlbumWithVersion(ctx context.Context, source, extAlbumID string, curVer int64) (core.AlbumCoverage, error) {
 	if row, err := s.cache.GetAlbumCoverage(ctx, source, extAlbumID); err == nil && row.Found && row.LibraryVersion >= curVer {
 		var cov core.AlbumCoverage

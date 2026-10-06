@@ -55,16 +55,3 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
   can: (cap: string) => get().me?.capabilities.includes(cap) ?? false,
 }))
-
-/**
- * A "manager" can reach the Admin surface — i.e. has any of the management
- * capabilities. Defined once so the TopBar entry and the /admin route guard
- * agree on exactly the same predicate.
- */
-export const MANAGER_CAPS = ['is_admin', 'can_manage_library', 'can_manage_users'] as const
-
-/** True iff the given capability list grants access to a management surface. */
-export function isManagerCaps(capabilities: string[] | undefined): boolean {
-  if (!capabilities) return false
-  return MANAGER_CAPS.some((c) => capabilities.includes(c))
-}

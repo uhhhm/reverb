@@ -3,7 +3,6 @@ package catalog
 import (
 	"context"
 	"database/sql"
-	"errors"
 
 	"github.com/uhhhm/reverb/internal/cover"
 	"github.com/uhhhm/reverb/internal/matching"
@@ -135,8 +134,7 @@ func (s *Service) merge(ctx context.Context, loser, winner string) error {
 // query. Instead we use the safe fallback: attempt bulk repoint; on UNIQUE
 // constraint failure (PK collision), delete all loser bindings and rely on the
 // winner's existing bindings — which is the correct conservative outcome since
-// the winner is the older, authoritative entity. repointBindingForLibID handles
-// the per-row case when the caller already knows the library_identity.
+// the winner is the older, authoritative entity.
 func (s *Service) repointBindingsPreferWinner(ctx context.Context, loser, winner string) error {
 	err := s.q.RepointBindings(ctx, db.RepointBindingsParams{
 		CatalogID:   winner,
@@ -150,61 +148,5 @@ func (s *Service) repointBindingsPreferWinner(ctx context.Context, loser, winner
 	if dbErr := s.q.DeleteBindingsForCatalog(ctx, loser); dbErr != nil {
 		return dbErr
 	}
-	return nil
-}
-
-// repointBindingForLibID resolves a PK collision for a single library_identity.
-// It reads both winner and loser bindings, keeps the better one under winner,
-// and deletes the loser's binding.
-func (s *Service) repointBindingForLibID(ctx context.Context, loser, winner, libID string) error {
-	winnerB, winnerErr := s.q.GetBackendBinding(ctx, db.GetBackendBindingParams{
-		CatalogID:       winner,
-		LibraryIdentity: libID,
-	})
-	loserB, loserErr := s.q.GetBackendBinding(ctx, db.GetBackendBindingParams{
-		CatalogID:       loser,
-		LibraryIdentity: libID,
-	})
-
-	if loserErr != nil {
-		// Loser has no binding for this library_identity — nothing to do.
-		return nil
-	}
-
-	if errors.Is(winnerErr, sql.ErrNoRows) {
-		// Winner has no binding — simply repoint the loser's binding to winner.
-		return s.q.UpsertBackendBinding(ctx, db.UpsertBackendBindingParams{
-			CatalogID:       winner,
-			LibraryIdentity: libID,
-			BackendID:       loserB.BackendID,
-			CoverArtID:      loserB.CoverArtID,
-			KnownAbsent:     loserB.KnownAbsent,
-			BindingEpoch:    loserB.BindingEpoch,
-			ResolvedAt:      loserB.ResolvedAt,
-			LibraryVersion:  loserB.LibraryVersion,
-		})
-	}
-	if winnerErr != nil {
-		return winnerErr
-	}
-
-	// Both winner and loser have a binding. Prefer the one with a non-empty backend_id.
-	// If both have one (or neither), keep the winner's (it is the authoritative entity).
-	if winnerB.BackendID == "" && loserB.BackendID != "" {
-		// Loser has the real backend_id, winner doesn't — upgrade the winner's binding.
-		if err := s.q.UpsertBackendBinding(ctx, db.UpsertBackendBindingParams{
-			CatalogID:       winner,
-			LibraryIdentity: libID,
-			BackendID:       loserB.BackendID,
-			CoverArtID:      loserB.CoverArtID,
-			KnownAbsent:     loserB.KnownAbsent,
-			BindingEpoch:    loserB.BindingEpoch,
-			ResolvedAt:      loserB.ResolvedAt,
-			LibraryVersion:  loserB.LibraryVersion,
-		}); err != nil {
-			return err
-		}
-	}
-	// Otherwise keep winner's binding as-is (winner already wins by default).
 	return nil
 }

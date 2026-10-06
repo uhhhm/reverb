@@ -41,6 +41,15 @@ func (n *discoveryNotifee) HandlePeerFound(pi peer.AddrInfo) {
 // mdnsTag is the service tag for local discovery.
 const mdnsTag = "_reverb._tcp"
 
+// HostOptions adjusts what NewHost starts.
+type HostOptions struct {
+	// NoDiscovery starts neither mDNS nor the DHT, so peers are reached only
+	// by addresses that were stored or supplied, the way they are across a
+	// VPN. Tests use it to prove a path does not lean on discovery.
+	NoDiscovery bool
+	Version     string
+}
+
 // NewHost creates a libp2p host with mDNS and DHT, listening on port (0 picks a
 // random one). A fixed port is what makes a manually entered peer address
 // survive a restart; with a random port any address written down goes stale the
@@ -51,21 +60,7 @@ const mdnsTag = "_reverb._tcp"
 // priv is this node's persistent identity; it must be stable across restarts or
 // every pairing bound to the resulting peer ID is invalidated. See
 // LoadOrCreateIdentity.
-func NewHost(ctx context.Context, priv crypto.PrivKey, port int) (*Host, error) {
-	return NewHostWith(ctx, priv, port, HostOptions{})
-}
-
-// HostOptions adjusts what NewHostWith starts.
-type HostOptions struct {
-	// NoDiscovery starts neither mDNS nor the DHT, so peers are reached only
-	// by addresses that were stored or supplied, the way they are across a
-	// VPN. Tests use it to prove a path does not lean on discovery.
-	NoDiscovery bool
-	Version     string
-}
-
-// NewHostWith is NewHost with options.
-func NewHostWith(ctx context.Context, priv crypto.PrivKey, port int, opts HostOptions) (*Host, error) {
+func NewHost(ctx context.Context, priv crypto.PrivKey, port int, opts HostOptions) (*Host, error) {
 	h, err := newLibp2pHost(priv, port, opts.Version)
 	if err != nil && port != 0 {
 		log.Printf("WARNING: p2p listen on port %d failed (%v); falling back to a random port. "+

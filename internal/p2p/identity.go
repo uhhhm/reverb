@@ -8,7 +8,6 @@ import (
 	"fmt"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
-	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/uhhhm/reverb/internal/store/db"
 )
 
@@ -65,11 +64,4 @@ func LoadOrCreateIdentity(ctx context.Context, store IdentityStore) (crypto.Priv
 		return nil, err
 	}
 	return priv, nil
-}
-
-// PublicKeyForPeer extracts the verification key embedded in an Ed25519 peer ID.
-// libp2p encodes small keys directly in the peer ID, so no key distribution is
-// needed: knowing a peer ID is knowing its public key.
-func PublicKeyForPeer(pid peer.ID) (crypto.PubKey, error) {
-	return pid.ExtractPublicKey()
 }

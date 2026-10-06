@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { listOfflineSet, setOfflineSet, removeOfflineSet } from './offlineSetApi'
+import { listOfflineSet, setOfflineSet } from './offlineSetApi'
 
 describe('offlineSetApi', () => {
   beforeEach(() => {
@@ -63,24 +63,5 @@ describe('offlineSetApi', () => {
     )
     await setOfflineSet('a/b c', true)
     expect(fetch).toHaveBeenCalledWith('/api/v1/offline-set/a%2Fb%20c', expect.objectContaining({ method: 'PUT' }))
-  })
-
-  it('removeOfflineSet DELETEs /offline-set/{playlistId}', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })),
-    )
-    const out = await removeOfflineSet('pl2')
-    expect(fetch).toHaveBeenCalledWith('/api/v1/offline-set/pl2', expect.objectContaining({ method: 'DELETE' }))
-    expect(out.ok).toBe(true)
-  })
-
-  it('removeOfflineSet URL-encodes playlistId', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })),
-    )
-    await removeOfflineSet('a/b')
-    expect(fetch).toHaveBeenCalledWith('/api/v1/offline-set/a%2Fb', expect.objectContaining({ method: 'DELETE' }))
   })
 })

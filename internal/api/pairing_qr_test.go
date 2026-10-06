@@ -16,7 +16,7 @@ import (
 
 func withP2PHost(t *testing.T, srv *Server, st *store.Store) *p2p.Host {
 	t.Helper()
-	h, err := p2p.NewHostWith(context.Background(), nil, 0, p2p.HostOptions{NoDiscovery: true})
+	h, err := p2p.NewHost(context.Background(), nil, 0, p2p.HostOptions{NoDiscovery: true})
 	if err != nil {
 		t.Fatal(err)
 	}

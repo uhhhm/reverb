@@ -43,18 +43,6 @@ export function postBatchDownload(tracks: ExternalTrackRef[]): Promise<DownloadJ
   return api.post<DownloadJob[]>('/downloads/batch', { tracks })
 }
 
-export function reqFromExternalRef(t: ExternalTrackRef): CreateDownloadReq {
-  return {
-    source: t.source,
-    externalId: t.externalId,
-    artist: t.artist ?? '',
-    title: t.title,
-    album: t.album ?? '',
-    isrc: t.isrc,
-    durationMs: t.durationMs,
-  }
-}
-
 export function pauseQueue(): Promise<{ paused: boolean }> {
   return api.post<{ paused: boolean }>('/downloads/pause')
 }

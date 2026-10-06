@@ -15,7 +15,6 @@ vi.mock('../lib/settingsApi', () => ({
 // tests are exercising, so it comes from the actual module.
 vi.mock('../lib/upgradeApi', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../lib/upgradeApi')>()),
-  useUpgradable: () => ({ data: upgradable }),
   useRefetchable: () => ({ data: upgradable }),
   useUpgradeDownload: () => ({ mutate: mockMutate, isPending: false }),
 }))

@@ -15,8 +15,6 @@ export type Mix = components['schemas']['Mix']
 export type MixKind = components['schemas']['MixKind']
 type MixList = components['schemas']['MixList']
 type RecommendationSettingsPatch = components['schemas']['RecommendationSettingsPatch']
-type RadioRequest = components['schemas']['RadioRequest']
-type RadioSeed = components['schemas']['RadioSeed']
 
 /** Similarity data moves slowly and the server caches it too. */
 const STALE_MS = 60 * 60 * 1000
@@ -124,12 +122,6 @@ export function useSimilarTracks(artist: string, title: string, mbid?: string) {
     enabled: !!artist && !!title,
     staleTime: STALE_MS,
   })
-}
-
-/** The next Radio tracks for some seeds, ready to queue. */
-export async function fetchRadio(seeds: RadioSeed[]): Promise<Track[]> {
-  const res = await api.post<SimilarTracksResult>('/recommendations/radio', { seeds } satisfies RadioRequest)
-  return res.tracks.map((track) => recommendedTrackToTrack(track, 'radio'))
 }
 
 /** The short reason shown with a recommendation. */

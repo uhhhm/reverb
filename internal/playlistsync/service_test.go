@@ -122,38 +122,6 @@ func (d *fakeDownloader) Enqueue(_ context.Context, req core.DownloadRequest) (c
 // fakeLibraryWriter
 // ---------------------------------------------------------------------------
 
-type fakeLibraryWriter struct {
-	playlists []core.Playlist
-	addCalls  []struct {
-		playlistID string
-		trackIDs   []string
-	}
-	createErr error
-	addErr    error
-	nextID    int
-}
-
-func (f *fakeLibraryWriter) CreatePlaylist(_ context.Context, name string) (core.Playlist, error) {
-	if f.createErr != nil {
-		return core.Playlist{}, f.createErr
-	}
-	f.nextID++
-	pl := core.Playlist{ID: fmt.Sprintf("pl-%d", f.nextID), Name: name}
-	f.playlists = append(f.playlists, pl)
-	return pl, nil
-}
-
-func (f *fakeLibraryWriter) AddTracksToPlaylist(_ context.Context, playlistID string, trackIDs []string) error {
-	if f.addErr != nil {
-		return f.addErr
-	}
-	f.addCalls = append(f.addCalls, struct {
-		playlistID string
-		trackIDs   []string
-	}{playlistID, trackIDs})
-	return nil
-}
-
 // ---------------------------------------------------------------------------
 // memStore
 // ---------------------------------------------------------------------------

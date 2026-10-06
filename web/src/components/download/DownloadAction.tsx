@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
+import { useFocusTrap } from '../../lib/useFocusTrap'
 import { createPortal } from 'react-dom'
 import { Badge, ProgressRing, Icon, Button } from '../ui'
 import { useDownloads } from '../../lib/downloadStore'
@@ -52,51 +53,16 @@ export function DownloadAction({ result, onPlay, compact = false }: Props) {
   const [prevJobStatus, setPrevJobStatus] = useState(job?.status)
   if (job?.status !== prevJobStatus) {
     setPrevJobStatus(job?.status)
-    if (job?.status !== 'failed' && linkModalOpen) {
-      setLinkModalOpen(false)
-      setUrlValue('')
-      setUrlError(null)
-    }
+    if (job?.status !== 'failed' && linkModalOpen) closeLinkModal()
   }
 
-  // Focus trap + Esc close for the link modal — mirrors ImportPlaylistDialog pattern.
-  const FOCUSABLE = 'button, [href], input, [tabindex]:not([tabindex="-1"])'
-  useEffect(() => {
-    if (!linkModalOpen) return
-    const previouslyFocused = document.activeElement as HTMLElement | null
+  function closeLinkModal() {
+    setLinkModalOpen(false)
+    setUrlValue('')
+    setUrlError(null)
+  }
 
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        setLinkModalOpen(false)
-        setUrlValue('')
-        setUrlError(null)
-        return
-      }
-      if (e.key === 'Tab' && modalPanelRef.current) {
-        const focusable = Array.from(
-          modalPanelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE),
-        ).filter((el) => !el.hasAttribute('disabled'))
-        if (focusable.length === 0) return
-        const first = focusable[0]
-        const last = focusable[focusable.length - 1]
-        if (e.shiftKey) {
-          if (document.activeElement === first) {
-            e.preventDefault()
-            last.focus()
-          }
-        } else if (document.activeElement === last) {
-          e.preventDefault()
-          first.focus()
-        }
-      }
-    }
-
-    document.addEventListener('keydown', handleKey)
-    return () => {
-      document.removeEventListener('keydown', handleKey)
-      previouslyFocused?.focus()
-    }
-  }, [linkModalOpen])
+  useFocusTrap(linkModalOpen, modalPanelRef, closeLinkModal, { focusFirst: false })
 
   // ── helper: enqueue with an optional downloader name ──────────────────────
   function enqueue(downloaderName?: string) {
@@ -168,12 +134,6 @@ export function DownloadAction({ result, onPlay, compact = false }: Props) {
   // ── 4. Failed ────────────────────────────────────────────────────────────
   if (job?.status === 'failed') {
     const failedJob = job
-
-    function closeLinkModal() {
-      setLinkModalOpen(false)
-      setUrlValue('')
-      setUrlError(null)
-    }
 
     function handleUrlSubmit(e: React.FormEvent) {
       e.preventDefault()
