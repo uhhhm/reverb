@@ -2519,6 +2519,7 @@ components:
         - latestVersion
         - sourceUrl
         - releaseUrl
+        - ipaUrl
       properties:
         version:
           type: string
@@ -2540,3 +2541,6 @@ components:
         releaseUrl:
           type: string
           description: The release page for latestVersion, or empty.
+        ipaUrl:
+          type: string
+          description: The Reverb.ipa download for latestVersion, which SideStore or AltStore installs, or empty.

@@ -16,8 +16,12 @@ Re-signing does not update the app, so a phone runs an older version than a
 desktop device, which updates itself, for longer than desktops ever lag each other.
 Sync, pairing, and Delegated request protocols therefore stay backward compatible
 across a declared window of releases, using the version already in each libp2p
-protocol ID. The phone shows a non-blocking banner when a newer release exists and
-links to the source.
+protocol ID. The phone shows a non-blocking banner when a newer release exists,
+whose Update hands that release's IPA to SideStore or AltStore through their URL
+schemes; installing over the app keeps its data. Neither tool can be told to
+re-sign from another app, so the phone warns during the last two days of its
+signature and opens SideStore, and the install guide sets up a daily Shortcuts
+automation running SideStore's Refresh All Apps.
 
 ## Consequences
 

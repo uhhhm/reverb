@@ -137,15 +137,30 @@ struct MainView: View {
     }
 }
 
-/// A newer release, or a paired device outside the protocol support window.
-/// Neither blocks the app: an update is only offered, and an incompatible
-/// device says which update fixes it.
+/// A lapsing signature, a newer release, or a paired device outside the
+/// protocol support window. None blocks the app: a refresh or update is only
+/// offered, and an incompatible device says which update fixes it.
 struct VersionBanner: View {
     @EnvironmentObject private var core: CoreHost
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("dismissedUpdate") private var dismissedUpdate = ""
+    @State private var signingDaysLeft: Int?
 
     var body: some View {
         VStack(spacing: 0) {
+            if let days = signingDaysLeft {
+                HStack {
+                    Label(Self.expiryMessage(days), systemImage: "clock.badge.exclamationmark")
+                        .font(.footnote)
+                    Spacer()
+                    Button("Refresh") { Sideloader.open(Sideloader.refresh) }
+                        .font(.footnote.weight(.semibold))
+                        .accessibilityIdentifier("signing.refresh")
+                }
+                .padding(10)
+                .background(.yellow.opacity(0.2))
+                .accessibilityIdentifier("signing.expiry")
+            }
             if let incompatible = core.version?.peers.first(where: { $0.compatibility == .incompatible }) {
                 Label(incompatible.message, systemImage: "exclamationmark.triangle.fill")
                     .font(.footnote)
@@ -156,11 +171,14 @@ struct VersionBanner: View {
             }
             if let info = core.version, !info.latestVersion.isEmpty, info.latestVersion != dismissedUpdate {
                 HStack {
-                    Label("Reverb \(info.latestVersion) is available. Update it in SideStore or AltStore.", systemImage: "arrow.down.app")
+                    Label("Reverb \(info.latestVersion) is available.", systemImage: "arrow.down.app")
                         .font(.footnote)
                     Spacer()
-                    if let url = URL(string: info.releaseUrl), !info.releaseUrl.isEmpty {
-                        Link("Details", destination: url).font(.footnote)
+                    let links = Sideloader.install(ipa: info.ipaUrl, fallback: info.releaseUrl)
+                    if !links.isEmpty {
+                        Button("Update") { Sideloader.open(links) }
+                            .font(.footnote.weight(.semibold))
+                            .accessibilityIdentifier("version.install")
                     }
                     Button { dismissedUpdate = info.latestVersion } label: { Image(systemName: "xmark") }
                         .accessibilityLabel("Dismiss")
@@ -170,6 +188,22 @@ struct VersionBanner: View {
                 .accessibilityIdentifier("version.update")
             }
         }
+        // The tints are translucent; content scrolling under must not show.
+        .background(.bar)
+        // A re-sign brings a new profile, read again on each return.
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            signingDaysLeft = SigningProfile.currentExpiry.flatMap { SigningProfile.daysLeftToWarn(expiry: $0) }
+        }
+    }
+
+    static func expiryMessage(_ days: Int) -> String {
+        let when = switch days {
+        case 0: "today"
+        case 1: "tomorrow"
+        default: "in \(days) days"
+        }
+        return "Reverb's signature expires \(when). Refresh it in SideStore to keep it opening."
     }
 }
 

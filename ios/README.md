@@ -77,17 +77,52 @@ before they expire, with no computer after setup.
    SideStore with your Apple ID and a pairing file from a computer, and has
    you enable Developer Mode on the iPhone.
 2. In SideStore, open **Sources**, tap **+**, and add the source URL above.
+   On the iPhone you can instead open this link in Safari, which asks
+   SideStore to add it:
+   `sidestore://source?url=https%3A%2F%2Fgithub.com%2Fuhhhm%2Freverb%2Freleases%2Fdownload%2Fios-source%2Fsource.json`
 3. Open the Reverb source and tap **Free** (or **Get**) to install Reverb.
-4. Keep SideStore's background refresh on, or open SideStore once a week, so
-   it re-signs Reverb before the 7 days run out.
+   Depending on its app-extension setting, SideStore asks whether to keep the
+   app's extension: see [App slots](#app-slots).
+4. Set up [automatic refreshing](#keeping-reverb-signed) so SideStore re-signs
+   Reverb before the 7 days run out.
 
-A free Apple ID can sign three apps at once. Reverb uses two of them: the app
-and its share extension (Add from link). SideStore counts itself as well.
+Devices → This iPhone → **Get updates in SideStore** adds the source from
+inside Reverb, for an install that did not come from it.
 
-New releases appear under SideStore's **Updates**; the app also shows a banner
-when one exists. A missed re-sign stops Reverb from launching but keeps its
-data: re-signing restores it as it was. Deleting the app deletes the phone's
-database, offline set and any Downloads still pending upload.
+#### Keeping Reverb signed
+
+SideStore refreshes in the background when iOS lets it, which is not
+reliable. A daily Shortcuts automation refreshes on a schedule instead:
+
+1. Open **Shortcuts** → **Automation** → **+** → **Create Personal
+   Automation**.
+2. Choose **Time of Day** (for example 3:00 AM, daily), or **Charger** → **Is
+   Connected** to refresh whenever the phone charges.
+3. Add the **Refresh All Apps** action from SideStore.
+4. Choose **Run Immediately**, and turn **Notify When Run** off if you prefer.
+
+SideStore needs its VPN (LocalDevVPN) connected to sign; the action reports a
+failure if it is not.
+
+Reverb warns in a banner during the last two days of a signature, with
+**Refresh**, which opens SideStore at My Apps. A missed re-sign stops Reverb
+from launching but keeps its data: re-signing restores it as it was. Deleting
+the app deletes the phone's database, offline set and any Downloads still
+pending upload.
+
+#### Updating
+
+A new release appears under SideStore's **Updates**. Reverb also shows a
+banner; **Update** hands the release's IPA to SideStore (or AltStore), which
+installs it over the current version and keeps the app's data.
+
+#### App slots
+
+A free Apple ID can have three apps signed at once, and SideStore is one of
+them. Reverb uses two: the app and its share extension (Add from link from
+another app's share sheet). Removing the extension when SideStore asks (or
+with its app-extension setting on Remove All) frees a slot; Add from link inside Reverb, and `reverb://add?url=` links,
+keep working without it.
 
 AltStore works the same way with the same source, using AltServer on a
 computer on your network to re-sign.

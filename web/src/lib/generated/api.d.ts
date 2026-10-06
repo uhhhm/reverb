@@ -7250,6 +7250,8 @@ export interface components {
             sourceUrl: string;
             /** @description The release page for latestVersion, or empty. */
             releaseUrl: string;
+            /** @description The Reverb.ipa download for latestVersion, which SideStore or AltStore installs, or empty. */
+            ipaUrl: string;
         };
         PeerVersion: {
             peerId: string;

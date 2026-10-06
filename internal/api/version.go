@@ -37,5 +37,6 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version": v, "updateRepo": s.deps.UpdateRepo, "supportWindow": p2p.SupportWindow, "peers": peers,
 		"latestVersion": latest.LatestVersion, "sourceUrl": latest.SourceURL, "releaseUrl": latest.ReleaseURL,
+		"ipaUrl": latest.IPAURL,
 	})
 }

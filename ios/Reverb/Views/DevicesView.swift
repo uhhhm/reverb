@@ -82,6 +82,11 @@ struct DevicesView: View {
                 Section("This iPhone") {
                     LabeledContent("Reverb version", value: info.version)
                         .accessibilityIdentifier("version.current")
+                    let source = Sideloader.addSource(info.sourceUrl)
+                    if !source.isEmpty {
+                        Button("Get updates in SideStore") { Sideloader.open(source) }
+                            .accessibilityIdentifier("version.addSource")
+                    }
                 }
             }
             Section {

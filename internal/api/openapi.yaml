@@ -2382,7 +2382,7 @@ components:
         session: { type: string }
     VersionInfo:
       type: object
-      required: [version, updateRepo, supportWindow, peers, latestVersion, sourceUrl, releaseUrl]
+      required: [version, updateRepo, supportWindow, peers, latestVersion, sourceUrl, releaseUrl, ipaUrl]
       properties:
         version: { type: string }
         updateRepo: { type: string }
@@ -2391,6 +2391,7 @@ components:
         latestVersion: { type: string, description: "A newer published release with an IPA, or empty. Reported on the phone only." }
         sourceUrl: { type: string, description: "The SideStore/AltStore source, or empty when updates are disabled." }
         releaseUrl: { type: string, description: "The release page for latestVersion, or empty." }
+        ipaUrl: { type: string, description: "The Reverb.ipa download for latestVersion, which SideStore or AltStore installs, or empty." }
     PeerVersion:
       type: object
       required: [peerId, deviceId, version, compatibility, message]

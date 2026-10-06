@@ -20,6 +20,7 @@ type Status struct {
 	LatestVersion string `json:"latestVersion"`
 	SourceURL     string `json:"sourceUrl"`
 	ReleaseURL    string `json:"releaseUrl"`
+	IPAURL        string `json:"ipaUrl"`
 }
 
 // Tracker checks GitHub for a newer release that carries an IPA.
@@ -58,9 +59,10 @@ func (t *Tracker) Status(ctx context.Context) Status {
 	t.checked = time.Now()
 	status := t.status
 	t.mu.Unlock()
-	if latest, ok := t.latest(ctx); ok {
+	if latest, ipa, ok := t.latest(ctx); ok {
 		status.LatestVersion = latest
 		status.ReleaseURL = "https://github.com/" + t.repo + "/releases/tag/" + latest
+		status.IPAURL = ipa
 		t.mu.Lock()
 		t.status = status
 		t.mu.Unlock()
@@ -69,43 +71,46 @@ func (t *Tracker) Status(ctx context.Context) Status {
 }
 
 // latest is the newest stable release tag newer than this build that carries
-// Reverb.ipa.
-func (t *Tracker) latest(ctx context.Context) (string, bool) {
+// Reverb.ipa, and that IPA's download URL. The phone hands the URL to SideStore
+// to install, so it must be this repository's own release download.
+func (t *Tracker) latest(ctx context.Context) (tag, ipa string, ok bool) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+t.repo+"/releases/latest", nil)
 	if err != nil {
-		return "", false
+		return "", "", false
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	resp, err := t.Client.Do(req)
 	if err != nil {
-		return "", false
+		return "", "", false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", false
+		return "", "", false
 	}
 	var latest struct {
 		Tag        string `json:"tag_name"`
 		Draft      bool   `json:"draft"`
 		Prerelease bool   `json:"prerelease"`
 		Assets     []struct {
-			Name string `json:"name"`
+			Name        string `json:"name"`
+			DownloadURL string `json:"browser_download_url"`
 		} `json:"assets"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&latest) != nil || latest.Draft || latest.Prerelease || !semver.IsValid(version(latest.Tag)) {
-		return "", false
+		return "", "", false
 	}
 	if semver.Compare(version(latest.Tag), version(t.current)) <= 0 {
-		return "", false
+		return "", "", false
 	}
+	prefix := "https://github.com/" + t.repo + "/releases/download/"
 	for _, a := range latest.Assets {
-		if a.Name == "Reverb.ipa" {
-			return latest.Tag, true
+		if a.Name == "Reverb.ipa" && strings.HasPrefix(a.DownloadURL, prefix) {
+			return latest.Tag, a.DownloadURL, true
 		}
 	}
-	return "", false
+	return "", "", false
 }
 
 func version(v string) string { return "v" + strings.TrimPrefix(v, "v") }
