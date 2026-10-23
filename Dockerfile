@@ -13,7 +13,7 @@ COPY web/ ./
 RUN npm run build:app
 
 # ---------- Stage 2: build the Go binary with the SPA embedded ----------
-FROM golang:1.26.7 AS gobuild
+FROM golang:1.26.10 AS gobuild
 ARG VERSION=dev
 WORKDIR /src
 # Module cache layer.
