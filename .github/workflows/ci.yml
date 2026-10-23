@@ -69,8 +69,11 @@ jobs:
       # Wrapped rather than run directly: one reachable advisory has no fixed
       # version, and the script is where that exception is recorded.
       - run: scripts/govulncheck.sh
+  # Windows is not yet a supported platform: its failures are reported but do
+  # not fail the run, which the release workflows gate on.
   windows:
     runs-on: windows-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

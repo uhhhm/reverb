@@ -168,9 +168,12 @@ jobs:
 
   # Windows is a separate job rather than a matrix row: the build, the GUI and
   # icon checks, and the zip all have to run in PowerShell, and threading that
-  # through the bash matrix step would obscure both.
+  # through the bash matrix step would obscure both. Windows is not yet a
+  # supported platform, so a failure here leaves its assets off the release
+  # instead of blocking it.
   build-windows:
     needs: verify
+    continue-on-error: true
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
@@ -303,6 +306,7 @@ jobs:
 
   publish:
     needs: [verify, build, build-windows]
+    if: ${{ !cancelled() && needs.verify.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -321,9 +325,16 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.verify.outputs.tag }}
         run: |
-          test "$(find dist -name '*.zip' | wc -l)" -eq 8
           test "$(find dist -name '*.tar.gz' | wc -l)" -eq 2
           test "$(find dist -name '*.dmg' | wc -l)" -eq 2
-          test "$(find dist -name '*-setup.exe' | wc -l)" -eq 1
+          # Windows adds its updater payload, install bundle and installer only
+          # when its non-blocking build succeeded.
+          if [ -n "$(find dist -name '*-windows-*')" ]; then
+            test "$(find dist -name '*.zip' | wc -l)" -eq 8
+            test "$(find dist -name '*-setup.exe' | wc -l)" -eq 1
+          else
+            test "$(find dist -name '*.zip' | wc -l)" -eq 6
+          fi
+          shopt -s nullglob
           gh release upload "$TAG" dist/*.zip dist/*.tar.gz dist/*.dmg dist/*-setup.exe --clobber
           desktop/tools/update-release-notes.sh "$TAG"

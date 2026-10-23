@@ -164,7 +164,7 @@ func (s *Stats) Summary(ctx context.Context, userID string, from, to int64) (Sum
 // TopTracks returns the top-played tracks for userID in [from, to), limited to
 // limit rows ordered by play count descending. CatalogID is always populated.
 func (s *Stats) TopTracks(ctx context.Context, userID string, from, to int64, limit int) ([]TopRow, error) {
-	return topRows(s.q.StatsTopTracks(ctx, db.StatsTopTracksParams(topParams(userID, from, to, limit))))
+	return topRows(s.q.StatsTopTracks(ctx, topParams(userID, from, to, limit)))
 }
 
 // TopArtists returns the top-played artists for userID in [from, to), limited

@@ -214,7 +214,8 @@ func TestReleaseWorkflowPublishesWindowsInstallBundle(t *testing.T) {
 }
 
 // The publish job's asset-count guards match what the build jobs produce, so a
-// missing build fails the release instead of publishing a partial one.
+// missing macOS or Linux build fails the release instead of publishing a
+// partial one. The first guard per glob is the full set, Windows included.
 func TestReleaseWorkflowAssetCountsMatch(t *testing.T) {
 	source := workflowSource(t)
 	count := func(glob string) int {

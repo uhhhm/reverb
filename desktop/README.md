@@ -230,7 +230,9 @@ runs when a GitHub release is **published**:
    has not finished yet the run fails; re-run it with **Run workflow** and the
    tag once CI is green.
 3. It builds `reverb-desktop-<version>-<os>-<arch>.zip` for macOS and Linux
-   (amd64 and arm64) plus Windows amd64, and attaches all five to the release.
+   (amd64 and arm64) plus Windows amd64, and attaches them to the release.
+   Windows is not yet supported: a failed Windows build leaves its assets off
+   the release instead of blocking it.
    Each zip holds the bare `reverb-desktop` executable — `reverb-desktop.exe`
    on Windows — which is the only file the updater swaps; the bundled tools
    beside the app are left as they are.

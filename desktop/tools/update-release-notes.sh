@@ -18,11 +18,18 @@ body="$(awk -v start="$start" -v end="$end" '
   !skip { print }
 ' <<<"$body")"
 base="https://github.com/${repo}/releases/download/${tag}"
+# The Windows build does not gate a release, so its line appears only when the
+# installer was attached.
+windows=""
+if gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name' |
+  grep -qx "Reverb-${version}-windows-amd64-setup.exe"; then
+  windows="- **Windows (64-bit):** [Reverb-${version}-windows-amd64-setup.exe](${base}/Reverb-${version}-windows-amd64-setup.exe) (portable: [zip](${base}/Reverb-${version}-windows-amd64.zip))
+"
+fi
 block="$start
 ## Install Reverb
 
-- **Windows (64-bit):** [Reverb-${version}-windows-amd64-setup.exe](${base}/Reverb-${version}-windows-amd64-setup.exe) (portable: [zip](${base}/Reverb-${version}-windows-amd64.zip))
-- **macOS Apple Silicon:** [Reverb-${version}-macOS-arm64.dmg](${base}/Reverb-${version}-macOS-arm64.dmg) ([zip](${base}/Reverb-${version}-macOS-arm64.zip))
+${windows}- **macOS Apple Silicon:** [Reverb-${version}-macOS-arm64.dmg](${base}/Reverb-${version}-macOS-arm64.dmg) ([zip](${base}/Reverb-${version}-macOS-arm64.zip))
 - **macOS Intel:** [Reverb-${version}-macOS-x86_64.dmg](${base}/Reverb-${version}-macOS-x86_64.dmg) ([zip](${base}/Reverb-${version}-macOS-x86_64.zip))
 - **Linux (64-bit Intel/AMD):** [Reverb-${version}-linux-amd64.tar.gz](${base}/Reverb-${version}-linux-amd64.tar.gz)
 - **Linux ARM64:** [Reverb-${version}-linux-arm64.tar.gz](${base}/Reverb-${version}-linux-arm64.tar.gz)
