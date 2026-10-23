@@ -34,7 +34,7 @@ ${windows}- **macOS Apple Silicon:** [Reverb-${version}-macOS-arm64.dmg](${base}
 - **Linux (64-bit Intel/AMD):** [Reverb-${version}-linux-amd64.tar.gz](${base}/Reverb-${version}-linux-amd64.tar.gz)
 - **Linux ARM64:** [Reverb-${version}-linux-arm64.tar.gz](${base}/Reverb-${version}-linux-arm64.tar.gz)
 
-The lowercase `reverb-desktop-*.zip` files are automatic-update payloads; do not install them by hand.
+The lowercase \`reverb-desktop-*.zip\` files are automatic-update payloads; do not install them by hand.
 $end"
 notes="$(mktemp)"
 trap 'rm -f "$notes"' EXIT
