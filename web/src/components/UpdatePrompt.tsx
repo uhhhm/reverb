@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useUpdateStore } from '../lib/updateStore'
 import { installUpdate, dismissUpdate } from '../lib/updateApi'
+import { ApiError } from '../lib/api'
 
 // UpdatePrompt offers a restart once a new version has been downloaded and
 // verified in the background. It never installs on its own: the update sits
@@ -8,6 +9,7 @@ import { installUpdate, dismissUpdate } from '../lib/updateApi'
 export function UpdatePrompt() {
   const state = useUpdateStore((s) => s.state)
   const installing = useUpdateStore((s) => s.installing)
+  const installError = useUpdateStore((s) => s.installError)
   const shouldPrompt = useUpdateStore((s) => s.shouldPrompt())
   const refresh = useUpdateStore((s) => s.refresh)
 
@@ -18,13 +20,24 @@ export function UpdatePrompt() {
   if (!shouldPrompt) return null
 
   async function onRestart() {
-    useUpdateStore.getState().setInstalling(true)
+    const store = useUpdateStore.getState()
+    store.setInstallError('')
+    store.setInstalling(true)
     try {
       await installUpdate()
-    } catch {
-      // The server going down mid-request is the expected outcome of a
-      // successful restart, so a failure here is not reported as one. If the
-      // app is still here a moment later, the prompt returns.
+    } catch (err) {
+      if (err instanceof ApiError) {
+        // The server answered, so it is still running and the install did not
+        // happen: say why instead of pretending to restart.
+        const reason = typeof err.body?.error === 'string' ? err.body.error : ''
+        store.setInstalling(false)
+        store.setInstallError(reason || `Reverb couldn't install the update (HTTP ${err.status}).`)
+        void store.refresh()
+        return
+      }
+      // The connection dropping is the expected outcome of a successful
+      // restart, so it is not reported as a failure. If the app is still here
+      // a moment later, the prompt returns.
       window.setTimeout(() => {
         useUpdateStore.getState().setInstalling(false)
         void useUpdateStore.getState().refresh()
@@ -52,6 +65,11 @@ export function UpdatePrompt() {
           ? 'Restarting to finish the update…'
           : 'It has been downloaded. Restart whenever suits you — nothing changes until you do.'}
       </p>
+      {installError && !installing ? (
+        <p role="alert" className="mt-2 break-words text-xs text-error">
+          Update failed: {installError}
+        </p>
+      ) : null}
       <div className="mt-3 flex items-center gap-2">
         <button
           type="button"

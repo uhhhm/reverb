@@ -20,9 +20,12 @@ interface UpdateStore {
   dismissed: string
   // installing is true from pressing Restart until the app goes away.
   installing: boolean
+  // installError is why the server refused the last install, '' when none.
+  installError: string
   setState: (s: UpdateState) => void
   dismiss: () => void
   setInstalling: (v: boolean) => void
+  setInstallError: (msg: string) => void
   refresh: () => Promise<void>
   // shouldPrompt reports whether the restart prompt belongs on screen: a build
   // is downloaded, verified and waiting, and the user has not postponed it.
@@ -33,8 +36,10 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
   state: EMPTY_UPDATE_STATE,
   dismissed: typeof window === 'undefined' ? '' : readDismissed(),
   installing: false,
+  installError: '',
   setState: (state) => set({ state }),
   setInstalling: (installing) => set({ installing }),
+  setInstallError: (installError) => set({ installError }),
   dismiss: () => {
     const tag = get().state.staged
     try {
