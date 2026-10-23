@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Chip } from '../components/ui'
 import { IntegrationsSection } from '../components/account/IntegrationsSection'
 import { AppearanceSection } from '../components/account/AppearanceSection'
@@ -7,6 +8,7 @@ import { AudioSection } from '../components/account/AudioSection'
 import { NotInterestedSection } from '../components/account/NotInterestedSection'
 import { RecommendationsSection } from '../components/account/RecommendationsSection'
 import { useDocumentTitle } from '../lib/useDocumentTitle'
+import { fetchVersionInfo } from '../lib/updateApi'
 
 type Tab = 'integrations' | 'downloads' | 'audio' | 'appearance' | 'recommendations' | 'not-interested'
 
@@ -58,6 +60,24 @@ export default function Settings() {
 
       {/* ── Not interested tab ───────────────────────────────────────────────── */}
       {tab === 'not-interested' && <NotInterestedSection />}
+
+      <AppVersion />
     </div>
+  )
+}
+
+// displayVersion writes a release number as a tag ("0.1.1" → "v0.1.1") and
+// leaves anything else, such as a "dev" build, as the server reported it.
+function displayVersion(version: string): string {
+  return /^\d/.test(version) ? `v${version}` : version
+}
+
+function AppVersion() {
+  const { data } = useQuery({ queryKey: ['version'], queryFn: fetchVersionInfo, staleTime: Infinity })
+  if (!data?.version) return null
+  return (
+    <p className="border-t border-border-subtle pt-4 text-xs text-text-muted">
+      Reverb {displayVersion(data.version)}
+    </p>
   )
 }

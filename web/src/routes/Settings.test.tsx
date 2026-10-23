@@ -214,3 +214,45 @@ describe('Settings — measure library', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('ffmpeg missing')
   })
 })
+
+// ── Version ───────────────────────────────────────────────────────────────────
+describe('Settings — version', () => {
+  function serveVersion(res: () => Response) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => (url === '/api/v1/version' ? res() : new Response('{}', { status: 200 }))),
+    )
+  }
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.clearAllMocks()
+  })
+
+  it('shows the running version on every tab', async () => {
+    serveVersion(() => new Response(JSON.stringify({ version: 'v0.1.1', updateRepo: 'uhhhm/reverb' })))
+    wrap(<Settings />)
+    expect(await screen.findByText('Reverb v0.1.1')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Appearance' }))
+    expect(screen.getByText('Reverb v0.1.1')).toBeInTheDocument()
+  })
+
+  it('prefixes a bare release number but leaves a dev build alone', async () => {
+    serveVersion(() => new Response(JSON.stringify({ version: '0.1.0-share' })))
+    const { unmount } = wrap(<Settings />)
+    expect(await screen.findByText('Reverb v0.1.0-share')).toBeInTheDocument()
+    unmount()
+
+    serveVersion(() => new Response(JSON.stringify({ version: 'dev' })))
+    wrap(<Settings />)
+    expect(await screen.findByText('Reverb dev')).toBeInTheDocument()
+  })
+
+  it('leaves the line out when the version cannot be read', async () => {
+    serveVersion(() => new Response('', { status: 500 }))
+    wrap(<Settings />)
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/v1/version', expect.anything()))
+    expect(screen.getByRole('heading', { name: /^settings$/i })).toBeInTheDocument()
+    expect(screen.queryByText(/^Reverb /)).toBeNull()
+  })
+})
