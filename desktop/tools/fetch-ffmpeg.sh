@@ -35,7 +35,10 @@ if [[ "$TARGETOS" == "linux" ]]; then
   install -m 0755 "$FFMPEG_BIN" "$BIN_DIR/ffmpeg"
   echo "ffmpeg installed to $BIN_DIR/ffmpeg"
 elif [[ "$TARGETOS" == "darwin" ]]; then
-  URL="https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip"
+  # evermeet.cx removed its latest-release API, so the version is pinned. The
+  # build is x86_64 only; Apple Silicon runs it under Rosetta.
+  FFMPEG_MAC_VERSION="9.0.2"
+  URL="https://evermeet.cx/ffmpeg/ffmpeg-${FFMPEG_MAC_VERSION}.zip"
   echo "Fetching ffmpeg for $TARGETOS/$TARGETARCH from $URL"
   TMP="$(mktemp -d)"
   trap 'rm -rf "$TMP"' EXIT
